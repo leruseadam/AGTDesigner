@@ -7384,6 +7384,53 @@ def get_session_cache_key(base_key):
     key_str = f"{base_key}:{sid}:{file_path}"
     return hashlib.sha256(key_str.encode()).hexdigest()
 
+def clear_available_tags_cache(reason=None):
+    """Clear cache entries related to available tags and dependent datasets."""
+    try:
+        cleared_keys = []
+        
+        def _clear_key(key_name):
+            try:
+                cache.delete(key_name)
+                cleared_keys.append(key_name)
+            except Exception:
+                pass
+        
+        # Base cache and file-specific cache
+        _clear_key(get_session_cache_key('available_tags'))
+        session_file_path = session.get('file_path', '')
+        if session_file_path:
+            _clear_key(get_session_cache_key(f'available_tags_{session_file_path}'))
+        
+        # Stored references
+        full_excel_cache_key = session.get('full_excel_cache_key')
+        if full_excel_cache_key:
+            _clear_key(full_excel_cache_key)
+        json_matched_cache_key = session.get('json_matched_cache_key')
+        if json_matched_cache_key:
+            _clear_key(json_matched_cache_key)
+        
+        # Related caches to keep UI in sync
+        related_bases = [
+            'selected_records',
+            'filtered_tags',
+            'tag_list',
+            'initial_data',
+            'web_available_tags',
+            'web_filter_options',
+            'filter_options',
+        ]
+        for base in related_bases:
+            _clear_key(get_session_cache_key(base))
+        
+        session['excel_processor_updated'] = time.time()
+        session['lineage_update_timestamp'] = time.time()
+        session.modified = True
+        
+        logging.info(f"🧹 Cleared {len(cleared_keys)} cache keys after lineage cache invalidation ({reason or 'no reason'})")
+    except Exception as cache_error:
+        logging.warning(f"Could not clear available tags caches ({reason or 'no reason'}): {cache_error}")
+
 def _find_most_likely_ounce_weight_for_database(product_name, product_type):
     """
     Find the most common ounce weight for similar nonclassic products in database processing.
@@ -9573,6 +9620,9 @@ def update_lineage():
         }
         
         logging.info(f"📤 LINEAGE UPDATE RESPONSE: {response_data}")
+        
+        # Ensure future requests reload fresh lineage data
+        clear_available_tags_cache(reason='single_lineage_update')
         return jsonify(response_data)
             
     except Exception as e:
@@ -9870,31 +9920,8 @@ def batch_update_lineage():
                 logging.info(f"Updated lineage in Excel processor DataFrame for {updated_count}/{len(changes_made)} items")
         except Exception as e_df:
             logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
-        # NEW: Clear caches like single-item update to avoid stale lineage on long lists
-        try:
-            cache_key = get_session_cache_key('available_tags')
-            cache.delete(cache_key)
-
-            full_excel_cache_key = session.get('full_excel_cache_key')
-            json_matched_cache_key = session.get('json_matched_cache_key')
-            if full_excel_cache_key:
-                cache.delete(full_excel_cache_key)
-            if json_matched_cache_key:
-                cache.delete(json_matched_cache_key)
-
-            for key in ['available_tags', 'selected_records', 'filtered_tags', 'tag_list']:
-                try:
-                    cache_key_to_clear = get_session_cache_key(key)
-                    cache.delete(cache_key_to_clear)
-                except Exception:
-                    pass
-
-            session['excel_processor_updated'] = time.time()
-            session['lineage_update_timestamp'] = time.time()
-            session.modified = True
-            logging.info("✅ BATCH LINEAGE UPDATE: Cleared caches and updated session timestamps")
-        except Exception as cache_error:
-            logging.warning(f"Could not clear caches after batch lineage update: {cache_error}")
+        # Clear caches to ensure refreshed data after batch lineage updates
+        clear_available_tags_cache(reason='batch_lineage_update')
         
         return jsonify({
             'success': True,
