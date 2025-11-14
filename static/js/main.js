@@ -5937,7 +5937,7 @@ const TagManager = {
                 // Clear existing tags if no new data
                 this.state.tags = [];
                 this.state.originalTags = [];
-                this._updateAvailableTags([]);
+                this._updateAvailableTags([], null);
                 this._restoreAvailableScrollPosition(savedScroll);
                 // Hide splash on error
                 if (this.hideActionSplash) {
@@ -5950,7 +5950,7 @@ const TagManager = {
                 console.warn('Backend returned empty tags array');
                 this.state.tags = [];
                 this.state.originalTags = [];
-                this._updateAvailableTags([]);
+                this._updateAvailableTags([], null);
                 this._restoreAvailableScrollPosition(savedScroll);
                 // Hide splash when no tags
                 if (this.hideActionSplash) {
@@ -6012,7 +6012,19 @@ const TagManager = {
             this.validateSelectedTags();
             
             // Update the UI with new tags
-            this._updateAvailableTags(tags);
+            // CRITICAL FIX: Pass tags as originalTags and null as filteredTags to render all tags
+            this._updateAvailableTags(tags, null);
+            
+            // Ensure tags are rendered to DOM - double check after a brief delay
+            setTimeout(() => {
+                const container = document.getElementById('availableTags');
+                if (container && (!container.querySelector('.tag-item') || container.querySelectorAll('.tag-item').length === 0)) {
+                    // Tags didn't render, force a re-render
+                    verboseLog('Tags not found in DOM, forcing re-render...');
+                    this._updateAvailableTags(tags, null);
+                }
+            }, 100);
+            
             this._restoreAvailableScrollPosition(savedScroll);
             
             // Update tag counts
