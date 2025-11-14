@@ -7952,13 +7952,27 @@ class JSONMatcher:
             product_type = db_info.get("Product Type*", "") or db_info.get("product_type", "")
             strain = db_info.get("Product Strain", "") or db_info.get("product_strain", "")
             lineage = db_info.get("Lineage", "") or db_info.get("lineage", "")
-            raw_price = db_info.get("Price", "") or db_info.get("price", "")
+            
+            # CRITICAL FIX: Extract Price from database - try multiple field name variations
+            raw_price = (db_info.get("Price", "") or 
+                        db_info.get("price", "") or 
+                        db_info.get("Price*", "") or
+                        db_info.get("Price* (Tier Name for Bulk)", ""))
             price = format_price(raw_price) if str(raw_price).strip() else ""
             
-            # CRITICAL FIX: Use proper weight normalization for nonclassic types
+            # CRITICAL FIX: Extract Weight and Units from database - try multiple field name variations
+            db_weight = (db_info.get("Weight*", "") or 
+                        db_info.get("Weight", "") or 
+                        db_info.get("weight", "") or
+                        db_info.get("CombinedWeight", ""))
+            db_units = (db_info.get("Units", "") or 
+                       db_info.get("units", "") or
+                       db_info.get("Weight Unit* (grams/gm or ounces/oz)", "") or
+                       db_info.get("Weight Unit*", ""))
+            
             weight, units = self._normalize_weight_for_json_product(
-                db_info.get("Weight*", "") or db_info.get("weight", ""),
-                db_info.get("Units", "") or db_info.get("units", ""),
+                db_weight,
+                db_units,
                 product_type,
                 db_info.get("Product Name*", "") or db_info.get("product_name", "")
             )
@@ -8069,8 +8083,9 @@ class JSONMatcher:
                 'Quantity*': "1",
                 'Quantity': "1",
                 'Units': units or "",
-                'Price': price or "",  # Use database price, no fallback
-                'Price* (Tier Name for Bulk)': price or "",  # Use database price, no fallback
+                'Price': price,  # Always include Price from database
+                'Price* (Tier Name for Bulk)': price,  # Always include Price from database
+                'price': price,  # Include lowercase variant for compatibility
                 'displayName': clean_display_name,  # Use clean product name for UI display
                 
                 # Enhanced fields using database information
