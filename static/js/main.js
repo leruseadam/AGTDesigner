@@ -903,10 +903,13 @@ const TagManager = {
         isSearching: false,
         initialDataAttempts: 0,
         initialDataRetryTimer: null,
+        forceFullAvailableTagRender: false,
+        simplifiedAvailableTagsActive: false,
         // Memory optimization flags
         _memoryOptimized: true,
         _lastCleanup: Date.now()
     },
+    SIMPLIFIED_RENDER_THRESHOLD: 900,
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
@@ -2913,6 +2916,19 @@ const TagManager = {
         // Always update the current tags for display
         this.state.tags = [...tags];
         
+        const shouldUseSimplified = !this.state.forceFullAvailableTagRender &&
+            !this.state.isSearching &&
+            !this.hasActiveFilters() &&
+            tags.length > this.SIMPLIFIED_RENDER_THRESHOLD;
+        this.state.simplifiedAvailableTagsActive = shouldUseSimplified;
+        if (shouldUseSimplified) {
+            verboseLog(`⚡ Simplified available-tag rendering enabled for ${tags.length} tags`);
+            this.renderSimplifiedAvailableTags(tags, savedScroll);
+            return;
+        } else if (this.state.forceFullAvailableTagRender && tags.length > this.SIMPLIFIED_RENDER_THRESHOLD) {
+            verboseLog('Detailed view forced despite large dataset.');
+        }
+        
         verboseLog('After update - this.state.tags length:', this.state.tags.length);
         verboseLog('After update - this.state.originalTags length:', this.state.originalTags.length);
         
@@ -3624,6 +3640,89 @@ const TagManager = {
         
         // Hide loading splash only after tags actually appear in DOM
         this._waitForTagsToAppear();
+    },
+
+    renderSimplifiedAvailableTags(tags, savedScroll) {
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (!availableTagsContainer) {
+            console.error('Available tags container not found for simplified render');
+            return;
+        }
+
+        const chunkSize = 200;
+        let index = 0;
+
+        availableTagsContainer.innerHTML = '';
+
+        const banner = document.createElement('div');
+        banner.className = 'alert alert-info simplified-tags-banner';
+        banner.style.background = 'rgba(13,17,27,0.7)';
+        banner.style.border = '1px solid rgba(0,212,170,0.2)';
+        banner.style.color = '#d0f5ff';
+        banner.style.fontSize = '0.9rem';
+        banner.style.marginBottom = '12px';
+        banner.innerHTML = `
+            <strong>Fast Tag View:</strong> Rendering ${tags.length.toLocaleString()} tags in compact mode for smoother performance.
+            <button class="btn btn-sm btn-outline-light ms-2 show-detailed-tags-btn">Show Full Hierarchy</button>
+        `;
+        availableTagsContainer.appendChild(banner);
+
+        const listWrapper = document.createElement('div');
+        listWrapper.className = 'tag-list simplified-tag-list';
+        listWrapper.style.maxHeight = 'none';
+        listWrapper.style.paddingTop = '0';
+        availableTagsContainer.appendChild(listWrapper);
+
+        const selectAllContainer = document.createElement('div');
+        selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3';
+        selectAllContainer.innerHTML = `
+            <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
+                <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
+                <span class="text-secondary fw-semibold">SELECT ALL</span>
+            </label>
+        `;
+        listWrapper.appendChild(selectAllContainer);
+
+        const showDetailedBtn = banner.querySelector('.show-detailed-tags-btn');
+        if (showDetailedBtn) {
+            showDetailedBtn.addEventListener('click', () => {
+                this.state.forceFullAvailableTagRender = true;
+                this.state.simplifiedAvailableTagsActive = false;
+                this.showActionSplash('Rendering detailed view...');
+                requestAnimationFrame(() => {
+                    this._updateAvailableTags(this.state.originalTags, null);
+                });
+            });
+        }
+
+        // Make sure select-all checkbox gets its listener
+        requestAnimationFrame(() => {
+            this.initializeSelectAllCheckbox();
+        });
+
+        const renderChunk = () => {
+            const fragment = document.createDocumentFragment();
+            const end = Math.min(index + chunkSize, tags.length);
+            for (; index < end; index++) {
+                const tag = tags[index];
+                const element = this.createTagElement(tag, false);
+                fragment.appendChild(element);
+            }
+            listWrapper.appendChild(fragment);
+
+            if (index < tags.length) {
+                requestAnimationFrame(renderChunk);
+            } else {
+                requestAnimationFrame(() => {
+                    this._restoreAvailableScrollPosition(savedScroll);
+                    this.updateSelectAllCheckboxes();
+                    this._waitForTagsToAppear();
+                    this.hideActionSplash();
+                });
+            }
+        };
+
+        requestAnimationFrame(renderChunk);
     },
     
     // Wait for tags to actually appear in DOM before hiding splash
