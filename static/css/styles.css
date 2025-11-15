@@ -4178,15 +4178,44 @@ canvas#lava-lamp-canvas {
     color: #fff;
   }
 
-  /* Clear Filters Button Styles */
+/* Filter Action Buttons */
+.filter-action-button {
+  min-width: 168px;
+  width: 168px;
+  min-height: 46px;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.filter-action-button svg {
+  flex-shrink: 0;
+}
+
+#uploadTriggerBtn {
+  background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%);
+  border: 2px solid #a084e8;
+  color: #fff;
+}
+
+#uploadTriggerBtn:hover {
+  background: linear-gradient(135deg, #b59aff 0%, #a277ff 100%);
+  border-color: #b59aff;
+}
+
+/* Clear Filters Button Styles */
   #clearFiltersBtn {
     background: linear-gradient(135deg, rgba(220, 53, 69, 0.8), rgba(220, 53, 69, 0.6)) !important;
     border: 1.5px solid rgba(220, 53, 69, 0.8) !important;
     color: #fff !important;
     border-radius: 8px !important;
-    font-size: 0.8rem !important;
-    font-weight: 600 !important;
-    padding: 0.4rem 0.6rem !important;
     transition: all 0.3s ease !important;
     box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3) !important;
     backdrop-filter: blur(10px) !important;
