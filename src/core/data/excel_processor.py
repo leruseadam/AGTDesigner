@@ -454,7 +454,8 @@ def batch_lineage_database_update(processor, df):
                     
                     # Only save if it's a valid lineage for classic types
                     if lineage_to_save.upper() in VALID_CLASSIC_LINEAGES:
-                        product_db.add_or_update_strain(strain_name, lineage_to_save, sovereign=True)
+                        # Never override sovereign/manual lineages when syncing from Excel.
+                        product_db.add_or_update_strain(strain_name, lineage_to_save, sovereign=False)
                     else:
                         processor.logger.warning(f"Invalid lineage '{lineage_to_save}' for classic strain '{strain_name}', skipping database save")
         
