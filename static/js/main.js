@@ -9021,49 +9021,44 @@ const TagManager = {
                     verboseLog(`[UPLOAD DEBUG] File marked as ready: ${filename}`);
                     this.hideExcelLoadingSplash();
                     this.updateUploadUI(displayName, 'File ready!', 'success');
-                    // Toast.show('success', 'File uploaded and ready!'); // Removed notification
-                    
-                    // Load the data - ensure all operations complete successfully
-                    // Force a small delay to ensure backend processing is complete
-                    verboseLog(`[UPLOAD DEBUG] Waiting 1 second before finalizing...`);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    
+
+                    // PERFORMANCE FIX: Removed artificial 1-second delay
                     // Show action splash for upload completion
                     verboseLog(`[UPLOAD DEBUG] Starting finalization process...`);
-                    this.showActionSplash('Finalizing upload...');
-                    
-                    // Clear any cached data to force fresh data from backend
-                    try {
-                        await fetch('/api/clear-cache', { method: 'POST' });
-                        verboseLog('Cleared backend cache after upload');
-                    } catch (cacheError) {
-                        console.warn('Failed to clear cache:', cacheError);
-                    }
-                    
-                    verboseLog(`[UPLOAD DEBUG] Loading available tags...`);
-                    const availableTagsLoaded = await this.fetchAndUpdateAvailableTags();
-                    verboseLog(`[UPLOAD DEBUG] Available tags loaded: ${availableTagsLoaded}`);
-                    
-                    verboseLog(`[UPLOAD DEBUG] Loading selected tags...`);
-                    const selectedTagsLoaded = await this.fetchAndUpdateSelectedTags();
-                    verboseLog(`[UPLOAD DEBUG] Selected tags loaded: ${selectedTagsLoaded}`);
-                    
+                    this.showActionSplash('Loading tags...');
+
+                    // PERFORMANCE FIX: Clear cache in parallel with tag loading (non-blocking)
+                    // Don't wait for cache clear to complete before loading tags
+                    fetch('/api/clear-cache', { method: 'POST' })
+                        .then(() => verboseLog('Cleared backend cache after upload'))
+                        .catch(err => console.warn('Failed to clear cache:', err));
+
+                    // PERFORMANCE FIX: Load tags, filters, and selected tags in parallel
+                    verboseLog(`[UPLOAD DEBUG] Loading data in parallel...`);
+                    const [availableTagsLoaded, selectedTagsLoaded] = await Promise.all([
+                        this.fetchAndUpdateAvailableTags(),
+                        this.fetchAndUpdateSelectedTags()
+                    ]);
+
+                    verboseLog(`[UPLOAD DEBUG] Available tags loaded: ${availableTagsLoaded}, Selected tags loaded: ${selectedTagsLoaded}`);
+
+                    // Load filters after tags are loaded (filters depend on tag data)
                     verboseLog(`[UPLOAD DEBUG] Loading filter options...`);
                     await this.fetchAndPopulateFilters();
                     verboseLog(`[UPLOAD DEBUG] Filter options loaded`);
-                    
-                    // Force refresh lineage colors by re-rendering tags
+
+                    // Force refresh lineage colors by re-rendering tags if needed
                     if (availableTagsLoaded && this.state.tags && this.state.tags.length > 0) {
                         verboseLog('[UPLOAD DEBUG] Forcing lineage color refresh after upload...');
                         this._updateAvailableTags(this.state.tags);
                     }
-                    
+
                     if (!availableTagsLoaded) {
                         console.error('[UPLOAD DEBUG] Failed to load available tags after upload');
                         console.error('Failed to load product data. Please try refreshing the page.');
                         return;
                     }
-                    
+
                     verboseLog('[UPLOAD DEBUG] Upload processing complete');
                     return;
                 } else if (status === 'processing') {
@@ -9123,7 +9118,10 @@ const TagManager = {
             }
             
             attempts++;
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Poll every 3 seconds
+            // PERFORMANCE FIX: Reduced polling interval from 3s to 1s for faster tag availability
+            // Use adaptive polling: faster initially, slower if taking longer
+            const pollInterval = attempts < 10 ? 1000 : 2000; // 1s for first 10 attempts, then 2s
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
         }
         
         // Timeout

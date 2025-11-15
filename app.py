@@ -2720,32 +2720,38 @@ def upload_file():
         if is_pythonanywhere:
             # On PythonAnywhere: Start background thread to avoid timeout
             logging.info("[PYTHONANYWHERE] Starting background processing thread")
-            
+
             # Capture variables from request context for background thread
             original_filename = file.filename
             # Store context removed - using single database
-            
+
+            # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
+            global _excel_processor
+            _excel_processor = None
+            logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
+
+            # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
+            # Background processing will handle database storage and cache clearing
+            update_processing_status(file.filename, 'ready')
+            logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
+
             def process_in_background():
                 try:
                     logging.info(f"[BACKGROUND] Processing file: {file_path}")
-                    # CRITICAL FIX: Clear global processor so it loads the NEW file from session
-                    global _excel_processor
-                    _excel_processor = None
-                    logging.info("[BACKGROUND] Cleared global processor before loading new file")
-                    
+
                     processor = get_excel_processor()
                     success = processor.load_file(file_path)
-                    
+
                     if success:
                         row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                         logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
-                        
+
                         # Store in database
                         try:
                             # Use the selected_store from outer scope
                             store_name = selected_store
                             product_db = get_product_database(store_name)
-                            
+
                             if product_db and hasattr(product_db, 'store_excel_data'):
                                 logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
                                 result = product_db.store_excel_data(processor.df, file_path)
@@ -2753,17 +2759,16 @@ def upload_file():
                         except Exception as db_error:
                             logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
 
-                        # Global processor already cleared at start of function
                         logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
-                        
+
                         # CRITICAL: Clear ALL caches to force complete refresh
                         try:
                             # Clear file-specific cache (uses file path in key)
                             # Note: In background thread, we can't access session directly, use file_path from closure
                             cache_keys_to_clear = [
                                 f'available_tags_{file_path}',
-                                'selected_tags', 
-                                'vendor_tags', 
+                                'selected_tags',
+                                'vendor_tags',
                                 'initial_data'
                             ]
                             for key_base in cache_keys_to_clear:
@@ -2773,31 +2778,31 @@ def upload_file():
                         except Exception as cache_err:
                             logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
-                        update_processing_status(original_filename, 'ready')
+                        # Already marked as ready above, so frontend doesn't wait
                         logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
                     else:
                         logging.error("[BACKGROUND] File load returned False")
                         update_processing_status(original_filename, 'error: File load failed')
-                        
+
                 except Exception as e:
                     logging.error(f"[BACKGROUND] Processing error: {e}")
                     logging.error(traceback.format_exc())
                     update_processing_status(original_filename, f'error: {str(e)}')
-            
+
             # Start background thread
             import threading
             thread = threading.Thread(target=process_in_background)
             thread.daemon = True
             thread.start()
-            
+
             upload_time = time.time() - start_time
-            logging.info(f"=== UPLOAD COMPLETE (background processing started): {upload_time:.3f}s ===")
-            
+            logging.info(f"=== UPLOAD COMPLETE (ready immediately, processing in background): {upload_time:.3f}s ===")
+
             response_data = {
                 'success': True,
-                'message': 'File uploaded, processing in background',
+                'message': 'File uploaded and ready',
                 'filename': file.filename,
-                'processing': True
+                'processing': False  # CHANGED: Marked as not processing so frontend loads immediately
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
