@@ -1338,7 +1338,7 @@ class ProductDatabase:
             logger.info(f"   Missing product type: {self._rejected_missing_type}")
             logger.info(f"   Total rejected: {total_rejected}")
     
-    def store_excel_data(self, df: pd.DataFrame, source_file: str = None) -> Dict[str, Any]:
+    def store_excel_data(self, df: pd.DataFrame, source_file: str = None, _retry_on_schema_error: bool = True) -> Dict[str, Any]:
         """Store Excel data in the database. New data replaces existing data when duplicates are found."""
         try:
             self.init_database()  # Ensure DB is initialized
@@ -1853,9 +1853,45 @@ class ProductDatabase:
             
             return result
             
+        except sqlite3.OperationalError as op_error:
+            error_text = str(op_error).lower()
+            if _retry_on_schema_error and 'no such column' in error_text:
+                self._attempt_schema_repair(op_error)
+                return self.store_excel_data(df, source_file, _retry_on_schema_error=False)
+            
+            logger.error(f"SQLite operational error while storing Excel data: {op_error}")
+            return {'stored': 0, 'updated': 0, 'errors': 1, 'excluded_json_matches': 0, 'message': f'Storage failed: {str(op_error)}'}
+            
         except Exception as e:
             logger.error(f"Error storing Excel data: {e}")
             return {'stored': 0, 'updated': 0, 'errors': 1, 'excluded_json_matches': 0, 'message': f'Storage failed: {str(e)}'}
+    
+    def _attempt_schema_repair(self, op_error: sqlite3.OperationalError) -> None:
+        """Attempt to repair the products table schema when a missing-column error is detected."""
+        try:
+            error_text = str(op_error)
+            missing_column = None
+            match = re.search(r'no such column: ([^ ]+)', error_text.lower())
+            if match:
+                missing_column = match.group(1)
+            
+            if missing_column:
+                logger.error(f"⚠️ Missing column detected in products table: '{missing_column}'. Attempting automatic repair...")
+            else:
+                logger.error("⚠️ Database schema mismatch detected. Attempting automatic repair...")
+            
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            self._add_missing_columns_safe(cursor, conn)
+            self._ensure_essential_columns_exist(cursor, conn)
+            conn.commit()
+            
+            logger.info("✅ Schema repair completed successfully.")
+            
+        except Exception as repair_error:
+            logger.error(f"❌ Schema repair failed: {repair_error}")
+            raise
     
     def cleanup_duplicate_products(self) -> Dict[str, Any]:
         """
