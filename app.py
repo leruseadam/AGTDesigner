@@ -2602,6 +2602,7 @@ def test_upload():
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Optimized file upload - saves file quickly then processes in background"""
+    global _excel_processor  # ensure global declared before any assignment within this function
     start_time = time.time()
     
     try:
@@ -2726,7 +2727,6 @@ def upload_file():
             # Store context removed - using single database
 
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
-            global _excel_processor
             _excel_processor = None
             logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
 
@@ -2816,7 +2816,6 @@ def upload_file():
             logging.info("[LOCAL] Fast upload mode - saving file without processing")
             
             # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
-            global _excel_processor
             _excel_processor = None
             logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
             
