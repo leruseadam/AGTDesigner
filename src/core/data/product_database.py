@@ -477,6 +477,38 @@ class ProductDatabase:
                 'Source'  # Add Source column for compatibility
             ]
             
+            advanced_columns = [
+                '"THC Per Serving"',
+                '"Allergens"',
+                '"Solvent"',
+                '"Accepted Date"',
+                '"Internal Product Identifier"',
+                '"Product Tags (comma separated)"',
+                '"Image URL"',
+                '"Ingredients"',
+                '"CombinedWeight"',
+                '"Ratio_or_THC_CBD"',
+                '"Description_Complexity"',
+                '"Total THC"',
+                '"THCA"',
+                '"CBDA"',
+                '"CBN"',
+                '"THC"',
+                '"CBD"',
+                '"Total CBD"',
+                '"CBGA"',
+                '"CBG"',
+                '"Total CBG"',
+                '"CBC"',
+                '"CBDV"',
+                '"THCV"',
+                '"CBGV"',
+                '"CBNV"',
+                '"CBGVA"'
+            ]
+            
+            essential_columns.extend(advanced_columns)
+            
             added_columns = []
             for col_name in essential_columns:
                 # Strip quotes for comparison with existing columns
@@ -497,6 +529,20 @@ class ProductDatabase:
                 logger.info(f"Added {len(added_columns)} essential columns to products table")
             else:
                 logger.debug("All essential columns already exist")
+            
+            # Ensure lineage_history table exists even on legacy databases
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS lineage_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    strain_id INTEGER,
+                    old_lineage TEXT,
+                    new_lineage TEXT,
+                    change_date TEXT NOT NULL,
+                    change_reason TEXT,
+                    FOREIGN KEY (strain_id) REFERENCES strains (id)
+                )
+            ''')
+            conn.commit()
                 
         except Exception as e:
             logger.error(f"Error ensuring essential columns exist: {e}")
@@ -2645,16 +2691,12 @@ class ProductDatabase:
                 cursor.execute("CREATE TABLE _migration_log (migration_name TEXT PRIMARY KEY, applied_date TEXT)")
                 conn.commit()
             
-            # Check if column migration has already been applied
+            # Track whether we've previously logged the v2 migration so we only log once,
+            # but we still want to re-run the safety checks in case new columns were added
             cursor.execute("SELECT migration_name FROM _migration_log WHERE migration_name = 'column_migration_v2'")
-            if cursor.fetchone():
-                logger.debug("Column migration already applied, skipping")
-                return
+            migration_logged = cursor.fetchone() is not None
             
-            # Also check if we've already run this migration in this session
-            if hasattr(self, '_migration_applied'):
-                logger.debug("Column migration already applied in this session, skipping")
-                return
+            migration_applied_this_session = getattr(self, '_migration_applied', False)
             
             # Check and add missing columns to products table
             cursor.execute("PRAGMA table_info(products)")
@@ -2792,13 +2834,15 @@ class ProductDatabase:
                 conn.commit()
                 logger.info(f"Added {len(missing_columns)} missing columns to products table")
             
-            # Log that this migration has been applied
-            cursor.execute("INSERT OR REPLACE INTO _migration_log (migration_name, applied_date) VALUES (?, ?)", 
-                          ('column_migration_v2', datetime.now().isoformat()))
-            conn.commit()
+            # Only log the migration once we've performed the check at least once
+            if not migration_logged:
+                cursor.execute("INSERT OR REPLACE INTO _migration_log (migration_name, applied_date) VALUES (?, ?)", 
+                              ('column_migration_v2', datetime.now().isoformat()))
+                conn.commit()
             
-            # Mark migration as applied in this session
-            self._migration_applied = True
+            # Mark migration as applied in this session so we can optionally skip repeated logging
+            if not migration_applied_this_session:
+                self._migration_applied = True
             
             # Check and add missing columns to strains table
             cursor.execute("PRAGMA table_info(strains)")
