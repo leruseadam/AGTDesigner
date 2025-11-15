@@ -2840,65 +2840,15 @@ class JSONMatcher:
             return ""
     
     def _estimate_price_from_product_info(self, product_type: str, weight: str, product_name: str) -> str:
-        """Estimate price based on product type and weight."""
-        try:
-            product_type_lower = product_type.lower()
-            
-            # Extract numeric weight
-            weight_value = 1.0
-            if weight:
-                try:
-                    # Extract number from weight string (e.g., "1g" -> 1.0)
-                    import re
-                    weight_match = re.search(r'(\d+(?:\.\d+)?)', str(weight))
-                    if weight_match:
-                        weight_value = float(weight_match.group(1))
-                except (ValueError, TypeError):
-                    weight_value = 1.0
-            
-            # Price estimation based on product type and weight
-            if 'edible' in product_type_lower or 'gummy' in product_type_lower or 'chocolate' in product_type_lower:
-                if weight_value <= 1:
-                    return "10"
-                elif weight_value <= 2:
-                    return "20"
-                else:
-                    return "30"
-            elif 'capsule' in product_type_lower:
-                if weight_value <= 0.5:
-                    return "10"
-                elif weight_value <= 1:
-                    return "20"
-                else:
-                    return "30"
-            elif 'topical' in product_type_lower or 'balm' in product_type_lower:
-                if weight_value <= 1:
-                    return "20"
-                elif weight_value <= 2:
-                    return "30"
-                elif weight_value <= 3.4:
-                    return "45"
-                else:
-                    return "60"
-            elif 'flower' in product_type_lower:
-                if weight_value <= 1:
-                    return "35"
-                elif weight_value <= 3.5:
-                    return "120"
-                else:
-                    return "220"
-            elif 'concentrate' in product_type_lower:
-                if weight_value <= 1:
-                    return "50"
-                else:
-                    return "90"
-            else:
-                # Default pricing for unknown types
-                return "25"
-                
-        except Exception as e:
-            logging.warning(f"Error estimating price: {e}")
-            return "25"
+        """
+        Legacy price-estimation helper. The business requirement is to avoid
+        synthetic prices—return blank so the UI clearly shows missing data.
+        """
+        logging.debug(
+            "⚠️ Skipping price estimate for '%s' (%s, %s); leaving blank per policy.",
+            product_name, product_type, weight
+        )
+        return ""
     
     def _create_product_from_json_item(self, item: Dict, global_vendor: str) -> Dict:
         """
@@ -2915,7 +2865,29 @@ class JSONMatcher:
             inventory_category = str(item.get("inventory_category", "")).strip()
             raw_weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
             raw_units = str(item.get("unit_weight_uom", item.get("uom", "g"))).strip()
-            raw_price = str(item.get("line_price", item.get("price", ""))).strip()
+            # Capture price from any JSON field before estimating
+            price_candidates = [
+                item.get("line_price"),
+                item.get("price"),
+                item.get("Price"),
+                item.get("retail_price"),
+                item.get("unit_price"),
+                item.get("sale_price"),
+                item.get("unit_cost"),
+                item.get("cost"),
+                item.get("Cost"),
+            ]
+            raw_price = ""
+            for candidate in price_candidates:
+                if candidate is None:
+                    continue
+                candidate_str = str(candidate).strip()
+                if not candidate_str:
+                    continue
+                if candidate_str.lower() in ("none", "nan"):
+                    continue
+                raw_price = candidate_str
+                break
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
             if json_vendor_value and global_vendor and not self._is_vendor_match(global_vendor, json_vendor_value):
                 logging.debug(f"🔁 Vendor override for JSON fallback: using item vendor '{json_vendor_value}' instead of metadata vendor '{global_vendor}'")
@@ -3017,12 +2989,9 @@ class JSONMatcher:
             
             # ===== STEP 7: Determine price with intelligent fallbacks =====
             price = raw_price
-            if not price or price == "0" or price == "0.00":
-                # Estimate based on product type and weight
-                estimated_price = self._estimate_price_from_product_info(product_type, weight, product_name)
-                if estimated_price:
-                    price = estimated_price
-                    logging.info(f"💰 Estimated price '${price}' for '{product_name}'")
+            if not price or price in ("0", "0.0", "0.00"):
+                logging.warning(f"⚠️ No valid price for '{product_name}' - leaving blank")
+                price = self._estimate_price_from_product_info(product_type, weight, product_name)
             formatted_price = format_price(price) if str(price).strip() else ""
             if formatted_price:
                 price = formatted_price
@@ -8140,7 +8109,7 @@ class JSONMatcher:
                 'productType': product_type or "Unknown",
                 'weight': weight or "1",
                 'units': units or "g",
-                'price': price or "25",
+                'price': price or "",
                 'strain': strain,
                 'quantity': "1",
                 'thc': thc_result,

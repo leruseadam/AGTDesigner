@@ -991,6 +991,22 @@ const TagManager = {
         return false;
     },
 
+    resetSearchInputs() {
+        try {
+            const searchInputs = document.querySelectorAll('#availableTagsSearch, #selectedTagsSearch');
+            searchInputs.forEach(input => {
+                const hadValue = input.value && input.value.length;
+                input.value = '';
+                if (hadValue) {
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            });
+            verboseLog('Cleared primary search inputs');
+        } catch (error) {
+            console.warn('Failed to reset search inputs during clear:', error);
+        }
+    },
+
     // Helper function to find tags in selected tags list, preserving tags from multiple filters
     // CRITICAL FIX: Use originalTags first to find ALL selected tags, not just filtered ones
     getSelectedTagObjects() {
@@ -8284,14 +8300,9 @@ const TagManager = {
             
             // Show loading feedback
             this.showActionSplash('Clearing and resetting...');
-            
-            // Perform full app reset first
-            try {
-                await performFullAppReset();
-            } catch (resetError) {
-                console.error('Error during app reset:', resetError);
-                // Continue anyway - reset might have partially worked
-            }
+
+            // Clear search inputs without nuking the entire DOM
+            this.resetSearchInputs();
             
             // Call the backend API to clear selected tags
             let response;
