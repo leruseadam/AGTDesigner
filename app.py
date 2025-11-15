@@ -7729,10 +7729,22 @@ def get_available_tags():
         # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         
+        # If lineage was recently changed, force a full refresh even if fast_load requested
+        lineage_update_ts = session.get('lineage_update_timestamp')
+        force_full_refresh = False
+        if lineage_update_ts:
+            try:
+                force_full_refresh = (time.time() - float(lineage_update_ts)) < 600  # 10 minutes
+            except Exception:
+                force_full_refresh = False
+        if force_full_refresh:
+            logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
+        
         if cached_tags and not nocache:
             # OPTIMIZATION: Skip lineage alignment for fast loads - return cached tags immediately
             # Lineage can be aligned later via a separate request if needed
-            if fast_load:
+            fast_path_allowed = fast_load and not force_full_refresh
+            if fast_path_allowed:
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
                 return jsonify({
@@ -7907,11 +7919,14 @@ def get_available_tags():
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"✅ Using {len(cached_tags)} cached available tags ({elapsed:.1f}ms)")
             safe_cached_tags = make_json_safe(cached_tags)
-            return jsonify({
+            response_payload = {
                 'tags': safe_cached_tags,  # Frontend expects 'tags', not 'available_tags'
                 'total_count': len(safe_cached_tags),
                 'source': 'cache+db-lineage' if lineage_alignment_needed else 'cache'
-            })
+            }
+            if force_full_refresh:
+                session['lineage_update_timestamp'] = 0
+            return jsonify(response_payload)
         
         logging.info("🔄 Building tag list... (prefer_db={}, request_args={})".format(prefer_db, dict(request.args)))
         
@@ -8130,11 +8145,14 @@ def get_available_tags():
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
             
-            return jsonify({
+            response_payload = {
                 'tags': safe_excel_tags,
                 'total_count': len(safe_excel_tags),
                 'source': 'excel+db-lineage'
-            })
+            }
+            if force_full_refresh:
+                session['lineage_update_timestamp'] = 0
+            return jsonify(response_payload)
         
         # Database path (either because prefer_db is set, or Excel had no data)
         logging.info(f"🔄 Building available tags from database... (prefer_db={prefer_db}, all_tags_count={len(all_tags)})")
@@ -13439,6 +13457,51 @@ def json_match():
         else:
             logging.warning("🔍 matched_products is empty or None!")
 
+        # Ensure JSON products have a stable Product Name* so downstream lookups can find them
+        def _normalize_json_product_names(products):
+            if not products:
+                return products
+            existing_names = set()
+            for idx, product in enumerate(products):
+                if not isinstance(product, dict):
+                    continue
+                base_name = (
+                    product.get('Product Name*') or
+                    product.get('ProductName') or
+                    product.get('displayName') or
+                    product.get('Description') or
+                    product.get('product_name') or
+                    product.get('Product') or
+                    f"JSON Product {idx + 1}"
+                )
+                base_name = str(base_name).strip()
+                if not base_name:
+                    base_name = f"JSON Product {idx + 1}"
+                unique_name = base_name
+                suffix = 2
+                vendor_hint = str(product.get('Vendor/Supplier*') or product.get('Vendor') or '').strip()
+                weight_hint = str(
+                    product.get('Weight*') or product.get('Weight') or
+                    product.get('CombinedWeight') or product.get('Quantity*') or ''
+                ).strip()
+                while unique_name in existing_names:
+                    parts = [base_name]
+                    hint_parts = [hint for hint in (weight_hint, vendor_hint) if hint]
+                    if hint_parts:
+                        parts.extend(hint_parts)
+                    parts.append(f"#{suffix}")
+                    unique_name = " - ".join(parts)
+                    suffix += 1
+                existing_names.add(unique_name)
+                product['Product Name*'] = unique_name
+                product.setdefault('ProductName', unique_name)
+                product.setdefault('displayName', unique_name)
+                product.setdefault('Description', unique_name)
+                product.setdefault('Source', product.get('Source') or 'JSON Match')
+            return products
+        
+        matched_products = _normalize_json_product_names(matched_products)
+        
         # CRITICAL FIX: Add JSON matched products directly to Excel DataFrame
         # This makes them work exactly like regular tags - no special handling needed
         try:
@@ -13476,16 +13539,10 @@ def json_match():
                 logging.info(f"DataFrame shape: {excel_processor.df.shape}")
 
                 # Extract product names for selection
-                matched_names = []
-                for p in matched_products:
-                    if isinstance(p, dict):
-                        # Priority: Description > Product Name* > ProductName
-                        name = (p.get('Description', '') or
-                               p.get('Product Name*', '') or
-                               p.get('ProductName', ''))
-
-                        if name:  # Only add non-empty names
-                            matched_names.append(name)
+                matched_names = [
+                    p.get('Product Name*') for p in matched_products
+                    if isinstance(p, dict) and p.get('Product Name*')
+                ]
 
                 logging.info(f"Extracted {len(matched_names)} product names from matched products")
                 logging.info(f"Sample matched names: {matched_names[:3]}")

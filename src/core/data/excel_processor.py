@@ -5422,6 +5422,17 @@ class ExcelProcessor:
             except (IndexError, KeyError):
                 original_doh = 'Unknown'
             
+            # Ensure DOH columns exist; create them on-the-fly if missing so UI and exports stay in sync
+            doh_columns_created = []
+            if 'DOH' not in self.df.columns:
+                self.df['DOH'] = ''
+                doh_columns_created.append('DOH')
+            if 'DOH Compliant (Yes/No)' not in self.df.columns:
+                self.df['DOH Compliant (Yes/No)'] = ''
+                doh_columns_created.append('DOH Compliant (Yes/No)')
+            if doh_columns_created:
+                self.logger.info(f"Created missing DOH column(s): {', '.join(doh_columns_created)}")
+            
             # Update DOH status in both possible columns
             updated_count = 0
             if 'DOH' in self.df.columns:
