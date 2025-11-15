@@ -875,6 +875,7 @@ const AppLoadingSplash = {
 };
 
 const TagManager = {
+    CACHE_TTL_MS: 10 * 60 * 1000, // 10 minutes
     state: {
         selectedTags: new Set(),
         isProcessingDeselection: false, // Flag to prevent filter updates during deselection
@@ -903,7 +904,8 @@ const TagManager = {
         isSearching: false,
         initialDataAttempts: 0,
         initialDataRetryTimer: null,
-        forceFullAvailableTagRender: false,
+        hydratedFromCache: false,
+        forceFullAvailableTagRender: true,
         simplifiedAvailableTagsActive: false,
         // Memory optimization flags
         _memoryOptimized: true,
@@ -912,6 +914,82 @@ const TagManager = {
     SIMPLIFIED_RENDER_THRESHOLD: 900,
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
+
+    getAvailableTagsCacheKey() {
+        try {
+            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                window.currentStore || 'default';
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
+                'nofile';
+            return `agt_available_tags_${store}_${file}`;
+        } catch (error) {
+            console.warn('Failed to build available-tags cache key:', error);
+            return 'agt_available_tags_default';
+        }
+    },
+
+    loadAvailableTagsFromCache() {
+        try {
+            if (!window.sessionStorage) return null;
+            const raw = sessionStorage.getItem(this.getAvailableTagsCacheKey());
+            if (!raw) return null;
+            const payload = JSON.parse(raw);
+            if (!payload || !Array.isArray(payload.tags) || payload.tags.length === 0) {
+                return null;
+            }
+            if (payload.timestamp && (Date.now() - payload.timestamp) > this.CACHE_TTL_MS) {
+                verboseLog('Available-tags cache expired, ignoring cached data');
+                return null;
+            }
+            return payload.tags;
+        } catch (error) {
+            console.warn('Failed to load available-tags cache:', error);
+            return null;
+        }
+    },
+
+    saveAvailableTagsToCache(tags) {
+        try {
+            if (!window.sessionStorage || !Array.isArray(tags) || tags.length === 0) {
+                return;
+            }
+            const payload = {
+                timestamp: Date.now(),
+                tags
+            };
+            sessionStorage.setItem(this.getAvailableTagsCacheKey(), JSON.stringify(payload));
+            verboseLog(`Cached ${tags.length} available tags locally for instant reloads`);
+        } catch (error) {
+            console.warn('Failed to save available-tags cache:', error);
+        }
+    },
+
+    clearAvailableTagsCache() {
+        try {
+            if (window.sessionStorage) {
+                sessionStorage.removeItem(this.getAvailableTagsCacheKey());
+                verboseLog('Cleared available-tags cache');
+            }
+        } catch (error) {
+            console.warn('Failed to clear available-tags cache:', error);
+        }
+    },
+
+    hydrateAvailableTagsFromCache() {
+        if (this.state.hydratedFromCache) {
+            return false;
+        }
+        const cachedTags = this.loadAvailableTagsFromCache();
+        if (cachedTags && cachedTags.length) {
+            verboseLog(`Hydrating ${cachedTags.length} tags from cache for instant display`);
+            this.state.hydratedFromCache = true;
+            this.state.forceFullAvailableTagRender = true;
+            this.state.simplifiedAvailableTagsActive = false;
+            this._updateAvailableTags(cachedTags, null);
+            return true;
+        }
+        return false;
+    },
 
     // Helper function to find tags in selected tags list, preserving tags from multiple filters
     // CRITICAL FIX: Use originalTags first to find ALL selected tags, not just filtered ones
@@ -6412,8 +6490,13 @@ const TagManager = {
     async fetchAndUpdateAvailableTags() {
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
-            // Show loading splash when fetching tags
-            this.showActionSplash('Loading tags...');
+            const hydratedFromCache = this.hydrateAvailableTagsFromCache();
+            if (!hydratedFromCache) {
+                // Show loading splash when fetching tags
+                this.showActionSplash('Loading tags...');
+            } else {
+                verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
+            }
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen
             const availableTagsContainer = document.getElementById('availableTags');
@@ -6609,6 +6692,8 @@ const TagManager = {
             // Clear existing state and set new data
             this.state.tags = [...tags];
             this.state.originalTags = [...tags]; // Store original tags for validation
+            this.state.hydratedFromCache = false;
+            this.saveAvailableTagsToCache(tags);
             
             // PERFORMANCE: Clear filter cache when tags change
             this._cachedFilterOptions = null;
@@ -8192,6 +8277,7 @@ const TagManager = {
         }
         
         this.state.isClearing = true;
+        this.clearAvailableTagsCache();
         
         try {
             verboseLog('🔄 Clearing selected tags and performing full app reset...');
@@ -10232,6 +10318,8 @@ async function handleJsonPasteInput(input) {
                 matchResult.available_tags !== matchResult.selected_tags) {
                 verboseLog('Updating available tags with new data');
                 TagManager._updateAvailableTags(matchResult.available_tags, null);
+                TagManager.saveAvailableTagsToCache(matchResult.available_tags || []);
+                TagManager.state.hydratedFromCache = false;
             } else {
                 verboseLog('Skipping available tags update to avoid duplication');
             }
@@ -11300,6 +11388,8 @@ window.toggleJsonFilter = function() {
                 requestAnimationFrame(() => {
                     // Call the update function to refresh the display
                     TagManager._updateAvailableTags(data.available_tags, null);
+                    TagManager.saveAvailableTagsToCache(data.available_tags || []);
+                    TagManager.state.hydratedFromCache = false;
                     
                     // Update tag counts
                     TagManager.updateTagCount('available', data.available_tags.length);
