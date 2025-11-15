@@ -7798,6 +7798,14 @@ def get_available_tags():
                         if product_names:
                             try:
                                 all_search_names = list(set(product_names + normalized_names))
+
+                                # CRITICAL FIX: Limit batch size to prevent query timeouts
+                                # SQLite can struggle with very large IN clauses (>1000 items)
+                                MAX_BATCH_SIZE = 500
+                                if len(all_search_names) > MAX_BATCH_SIZE:
+                                    logging.warning(f"Cache batch query size ({len(all_search_names)}) exceeds limit, using first {MAX_BATCH_SIZE} items")
+                                    all_search_names = all_search_names[:MAX_BATCH_SIZE]
+
                                 placeholders = ','.join(['?'] * len(all_search_names))
                                 batch_query = f'''
                                     SELECT DISTINCT
@@ -7810,8 +7818,12 @@ def get_available_tags():
                                     WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                     ORDER BY p.id DESC
                                 '''
+                                # Add query timing to detect slow queries
+                                query_start = time.time()
                                 cur.execute(batch_query, all_search_names + all_search_names)
                                 batch_results = cur.fetchall()
+                                query_duration = (time.time() - query_start) * 1000
+                                logging.info(f"Cache batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
                                 
                                 # Build lookup map from results
                                 for row in batch_results:
@@ -7992,6 +8004,14 @@ def get_available_tags():
                                 # Build batch query with IN clause - match by either product name or normalized name
                                 # Combine both lists for the IN clause
                                 all_search_names = list(set(product_names + normalized_names))
+
+                                # CRITICAL FIX: Limit batch size to prevent query timeouts
+                                # SQLite can struggle with very large IN clauses (>1000 items)
+                                MAX_BATCH_SIZE = 500
+                                if len(all_search_names) > MAX_BATCH_SIZE:
+                                    logging.warning(f"Batch query size ({len(all_search_names)}) exceeds limit, using first {MAX_BATCH_SIZE} items")
+                                    all_search_names = all_search_names[:MAX_BATCH_SIZE]
+
                                 placeholders = ','.join(['?'] * len(all_search_names))
                                 batch_query = f'''
                                     SELECT DISTINCT
@@ -8005,8 +8025,12 @@ def get_available_tags():
                                     ORDER BY p.id DESC
                                 '''
                                 # Execute with all search names (product names + normalized names, deduplicated)
+                                # Add query timeout to prevent hanging
+                                query_start = time.time()
                                 cur.execute(batch_query, all_search_names + all_search_names)
                                 batch_results = cur.fetchall()
+                                query_duration = (time.time() - query_start) * 1000
+                                logging.info(f"Batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
                                 
                                 # Build lookup map from results - match by product name or normalized name
                                 for row in batch_results:

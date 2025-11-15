@@ -1331,6 +1331,19 @@ const TagManager = {
                 return true;
             }) : tagsToFilter;
 
+            // Build hash for caching/comparison
+            const tagsHash = [
+                tagsToFilter.length,
+                filteredTags.length,
+                currentFilters.vendor || '',
+                currentFilters.brand || '',
+                currentFilters.productType || '',
+                currentFilters.lineage || '',
+                currentFilters.weight || '',
+                currentFilters.doh || '',
+                currentFilters.highCbd || ''
+            ].join('|');
+            
             // Extract available options from filtered tags
             const availableOptions = {
                 vendor: new Set(),
@@ -4565,6 +4578,7 @@ const TagManager = {
         const requestStartTime = Date.now();
         let timeoutId = null;
         let abortController = null;
+        const LINEAGE_UPDATE_TIMEOUT_MS = 45000;
         
         try {
             verboseLog(`🔄 Updating lineage for ${tagName} to ${newLineage}...`);
@@ -4575,12 +4589,12 @@ const TagManager = {
                 lineage: newLineage
             };
             
-            // CRITICAL FIX: Add timeout to prevent hanging (increased to 15s to account for database operations)
+            // CRITICAL FIX: Add timeout to prevent hanging (increased to 45s to account for database operations)
             abortController = new AbortController();
             timeoutId = setTimeout(() => {
                 abortController.abort();
-                console.error(`❌ LINEAGE UPDATE TIMEOUT: Request took longer than 15 seconds`);
-            }, 15000); // 15 second timeout (increased from 10s)
+                console.error(`❌ LINEAGE UPDATE TIMEOUT: Request took longer than ${LINEAGE_UPDATE_TIMEOUT_MS / 1000} seconds`);
+            }, LINEAGE_UPDATE_TIMEOUT_MS);
             
             const response = await fetch('/api/update-lineage', {
                 method: 'POST',
@@ -6319,8 +6333,9 @@ const TagManager = {
             const savedScroll = this._saveAvailableScrollPosition();
             
             // Rate limiting: prevent rapid successive calls
+            // Reduced from 2000ms to 500ms to allow faster retries while still preventing abuse
             const now = Date.now();
-            if (this._lastFetchTime && (now - this._lastFetchTime) < 2000) {
+            if (this._lastFetchTime && (now - this._lastFetchTime) < 500) {
                 verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
                 // Hide splash if we're skipping
                 if (this.hideActionSplash) {
@@ -6381,8 +6396,9 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout - faster failure detection
-                    
+                    // Increased timeout from 10s to 20s to accommodate slower lineage alignment queries
+                    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
                     // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
@@ -6392,9 +6408,9 @@ const TagManager = {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
-                    
+
                     verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}):`, response.status);
-                    
+
                     if (!response.ok) {
                         if (response.status >= 500 && retryCount < maxRetries - 1) {
                             // Server error - retry
@@ -6602,7 +6618,39 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
+
+            // CRITICAL FIX: Show user-friendly error message with retry button
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="alert alert-warning mx-3">
+                            <h5 class="alert-heading">Unable to Load Tags</h5>
+                            <p class="mb-3">There was a problem loading the product tags. This can happen if the database is temporarily unavailable or the connection timed out.</p>
+                            <button class="btn btn-primary" onclick="TagManager.retryLoadTags()">
+                                <i class="fas fa-redo"></i> Retry Loading Tags
+                            </button>
+                        </div>
+                        <small class="text-muted d-block mt-2">Error: ${error.message || 'Unknown error'}</small>
+                    </div>
+                `;
+            }
+
             return false;
+        }
+    },
+
+    async retryLoadTags() {
+        verboseLog('User requested retry of tag loading');
+        // Reset rate limiting to allow immediate retry
+        this._lastFetchTime = 0;
+        // Show loading indicator
+        this.showActionSplash('Retrying tag loading...');
+        // Attempt to load tags again
+        try {
+            await this.fetchAndUpdateAvailableTags();
+        } catch (error) {
+            console.error('Retry failed:', error);
         }
     },
     

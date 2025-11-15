@@ -122,46 +122,82 @@ class ProductDatabase:
     def _get_connection(self):
         """Get a database connection from pool, with enhanced connection management."""
         thread_id = threading.get_ident()
-        
+
         with self._pool_lock:
             # Check if we have a connection for this thread
             if thread_id in self._connection_pool:
                 conn = self._connection_pool[thread_id]
-                # Verify connection is still valid
+                # Verify connection is still valid with a safer check
                 try:
-                    conn.execute("SELECT 1")
+                    # Use cursor().execute() instead of conn.execute() to avoid autocommit issues
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.close()
                     self._timing_stats['connection_reuses'] += 1
                     return conn
-                except sqlite3.Error:
-                    # Connection is dead, remove it
+                except (sqlite3.Error, sqlite3.DatabaseError, sqlite3.OperationalError) as e:
+                    # Connection is dead or database is locked, remove it and create new one
+                    logging.warning(f"Connection validation failed for thread {thread_id}: {e}, creating new connection")
                     try:
                         conn.close()
                     except:
                         pass
                     del self._connection_pool[thread_id]
-            
+
             # Create new connection with optimized settings
-            conn = sqlite3.connect(
-                self.db_path,
-                timeout=self._pool_timeout,
-                check_same_thread=False,  # Allow connection sharing
-                isolation_level='DEFERRED'  # Better concurrency for reads
-            )
-            
-            # Apply performance optimizations
-            conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
-            conn.execute("PRAGMA busy_timeout=60000")  # 60 second busy timeout
-            conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/speed
-            conn.execute("PRAGMA cache_size=-20000")  # 20MB cache
-            conn.execute("PRAGMA temp_store=MEMORY")  # Temp tables in memory
-            conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
-            conn.execute("PRAGMA page_size=4096")  # Optimal page size
-            
-            # Store in pool
-            self._connection_pool[thread_id] = conn
-            self._timing_stats['connection_creates'] += 1
-            
-            return conn
+            max_retries = 3
+            retry_delay = 0.1  # 100ms
+
+            for attempt in range(max_retries):
+                try:
+                    conn = sqlite3.connect(
+                        self.db_path,
+                        timeout=self._pool_timeout,
+                        check_same_thread=False,  # Allow connection sharing
+                        isolation_level='DEFERRED'  # Better concurrency for reads
+                    )
+
+                    # Apply performance optimizations with error handling
+                    # WAL mode can fail on some filesystems, so make it optional
+                    try:
+                        conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
+                    except sqlite3.OperationalError as e:
+                        logging.warning(f"WAL mode not supported, using default journal mode: {e}")
+
+                    conn.execute("PRAGMA busy_timeout=60000")  # 60 second busy timeout
+                    conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/speed
+                    conn.execute("PRAGMA cache_size=-20000")  # 20MB cache
+                    conn.execute("PRAGMA temp_store=MEMORY")  # Temp tables in memory
+
+                    try:
+                        conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
+                    except sqlite3.OperationalError as e:
+                        logging.warning(f"Memory-mapped I/O not supported: {e}")
+
+                    try:
+                        conn.execute("PRAGMA page_size=4096")  # Optimal page size
+                    except sqlite3.OperationalError as e:
+                        logging.warning(f"Could not set page size: {e}")
+
+                    # Verify connection works before returning
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.close()
+
+                    # Store in pool
+                    self._connection_pool[thread_id] = conn
+                    self._timing_stats['connection_creates'] += 1
+
+                    return conn
+
+                except (sqlite3.Error, sqlite3.OperationalError) as e:
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Connection attempt {attempt + 1} failed: {e}, retrying...")
+                        import time
+                        time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                    else:
+                        logging.error(f"Failed to create database connection after {max_retries} attempts: {e}")
+                        raise
     
     def close_connection(self):
         """Close the connection for the current thread."""
