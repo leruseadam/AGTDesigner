@@ -7116,7 +7116,13 @@ const TagManager = {
         AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
-        this.checkForExistingData();
+        // Defer to idle/next tick so the splash paints and the browser remains responsive
+        const kickoffExistingData = () => this.checkForExistingData();
+        if (typeof window.requestIdleCallback === 'function') {
+            requestIdleCallback(() => kickoffExistingData());
+        } else {
+            setTimeout(() => kickoffExistingData(), 0);
+        }
         
         // Ensure all filters default to 'All' on page load
         this.state.filters = {
