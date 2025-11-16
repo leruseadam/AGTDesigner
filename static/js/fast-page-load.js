@@ -122,6 +122,10 @@
                             if (fileInfoText) {
                                 fileInfoText.textContent = data.filename;
                             }
+                            // Update upload notification banner
+                            if (window.updateUploadNotificationBanner) {
+                                window.updateUploadNotificationBanner();
+                            }
                         }
                         
                         console.log('⚡ Background data loading complete');

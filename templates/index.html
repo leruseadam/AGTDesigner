@@ -5035,6 +5035,20 @@
 
       <!-- Main Content Area -->
       <div class="w-100">
+        <!-- Upload Notification Banner -->
+        <div id="uploadNotificationBanner" class="col-12 mb-3" style="display: none;">
+          <div class="alert alert-info d-flex align-items-center gap-3" style="background: linear-gradient(135deg, rgba(160, 132, 232, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%); border: 2px solid rgba(160, 132, 232, 0.5); border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 0;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; color: #a084e8;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <div class="flex-grow-1">
+              <strong style="color: #fff;">No file uploaded</strong>
+              <p class="mb-0" style="color: rgba(255, 255, 255, 0.9); font-size: 0.95rem;">Please upload an Excel file to begin generating tags. Click the "Upload Excel" button above to get started.</p>
+            </div>
+          </div>
+        </div>
         <!-- Tag-list containers row (now includes filter bar for alignment) -->
         <div class="row fade-in g-1" style="animation-delay: 0.4s; padding-left: 0.5rem; padding-right: 0.5rem;">
           <!-- Filter Bar as a column -->
@@ -7041,8 +7055,44 @@
     // Start waiting for TagManager to load
     waitForTagManagerAndInit();
     
+    // Function to update upload notification banner visibility
+    function updateUploadNotificationBanner() {
+      const banner = document.getElementById('uploadNotificationBanner');
+      const fileInfoText = document.getElementById('fileInfoText');
+      
+      if (!banner) return;
+      
+      // Check if file is uploaded
+      const hasFile = fileInfoText && 
+        fileInfoText.textContent.trim() !== 'No file uploaded' && 
+        fileInfoText.textContent.trim() !== '';
+      
+      // Show banner if no file is uploaded
+      if (!hasFile) {
+        banner.style.display = 'block';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+    
+    // Expose function globally so it can be called after file uploads
+    window.updateUploadNotificationBanner = updateUploadNotificationBanner;
+    
     // Additional DOM-ready setup
     document.addEventListener('DOMContentLoaded', function() {
+      // Update upload notification banner on page load
+      updateUploadNotificationBanner();
+      
+      // Watch for changes to fileInfoText
+      const fileInfoText = document.getElementById('fileInfoText');
+      if (fileInfoText) {
+        // Use MutationObserver to watch for text changes
+        const observer = new MutationObserver(function(mutations) {
+          updateUploadNotificationBanner();
+        });
+        observer.observe(fileInfoText, { childList: true, characterData: true, subtree: true });
+      }
+      
       // DEBUG: Add global click handler to track what's causing page reloads
       document.addEventListener('click', function(e) {
         const target = e.target;

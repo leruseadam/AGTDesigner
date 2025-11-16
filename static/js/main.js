@@ -7516,6 +7516,10 @@ const TagManager = {
                         if (fileInfoText) {
                             fileInfoText.textContent = data.filename;
                         }
+                        // Update upload notification banner
+                        if (window.updateUploadNotificationBanner) {
+                            window.updateUploadNotificationBanner();
+                        }
                     }
                     
                     // CRITICAL FIX: Don't hide splash here - wait for tags to be fully rendered
@@ -9428,6 +9432,10 @@ const TagManager = {
         // Update the file info text if a filename is provided
         if (fileName && fileInfoText) {
             fileInfoText.textContent = fileName;
+            // Update upload notification banner
+            if (window.updateUploadNotificationBanner) {
+                window.updateUploadNotificationBanner();
+            }
         }
     },
 
@@ -9813,6 +9821,10 @@ const TagManager = {
         
         if (fileInfoText) {
             fileInfoText.textContent = '';
+            // Update upload notification banner
+            if (window.updateUploadNotificationBanner) {
+                window.updateUploadNotificationBanner();
+            }
         }
         
         verboseLog('Upload UI state cleared');
