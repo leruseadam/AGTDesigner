@@ -221,32 +221,35 @@ async function handleFiles(files) {
           }
         }
         
-        // Hide splash and refresh data immediately (no full page reload)
-        hideSplashWithDelay(splashStartTime, 200);
-        
-        // Refresh data in-place for immediate tag visibility
+        // Hide splash immediately and refresh data asynchronously (non-blocking)
+        const splashEl = document.getElementById('excelLoadingSplash');
+        if (splashEl) splashEl.style.display = 'none';
         if (typeof TagManager !== 'undefined') {
           try {
-            // Ensure a clean slate but keep current filters
-            TagManager.clearUIStateForNewFile(true);
-            if (TagManager.refreshTagLists) {
-              console.time('post-upload-refresh');
-              await TagManager.refreshTagLists({ preserveFilters: true, force: true });
-              console.timeEnd('post-upload-refresh');
-            } else {
-              // Fallback to individual fetches in parallel
-              await Promise.all([
-                TagManager.fetchAndUpdateAvailableTags?.(),
-                TagManager.fetchAndUpdateSelectedTags?.(),
-                (async () => { await TagManager.fetchAndPopulateFilters?.(); })()
-              ]);
-            }
+            TagManager.clearUIStateForNewFile(true); // keep filters
+            // Kick off refresh without awaiting to prevent UI stall
+            setTimeout(() => {
+              if (TagManager.refreshTagLists) {
+                console.time('post-upload-refresh-async');
+                TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                  .finally(() => console.timeEnd('post-upload-refresh-async'))
+                  .catch(err => {
+                    console.error('Async refreshTagLists failed', err);
+                    // Last resort fallback
+                    window.location.reload();
+                  });
+              } else {
+                // Fallback individual fetches without await
+                TagManager.fetchAndUpdateAvailableTags?.();
+                TagManager.fetchAndUpdateSelectedTags?.();
+                TagManager.fetchAndPopulateFilters?.();
+              }
+            }, 0);
           } catch (e) {
-            console.error('Post-upload immediate refresh failed, falling back to reload', e);
+            console.error('Post-upload async refresh setup failed, reloading', e);
             window.location.reload();
           }
         } else {
-          // If TagManager isn't available, reload as a fallback
           window.location.reload();
         }
         
@@ -486,13 +489,37 @@ function pollUploadStatus(filename) {
         }
         console.timeEnd('post-ready-data-fetch');
         
-        // Hide splash screen on success
+        // Hide splash and trigger async, non-blocking refresh
         if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
           TagManager.hideExcelLoadingSplash();
+        } else {
+          const s = document.getElementById('excelLoadingSplash');
+          if (s) s.style.display = 'none';
         }
-        
-        // Show success message
         showToast('success', `File "${filename}" loaded successfully!`);
+        if (typeof TagManager !== 'undefined') {
+          try {
+            TagManager.clearUIStateForNewFile?.(true);
+            setTimeout(() => {
+              if (TagManager.refreshTagLists) {
+                TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                  .catch(err => {
+                    console.error('refreshTagLists failed after poll-ready', err);
+                    window.location.reload();
+                  });
+              } else {
+                TagManager.fetchAndUpdateAvailableTags?.();
+                TagManager.fetchAndUpdateSelectedTags?.();
+                TagManager.fetchAndPopulateFilters?.();
+              }
+            }, 0);
+          } catch (e) {
+            console.error('Async refresh setup failed after poll-ready', e);
+            window.location.reload();
+          }
+        } else {
+          window.location.reload();
+        }
         
         return; // Stop polling
       } else if (data.status === 'error') {
