@@ -3,6 +3,8 @@
 
 let templatePreviewInitAttempts = 0;
 let templatePreviewInitialized = false;
+let templatePreviewRetryScheduled = false;
+const MAX_RETRY_ATTEMPTS = 10;
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Template Preview Fix: DOM loaded');
@@ -10,13 +12,32 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function scheduleTemplatePreviewInit(delay = 500) {
+    // Prevent multiple simultaneous retry schedules
+    if (templatePreviewRetryScheduled) {
+        return;
+    }
+    
+    // Don't schedule if we've exceeded max attempts
+    if (templatePreviewInitAttempts >= MAX_RETRY_ATTEMPTS) {
+        return;
+    }
+    
+    templatePreviewRetryScheduled = true;
     setTimeout(function() {
+        templatePreviewRetryScheduled = false;
         initializeTemplatePreview();
     }, delay);
 }
 
 function initializeTemplatePreview() {
+    // Prevent multiple initializations
     if (templatePreviewInitialized) {
+        return;
+    }
+
+    // Check if we've exceeded max attempts
+    if (templatePreviewInitAttempts >= MAX_RETRY_ATTEMPTS) {
+        console.warn('Template Preview Fix: Max retry attempts reached. Preview functionality disabled.');
         return;
     }
 
@@ -35,42 +56,52 @@ function initializeTemplatePreview() {
     const saveTemplateBtn = document.getElementById('saveTemplateBtn');
     const previewContainer = document.getElementById('templatePreviewModal');
     
-    console.log('Template Preview Fix: Elements found:', {
-        editTemplateModal: !!editTemplateModal,
-        templateSelectModal: !!templateSelectModal,
-        scaleInputModal: !!scaleInputModal,
-        fontSelectModal: !!fontSelectModal,
-        fontSizingModeModal: !!fontSizingModeModal,
-        fieldFontSizesSection: !!fieldFontSizesSection,
-        templateSelect: !!templateSelect,
-        scaleInput: !!scaleInput,
-        fontSelect: !!fontSelect,
-        saveTemplateBtn: !!saveTemplateBtn,
-        previewContainer: !!previewContainer
-    });
+    // Only log element status on first few attempts to reduce console noise
+    if (templatePreviewInitAttempts < 3) {
+        console.log('Template Preview Fix: Elements found:', {
+            editTemplateModal: !!editTemplateModal,
+            templateSelectModal: !!templateSelectModal,
+            scaleInputModal: !!scaleInputModal,
+            fontSelectModal: !!fontSelectModal,
+            fontSizingModeModal: !!fontSizingModeModal,
+            fieldFontSizesSection: !!fieldFontSizesSection,
+            templateSelect: !!templateSelect,
+            scaleInput: !!scaleInput,
+            fontSelect: !!fontSelect,
+            saveTemplateBtn: !!saveTemplateBtn,
+            previewContainer: !!previewContainer
+        });
+    }
     
     if (!editTemplateModal) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
+        if (templatePreviewInitAttempts < MAX_RETRY_ATTEMPTS) {
+            // Only log warnings for first few attempts
+            if (templatePreviewInitAttempts <= 3) {
+                console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/${MAX_RETRY_ATTEMPTS}) - retrying...`);
+            }
+            scheduleTemplatePreviewInit(1000); // Increased delay to reduce spam
         } else {
-            console.error('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
+            console.warn('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
         }
         return;
     }
     
     if (!previewContainer) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
+        if (templatePreviewInitAttempts < MAX_RETRY_ATTEMPTS) {
+            if (templatePreviewInitAttempts <= 3) {
+                console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/${MAX_RETRY_ATTEMPTS}) - retrying...`);
+            }
+            scheduleTemplatePreviewInit(1000);
         } else {
-            console.error('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
+            console.warn('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
         }
         return;
     }
     
+    // Reset attempts counter on success
+    templatePreviewInitAttempts = 0;
     templatePreviewInitialized = true;
     
     // Function to update the template preview
@@ -288,4 +319,58 @@ window.updateTemplatePreview = function() {
             templateSelectModal.dispatchEvent(event);
         }
     }
-}; 
+};
+
+// Allow manual reinitialization if modal becomes available later
+window.reinitializeTemplatePreview = function() {
+    console.log('Template Preview Fix: Manual reinitialization requested');
+    templatePreviewInitialized = false;
+    templatePreviewInitAttempts = 0;
+    templatePreviewRetryScheduled = false;
+    scheduleTemplatePreviewInit(100);
+};
+
+// Watch for modal elements being added to the DOM dynamically
+if (typeof MutationObserver !== 'undefined') {
+    let observer = null;
+    
+    const setupObserver = function() {
+        // Only set up observer if we haven't exceeded max attempts
+        if (templatePreviewInitAttempts >= MAX_RETRY_ATTEMPTS) {
+            return; // Don't set up observer if we've given up
+        }
+        
+        observer = new MutationObserver(function(mutations) {
+            // Check if modal was added
+            const editTemplateModal = document.getElementById('editTemplateModal');
+            if (editTemplateModal && !templatePreviewInitialized && templatePreviewInitAttempts < MAX_RETRY_ATTEMPTS) {
+                console.log('Template Preview Fix: Modal detected, reinitializing...');
+                window.reinitializeTemplatePreview();
+                // Disconnect observer after successful initialization to prevent loops
+                if (observer) {
+                    observer.disconnect();
+                    observer = null;
+                }
+            }
+        });
+        
+        // Start observing after DOM is ready
+        if (document.body) {
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        } else {
+            document.addEventListener('DOMContentLoaded', function() {
+                if (document.body && observer) {
+                    observer.observe(document.body, {
+                        childList: true,
+                        subtree: true
+                    });
+                }
+            });
+        }
+    };
+    
+    setupObserver();
+} 

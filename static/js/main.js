@@ -8409,34 +8409,13 @@ const TagManager = {
             // Show loading feedback
             this.showActionSplash('Clearing and resetting...');
 
-            // Clear search inputs without nuking the entire DOM
-            this.resetSearchInputs();
+            // Fire-and-forget backend API call (non-blocking)
+            fetch('/api/clear-filters', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }).catch(() => {}); // Silently ignore errors
             
-            // Call the backend API to clear selected tags (non-blocking)
-            let response;
-            try {
-                response = await fetch('/api/clear-filters', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            } catch (fetchError) {
-                console.error('Network error clearing filters:', fetchError);
-                // Continue with local clearing even if API fails
-                response = null;
-            }
-            
-            if (response && response.ok) {
-                try {
-                    const data = await response.json();
-                    verboseLog('Backend clear-filters response:', data);
-                } catch (jsonError) {
-                    console.error('Error parsing response:', jsonError);
-                }
-            } else if (response) {
-                console.error('Failed to clear selected tags on server:', response.status, response.statusText);
-            }
-            
-            // Clear persistent selected tags (fast operation)
+            // Clear state immediately (fast operations)
             if (this.state) {
                 if (Array.isArray(this.state.persistentSelectedTags)) {
                     this.state.persistentSelectedTags = [];
@@ -8444,9 +8423,13 @@ const TagManager = {
                 if (this.state.selectedTags && typeof this.state.selectedTags.clear === 'function') {
                     this.state.selectedTags.clear();
                 }
+                this.state.filterCache = null;
             }
             
-            // Update the selected tags display immediately
+            // Clear search inputs
+            this.resetSearchInputs();
+            
+            // Update selected tags display immediately (this clears the selected tags UI)
             if (this.updateSelectedTags) {
                 try {
                     this.updateSelectedTags([]);
@@ -8455,136 +8438,52 @@ const TagManager = {
                 }
             }
             
-            // Clear filter cache to ensure fresh data
-            if (this.state) {
-                this.state.filterCache = null;
-            }
+            // Use CSS class manipulation for faster bulk operations
+            const availableContainer = document.getElementById('availableTags');
+            const selectedContainer = document.getElementById('selectedTags');
             
-            // Yield to browser before heavy DOM operations
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            
-            // Clear all checkboxes in available tags section (batched to prevent blocking)
-            try {
-                const availableCheckboxes = Array.from(document.querySelectorAll('#availableTags input[type="checkbox"]'));
-                // Process in batches to prevent UI freeze
-                const batchSize = 100;
-                for (let i = 0; i < availableCheckboxes.length; i += batchSize) {
-                    const batch = availableCheckboxes.slice(i, i + batchSize);
-                    batch.forEach(checkbox => {
-                        checkbox.checked = false;
-                    });
-                    // Yield to browser every batch
-                    if (i + batchSize < availableCheckboxes.length) {
-                        await new Promise(resolve => requestAnimationFrame(resolve));
-                    }
+            // Clear all checkboxes efficiently (no batching needed for simple property changes)
+            if (availableContainer) {
+                const availableCheckboxes = availableContainer.querySelectorAll('input[type="checkbox"]');
+                for (let i = 0; i < availableCheckboxes.length; i++) {
+                    availableCheckboxes[i].checked = false;
                 }
-            } catch (checkboxError) {
-                console.error('Error clearing available checkboxes:', checkboxError);
-            }
-            
-            // Yield to browser
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            
-            // Clear all checkboxes in selected tags section (batched)
-            try {
-                const selectedCheckboxes = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"]'));
-                const batchSize = 100;
-                for (let i = 0; i < selectedCheckboxes.length; i += batchSize) {
-                    const batch = selectedCheckboxes.slice(i, i + batchSize);
-                    batch.forEach(checkbox => {
-                        checkbox.checked = false;
-                    });
-                    if (i + batchSize < selectedCheckboxes.length) {
-                        await new Promise(resolve => requestAnimationFrame(resolve));
-                    }
+                
+                // Show all tags using CSS (faster than individual style changes)
+                const availableTagItems = availableContainer.querySelectorAll('.tag-item');
+                for (let i = 0; i < availableTagItems.length; i++) {
+                    availableTagItems[i].style.display = 'block';
                 }
-            } catch (checkboxError) {
-                console.error('Error clearing selected checkboxes:', checkboxError);
             }
             
-            // Yield to browser
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            
-            // Show all available tags (in case some were hidden) - batched
-            try {
-                const availableTagItems = Array.from(document.querySelectorAll('#availableTags .tag-item'));
-                const batchSize = 200;
-                for (let i = 0; i < availableTagItems.length; i += batchSize) {
-                    const batch = availableTagItems.slice(i, i + batchSize);
-                    batch.forEach(item => {
-                        item.style.display = 'block';
-                    });
-                    if (i + batchSize < availableTagItems.length) {
-                        await new Promise(resolve => requestAnimationFrame(resolve));
-                    }
+            if (selectedContainer) {
+                const selectedCheckboxes = selectedContainer.querySelectorAll('input[type="checkbox"]');
+                for (let i = 0; i < selectedCheckboxes.length; i++) {
+                    selectedCheckboxes[i].checked = false;
                 }
-            } catch (displayError) {
-                console.error('Error showing available tags:', displayError);
             }
             
-            // Yield to browser before heavy operations
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            
-            // Update available tags display to reflect cleared state (defer to avoid blocking)
-            if (this.efficientlyUpdateAvailableTagsDisplay) {
+            // Defer heavy operations to next frame (non-blocking)
+            requestAnimationFrame(() => {
                 try {
-                    // Use setTimeout to defer this heavy operation
-                    await new Promise(resolve => {
-                        requestAnimationFrame(() => {
-                            try {
-                                this.efficientlyUpdateAvailableTagsDisplay();
-                            } catch (updateError) {
-                                console.error('Error updating available tags display:', updateError);
-                            }
-                            resolve();
-                        });
-                    });
-                } catch (updateError) {
-                    console.error('Error updating available tags display:', updateError);
+                    // Update available tags display
+                    if (this.efficientlyUpdateAvailableTagsDisplay) {
+                        this.efficientlyUpdateAvailableTagsDisplay();
+                    }
+                    
+                    // Update select all checkboxes
+                    if (this.updateSelectAllCheckboxes) {
+                        this.updateSelectAllCheckboxes();
+                    }
+                    
+                    // Clear filters (non-blocking)
+                    if (this.clearAllFilters) {
+                        this.clearAllFilters().catch(err => console.error('Error clearing filters:', err));
+                    }
+                } catch (err) {
+                    console.error('Error in deferred clear operations:', err);
                 }
-            }
-            
-            // Yield to browser
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            
-            // Update select all checkboxes to unchecked state (defer to avoid blocking)
-            if (this.updateSelectAllCheckboxes) {
-                try {
-                    await new Promise(resolve => {
-                        requestAnimationFrame(() => {
-                            try {
-                                this.updateSelectAllCheckboxes();
-                            } catch (updateError) {
-                                console.error('Error updating select all checkboxes:', updateError);
-                            }
-                            resolve();
-                        });
-                    });
-                } catch (updateError) {
-                    console.error('Error updating select all checkboxes:', updateError);
-                }
-            }
-            
-            // Yield to browser before clearing filters
-            await new Promise(resolve => requestAnimationFrame(resolve));
-            
-            // Also clear filters (defer to avoid blocking)
-            if (this.clearAllFilters) {
-                try {
-                    await new Promise(resolve => {
-                        requestAnimationFrame(async () => {
-                            try {
-                                await this.clearAllFilters();
-                            } catch (filterError) {
-                                console.error('Error clearing filters:', filterError);
-                            }
-                            resolve();
-                        });
-                    });
-                } catch (filterError) {
-                    console.error('Error clearing filters:', filterError);
-                }
-            }
+            });
             
             verboseLog('✅ Selected tags cleared and app reset completed successfully');
             
@@ -8602,7 +8501,7 @@ const TagManager = {
                 alert(`Failed to clear and reset: ${error.message}`);
             }
         } finally {
-            // Hide loading splash
+            // Hide loading splash immediately
             this.hideActionSplash();
             // Reset the clearing flag
             this.state.isClearing = false;

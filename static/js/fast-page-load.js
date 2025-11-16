@@ -71,6 +71,14 @@
                     if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                         console.log(`⚡ Loaded ${data.available_tags.length} tags in background`);
                         
+                        // Show tag loading splash while tags are being rendered
+                        if (this.showTagLoadingSplash) {
+                            this.showTagLoadingSplash('Loading tags...');
+                        }
+                        if (this.showActionSplash) {
+                            this.showActionSplash('Loading tags...');
+                        }
+                        
                         // Update state immediately
                         this.state.tags = [...data.available_tags];
                         this.state.originalTags = [...data.available_tags];
@@ -79,27 +87,31 @@
                         // Use _updateAvailableTags directly to avoid debounce delay
                         this._updateAvailableTags(data.available_tags, null);
                         
-                        // Immediately check if tags are visible and hide splash
-                        requestAnimationFrame(() => {
-                            const container = document.getElementById('availableTags');
-                            if (container) {
-                                const tagItems = container.querySelectorAll('.tag-item');
-                                if (tagItems.length > 0) {
-                                    console.log(`⚡ Tags rendered (${tagItems.length} items), hiding splash immediately`);
-                                    if (this.hideActionSplash) {
-                                        this.hideActionSplash();
-                                    }
-                                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                                        AppLoadingSplash.stopAutoAdvance();
-                                        AppLoadingSplash.complete();
-                                    }
-                                }
-                            }
-                        });
-                        
-                        // Also ensure splash is hidden when tags appear (backup)
+                        // Use _waitForTagsToAppear to properly wait for tags and hide splash
+                        // This ensures splash stays visible until tags are actually rendered
                         if (this._waitForTagsToAppear) {
                             this._waitForTagsToAppear();
+                        } else {
+                            // Fallback: check after a delay if _waitForTagsToAppear is not available
+                            setTimeout(() => {
+                                const container = document.getElementById('availableTags');
+                                if (container) {
+                                    const tagItems = container.querySelectorAll('.tag-item');
+                                    if (tagItems.length > 0) {
+                                        console.log(`⚡ Tags rendered (${tagItems.length} items), hiding splash`);
+                                        if (this.hideActionSplash) {
+                                            this.hideActionSplash();
+                                        }
+                                        if (this.hideTagLoadingSplash) {
+                                            this.hideTagLoadingSplash();
+                                        }
+                                        if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                                            AppLoadingSplash.stopAutoAdvance();
+                                            AppLoadingSplash.complete();
+                                        }
+                                    }
+                                }
+                            }, 500);
                         }
                         
                         // Restore selected tags (non-blocking)
