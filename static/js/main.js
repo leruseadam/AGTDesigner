@@ -7368,6 +7368,7 @@ const TagManager = {
         verboseLog('Checking for existing data...');
 
         // Show loading splash IMMEDIATELY before any async operations
+        this.showTagLoadingSplash('Loading tags...');
         this.showActionSplash('Loading tags...');
 
         // Check for current uploaded file from session (non-blocking, runs in parallel)
@@ -7446,10 +7447,15 @@ const TagManager = {
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length > 0) {
             verboseLog(`⚡ FAST PATH: Loaded ${cachedTags.length} tags from cache instantly`);
+            // Keep splash visible while rendering cached tags
             // Render cached tags immediately for instant display
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
             this._updateAvailableTags(cachedTags);
+            // Wait for tags to appear before hiding splash
+            if (this._waitForTagsToAppear) {
+                this._waitForTagsToAppear();
+            }
 
             // Continue loading fresh data in background (non-blocking)
             verboseLog('Cache rendered, fetching fresh data in background...');
@@ -7465,6 +7471,9 @@ const TagManager = {
             // Always make UI interactive again quickly
             if (typeof this.hideActionSplash === 'function') {
                 this.hideActionSplash();
+            }
+            if (typeof this.hideTagLoadingSplash === 'function') {
+                this.hideTagLoadingSplash();
             }
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
@@ -7513,10 +7522,21 @@ const TagManager = {
 
                     // Update available tags (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
+                    // Ensure tag loading splash is visible
+                    if (this.showTagLoadingSplash) {
+                        this.showTagLoadingSplash('Loading tags...');
+                    }
                     setTimeout(() => {
                         this.debouncedUpdateAvailableTags(data.available_tags, null);
                         // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
                         // when tags are actually fully rendered
+                        // Use _waitForTagsToAppear to ensure splash stays visible until tags appear
+                        if (this._waitForTagsToAppear) {
+                            // Wait a bit for debounced function to execute, then check for tags
+                            setTimeout(() => {
+                                this._waitForTagsToAppear();
+                            }, 100);
+                        }
                     }, 0);
 
                     // Restore previously selected tags from backend
@@ -7563,6 +7583,12 @@ const TagManager = {
                 } else {
                     verboseLog('No initial data available:', data.message || 'No data found');
                     // Complete splash loading even if no data
+                    if (typeof this.hideActionSplash === 'function') {
+                        this.hideActionSplash();
+                    }
+                    if (typeof this.hideTagLoadingSplash === 'function') {
+                        this.hideTagLoadingSplash();
+                    }
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
@@ -7576,6 +7602,12 @@ const TagManager = {
             } else {
                 verboseLog('Initial data endpoint returned error:', response.status);
                 // Complete splash loading on error
+                if (typeof this.hideActionSplash === 'function') {
+                    this.hideActionSplash();
+                }
+                if (typeof this.hideTagLoadingSplash === 'function') {
+                    this.hideTagLoadingSplash();
+                }
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
@@ -7596,6 +7628,12 @@ const TagManager = {
             }
             
             // Complete splash loading on error
+            if (typeof this.hideActionSplash === 'function') {
+                this.hideActionSplash();
+            }
+            if (typeof this.hideTagLoadingSplash === 'function') {
+                this.hideTagLoadingSplash();
+            }
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             clearTimeout(splashSafetyTimeout);
@@ -9755,8 +9793,8 @@ const TagManager = {
             filterIds.forEach(filterId => {
                 const filterElement = document.getElementById(filterId);
                 if (filterElement) {
-                    filterElement.value = '';
-                    verboseLog(`Cleared ${filterId}`);
+                    filterElement.value = 'All';
+                    verboseLog(`Cleared ${filterId} (set to 'All')`);
                 }
             });
             
@@ -9826,8 +9864,8 @@ const TagManager = {
         otherFilterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
             if (filterElement) {
-                filterElement.value = '';
-                verboseLog(`Cleared ${filterId}`);
+                filterElement.value = 'All';
+                verboseLog(`Cleared ${filterId} (set to 'All')`);
             }
         });
         
