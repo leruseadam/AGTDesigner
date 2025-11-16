@@ -239,14 +239,23 @@ async function handleFiles(files) {
         console.log('✅ Upload successful! Refreshing UI without full reload...');
         if (typeof TagManager !== 'undefined' && typeof TagManager.refreshTagLists === 'function') {
           try {
-            await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+            // Yield to the browser so the splash paints before heavy DOM work
+            const kickoff = () => TagManager.refreshTagLists({ preserveFilters: true, force: true })
+              .catch(async (e) => {
+                console.warn('refreshTagLists failed, falling back to manual fetch:', e);
+                await Promise.all([
+                  TagManager.fetchAndUpdateAvailableTags?.(),
+                  TagManager.fetchAndUpdateSelectedTags?.(),
+                  TagManager.fetchAndPopulateFilters?.()
+                ]);
+              });
+            if (typeof window.requestIdleCallback === 'function') {
+              requestIdleCallback(() => kickoff());
+            } else {
+              setTimeout(() => kickoff(), 0);
+            }
           } catch (e) {
-            console.warn('refreshTagLists failed, falling back to manual fetch:', e);
-            await Promise.all([
-              TagManager.fetchAndUpdateAvailableTags?.(),
-              TagManager.fetchAndUpdateSelectedTags?.(),
-              TagManager.fetchAndPopulateFilters?.()
-            ]);
+            console.warn('Non-fatal refresh kickoff error:', e);
           }
         }
         
