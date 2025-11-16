@@ -157,6 +157,10 @@ async function handleFiles(files) {
       if (typeof TagManager !== 'undefined' && TagManager.clearUIStateForNewFile) {
         TagManager.clearUIStateForNewFile(true); // Preserve filters during upload
       }
+      // Show center loading splash immediately so there is no blank period
+      if (typeof TagManager !== 'undefined' && typeof TagManager.showActionSplash === 'function') {
+        TagManager.showActionSplash('Loading tags...');
+      }
       // Then show the loading indicator immediately
       if (typeof TagManager !== 'undefined' && TagManager.setLoading) {
         TagManager.setLoading(true);
