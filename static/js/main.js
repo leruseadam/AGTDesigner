@@ -7214,6 +7214,10 @@ const TagManager = {
         this.initializeEmptyState();
         AppLoadingSplash.nextStep(); // Templates loaded
         
+        // Show tag loading splash immediately when checking for existing data
+        // This ensures it's visible even if checkForExistingData is fast
+        this.showTagLoadingSplash('Loading tags...');
+        
         // Check if there's already data loaded (e.g., from a previous session or default file)
         this.checkForExistingData();
         
@@ -8617,44 +8621,99 @@ const TagManager = {
     },
 
     showTagLoadingSplash(message = 'Populating inventory...') {
+        console.log('🎬 SHOWING TAG LOADING SPLASH:', message);
         verboseLog('🎬 SHOWING TAG LOADING SPLASH:', message);
-        const splash = document.getElementById('tagLoadingSplash');
-        const statusElement = document.getElementById('tagLoadingStatus');
         
-        if (splash && statusElement) {
-            verboseLog('✅ Tag splash elements found, displaying...');
-            statusElement.textContent = message;
-            // Remove any classes that might hide it
-            splash.classList.remove('fade-out', 'd-none');
-            // Ensure splash is visible with high z-index and proper positioning
-            splash.style.display = 'flex';
-            splash.style.zIndex = '99999';
-            splash.style.position = 'fixed';
-            splash.style.top = '0';
-            splash.style.left = '0';
-            splash.style.width = '100%';
-            splash.style.height = '100%';
-            splash.style.visibility = 'visible';
-            splash.style.opacity = '1';
-            // Force a reflow to ensure the display change takes effect
-            splash.offsetHeight;
-            // Force browser to repaint in next frame
-            requestAnimationFrame(() => {
-                splash.style.display = 'flex';
-                const computed = window.getComputedStyle(splash);
-                verboseLog('✅ Tag splash forced repaint, display:', splash.style.display, 'computed display:', computed.display, 'z-index:', splash.style.zIndex);
-            });
-            verboseLog('✅ Tag splash display set to:', splash.style.display, 'z-index:', splash.style.zIndex);
-        } else {
-            console.error('❌ Could not find tag splash elements:', {
-                splash: !!splash,
-                statusElement: !!statusElement
-            });
-            // Fallback: try to show action splash if tag splash not available
-            if (this.showActionSplash) {
-                this.showActionSplash(message);
+        // Try to get splash element - retry if not found immediately
+        let splash = document.getElementById('tagLoadingSplash');
+        let statusElement = document.getElementById('tagLoadingStatus');
+        
+        // If not found, wait a bit and try again (for cases where DOM isn't ready)
+        if (!splash || !statusElement) {
+            console.warn('⚠️ Splash elements not found immediately, retrying...');
+            setTimeout(() => {
+                splash = document.getElementById('tagLoadingSplash');
+                statusElement = document.getElementById('tagLoadingStatus');
+                if (splash && statusElement) {
+                    this._actuallyShowSplash(splash, statusElement, message);
+                } else {
+                    console.error('❌ Could not find tag splash elements after retry');
+                }
+            }, 100);
+            return;
+        }
+        
+        this._actuallyShowSplash(splash, statusElement, message);
+    },
+    
+    _actuallyShowSplash(splash, statusElement, message) {
+        console.log('✅ Tag splash elements found, displaying...');
+        verboseLog('✅ Tag splash elements found, displaying...');
+        
+        statusElement.textContent = message;
+        
+        // Remove any classes that might hide it
+        splash.classList.remove('fade-out', 'd-none', 'hidden');
+        
+        // CRITICAL: Set all visibility properties aggressively
+        splash.style.setProperty('display', 'flex', 'important');
+        splash.style.setProperty('z-index', '999999', 'important');
+        splash.style.setProperty('position', 'fixed', 'important');
+        splash.style.setProperty('top', '0', 'important');
+        splash.style.setProperty('left', '0', 'important');
+        splash.style.setProperty('width', '100%', 'important');
+        splash.style.setProperty('height', '100%', 'important');
+        splash.style.setProperty('visibility', 'visible', 'important');
+        splash.style.setProperty('opacity', '1', 'important');
+        splash.style.setProperty('pointer-events', 'auto', 'important');
+        
+        // Remove inline style="display: none" if present
+        if (splash.hasAttribute('style')) {
+            const currentStyle = splash.getAttribute('style');
+            if (currentStyle.includes('display: none')) {
+                splash.setAttribute('style', currentStyle.replace(/display:\s*none[;]?/gi, ''));
             }
         }
+        
+        // Force multiple reflows to ensure visibility
+        splash.offsetHeight;
+        void splash.offsetWidth;
+        
+        // Force browser to repaint in next frame
+        requestAnimationFrame(() => {
+            splash.style.setProperty('display', 'flex', 'important');
+            const computed = window.getComputedStyle(splash);
+            console.log('✅ Tag splash forced repaint:', {
+                display: splash.style.display,
+                computedDisplay: computed.display,
+                zIndex: splash.style.zIndex,
+                computedZIndex: computed.zIndex,
+                visibility: computed.visibility,
+                opacity: computed.opacity
+            });
+            verboseLog('✅ Tag splash forced repaint, display:', splash.style.display, 'computed display:', computed.display, 'z-index:', splash.style.zIndex);
+        });
+        
+        // Double-check after a short delay
+        setTimeout(() => {
+            const finalCheck = window.getComputedStyle(splash);
+            if (finalCheck.display === 'none' || finalCheck.visibility === 'hidden') {
+                console.error('❌ Splash still hidden after all attempts!', {
+                    display: finalCheck.display,
+                    visibility: finalCheck.visibility,
+                    opacity: finalCheck.opacity,
+                    zIndex: finalCheck.zIndex
+                });
+                // Last resort: try to force it again
+                splash.style.setProperty('display', 'flex', 'important');
+                splash.style.setProperty('visibility', 'visible', 'important');
+            } else {
+                console.log('✅ Splash confirmed visible');
+            }
+        }, 50);
+        
+        console.log('✅ Tag splash display set to:', splash.style.display, 'z-index:', splash.style.zIndex);
+        verboseLog('✅ Tag splash display set to:', splash.style.display, 'z-index:', splash.style.zIndex);
     },
 
     hideTagLoadingSplash() {
