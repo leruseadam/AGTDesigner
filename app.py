@@ -7747,11 +7747,14 @@ def get_available_tags():
             if fast_path_allowed:
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
-                return jsonify({
+                response = make_response(jsonify({
                     'tags': cached_tags,
                     'total_count': len(cached_tags),
                     'source': 'cache-fast'
-                })
+                }))
+                response.headers['X-Cache'] = 'HIT-FAST'
+                response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
+                return response
             
             # Always do lineage alignment to ensure database lineage is applied (when not fast_load)
             # This ensures tags always have the latest lineage from the database
@@ -14864,6 +14867,7 @@ def get_initial_data():
             logging.info(f"⚡ Returning cached initial data (took {elapsed:.0f}ms)")
             response = make_response(jsonify(cached_response))
             response.headers['X-Cache'] = 'HIT'
+            response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
             return response
 
         logging.info("=== INITIAL DATA REQUEST START ===")
@@ -14956,9 +14960,11 @@ def get_initial_data():
             
             # Get available tags
             logging.info("Getting available tags...")
+            tags_start = time.time()
             available_tags = excel_processor.get_available_tags()
-            logging.info(f"Available tags count: {len(available_tags)}")
-            
+            tags_elapsed = (time.time() - tags_start) * 1000
+            logging.info(f"Available tags count: {len(available_tags)} (took {tags_elapsed:.0f}ms)")
+
             initial_data = {
                 'success': True,
                 'data_loaded': True,  # Add this field for frontend compatibility
@@ -14971,6 +14977,9 @@ def get_initial_data():
                 'total_records': len(excel_processor.df),
                 'source': 'excel'
             }
+
+            # PERFORMANCE: Cache the result for 5 minutes
+            cache.set(cache_key, initial_data, timeout=300)
         else:
             logging.warning("Excel processor has no data - attempting database fallback for initial data")
             available_tags = []

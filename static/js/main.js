@@ -7294,13 +7294,13 @@ const TagManager = {
             return;
         }
         this._checkingExistingData = true;
-        
+
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
-        
+
         // Show loading splash IMMEDIATELY before any async operations
         this.showActionSplash('Loading tags...');
-        
+
         // Check for current uploaded file from session (non-blocking, runs in parallel)
         // Use requestAnimationFrame to ensure it doesn't block the main thread
         requestAnimationFrame(() => {
@@ -7332,7 +7332,7 @@ const TagManager = {
                     verboseLog('Error checking for current file:', error);
                 });
         });
-        
+
         // Show loading indicator in container IMMEDIATELY to prevent blank screen
         const availableTagsContainer = document.getElementById('availableTags');
         if (availableTagsContainer) {
@@ -7354,59 +7354,88 @@ const TagManager = {
         const maxAttempts = retryDelays.length + 1;
         verboseLog(`[InitialData] Attempt ${attemptNumber}/${maxAttempts}`);
         if (attemptNumber > maxAttempts) {
-            console.warn(`[InitialData] Attempt limit exceeded (${maxAttempts}); aborting further retries.`);
-            // Hide splash if we're aborting
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
+            console.warn(`[InitialData] Attempt limit exceeded (${maxAttempts}); falling back to direct tag load.`);
+            // CRITICAL FIX: Fall back to direct tag loading instead of giving up
+            verboseLog('Attempting direct tag load as fallback...');
+            try {
+                await this.fetchAndUpdateAvailableTags();
+                await this.fetchAndUpdateSelectedTags();
+                await this.fetchAndPopulateFilters();
+                this._checkingExistingData = false;
+                return;
+            } catch (fallbackError) {
+                console.error('Fallback tag loading failed:', fallbackError);
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                this._checkingExistingData = false;
+                return;
             }
-            return;
         }
-        
-        // Add timeout protection - reduced to 15 seconds to prevent hanging
+
+        // PERFORMANCE FIX: Try cache first for instant load
+        const cachedTags = this.loadAvailableTagsFromCache();
+        if (cachedTags && cachedTags.length > 0) {
+            verboseLog(`⚡ FAST PATH: Loaded ${cachedTags.length} tags from cache instantly`);
+            // Render cached tags immediately for instant display
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            this._updateAvailableTags(cachedTags);
+
+            // Continue loading fresh data in background (non-blocking)
+            verboseLog('Cache rendered, fetching fresh data in background...');
+        }
+
+        // CRITICAL FIX: Increased timeout to 30 seconds to handle slow database queries
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 15000); // 15 second timeout
+            setTimeout(() => reject(new Error('Initialization timeout')), 30000);
         });
-        
+
         // Safety net: ensure loading overlay never blocks interaction for long
-        // CRITICAL FIX: Increased timeout to allow tags to fully load before forcing hide
         const splashSafetyTimeout = setTimeout(() => {
             // Only force hide if tags haven't appeared yet
             const availableTagsContainer = document.getElementById('availableTags');
             const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
             if (tagItems.length === 0) {
-                console.warn('⏳ Safety timeout triggered - no tags found, force hiding loading splash');
-                if (typeof this.hideActionSplash === 'function') {
-                    this.hideActionSplash();
-                }
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
+                console.warn('⏳ Safety timeout triggered - no tags found, attempting fallback load');
+                // Try direct tag loading as fallback
+                this.fetchAndUpdateAvailableTags().then(() => {
+                    verboseLog('Fallback tag loading succeeded');
+                }).catch(fallbackError => {
+                    console.error('Fallback tag loading failed:', fallbackError);
+                    if (typeof this.hideActionSplash === 'function') {
+                        this.hideActionSplash();
+                    }
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                });
             } else {
-                verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - letting _waitForTagsToAppear handle it`);
+                verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 5000); // Increased to 5 seconds to allow tags to fully load
-        
+        }, 8000); // 8 second safety net
+
         try {
             // Use the new initial-data endpoint for faster loading with timeout
             const response = await Promise.race([
                 fetch('/api/initial-data'),
                 timeoutPromise
             ]);
-            
+
             if (response.ok) {
                 const data = await response.json();
                 verboseLog('Initial data response:', data);
                 if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                     verboseLog(`Found ${data.available_tags.length} existing tags, loading data...`);
-                    
+
                     // Update splash progress for data loading
                     AppLoadingSplash.updateProgress(60, 'Loading product data...');
-                    
+
                     // Splash already shown at start of function, just update message
                     const splashMessage = document.querySelector('#actionSplash .action-splash-message');
                     if (splashMessage) {
                         splashMessage.textContent = 'Loading product tags...';
                     }
-                    
+
                     // Update available tags (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
                     setTimeout(() => {
@@ -7414,14 +7443,14 @@ const TagManager = {
                         // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
                         // when tags are actually fully rendered
                     }, 0);
-                    
+
                     // Restore previously selected tags from backend
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
                     verboseLog('About to fetch and update selected tags...');
                     const selectedTagsResult = await this.fetchAndUpdateSelectedTags();
                     verboseLog('fetchAndUpdateSelectedTags result:', selectedTagsResult);
                     verboseLog('persistentSelectedTags after restore:', this.state.persistentSelectedTags);
-                    
+
                     // Update filters (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(90, 'Setting up filters...');
                     setTimeout(() => {
@@ -7433,7 +7462,7 @@ const TagManager = {
                             weight: []
                         }, true); // Preserve existing values when loading initial data
                     }, 0);
-                    
+
                     // Update file info text to show the loaded filename
                     if (data.filename) {
                         const fileInfoText = document.getElementById('fileInfoText');
