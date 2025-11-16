@@ -1116,13 +1116,12 @@ const TagManager = {
                     return false;
                 })
                 .finally(() => {
-                    if (typeof this.hideActionSplash === 'function') {
-                        this.hideActionSplash();
-                    }
+                    // Keep the loading splash visible; it will be hidden by _waitForTagsToAppear()
+                    // This prevents showing a blank panel while tags are still loading
                     if (typeof this.hideEnhancedGenerationSplash === 'function') {
                         this.hideEnhancedGenerationSplash();
                     }
-                    this.state.loading = false;
+                    // Do NOT set loading=false here; defer to _waitForTagsToAppear() when tags render
                 });
         } catch (err) {
             console.error('refreshAfterStoreChange encountered an exception', err);
@@ -2961,11 +2960,25 @@ const TagManager = {
 
         const tags = filteredTags || originalTags;
         if (!tags || tags.length === 0) {
-            verboseLog('No tags provided, showing empty state');
-            availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
-            // Hide splash if showing
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
+            // If we're in an active loading cycle, keep showing a loading state
+            if (this.state && this.state.loading) {
+                verboseLog('No tags yet, but loading in progress — keep spinner visible');
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags...</p>
+                    </div>
+                `;
+                // Do not hide the splash; _waitForTagsToAppear() will handle it
+            } else {
+                verboseLog('No tags provided, showing empty state');
+                availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
+                // Hide splash if showing
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
             }
             return;
         }
@@ -3864,6 +3877,10 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                // Mark loading complete
+                if (this.state) {
+                    this.state.loading = false;
+                }
                 // Also complete AppLoadingSplash if it's still showing
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
@@ -3878,6 +3895,9 @@ const TagManager = {
                 }
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
+                }
+                if (this.state) {
+                    this.state.loading = false;
                 }
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
