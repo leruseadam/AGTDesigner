@@ -744,6 +744,13 @@ const AppLoadingSplash = {
     show() {
         this.isVisible = true;
         this.currentStep = 0;
+        // Emergency kill-switch: never let the splash sit indefinitely
+        if (this._emergencyTimer) {
+            clearTimeout(this._emergencyTimer);
+        }
+        this._emergencyTimer = setTimeout(() => {
+            this.emergencyHide();
+        }, 7000);
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -813,6 +820,10 @@ const AppLoadingSplash = {
     hide() {
         this.isVisible = false;
         this.stopAutoAdvance();
+        if (this._emergencyTimer) {
+            clearTimeout(this._emergencyTimer);
+            this._emergencyTimer = null;
+        }
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
