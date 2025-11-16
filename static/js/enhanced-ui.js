@@ -99,6 +99,42 @@ async function handleFiles(files) {
     const file = files[0];
     console.log('📄 File selected:', file.name, 'size:', file.size);
     
+    // Gate on store selection: if a store is required, show the modal and abort upload
+    try {
+      // Quick client-side check first
+      if (window.STORE_MODAL_BLOCKING) {
+        console.warn('Store selection required; showing modal and aborting upload');
+        if (typeof window.showStoreSelectionModal === 'function') {
+          window.showStoreSelectionModal();
+        }
+        return;
+      }
+      // Confirm with backend to be safe
+      const res = await fetch(`/api/check-store-required?ts=${Date.now()}`, { credentials: 'same-origin', cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const requiresStore = data.requires_store === true || data.required === true || !data.store;
+        if (requiresStore) {
+          console.warn('Backend indicates store selection required; showing modal and aborting upload');
+          if (typeof window.showStoreSelectionModal === 'function') {
+            window.showStoreSelectionModal();
+          } else {
+            const modalEl = document.getElementById('storeSelectionModal');
+            if (modalEl && typeof bootstrap !== 'undefined') {
+              bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: 'static', keyboard: false }).show();
+            }
+          }
+          return;
+        }
+      }
+    } catch (storeCheckErr) {
+      console.warn('Store check failed; defaulting to show modal before upload', storeCheckErr);
+      if (typeof window.showStoreSelectionModal === 'function') {
+        window.showStoreSelectionModal();
+      }
+      return;
+    }
+    
     // CRITICAL: Show Excel loading splash screen FIRST before anything else
     const splashStartTime = Date.now();
     console.log('🎬 UPLOAD: Showing splash IMMEDIATELY for:', file.name);
