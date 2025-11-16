@@ -5438,6 +5438,10 @@
           console.log('🔄 Forcing store modal to display...');
 
           window.STORE_MODAL_BLOCKING = true;
+          try {
+            const btn = document.getElementById('uploadTriggerBtn');
+            if (btn) btn.setAttribute('disabled', 'disabled');
+          } catch(_) {}
 
           const attemptShow = () => {
             if (typeof window.showStoreSelectionModal === 'function') {
@@ -5504,6 +5508,10 @@
         sessionStorage.removeItem('store_selected_timestamp');
 
         window.STORE_MODAL_BLOCKING = false;
+        try {
+          const btn = document.getElementById('uploadTriggerBtn');
+          if (btn) btn.removeAttribute('disabled');
+        } catch(_) {}
 
         const modalElement = document.getElementById('storeSelectionModal');
         if (modalElement) {
@@ -5535,6 +5543,10 @@
         // On error, default to showing modal (safer)
         console.log('⚠️ Error checking store - defaulting to show modal');
         window.STORE_MODAL_BLOCKING = true;
+        try {
+          const btn = document.getElementById('uploadTriggerBtn');
+          if (btn) btn.setAttribute('disabled', 'disabled');
+        } catch(_) {}
         
         const showModal = () => {
           const modalElement = document.getElementById('storeSelectionModal');
