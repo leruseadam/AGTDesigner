@@ -1246,7 +1246,7 @@ const TagManager = {
             
             // Update the dropdown options with special formatting for RSO/CO2 Tanker
             filterElement.innerHTML = `
-                <option value="">All</option>
+                <option value="All">All</option>
                 ${sortedValues.map(value => {
                     // Apply special font formatting for RSO/CO2 Tanker
                     if (value === 'rso/co2 tankers') {
@@ -1284,7 +1284,7 @@ const TagManager = {
                         filterElement.appendChild(option);
                         filterElement.value = currentValue;
                     } else {
-                        filterElement.value = '';
+                        filterElement.value = 'All';
                     }
                 }
             } else {
@@ -1302,7 +1302,7 @@ const TagManager = {
                         filterElement.appendChild(option);
                         filterElement.value = currentValue;
                     } else {
-                        filterElement.value = '';
+                        filterElement.value = 'All';
                     }
                 }
             }
@@ -1673,7 +1673,7 @@ const TagManager = {
                             filterElement.appendChild(option);
                             filterElement.value = currentValue;
                         } else {
-                            filterElement.value = '';
+                            filterElement.value = 'All';
                         }
                     }
                 }
@@ -2339,6 +2339,8 @@ const TagManager = {
         // Show loading splash for tag population
         const tagsToShow = filteredTags || originalTags;
         if (tagsToShow && tagsToShow.length > 0) {
+            // Show both splash screens to ensure visibility
+            this.showTagLoadingSplash('Loading tags...');
             this.showActionSplash('Loading tags...');
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen
@@ -2944,6 +2946,16 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
+        // Show splash if we're loading tags and splash isn't already showing
+        const tagsToShow = filteredTags || originalTags;
+        if (tagsToShow && tagsToShow.length > 0) {
+            // Check if splash is already visible to avoid flicker
+            const splash = document.getElementById('tagLoadingSplash');
+            if (!splash || splash.style.display === 'none' || !splash.style.display) {
+                this.showTagLoadingSplash('Loading tags...');
+            }
+        }
+        
         // Windows optimization: Use requestAnimationFrame for smoother rendering
         if (isWindows) {
             requestAnimationFrame(() => {
@@ -3861,13 +3873,27 @@ const TagManager = {
                     verboseLog(`Tags already visible (${tagItems.length} items), waiting ${remainingTime}ms before hiding splash`);
                     // Wait for minimum visibility time before hiding
                     setTimeout(() => {
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                        this.hideTagLoadingSplash();
-                        if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                            AppLoadingSplash.stopAutoAdvance();
-                            AppLoadingSplash.complete();
+                        // Double-check tags are still visible before hiding
+                        const finalCheck = document.getElementById('availableTags');
+                        if (finalCheck) {
+                            const finalTags = finalCheck.querySelectorAll('.tag-item');
+                            const finalVisible = Array.from(finalTags).filter(item => {
+                                const rect = item.getBoundingClientRect();
+                                return rect.width > 0 && rect.height > 0;
+                            });
+                            if (finalVisible.length > 0) {
+                                verboseLog(`Hiding splash after minimum visibility time (${finalVisible.length} tags visible)`);
+                                if (this.hideActionSplash) {
+                                    this.hideActionSplash();
+                                }
+                                this.hideTagLoadingSplash();
+                                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                                    AppLoadingSplash.stopAutoAdvance();
+                                    AppLoadingSplash.complete();
+                                }
+                            } else {
+                                verboseLog('Tags disappeared, keeping splash visible');
+                            }
                         }
                     }, remainingTime);
                     return true;
@@ -7195,11 +7221,11 @@ const TagManager = {
             lineage: 'All',
             weight: 'All'
         };
-        // Set each filter dropdown to 'All' (or '')
+        // Set each filter dropdown to 'All'
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
         filterIds.forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.value = '';
+            if (el) el.value = 'All';
         });
         // Don't apply filters immediately - let checkForExistingData handle it
         // this.applyFilters();
@@ -8594,6 +8620,8 @@ const TagManager = {
         if (splash && statusElement) {
             verboseLog('✅ Tag splash elements found, displaying...');
             statusElement.textContent = message;
+            // Remove any classes that might hide it
+            splash.classList.remove('fade-out', 'd-none');
             // Ensure splash is visible with high z-index and proper positioning
             splash.style.display = 'flex';
             splash.style.zIndex = '99999';
@@ -8606,6 +8634,12 @@ const TagManager = {
             splash.style.opacity = '1';
             // Force a reflow to ensure the display change takes effect
             splash.offsetHeight;
+            // Force browser to repaint in next frame
+            requestAnimationFrame(() => {
+                splash.style.display = 'flex';
+                const computed = window.getComputedStyle(splash);
+                verboseLog('✅ Tag splash forced repaint, display:', splash.style.display, 'computed display:', computed.display, 'z-index:', splash.style.zIndex);
+            });
             verboseLog('✅ Tag splash display set to:', splash.style.display, 'z-index:', splash.style.zIndex);
         } else {
             console.error('❌ Could not find tag splash elements:', {
@@ -9761,7 +9795,7 @@ const TagManager = {
                 closeBtn.style.fontSize = '1em';
                 closeBtn.setAttribute('aria-label', `Clear ${label} filter`);
                 closeBtn.addEventListener('click', () => {
-                    select.value = '';
+                    select.value = 'All';
                     // Trigger change event to update filters
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                 });
@@ -9944,7 +9978,7 @@ const TagManager = {
             verboseLog('Clearing filter settings for new file upload');
             const filterSelects = document.querySelectorAll('select[id*="Filter"]');
             filterSelects.forEach(select => {
-                select.value = '';
+                select.value = 'All';
             });
             
             // Reset filter state to defaults
@@ -10910,7 +10944,7 @@ async function performFullAppReset() {
         filterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
             if (filterElement) {
-                filterElement.value = '';
+                filterElement.value = 'All';
                 filterElement.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
