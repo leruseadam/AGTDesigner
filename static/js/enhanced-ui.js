@@ -99,42 +99,6 @@ async function handleFiles(files) {
     const file = files[0];
     console.log('📄 File selected:', file.name, 'size:', file.size);
     
-    // Gate on store selection: if a store is required, show the modal and abort upload
-    try {
-      // Quick client-side check first
-      if (window.STORE_MODAL_BLOCKING) {
-        console.warn('Store selection required; showing modal and aborting upload');
-        if (typeof window.showStoreSelectionModal === 'function') {
-          window.showStoreSelectionModal();
-        }
-        return;
-      }
-      // Confirm with backend to be safe
-      const res = await fetch(`/api/check-store-required?ts=${Date.now()}`, { credentials: 'same-origin', cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const requiresStore = data.requires_store === true || data.required === true || !data.store;
-        if (requiresStore) {
-          console.warn('Backend indicates store selection required; showing modal and aborting upload');
-          if (typeof window.showStoreSelectionModal === 'function') {
-            window.showStoreSelectionModal();
-          } else {
-            const modalEl = document.getElementById('storeSelectionModal');
-            if (modalEl && typeof bootstrap !== 'undefined') {
-              bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: 'static', keyboard: false }).show();
-            }
-          }
-          return;
-        }
-      }
-    } catch (storeCheckErr) {
-      console.warn('Store check failed; defaulting to show modal before upload', storeCheckErr);
-      if (typeof window.showStoreSelectionModal === 'function') {
-        window.showStoreSelectionModal();
-      }
-      return;
-    }
-    
     // CRITICAL: Show Excel loading splash screen FIRST before anything else
     const splashStartTime = Date.now();
     console.log('🎬 UPLOAD: Showing splash IMMEDIATELY for:', file.name);
@@ -189,21 +153,12 @@ async function handleFiles(files) {
     formData.append('file', file);
     
     try {
-      // Clear UI state first so our loading indicator isn't wiped out
+      TagManager.setLoading(true);
+      
+      // Clear UI state immediately when upload starts
       if (typeof TagManager !== 'undefined' && TagManager.clearUIStateForNewFile) {
         TagManager.clearUIStateForNewFile(true); // Preserve filters during upload
       }
-      // Show center loading splash immediately so there is no blank period
-      if (typeof TagManager !== 'undefined' && typeof TagManager.showActionSplash === 'function') {
-        TagManager.showActionSplash('Loading tags...');
-      }
-      // Then show the loading indicator immediately
-      if (typeof TagManager !== 'undefined' && TagManager.setLoading) {
-        TagManager.setLoading(true);
-      }
-      // Give the browser a paint frame so the splash/spinner is visible immediately
-      await new Promise(requestAnimationFrame);
-      await new Promise(resolve => setTimeout(resolve, 0));
       
       console.log('🚀 Sending upload request to /upload...');
       // Update splash status
@@ -274,29 +229,18 @@ async function handleFiles(files) {
           TagManager.clearUIStateForNewFile(true); // Preserve filters
         }
         
-        // Refresh UI in-place instead of reloading the page to prevent browser hangs
-        console.log('✅ Upload successful! Refreshing UI without full reload...');
-        if (typeof TagManager !== 'undefined' && typeof TagManager.refreshTagLists === 'function') {
-          try {
-            // Yield to the browser so the splash paints before heavy DOM work
-            const kickoff = () => TagManager.refreshTagLists({ preserveFilters: true, force: true })
-              .catch(async (e) => {
-                console.warn('refreshTagLists failed, falling back to manual fetch:', e);
-                await Promise.all([
-                  TagManager.fetchAndUpdateAvailableTags?.(),
-                  TagManager.fetchAndUpdateSelectedTags?.(),
-                  TagManager.fetchAndPopulateFilters?.()
-                ]);
-              });
-            if (typeof window.requestIdleCallback === 'function') {
-              requestIdleCallback(() => kickoff());
-            } else {
-              setTimeout(() => kickoff(), 0);
-            }
-          } catch (e) {
-            console.warn('Non-fatal refresh kickoff error:', e);
-          }
-        }
+        // Show success message with splash screen
+        console.log('✅ Upload successful! Reloading page to show new data...');
+        
+        // Show success splash instead of alert
+        // if (typeof TagManager !== 'undefined' && TagManager.showUploadSuccessSplash) {
+        //   TagManager.showUploadSuccessSplash(data.rows);
+        // }
+        
+        // Reload page after a short delay
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
         
         // Add animation class to file path container
         if (filePathContainer) {

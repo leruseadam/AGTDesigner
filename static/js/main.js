@@ -7116,13 +7116,7 @@ const TagManager = {
         AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
-        // Defer to idle/next tick so the splash paints and the browser remains responsive
-        const kickoffExistingData = () => this.checkForExistingData();
-        if (typeof window.requestIdleCallback === 'function') {
-            requestIdleCallback(() => kickoffExistingData());
-        } else {
-            setTimeout(() => kickoffExistingData(), 0);
-        }
+        this.checkForExistingData();
         
         // Ensure all filters default to 'All' on page load
         this.state.filters = {
@@ -10445,20 +10439,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Show splash screen immediately
     AppLoadingSplash.show();
     
-    // Initialize TagManager after first paint to avoid reload freezes
-    requestAnimationFrame(() => {
-        setTimeout(() => {
-            try {
-                TagManager.init();
-            } catch (e) {
-                console.error('TagManager.init error:', e);
-                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-            }
-        }, 0);
-    });
+    // Initialize TagManager (which will handle the splash loading)
+    TagManager.init();
     
     // Ensure proper scrolling behavior
     TagManager.ensureProperScrolling();

@@ -4619,9 +4619,9 @@
       left: 0;
       width: 100%;
       height: 100%;
-      background: rgba(0, 0, 0, 0.6); /* solid overlay for performance */
-      backdrop-filter: none; /* avoid heavy GPU blur that can freeze */
-      -webkit-backdrop-filter: none;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       display: none;
       justify-content: center;
       align-items: center;
@@ -4645,8 +4645,8 @@
       position: relative;
       z-index: 10000;
       background: var(--glass-bg);
-      backdrop-filter: none; /* avoid nested blur */
-      -webkit-backdrop-filter: none;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--glass-border);
       border-radius: 20px;
       padding: 40px;
@@ -5438,10 +5438,6 @@
           console.log('🔄 Forcing store modal to display...');
 
           window.STORE_MODAL_BLOCKING = true;
-          try {
-            const btn = document.getElementById('uploadTriggerBtn');
-            if (btn) btn.setAttribute('disabled', 'disabled');
-          } catch(_) {}
 
           const attemptShow = () => {
             if (typeof window.showStoreSelectionModal === 'function') {
@@ -5508,10 +5504,6 @@
         sessionStorage.removeItem('store_selected_timestamp');
 
         window.STORE_MODAL_BLOCKING = false;
-        try {
-          const btn = document.getElementById('uploadTriggerBtn');
-          if (btn) btn.removeAttribute('disabled');
-        } catch(_) {}
 
         const modalElement = document.getElementById('storeSelectionModal');
         if (modalElement) {
@@ -5543,10 +5535,6 @@
         // On error, default to showing modal (safer)
         console.log('⚠️ Error checking store - defaulting to show modal');
         window.STORE_MODAL_BLOCKING = true;
-        try {
-          const btn = document.getElementById('uploadTriggerBtn');
-          if (btn) btn.setAttribute('disabled', 'disabled');
-        } catch(_) {}
         
         const showModal = () => {
           const modalElement = document.getElementById('storeSelectionModal');
