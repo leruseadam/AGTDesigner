@@ -7393,26 +7393,32 @@ const TagManager = {
 
         // Safety net: ensure loading overlay never blocks interaction for long
         const splashSafetyTimeout = setTimeout(() => {
-            // Only force hide if tags haven't appeared yet
+            // Always make UI interactive again quickly
+            if (typeof this.hideActionSplash === 'function') {
+                this.hideActionSplash();
+            }
+            AppLoadingSplash.stopAutoAdvance();
+            AppLoadingSplash.complete();
+
+            // Only attempt a visible fallback load if nothing has rendered yet
             const availableTagsContainer = document.getElementById('availableTags');
             const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
             if (tagItems.length === 0) {
-                console.warn('⏳ Safety timeout triggered - no tags found, attempting fallback load');
-                // Try direct tag loading as fallback
-                this.fetchAndUpdateAvailableTags().then(() => {
-                    verboseLog('Fallback tag loading succeeded');
-                }).catch(fallbackError => {
-                    console.error('Fallback tag loading failed:', fallbackError);
-                    if (typeof this.hideActionSplash === 'function') {
-                        this.hideActionSplash();
-                    }
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                });
+                console.warn('⏳ Safety timeout triggered - no tags found, attempting fallback load (non-blocking)');
+                // Fire-and-forget fallback fetch so UI stays responsive
+                try {
+                    this.fetchAndUpdateAvailableTags().then(() => {
+                        verboseLog('Fallback tag loading succeeded');
+                    }).catch(fallbackError => {
+                        console.error('Fallback tag loading failed:', fallbackError);
+                    });
+                } catch (fallbackError) {
+                    console.error('Fallback tag loading threw synchronously:', fallbackError);
+                }
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 8000); // 8 second safety net
+        }, 3500); // ~3.5 second safety net so "Loading tags" overlay never lingers
 
         try {
             // Use the new initial-data endpoint for faster loading with timeout
