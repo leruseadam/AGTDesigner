@@ -3823,6 +3823,7 @@ const TagManager = {
                     this.updateSelectAllCheckboxes();
                     this._waitForTagsToAppear();
                     this.hideActionSplash();
+                    this.hideTagLoadingSplash();
                 });
             }
         };
@@ -3838,6 +3839,7 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
+            this.hideTagLoadingSplash();
             return;
         }
         
@@ -3854,6 +3856,7 @@ const TagManager = {
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
+                    this.hideTagLoadingSplash();
                     if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                         AppLoadingSplash.stopAutoAdvance();
                         AppLoadingSplash.complete();
@@ -3875,6 +3878,7 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
+            this.hideTagLoadingSplash();
             if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
@@ -3916,6 +3920,7 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this.hideTagLoadingSplash();
                 // Also complete AppLoadingSplash if it's still showing
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
@@ -3932,6 +3937,7 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this.hideTagLoadingSplash();
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
@@ -6620,6 +6626,9 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
+            // Show tag loading splash
+            this.showTagLoadingSplash('Loading tags...');
+            
             // OPTIMIZATION: Use fast_load parameter for initial load to skip slow lineage alignment
             // This dramatically speeds up tag loading when cached data is available
             const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
@@ -6718,6 +6727,7 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this.hideTagLoadingSplash();
                 return false;
             }
             
@@ -6731,6 +6741,7 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this.hideTagLoadingSplash();
                 return false;
             }
             
@@ -6859,6 +6870,7 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
+            this.hideTagLoadingSplash();
 
             // CRITICAL FIX: Show user-friendly error message with retry button
             const availableTagsContainer = document.getElementById('availableTags');
@@ -6973,6 +6985,7 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
+            this.hideTagLoadingSplash();
         }
     },
 
@@ -8553,6 +8566,43 @@ const TagManager = {
             verboseLog('✅ Splash hidden');
         } else {
             console.error('❌ Could not find splash element to hide');
+        }
+    },
+
+    showTagLoadingSplash(message = 'Populating inventory...') {
+        verboseLog('🎬 SHOWING TAG LOADING SPLASH:', message);
+        const splash = document.getElementById('tagLoadingSplash');
+        const statusElement = document.getElementById('tagLoadingStatus');
+        
+        if (splash && statusElement) {
+            verboseLog('✅ Tag splash elements found, displaying...');
+            statusElement.textContent = message;
+            splash.style.display = 'flex';
+            splash.style.zIndex = '99999';
+            splash.style.position = 'fixed';
+            splash.style.top = '0';
+            splash.style.left = '0';
+            splash.style.width = '100%';
+            splash.style.height = '100%';
+            verboseLog('✅ Tag splash display set to:', splash.style.display);
+        } else {
+            console.error('❌ Could not find tag splash elements:', {
+                splash: !!splash,
+                statusElement: !!statusElement
+            });
+        }
+    },
+
+    hideTagLoadingSplash() {
+        verboseLog('🎬 HIDING TAG LOADING SPLASH');
+        const splash = document.getElementById('tagLoadingSplash');
+        
+        if (splash) {
+            // Hide splash immediately
+            splash.style.display = 'none';
+            verboseLog('✅ Tag splash hidden');
+        } else {
+            console.error('❌ Could not find tag splash element to hide');
         }
     },
 
