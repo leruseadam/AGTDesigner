@@ -4619,9 +4619,9 @@
       left: 0;
       width: 100%;
       height: 100%;
-      background: rgba(0, 0, 0, 0.7);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      background: rgba(0, 0, 0, 0.6); /* solid overlay for performance */
+      backdrop-filter: none; /* avoid heavy GPU blur that can freeze */
+      -webkit-backdrop-filter: none;
       display: none;
       justify-content: center;
       align-items: center;
@@ -4645,8 +4645,8 @@
       position: relative;
       z-index: 10000;
       background: var(--glass-bg);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: none; /* avoid nested blur */
+      -webkit-backdrop-filter: none;
       border: 1px solid var(--glass-border);
       border-radius: 20px;
       padding: 40px;
