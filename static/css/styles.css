@@ -1944,10 +1944,15 @@ canvas#lava-lamp-canvas {
   #availableTags .tag-list {
     margin: 0 !important;
     padding: 0 !important;
+    padding-bottom: 1rem !important; /* Professional bottom buffer */
     min-height: 100% !important;
     height: 100% !important;
     display: flex !important;
     flex-direction: column !important;
+  }
+  
+  #selectedTags .tag-list {
+    padding-bottom: 1rem !important; /* Professional bottom buffer */
   }
   
   /* Force the content to fill the entire height */
@@ -2483,6 +2488,7 @@ canvas#lava-lamp-canvas {
     flex: 1 !important;
     min-height: 0 !important;
     height: 100% !important;
+    padding-bottom: 1rem !important; /* Professional bottom buffer */
   }
   
   /* Ensure the tag list fills the available space */
@@ -2491,6 +2497,7 @@ canvas#lava-lamp-canvas {
     flex-direction: column !important;
     height: 100% !important;
     min-height: 0 !important;
+    padding-bottom: 1rem !important; /* Professional bottom buffer */
   }
   
   /* Ensure tag entries expand to fill space */
@@ -6265,6 +6272,7 @@ canvas#lava-lamp-canvas {
     display: flex;
     flex-direction: column;
     align-items: stretch;
+    padding-bottom: 1rem; /* Professional bottom buffer */
   }
 
   .tag-item {
@@ -7062,9 +7070,9 @@ canvas#lava-lamp-canvas {
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
   }
 
-  /* Remove extra space at the bottom of the tag list */
+  /* Professional bottom buffer for tag lists */
   .tag-list {
-    padding-bottom: 0 !important;
+    padding-bottom: 1rem !important; /* Professional bottom buffer */
     margin-bottom: 0 !important;
   }
 
