@@ -1215,7 +1215,7 @@ const TagManager = {
             const fieldValues = filters[filterType] || [];
             const values = new Set();
             fieldValues.forEach(value => {
-                if (value && value.trim() !== '') {
+                if (value && value.trim() !== '' && value.trim().toLowerCase() !== 'all') {
                     values.add(value.trim());
                 }
             });
@@ -1620,7 +1620,9 @@ const TagManager = {
                 }
 
                 const currentValue = filterElement.value;
-                const newOptions = Array.from(availableOptions[filterType]);
+                const newOptions = Array.from(availableOptions[filterType]).filter(opt => 
+                    opt && opt.trim() !== '' && opt.trim().toLowerCase() !== 'all'
+                );
                 
                 // Sort options consistently
                 const sortedOptions = [...newOptions].sort((a, b) => {
@@ -1637,14 +1639,16 @@ const TagManager = {
                 });
                 
                 // Only update if options have actually changed
-                const currentOptions = Array.from(filterElement.options).map(opt => opt.value).filter(v => v !== '');
+                // Include "All" in comparison since it now has value="All"
+                const currentOptions = Array.from(filterElement.options).map(opt => opt.value).filter(v => v !== '' && v.toLowerCase() !== 'all');
+                const newOptionsWithAll = ['All', ...sortedOptions];
                 const optionsChanged = currentOptions.length !== sortedOptions.length || 
                                      !currentOptions.every((opt, i) => opt === sortedOptions[i]);
                 
                 if (optionsChanged) {
                     // Create new options HTML with special formatting for RSO/CO2 Tanker
                     const optionsHtml = `
-                        <option value="">All</option>
+                        <option value="All">All</option>
                         ${sortedOptions.map(value => {
                             const displayValue = filterType === 'productType' ? formatProductTypeLabel(value) : value;
                             if (filterType === 'productType' && value === 'rso/co2 tankers') {
@@ -9848,11 +9852,9 @@ const TagManager = {
                 this.applyFilters();
             }
             
-            // Update filter dropdowns to show all options
-            if (this.state.originalFilterOptions && this.state.originalFilterOptions.vendor) {
-                if (this.updateFilters) {
-                    this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
-                }
+            // Update filter dropdowns to show all options from all tags
+            if (this.updateFilterOptions) {
+                await this.updateFilterOptions(); // Regenerate all filter options from all tags
             }
             
             // Render active filters (should be empty now)
