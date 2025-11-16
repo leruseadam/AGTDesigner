@@ -165,6 +165,9 @@ async function handleFiles(files) {
       if (typeof TagManager !== 'undefined' && TagManager.setLoading) {
         TagManager.setLoading(true);
       }
+      // Give the browser a paint frame so the splash/spinner is visible immediately
+      await new Promise(requestAnimationFrame);
+      await new Promise(resolve => setTimeout(resolve, 0));
       
       console.log('🚀 Sending upload request to /upload...');
       // Update splash status
