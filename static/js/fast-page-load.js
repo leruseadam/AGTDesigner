@@ -48,14 +48,18 @@
             // Show UI immediately - don't block on data loading
             AppLoadingSplash.updateProgress(50, 'UI Ready - Loading data in background...');
             
-            // Hide splash after 1 second, even if data isn't loaded yet
+            // Hide splash after 500ms, even if data isn't loaded yet (faster UI)
             setTimeout(() => {
                 if (AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
                     console.log('⚡ Splash hidden - UI is interactive');
                 }
-            }, 1000);
+                // Also hide action splash if it's showing
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+            }, 500);
             
             // Load data in background (non-blocking)
             try {
@@ -67,11 +71,41 @@
                     if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                         console.log(`⚡ Loaded ${data.available_tags.length} tags in background`);
                         
-                        // Update UI with loaded data
-                        this.debouncedUpdateAvailableTags(data.available_tags, null);
+                        // Update state immediately
+                        this.state.tags = [...data.available_tags];
+                        this.state.originalTags = [...data.available_tags];
                         
-                        // Restore selected tags
-                        await this.fetchAndUpdateSelectedTags();
+                        // Update UI with loaded data IMMEDIATELY (no debounce for initial load)
+                        // Use _updateAvailableTags directly to avoid debounce delay
+                        this._updateAvailableTags(data.available_tags, null);
+                        
+                        // Immediately check if tags are visible and hide splash
+                        requestAnimationFrame(() => {
+                            const container = document.getElementById('availableTags');
+                            if (container) {
+                                const tagItems = container.querySelectorAll('.tag-item');
+                                if (tagItems.length > 0) {
+                                    console.log(`⚡ Tags rendered (${tagItems.length} items), hiding splash immediately`);
+                                    if (this.hideActionSplash) {
+                                        this.hideActionSplash();
+                                    }
+                                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                                        AppLoadingSplash.stopAutoAdvance();
+                                        AppLoadingSplash.complete();
+                                    }
+                                }
+                            }
+                        });
+                        
+                        // Also ensure splash is hidden when tags appear (backup)
+                        if (this._waitForTagsToAppear) {
+                            this._waitForTagsToAppear();
+                        }
+                        
+                        // Restore selected tags (non-blocking)
+                        this.fetchAndUpdateSelectedTags().catch(err => {
+                            console.warn('Error restoring selected tags:', err);
+                        });
                         
                         // Update filters
                         this.updateFilters(data.filters || {
