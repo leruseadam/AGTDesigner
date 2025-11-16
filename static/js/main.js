@@ -6559,25 +6559,13 @@ const TagManager = {
     async fetchAndUpdateAvailableTags() {
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
+
+            // ALWAYS show loading splash to prevent awkward gaps
+            this.showActionSplash('Loading tags...');
+
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
-            if (!hydratedFromCache) {
-                // Show loading splash when fetching tags
-                this.showActionSplash('Loading tags...');
-            } else {
+            if (hydratedFromCache) {
                 verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
-            }
-            
-            // Show loading indicator in container IMMEDIATELY to prevent blank screen
-            const availableTagsContainer = document.getElementById('availableTags');
-            if (availableTagsContainer) {
-                availableTagsContainer.innerHTML = `
-                    <div class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2 text-white">Loading tags...</p>
-                    </div>
-                `;
             }
             
             // Preserve current scroll/anchor so refreshes don't jump the list
