@@ -6566,7 +6566,9 @@ const TagManager = {
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
 
-            // ALWAYS show loading splash to prevent awkward gaps
+            // Show tag loading splash IMMEDIATELY at the start to ensure user sees it
+            this.showTagLoadingSplash('Loading tags...');
+            // Also show action splash for consistency
             this.showActionSplash('Loading tags...');
 
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
@@ -6586,6 +6588,7 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this.hideTagLoadingSplash();
                 return false;
             }
             this._lastFetchTime = now;
@@ -6625,9 +6628,6 @@ const TagManager = {
             
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
-            
-            // Show tag loading splash
-            this.showTagLoadingSplash('Loading tags...');
             
             // OPTIMIZATION: Use fast_load parameter for initial load to skip slow lineage alignment
             // This dramatically speeds up tag loading when cached data is available
@@ -8577,6 +8577,7 @@ const TagManager = {
         if (splash && statusElement) {
             verboseLog('✅ Tag splash elements found, displaying...');
             statusElement.textContent = message;
+            // Ensure splash is visible with high z-index and proper positioning
             splash.style.display = 'flex';
             splash.style.zIndex = '99999';
             splash.style.position = 'fixed';
@@ -8584,12 +8585,20 @@ const TagManager = {
             splash.style.left = '0';
             splash.style.width = '100%';
             splash.style.height = '100%';
-            verboseLog('✅ Tag splash display set to:', splash.style.display);
+            splash.style.visibility = 'visible';
+            splash.style.opacity = '1';
+            // Force a reflow to ensure the display change takes effect
+            splash.offsetHeight;
+            verboseLog('✅ Tag splash display set to:', splash.style.display, 'z-index:', splash.style.zIndex);
         } else {
             console.error('❌ Could not find tag splash elements:', {
                 splash: !!splash,
                 statusElement: !!statusElement
             });
+            // Fallback: try to show action splash if tag splash not available
+            if (this.showActionSplash) {
+                this.showActionSplash(message);
+            }
         }
     },
 

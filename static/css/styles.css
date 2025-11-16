@@ -301,6 +301,10 @@ p, span, div {
 }
 
 #detailedJsonMatchModal .modal-dialog {
+  max-width: 95vw !important;
+}
+
+#jsonInventoryModal .modal-dialog {
   max-width: 90vw !important;
 }
 
@@ -5962,7 +5966,7 @@ canvas#lava-lamp-canvas {
     overflow: hidden !important;
     filter: none !important;
     margin: 1.75rem auto !important;
-    max-width: 800px !important;
+    max-width: 95vw !important;
     width: auto !important;
     height: auto !important;
     position: relative !important;
@@ -5983,7 +5987,7 @@ canvas#lava-lamp-canvas {
     overflow-y: auto !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch !important;
-    max-height: calc(100vh - 300px) !important;
+    max-height: calc(100vh - 200px) !important;
   }
   
   #jsonMatchModal .modal-header {
