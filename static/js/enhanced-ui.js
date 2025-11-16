@@ -153,11 +153,13 @@ async function handleFiles(files) {
     formData.append('file', file);
     
     try {
-      TagManager.setLoading(true);
-      
-      // Clear UI state immediately when upload starts
+      // Clear UI state first so our loading indicator isn't wiped out
       if (typeof TagManager !== 'undefined' && TagManager.clearUIStateForNewFile) {
         TagManager.clearUIStateForNewFile(true); // Preserve filters during upload
+      }
+      // Then show the loading indicator immediately
+      if (typeof TagManager !== 'undefined' && TagManager.setLoading) {
+        TagManager.setLoading(true);
       }
       
       console.log('🚀 Sending upload request to /upload...');
