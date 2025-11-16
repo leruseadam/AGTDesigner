@@ -1080,11 +1080,6 @@ const TagManager = {
             this.state.originalTags = [];
             this.state.isProcessingDeselection = false;
             this.state.loading = true;
-            // Clear any prior tag load watchdog
-            if (this._tagLoadWatchdog) {
-                clearTimeout(this._tagLoadWatchdog);
-                this._tagLoadWatchdog = null;
-            }
             this.state.initialized = false;
             this.state.filterCache = null;
 
@@ -1121,46 +1116,13 @@ const TagManager = {
                     return false;
                 })
                 .finally(() => {
-                    // Keep the loading splash visible; it will be hidden by _waitForTagsToAppear()
-                    // This prevents showing a blank panel while tags are still loading
+                    if (typeof this.hideActionSplash === 'function') {
+                        this.hideActionSplash();
+                    }
                     if (typeof this.hideEnhancedGenerationSplash === 'function') {
                         this.hideEnhancedGenerationSplash();
                     }
-                    // Do NOT set loading=false here; defer to _waitForTagsToAppear() when tags render
-                    // Start a watchdog to avoid indefinite freeze if tags fail to appear
-                    const WATCHDOG_MS = 15000; // 15s fallback
-                    const self = this;
-                    if (self._tagLoadWatchdog) {
-                        clearTimeout(self._tagLoadWatchdog);
-                    }
-                    self._tagLoadWatchdog = setTimeout(() => {
-                        // If still loading and no tags are visible, end gracefully
-                        try {
-                            const availableTagsContainer = document.getElementById('availableTags');
-                            const tagItems = availableTagsContainer
-                                ? availableTagsContainer.querySelectorAll('.tag-item')
-                                : [];
-                            const hasTags = tagItems && tagItems.length > 0;
-                            if (self.state && self.state.loading && !hasTags) {
-                                console.warn('Tag load watchdog fired: hiding splash and showing empty state');
-                                if (typeof self.hideActionSplash === 'function') {
-                                    self.hideActionSplash();
-                                }
-                                if (availableTagsContainer && availableTagsContainer.innerHTML.trim() === '') {
-                                    availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
-                                }
-                                self.state.loading = false;
-                            }
-                        } catch (e) {
-                            console.warn('Tag load watchdog encountered an error:', e);
-                            if (typeof self.hideActionSplash === 'function') {
-                                self.hideActionSplash();
-                            }
-                            if (self.state) self.state.loading = false;
-                        } finally {
-                            self._tagLoadWatchdog = null;
-                        }
-                    }, WATCHDOG_MS);
+                    this.state.loading = false;
                 });
         } catch (err) {
             console.error('refreshAfterStoreChange encountered an exception', err);
@@ -2999,25 +2961,11 @@ const TagManager = {
 
         const tags = filteredTags || originalTags;
         if (!tags || tags.length === 0) {
-            // If we're in an active loading cycle, keep showing a loading state
-            if (this.state && this.state.loading) {
-                verboseLog('No tags yet, but loading in progress — keep spinner visible');
-                availableTagsContainer.innerHTML = `
-                    <div class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2 text-white">Loading tags...</p>
-                    </div>
-                `;
-                // Do not hide the splash; _waitForTagsToAppear() will handle it
-            } else {
-                verboseLog('No tags provided, showing empty state');
-                availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
-                // Hide splash if showing
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
+            verboseLog('No tags provided, showing empty state');
+            availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
+            // Hide splash if showing
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
             }
             return;
         }
@@ -3916,15 +3864,6 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                // Mark loading complete
-                if (this.state) {
-                    this.state.loading = false;
-                }
-                // Clear watchdog if set
-                if (this._tagLoadWatchdog) {
-                    clearTimeout(this._tagLoadWatchdog);
-                    this._tagLoadWatchdog = null;
-                }
                 // Also complete AppLoadingSplash if it's still showing
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
@@ -3939,13 +3878,6 @@ const TagManager = {
                 }
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
-                }
-                if (this.state) {
-                    this.state.loading = false;
-                }
-                if (this._tagLoadWatchdog) {
-                    clearTimeout(this._tagLoadWatchdog);
-                    this._tagLoadWatchdog = null;
                 }
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
@@ -10507,8 +10439,20 @@ document.addEventListener('DOMContentLoaded', function() {
     // Show splash screen immediately
     AppLoadingSplash.show();
     
-    // Initialize TagManager (which will handle the splash loading)
-    TagManager.init();
+    // Initialize TagManager after first paint to avoid reload freezes
+    requestAnimationFrame(() => {
+        setTimeout(() => {
+            try {
+                TagManager.init();
+            } catch (e) {
+                console.error('TagManager.init error:', e);
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+            }
+        }, 0);
+    });
     
     // Ensure proper scrolling behavior
     TagManager.ensureProperScrolling();
