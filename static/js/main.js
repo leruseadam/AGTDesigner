@@ -3843,7 +3843,11 @@ const TagManager = {
             return;
         }
         
-        // Immediate check - if tags are already visible, hide splash right away
+        // Track when we started waiting to ensure minimum visibility time
+        const startTime = Date.now();
+        const minVisibilityTime = 300; // Minimum 300ms visibility so user can see the splash
+        
+        // Immediate check - if tags are already visible, wait for minimum visibility time
         const immediateCheck = () => {
             const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
             if (tagItems.length > 0) {
@@ -3852,15 +3856,20 @@ const TagManager = {
                     return rect.width > 0 && rect.height > 0;
                 });
                 if (visibleTags.length > 0) {
-                    verboseLog(`Tags already visible (${tagItems.length} items), hiding splash immediately`);
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                    this.hideTagLoadingSplash();
-                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                        AppLoadingSplash.stopAutoAdvance();
-                        AppLoadingSplash.complete();
-                    }
+                    const elapsed = Date.now() - startTime;
+                    const remainingTime = Math.max(0, minVisibilityTime - elapsed);
+                    verboseLog(`Tags already visible (${tagItems.length} items), waiting ${remainingTime}ms before hiding splash`);
+                    // Wait for minimum visibility time before hiding
+                    setTimeout(() => {
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        this.hideTagLoadingSplash();
+                        if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }
+                    }, remainingTime);
                     return true;
                 }
             }
@@ -6574,6 +6583,12 @@ const TagManager = {
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
                 verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
+                // Even if tags are loaded from cache, keep splash visible briefly
+                // to show user that loading is happening, then _waitForTagsToAppear will hide it
+                setTimeout(() => {
+                    // Give tags a moment to render, then check if they're visible
+                    this._waitForTagsToAppear();
+                }, 100);
             }
             
             // Preserve current scroll/anchor so refreshes don't jump the list
@@ -8397,7 +8412,7 @@ const TagManager = {
             // Clear search inputs without nuking the entire DOM
             this.resetSearchInputs();
             
-            // Call the backend API to clear selected tags
+            // Call the backend API to clear selected tags (non-blocking)
             let response;
             try {
                 response = await fetch('/api/clear-filters', {
@@ -8421,7 +8436,7 @@ const TagManager = {
                 console.error('Failed to clear selected tags on server:', response.status, response.statusText);
             }
             
-            // Clear persistent selected tags
+            // Clear persistent selected tags (fast operation)
             if (this.state) {
                 if (Array.isArray(this.state.persistentSelectedTags)) {
                     this.state.persistentSelectedTags = [];
@@ -8440,67 +8455,132 @@ const TagManager = {
                 }
             }
             
-            // Clear all checkboxes in available tags section
-            try {
-                const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
-                availableCheckboxes.forEach(checkbox => {
-                    checkbox.checked = false;
-                    // Trigger change event to update listeners
-                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                });
-            } catch (checkboxError) {
-                console.error('Error clearing available checkboxes:', checkboxError);
-            }
-            
-            // Clear all checkboxes in selected tags section
-            try {
-                const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
-                selectedCheckboxes.forEach(checkbox => {
-                    checkbox.checked = false;
-                    // Trigger change event to update listeners
-                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                });
-            } catch (checkboxError) {
-                console.error('Error clearing selected checkboxes:', checkboxError);
-            }
-            
-            // Show all available tags (in case some were hidden)
-            try {
-                const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
-                availableTagItems.forEach(item => {
-                    item.style.display = 'block';
-                });
-            } catch (displayError) {
-                console.error('Error showing available tags:', displayError);
-            }
-            
             // Clear filter cache to ensure fresh data
             if (this.state) {
                 this.state.filterCache = null;
             }
             
-            // Update available tags display to reflect cleared state
+            // Yield to browser before heavy DOM operations
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            
+            // Clear all checkboxes in available tags section (batched to prevent blocking)
+            try {
+                const availableCheckboxes = Array.from(document.querySelectorAll('#availableTags input[type="checkbox"]'));
+                // Process in batches to prevent UI freeze
+                const batchSize = 100;
+                for (let i = 0; i < availableCheckboxes.length; i += batchSize) {
+                    const batch = availableCheckboxes.slice(i, i + batchSize);
+                    batch.forEach(checkbox => {
+                        checkbox.checked = false;
+                    });
+                    // Yield to browser every batch
+                    if (i + batchSize < availableCheckboxes.length) {
+                        await new Promise(resolve => requestAnimationFrame(resolve));
+                    }
+                }
+            } catch (checkboxError) {
+                console.error('Error clearing available checkboxes:', checkboxError);
+            }
+            
+            // Yield to browser
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            
+            // Clear all checkboxes in selected tags section (batched)
+            try {
+                const selectedCheckboxes = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"]'));
+                const batchSize = 100;
+                for (let i = 0; i < selectedCheckboxes.length; i += batchSize) {
+                    const batch = selectedCheckboxes.slice(i, i + batchSize);
+                    batch.forEach(checkbox => {
+                        checkbox.checked = false;
+                    });
+                    if (i + batchSize < selectedCheckboxes.length) {
+                        await new Promise(resolve => requestAnimationFrame(resolve));
+                    }
+                }
+            } catch (checkboxError) {
+                console.error('Error clearing selected checkboxes:', checkboxError);
+            }
+            
+            // Yield to browser
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            
+            // Show all available tags (in case some were hidden) - batched
+            try {
+                const availableTagItems = Array.from(document.querySelectorAll('#availableTags .tag-item'));
+                const batchSize = 200;
+                for (let i = 0; i < availableTagItems.length; i += batchSize) {
+                    const batch = availableTagItems.slice(i, i + batchSize);
+                    batch.forEach(item => {
+                        item.style.display = 'block';
+                    });
+                    if (i + batchSize < availableTagItems.length) {
+                        await new Promise(resolve => requestAnimationFrame(resolve));
+                    }
+                }
+            } catch (displayError) {
+                console.error('Error showing available tags:', displayError);
+            }
+            
+            // Yield to browser before heavy operations
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            
+            // Update available tags display to reflect cleared state (defer to avoid blocking)
             if (this.efficientlyUpdateAvailableTagsDisplay) {
                 try {
-                    this.efficientlyUpdateAvailableTagsDisplay();
+                    // Use setTimeout to defer this heavy operation
+                    await new Promise(resolve => {
+                        requestAnimationFrame(() => {
+                            try {
+                                this.efficientlyUpdateAvailableTagsDisplay();
+                            } catch (updateError) {
+                                console.error('Error updating available tags display:', updateError);
+                            }
+                            resolve();
+                        });
+                    });
                 } catch (updateError) {
                     console.error('Error updating available tags display:', updateError);
                 }
             }
             
-            // Update select all checkboxes to unchecked state
+            // Yield to browser
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            
+            // Update select all checkboxes to unchecked state (defer to avoid blocking)
             if (this.updateSelectAllCheckboxes) {
                 try {
-                    this.updateSelectAllCheckboxes();
+                    await new Promise(resolve => {
+                        requestAnimationFrame(() => {
+                            try {
+                                this.updateSelectAllCheckboxes();
+                            } catch (updateError) {
+                                console.error('Error updating select all checkboxes:', updateError);
+                            }
+                            resolve();
+                        });
+                    });
                 } catch (updateError) {
                     console.error('Error updating select all checkboxes:', updateError);
                 }
             }
             
-            // Also clear filters
+            // Yield to browser before clearing filters
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            
+            // Also clear filters (defer to avoid blocking)
             if (this.clearAllFilters) {
                 try {
-                    await this.clearAllFilters();
+                    await new Promise(resolve => {
+                        requestAnimationFrame(async () => {
+                            try {
+                                await this.clearAllFilters();
+                            } catch (filterError) {
+                                console.error('Error clearing filters:', filterError);
+                            }
+                            resolve();
+                        });
+                    });
                 } catch (filterError) {
                     console.error('Error clearing filters:', filterError);
                 }
