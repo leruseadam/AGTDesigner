@@ -3841,8 +3841,48 @@ const TagManager = {
             return;
         }
         
+        // Immediate check - if tags are already visible, hide splash right away
+        const immediateCheck = () => {
+            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
+            if (tagItems.length > 0) {
+                const visibleTags = Array.from(tagItems).filter(item => {
+                    const rect = item.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                });
+                if (visibleTags.length > 0) {
+                    verboseLog(`Tags already visible (${tagItems.length} items), hiding splash immediately`);
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                    return true;
+                }
+            }
+            return false;
+        };
+        
+        // Try immediate check first
+        if (immediateCheck()) {
+            return;
+        }
+        
+        // Aggressive timeout: hide splash after 2 seconds max, regardless of tag count
+        const forceHideTimeout = setTimeout(() => {
+            verboseLog('Force hiding splash after 2 second timeout');
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+        }, 2000);
+        
         let attempts = 0;
-        const maxAttempts = 100; // 10 seconds max (100 * 100ms) - increased for large tag lists
+        const maxAttempts = 20; // 2 seconds max (20 * 100ms) - reduced for faster response
         let lastTagCount = 0;
         let stableCount = 0; // Count how many times tag count has been stable
         
@@ -3868,9 +3908,10 @@ const TagManager = {
             // Tags are fully loaded if:
             // 1. We have tags in the DOM
             // 2. Tags are visible (rendered)
-            // 3. Tag count has been stable for at least 3 checks (300ms) - ensures rendering is complete
-            if (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 3) {
+            // 3. Tag count has been stable for at least 1 check (100ms) - faster response
+            if (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 1) {
                 // Tags are fully rendered, hide splash
+                clearTimeout(forceHideTimeout);
                 verboseLog(`Tags fully loaded and rendered (${currentTagCount} items, ${visibleTags.length} visible), hiding splash`);
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
@@ -3882,6 +3923,7 @@ const TagManager = {
                 }
             } else if (attempts >= maxAttempts) {
                 // Timeout reached, hide splash anyway (but log warning)
+                clearTimeout(forceHideTimeout);
                 if (currentTagCount > 0) {
                     verboseLog(`Timeout waiting for tags to stabilize, but found ${currentTagCount} tags - hiding splash`);
                 } else {
@@ -3904,7 +3946,7 @@ const TagManager = {
         };
         
         // Start checking after a brief delay to allow DOM to update
-        setTimeout(checkForTags, 100);
+        setTimeout(checkForTags, 50);
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -7429,7 +7471,7 @@ const TagManager = {
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 3500); // ~3.5 second safety net so "Loading tags" overlay never lingers
+        }, 2000); // 2 second safety net so "Loading tags" overlay never lingers
 
         try {
             // Use the new initial-data endpoint for faster loading with timeout
