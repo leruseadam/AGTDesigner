@@ -221,26 +221,34 @@ async function handleFiles(files) {
           }
         }
         
-        // Hide splash screen with minimum display time (800ms) so user can see it
-        hideSplashWithDelay(splashStartTime, 800);
+        // Hide splash and refresh data immediately (no full page reload)
+        hideSplashWithDelay(splashStartTime, 200);
         
-        // Clear UI state for fresh data
+        // Refresh data in-place for immediate tag visibility
         if (typeof TagManager !== 'undefined') {
-          TagManager.clearUIStateForNewFile(true); // Preserve filters
-        }
-        
-        // Show success message with splash screen
-        console.log('✅ Upload successful! Reloading page to show new data...');
-        
-        // Show success splash instead of alert
-        // if (typeof TagManager !== 'undefined' && TagManager.showUploadSuccessSplash) {
-        //   TagManager.showUploadSuccessSplash(data.rows);
-        // }
-        
-        // Reload page after a short delay
-        setTimeout(() => {
+          try {
+            // Ensure a clean slate but keep current filters
+            TagManager.clearUIStateForNewFile(true);
+            if (TagManager.refreshTagLists) {
+              console.time('post-upload-refresh');
+              await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+              console.timeEnd('post-upload-refresh');
+            } else {
+              // Fallback to individual fetches in parallel
+              await Promise.all([
+                TagManager.fetchAndUpdateAvailableTags?.(),
+                TagManager.fetchAndUpdateSelectedTags?.(),
+                (async () => { await TagManager.fetchAndPopulateFilters?.(); })()
+              ]);
+            }
+          } catch (e) {
+            console.error('Post-upload immediate refresh failed, falling back to reload', e);
+            window.location.reload();
+          }
+        } else {
+          // If TagManager isn't available, reload as a fallback
           window.location.reload();
-        }, 2000);
+        }
         
         // Add animation class to file path container
         if (filePathContainer) {
@@ -521,8 +529,8 @@ function pollUploadStatus(filename) {
           return; // Stop polling
         }
         
-        // Continue polling in 1 second for faster response
-        setTimeout(poll, 1000);
+        // Continue polling frequently for faster response
+        setTimeout(poll, 500);
       } else if (data.status === 'not_found') {
         // File not found in processing status - check if it exists
         console.warn(`File not found in processing status: ${filename}`);
@@ -559,8 +567,8 @@ function pollUploadStatus(filename) {
           return; // Stop polling
         }
         
-        // Continue polling in 1 second for faster response
-        setTimeout(poll, 1000);
+        // Continue polling frequently for faster response
+        setTimeout(poll, 500);
       }
     } catch (error) {
       console.error(`Error polling upload status for ${filename}:`, error);
@@ -575,8 +583,8 @@ function pollUploadStatus(filename) {
         return; // Stop polling
       }
       
-      // Continue polling in 1 second for faster response
-      setTimeout(poll, 1000);
+      // Continue polling frequently for faster response
+      setTimeout(poll, 500);
     }
   };
   
