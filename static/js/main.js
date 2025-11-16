@@ -10453,14 +10453,17 @@ async function handleJsonPasteInput(input) {
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
-    // Show splash screen immediately
+    // Show splash screen immediately (but don't load tags yet - wait for store selection)
     AppLoadingSplash.show();
+    AppLoadingSplash.updateProgress(10, 'Initializing application...');
     
-    // Initialize TagManager (which will handle the splash loading)
-    TagManager.init();
+    // DO NOT call TagManager.init() here - it will be called after store selection
+    // in templates/index.html via checkStoreRequired() callback
     
-    // Ensure proper scrolling behavior
-    TagManager.ensureProperScrolling();
+    // Ensure proper scrolling behavior (safe to call even if TagManager not fully initialized)
+    if (window.TagManager && typeof TagManager.ensureProperScrolling === 'function') {
+        TagManager.ensureProperScrolling();
+    }
     
     // Initialize sticky filter bar behavior
     initializeStickyFilterBar();
