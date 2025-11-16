@@ -235,18 +235,20 @@ async function handleFiles(files) {
           TagManager.clearUIStateForNewFile(true); // Preserve filters
         }
         
-        // Show success message with splash screen
-        console.log('✅ Upload successful! Reloading page to show new data...');
-        
-        // Show success splash instead of alert
-        // if (typeof TagManager !== 'undefined' && TagManager.showUploadSuccessSplash) {
-        //   TagManager.showUploadSuccessSplash(data.rows);
-        // }
-        
-        // Reload page after a short delay
-        setTimeout(() => {
-          window.location.reload();
-        }, 2000);
+        // Refresh UI in-place instead of reloading the page to prevent browser hangs
+        console.log('✅ Upload successful! Refreshing UI without full reload...');
+        if (typeof TagManager !== 'undefined' && typeof TagManager.refreshTagLists === 'function') {
+          try {
+            await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+          } catch (e) {
+            console.warn('refreshTagLists failed, falling back to manual fetch:', e);
+            await Promise.all([
+              TagManager.fetchAndUpdateAvailableTags?.(),
+              TagManager.fetchAndUpdateSelectedTags?.(),
+              TagManager.fetchAndPopulateFilters?.()
+            ]);
+          }
+        }
         
         // Add animation class to file path container
         if (filePathContainer) {
