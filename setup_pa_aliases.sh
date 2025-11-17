@@ -25,3 +25,4 @@ echo "Note: If you're in a new terminal, run: source ~/.bashrc"
 echo "Or just use: gsync (it's already active in this session)"
 
 
+

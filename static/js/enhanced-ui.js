@@ -61,31 +61,6 @@ if (fileInput) {
     console.log('🔄 File input change event fired');
     if (e.target.files && e.target.files.length > 0) {
       console.log('🎬 UPLOAD START: Showing splash immediately');
-      
-      // Show splash IMMEDIATELY before calling handleFiles
-      const splash = document.getElementById('excelLoadingSplash');
-      if (splash) {
-        console.log('🎬 Showing splash from file input change handler');
-        splash.classList.remove('fade-out', 'd-none', 'hidden');
-        splash.style.setProperty('display', 'flex', 'important');
-        splash.style.setProperty('z-index', '999999', 'important');
-        splash.style.setProperty('position', 'fixed', 'important');
-        splash.style.setProperty('top', '0', 'important');
-        splash.style.setProperty('left', '0', 'important');
-        splash.style.setProperty('width', '100%', 'important');
-        splash.style.setProperty('height', '100%', 'important');
-        splash.style.setProperty('visibility', 'visible', 'important');
-        splash.style.setProperty('opacity', '1', 'important');
-        splash.style.setProperty('background', 'rgba(0, 0, 0, 0.8)', 'important');
-        
-        const filenameElement = document.getElementById('excelLoadingFilename');
-        const statusElement = document.getElementById('excelLoadingStatus');
-        if (filenameElement) filenameElement.textContent = e.target.files[0].name;
-        if (statusElement) statusElement.textContent = 'Uploading file...';
-      } else {
-        console.error('❌ Splash element not found in file input handler');
-      }
-      
       handleFiles(e.target.files);
       // Prevent any other handlers from running
       e.stopPropagation();
@@ -127,108 +102,30 @@ async function handleFiles(files) {
     // CRITICAL: Show Excel loading splash screen FIRST before anything else
     const splashStartTime = Date.now();
     console.log('🎬 UPLOAD: Showing splash IMMEDIATELY for:', file.name);
+    const splash = document.getElementById('excelLoadingSplash');
+    const filenameElement = document.getElementById('excelLoadingFilename');
+    const statusElement = document.getElementById('excelLoadingStatus');
     
-    function showExcelSplash(splash, filenameElement, statusElement, fileName) {
-      if (!splash) {
-        console.error('❌ Splash element is null!');
-        return;
-      }
-      
+    if (splash && filenameElement && statusElement) {
       console.log('🎬 UPLOAD: Splash elements found - displaying NOW');
-      if (filenameElement) filenameElement.textContent = fileName;
-      if (statusElement) statusElement.textContent = 'Uploading file...';
-      
-      // Remove any classes that might hide it
-      splash.classList.remove('fade-out', 'd-none', 'hidden');
-      
-      // CRITICAL: Set all visibility properties aggressively with !important
-      splash.style.setProperty('display', 'flex', 'important');
-      splash.style.setProperty('z-index', '999999', 'important');
-      splash.style.setProperty('position', 'fixed', 'important');
-      splash.style.setProperty('top', '0', 'important');
-      splash.style.setProperty('left', '0', 'important');
-      splash.style.setProperty('width', '100%', 'important');
-      splash.style.setProperty('height', '100%', 'important');
-      splash.style.setProperty('visibility', 'visible', 'important');
-      splash.style.setProperty('opacity', '1', 'important');
-      splash.style.setProperty('pointer-events', 'auto', 'important');
-      splash.style.setProperty('background', 'rgba(0, 0, 0, 0.8)', 'important');
-      
-      // Remove inline style="display: none" if present
-      if (splash.hasAttribute('style')) {
-        const currentStyle = splash.getAttribute('style');
-        if (currentStyle.includes('display: none')) {
-          splash.setAttribute('style', currentStyle.replace(/display:\s*none[;]?/gi, ''));
-        }
-      }
-      
-      // Force multiple reflows to ensure visibility
-      splash.offsetHeight;
-      void splash.offsetWidth;
-      
-      // Force browser to repaint in next frame
-      requestAnimationFrame(() => {
-        splash.style.setProperty('display', 'flex', 'important');
-        const computed = window.getComputedStyle(splash);
-        console.log('✅ Excel splash forced repaint:', {
-          display: splash.style.display,
-          computedDisplay: computed.display,
-          zIndex: splash.style.zIndex,
-          computedZIndex: computed.zIndex,
-          visibility: computed.visibility,
-          opacity: computed.opacity
-        });
-        
-        // Double-check after a short delay
-        setTimeout(() => {
-          const finalCheck = window.getComputedStyle(splash);
-          if (finalCheck.display === 'none' || finalCheck.visibility === 'hidden') {
-            console.error('❌ Splash still hidden after all attempts!', {
-              display: finalCheck.display,
-              visibility: finalCheck.visibility,
-              opacity: finalCheck.opacity,
-              zIndex: finalCheck.zIndex
-            });
-            // Last resort: try to force it again
-            splash.style.setProperty('display', 'flex', 'important');
-            splash.style.setProperty('visibility', 'visible', 'important');
-          } else {
-            console.log('✅ Splash confirmed visible');
-          }
-        }, 50);
-      });
-      
+      filenameElement.textContent = file.name;
+      statusElement.textContent = 'Uploading file...';
+      splash.style.display = 'flex';
+      splash.style.zIndex = '99999';
+      splash.style.position = 'fixed';
+      splash.style.top = '0';
+      splash.style.left = '0';
+      splash.style.width = '100%';
+      splash.style.height = '100%';
       console.log('✅ SPLASH SHOWN - display:', splash.style.display);
-    }
-    
-    // Try to show splash immediately
-    let splash = document.getElementById('excelLoadingSplash');
-    let filenameElement = document.getElementById('excelLoadingFilename');
-    let statusElement = document.getElementById('excelLoadingStatus');
-    
-    if (splash) {
-      // Show splash even if filename/status elements aren't found
-      showExcelSplash(splash, filenameElement, statusElement, file.name);
     } else {
-      // If not found, wait a bit and try again (for cases where DOM isn't ready)
-      console.warn('⚠️ Excel splash element not found immediately, retrying...');
-      const retryInterval = setInterval(() => {
-        splash = document.getElementById('excelLoadingSplash');
-        filenameElement = document.getElementById('excelLoadingFilename');
-        statusElement = document.getElementById('excelLoadingStatus');
-        if (splash) {
-          clearInterval(retryInterval);
-          showExcelSplash(splash, filenameElement, statusElement, file.name);
-        }
-      }, 50);
-      
-      // Stop retrying after 1 second
-      setTimeout(() => {
-        clearInterval(retryInterval);
-        if (!splash) {
-          console.error('❌ Could not find Excel splash element after retry');
-        }
-      }, 1000);
+      console.error('❌ UPLOAD: Could not find splash elements:', {
+        splash: !!splash,
+        filenameElement: !!filenameElement,
+        statusElement: !!statusElement
+      });
+      alert('Error: Upload splash screen not found. Please refresh the page.');
+      return;
     }
     
     // Now update file info UI
@@ -294,62 +191,9 @@ async function handleFiles(files) {
           if (typeof pollUploadStatus === 'function') {
             pollUploadStatus(data.filename || file.name);
           } else {
-            console.warn('pollUploadStatus function not available; using manual refresh');
-
-            // Hide Excel splash FIRST
-            const excelSplash = document.getElementById('excelLoadingSplash');
-            if (excelSplash) excelSplash.style.display = 'none';
-
-            // CRITICAL: Show tag loading splash immediately
-            console.log('🎬 Background processing mode, showing tag loading splash...');
-            if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-              TagManager.showTagLoadingSplash('Loading tags from uploaded file...');
-            } else {
-              // Fallback if TagManager not available
-              const tagSplash = document.getElementById('tagLoadingSplash');
-              const statusElement = document.getElementById('tagLoadingStatus');
-              if (tagSplash) {
-                if (statusElement) statusElement.textContent = 'Loading tags from uploaded file...';
-                tagSplash.classList.remove('fade-out', 'd-none', 'hidden');
-                tagSplash.style.setProperty('display', 'flex', 'important');
-                tagSplash.style.setProperty('z-index', '999999', 'important');
-                tagSplash.style.setProperty('opacity', '1', 'important');
-                tagSplash.style.setProperty('visibility', 'visible', 'important');
-                console.log('✅ Tag loading splash shown (fallback method)');
-              }
-            }
-
+            console.warn('pollUploadStatus function not available; falling back to manual reload');
             setTimeout(() => {
-              console.log('🔄 Starting manual tag refresh...');
-              if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
-                TagManager.refreshTagLists({ preserveFilters: true, force: true })
-                  .then(() => {
-                    console.log('✅ Manual tag refresh complete');
-                  })
-                  .catch(err => {
-                    console.error('Manual refreshTagLists failed', err);
-                    if (TagManager.hideTagLoadingSplash) {
-                      TagManager.hideTagLoadingSplash();
-                    }
-                  });
-              } else if (typeof TagManager !== 'undefined') {
-                console.log('⚠️ Using fallback individual tag fetch methods');
-                Promise.all([
-                  TagManager.fetchAndUpdateAvailableTags?.(),
-                  TagManager.fetchAndUpdateSelectedTags?.(),
-                  TagManager.fetchAndPopulateFilters?.()
-                ]).then(() => {
-                  console.log('✅ Fallback tag refresh complete');
-                  if (TagManager.hideTagLoadingSplash) {
-                    TagManager.hideTagLoadingSplash();
-                  }
-                }).catch(err => {
-                  console.error('Fallback tag refresh failed', err);
-                  if (TagManager.hideTagLoadingSplash) {
-                    TagManager.hideTagLoadingSplash();
-                  }
-                });
-              }
+              window.location.reload();
             }, 2000);
           }
           return;
@@ -377,29 +221,9 @@ async function handleFiles(files) {
           }
         }
         
-        // Hide Excel splash and show tag loading splash before refreshing
+        // Hide splash immediately and refresh data asynchronously (non-blocking)
         const splashEl = document.getElementById('excelLoadingSplash');
         if (splashEl) splashEl.style.display = 'none';
-
-        // CRITICAL: Show tag loading splash immediately and keep it visible
-        console.log('🎬 Excel upload complete, showing tag loading splash...');
-        if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-          TagManager.showTagLoadingSplash('Loading tags from uploaded file...');
-        } else {
-          // Fallback if TagManager not available
-          const tagSplash = document.getElementById('tagLoadingSplash');
-          const statusElement = document.getElementById('tagLoadingStatus');
-          if (tagSplash) {
-            if (statusElement) statusElement.textContent = 'Loading tags from uploaded file...';
-            tagSplash.classList.remove('fade-out', 'd-none', 'hidden');
-            tagSplash.style.setProperty('display', 'flex', 'important');
-            tagSplash.style.setProperty('z-index', '999999', 'important');
-            tagSplash.style.setProperty('opacity', '1', 'important');
-            tagSplash.style.setProperty('visibility', 'visible', 'important');
-            console.log('✅ Tag loading splash shown (fallback method)');
-          }
-        }
-
         if (typeof TagManager !== 'undefined') {
           try {
             TagManager.clearUIStateForNewFile(true); // keep filters
@@ -407,77 +231,26 @@ async function handleFiles(files) {
             setTimeout(() => {
               if (TagManager.refreshTagLists) {
                 console.time('post-upload-refresh-async');
-                console.log('🔄 Starting tag refresh after Excel upload...');
                 TagManager.refreshTagLists({ preserveFilters: true, force: true })
-                  .then(() => {
-                    console.log('✅ Tag refresh complete after Excel upload');
-                  })
                   .finally(() => console.timeEnd('post-upload-refresh-async'))
                   .catch(err => {
                     console.error('Async refreshTagLists failed', err);
-                    // Hide splash on error
-                    if (TagManager.hideTagLoadingSplash) {
-                      TagManager.hideTagLoadingSplash();
-                    }
-                    // Don't reload - just show error and let user retry
-                    showToast('error', 'Failed to refresh tags. Please try refreshing manually.');
+                    // Last resort fallback
+                    window.location.reload();
                   });
               } else {
                 // Fallback individual fetches without await
-                console.log('⚠️ refreshTagLists not available, using fallback methods');
-                Promise.all([
-                  TagManager.fetchAndUpdateAvailableTags?.(),
-                  TagManager.fetchAndUpdateSelectedTags?.(),
-                  TagManager.fetchAndPopulateFilters?.()
-                ]).then(() => {
-                  console.log('✅ Fallback tag refresh complete');
-                  if (TagManager.hideTagLoadingSplash) {
-                    TagManager.hideTagLoadingSplash();
-                  }
-                }).catch(err => {
-                  console.error('Fallback tag refresh failed', err);
-                  if (TagManager.hideTagLoadingSplash) {
-                    TagManager.hideTagLoadingSplash();
-                  }
-                });
+                TagManager.fetchAndUpdateAvailableTags?.();
+                TagManager.fetchAndUpdateSelectedTags?.();
+                TagManager.fetchAndPopulateFilters?.();
               }
             }, 0);
           } catch (e) {
-            console.error('Post-upload async refresh setup failed', e);
-            // Don't reload on error - just log it and let the user continue
-            // The tag loading splash will handle showing loading state
-            if (TagManager && TagManager.hideTagLoadingSplash) {
-              TagManager.hideTagLoadingSplash();
-            }
+            console.error('Post-upload async refresh setup failed, reloading', e);
+            window.location.reload();
           }
         } else {
-          // TagManager not available - try to show splash manually and fetch tags
-          console.warn('TagManager not available, attempting manual tag refresh');
-          const tagSplash = document.getElementById('tagLoadingSplash');
-          const statusElement = document.getElementById('tagLoadingStatus');
-          if (tagSplash) {
-            if (statusElement) statusElement.textContent = 'Loading tags from uploaded file...';
-            tagSplash.style.display = 'flex';
-          }
-          // Try to fetch tags manually
-          setTimeout(() => {
-            fetch('/api/available-tags')
-              .then(response => response.json())
-              .then(data => {
-                if (data.tags) {
-                  console.log('Tags fetched manually:', data.tags.length);
-                }
-                if (tagSplash) {
-                  tagSplash.style.display = 'none';
-                }
-              })
-              .catch(err => {
-                console.error('Manual tag fetch failed:', err);
-                if (tagSplash) {
-                  tagSplash.style.display = 'none';
-                }
-              });
-          }, 100);
+          window.location.reload();
         }
         
         // Add animation class to file path container
@@ -688,43 +461,11 @@ function pollUploadStatus(filename) {
         
         console.log('File processing complete, updating UI...');
 
-        // Hide Excel splash FIRST
-        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
-          TagManager.hideExcelLoadingSplash();
-        } else {
-          const s = document.getElementById('excelLoadingSplash');
-          if (s) s.style.display = 'none';
-        }
-
-        // CRITICAL: Show tag loading splash immediately and keep it visible
-        console.log('🎬 File processing complete, showing tag loading splash...');
-        if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-          TagManager.showTagLoadingSplash('Loading tags from uploaded file...');
-        } else {
-          // Fallback if TagManager not available
-          const tagSplash = document.getElementById('tagLoadingSplash');
-          const statusElement = document.getElementById('tagLoadingStatus');
-          if (tagSplash) {
-            if (statusElement) statusElement.textContent = 'Loading tags from uploaded file...';
-            tagSplash.classList.remove('fade-out', 'd-none', 'hidden');
-            tagSplash.style.setProperty('display', 'flex', 'important');
-            tagSplash.style.setProperty('z-index', '999999', 'important');
-            tagSplash.style.setProperty('opacity', '1', 'important');
-            tagSplash.style.setProperty('visibility', 'visible', 'important');
-            console.log('✅ Tag loading splash shown (fallback method)');
-          }
-        }
-
-        // Show success toast
-        showToast('success', `File "${filename}" loaded successfully!`);
-
         // Fetch all updated data in parallel to avoid serial bottlenecks
         console.time('post-ready-data-fetch');
-        console.log('🔄 Starting tag refresh after file processing complete...');
         if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
           await TagManager.refreshTagLists({ preserveFilters: true, force: true });
-          console.log('✅ Tag refresh complete after file processing');
-        } else if (typeof TagManager !== 'undefined') {
+        } else {
           await Promise.all([
             // Available tags
             (async () => {
@@ -745,33 +486,40 @@ function pollUploadStatus(filename) {
               console.log('Filter options updated');
             })()
           ]);
-          console.log('✅ Fallback tag refresh complete');
-          // Hide splash after fallback completes
-          if (TagManager.hideTagLoadingSplash) {
-            TagManager.hideTagLoadingSplash();
-          }
-        } else {
-          // TagManager not available - try manual fetch
-          console.warn('TagManager not available, attempting manual tag refresh');
-          const tagSplash = document.getElementById('tagLoadingSplash');
-          await fetch('/api/available-tags')
-            .then(response => response.json())
-            .then(data => {
-              if (data.tags) {
-                console.log('Tags fetched manually:', data.tags.length);
-              }
-              if (tagSplash) {
-                tagSplash.style.display = 'none';
-              }
-            })
-            .catch(err => {
-              console.error('Manual tag fetch failed:', err);
-              if (tagSplash) {
-                tagSplash.style.display = 'none';
-              }
-            });
         }
         console.timeEnd('post-ready-data-fetch');
+        
+        // Hide splash and trigger async, non-blocking refresh
+        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
+          TagManager.hideExcelLoadingSplash();
+        } else {
+          const s = document.getElementById('excelLoadingSplash');
+          if (s) s.style.display = 'none';
+        }
+        showToast('success', `File "${filename}" loaded successfully!`);
+        if (typeof TagManager !== 'undefined') {
+          try {
+            TagManager.clearUIStateForNewFile?.(true);
+            setTimeout(() => {
+              if (TagManager.refreshTagLists) {
+                TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                  .catch(err => {
+                    console.error('refreshTagLists failed after poll-ready', err);
+                    window.location.reload();
+                  });
+              } else {
+                TagManager.fetchAndUpdateAvailableTags?.();
+                TagManager.fetchAndUpdateSelectedTags?.();
+                TagManager.fetchAndPopulateFilters?.();
+              }
+            }, 0);
+          } catch (e) {
+            console.error('Async refresh setup failed after poll-ready', e);
+            window.location.reload();
+          }
+        } else {
+          window.location.reload();
+        }
         
         return; // Stop polling
       } else if (data.status === 'error') {

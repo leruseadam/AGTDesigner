@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -2765,8 +2765,8 @@
       color: #e0e0e0;
       padding: 1.1rem 1.4rem;
       transition: all 0.25s ease;
-      -webkit-backdrop-filter: blur(8px);
       backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       text-align: center;
       min-height: 72px;
       display: flex;
@@ -2815,8 +2815,8 @@
         border-radius: 12px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
         transition: all 0.3s ease;
-        -webkit-backdrop-filter: blur(20px);
         backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
         padding: 0.5rem;
       }
       
@@ -2848,16 +2848,16 @@
     input[type="checkbox"],
     input[type="checkbox"].form-check-input,
     .form-check input[type="checkbox"] {
+      appearance: none !important;
       -webkit-appearance: none !important;
       -moz-appearance: none !important;
-      appearance: none !important;
       width: 18px !important;
       height: 18px !important;
       border: 2px solid #64748b !important;
       border-radius: 4px !important;
       background: rgba(255, 255, 255, 0.1) !important;
-      -webkit-backdrop-filter: blur(10px) !important;
       backdrop-filter: blur(10px) !important;
+      -webkit-backdrop-filter: blur(10px) !important;
       cursor: pointer;
       position: relative;
       transition: all 0.2s ease !important;
@@ -3025,7 +3025,6 @@
       /* Card Enhancements */
       .glass-card {
         background: rgba(255, 255, 255, 0.95);
-        -webkit-backdrop-filter: blur(10px);
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.2);
         box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
@@ -3251,7 +3250,6 @@
         transition: all 0.2s ease !important;
         white-space: nowrap !important;
         flex-shrink: 0 !important;
-        min-width: -webkit-fill-available !important;
         min-width: fit-content !important;
       }
       
@@ -3526,8 +3524,8 @@
     /* Database Editor Modal Styles */
     #databaseEditorModal .modal-content {
       background: rgba(22, 33, 62, 0.95);
-      -webkit-backdrop-filter: blur(20px);
       backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border: 1px solid rgba(0, 212, 170, 0.3);
       border-radius: 20px;
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.1);
@@ -3982,8 +3980,8 @@
       background: rgba(255, 255, 255, 0.1);
       border: 1px solid rgba(255, 255, 255, 0.2);
       color: rgba(255, 255, 255, 0.9);
-      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
     
     .form-control-modern,
@@ -3994,8 +3992,8 @@
       border-radius: 8px;
       padding: 0.75rem;
       transition: all 0.3s ease;
-      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
     
     .form-control-modern:focus,
@@ -4028,8 +4026,8 @@
       font-weight: 500;
       padding: 0.5rem 1rem;
       transition: all 0.3s ease;
-      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
     }
     
     .btn-glass:hover {
@@ -4397,8 +4395,8 @@
       box-shadow: 
         0 20px 40px rgba(0, 0, 0, 0.3),
         0 0 0 1px rgba(0, 212, 170, 0.1);
-      -webkit-backdrop-filter: blur(20px);
       backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       transform: translateX(0);
     }
 
@@ -4563,8 +4561,8 @@
       border-radius: 12px;
       font-size: 12px;
       font-weight: 600;
-      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       border: 1px solid rgba(0, 212, 170, 0.2);
       color: #00d4aa;
     }
@@ -4591,8 +4589,8 @@
       border-radius: 12px;
       font-size: 12px;
       font-weight: 600;
-      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       border: 1px solid rgba(0, 212, 170, 0.2);
       color: #00d4aa;
     }
@@ -4622,8 +4620,8 @@
       width: 100%;
       height: 100%;
       background: rgba(0, 0, 0, 0.7);
-      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       display: none;
       justify-content: center;
       align-items: center;
@@ -4647,8 +4645,8 @@
       position: relative;
       z-index: 10000;
       background: var(--glass-bg);
-      -webkit-backdrop-filter: blur(20px);
       backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--glass-border);
       border-radius: 20px;
       padding: 40px;
@@ -4680,112 +4678,6 @@
       to { 
         opacity: 1;
         transform: translateY(0);
-      }
-    }
-
-    /* Tag Loading Splash Screen */
-    .tag-loading-splash {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.85);
-      -webkit-backdrop-filter: blur(10px);
-      backdrop-filter: blur(10px);
-      display: none;
-      justify-content: center;
-      align-items: center;
-      z-index: 9999;
-      animation: fadeIn 0.3s ease-out;
-    }
-
-    .tag-loading-container {
-      position: relative;
-      z-index: 10000;
-    }
-
-    .tag-loading-content {
-      background: linear-gradient(135deg, rgba(45, 34, 58, 0.98) 0%, rgba(60, 45, 75, 0.95) 100%);
-      -webkit-backdrop-filter: blur(20px);
-      backdrop-filter: blur(20px);
-      border: 2px solid rgba(160, 132, 232, 0.6);
-      border-radius: 20px;
-      padding: 40px;
-      text-align: center;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(160, 132, 232, 0.5), 0 20px 40px rgba(80, 40, 160, 0.25);
-      animation: slideUp 0.4s ease-out;
-      min-width: 300px;
-    }
-
-    .tag-loading-icon {
-      color: #a084e8;
-      margin-bottom: 20px;
-      animation: pulse 2s ease-in-out infinite;
-      filter: drop-shadow(0 0 15px rgba(160, 132, 232, 0.6));
-    }
-
-    @keyframes pulse {
-      0%, 100% {
-        opacity: 1;
-        transform: scale(1);
-      }
-      50% {
-        opacity: 0.8;
-        transform: scale(1.05);
-      }
-    }
-
-    .tag-loading-title {
-      color: #ffffff;
-      font-size: 24px;
-      font-weight: 600;
-      margin-bottom: 10px;
-    }
-
-    .tag-loading-subtitle {
-      color: rgba(255, 255, 255, 0.8);
-      font-size: 16px;
-      font-weight: 400;
-      margin-bottom: 20px;
-    }
-
-    .tag-loading-dots {
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-      margin-top: 20px;
-    }
-
-    .tag-loading-dots span {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #a084e8;
-      box-shadow: 0 0 10px rgba(160, 132, 232, 0.6);
-      animation: dot-pulse 1.4s ease-in-out infinite both;
-    }
-
-    .tag-loading-dots span:nth-child(1) {
-      animation-delay: -0.32s;
-    }
-
-    .tag-loading-dots span:nth-child(2) {
-      animation-delay: -0.16s;
-    }
-
-    .tag-loading-dots span:nth-child(3) {
-      animation-delay: 0s;
-    }
-
-    @keyframes dot-pulse {
-      0%, 80%, 100% {
-        transform: scale(0.8);
-        opacity: 0.4;
-      }
-      40% {
-        transform: scale(1.2);
-        opacity: 1;
       }
     }
 
@@ -4949,7 +4841,6 @@
       border-radius: 8px;
       transition: all 0.3s ease;
       white-space: nowrap;
-      min-width: -webkit-fill-available;
       min-width: fit-content;
       display: inline-flex;
       align-items: center;
@@ -5095,27 +4986,6 @@
       </div>
     </div>
 
-    <!-- Tag Loading Splash Screen -->
-    <div id="tagLoadingSplash" class="tag-loading-splash" style="display: none;">
-      <div class="tag-loading-container">
-        <div class="tag-loading-content">
-          <div class="tag-loading-icon">
-            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
-              <line x1="7" y1="7" x2="7.01" y2="7"></line>
-            </svg>
-          </div>
-          <h3 class="tag-loading-title">Loading Tags</h3>
-          <p class="tag-loading-subtitle" id="tagLoadingStatus">Populating inventory...</p>
-          <div class="tag-loading-dots">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <div class="w-100 py-1" style="z-index:1; position:relative;">
       <!-- Title and Subtitle centered above tag panels -->
 
@@ -5165,20 +5035,6 @@
 
       <!-- Main Content Area -->
       <div class="w-100">
-        <!-- Upload Notification Banner -->
-        <div id="uploadNotificationBanner" class="col-12 mb-3" style="display: none;">
-          <div class="alert alert-info d-flex align-items-center gap-3" style="background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.95) 100%); border: 3px solid rgba(160, 132, 232, 0.9); border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 0; max-width: 25%; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(160, 132, 232, 0.5), 0 0 30px rgba(160, 132, 232, 0.3);">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; color: #a084e8; filter: drop-shadow(0 0 8px rgba(160, 132, 232, 0.8));">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <div class="flex-grow-1">
-              <strong style="color: #fff; text-shadow: 0 0 10px rgba(160, 132, 232, 0.5);">No file uploaded</strong>
-              <p class="mb-0" style="color: rgba(255, 255, 255, 1); font-size: 0.95rem; font-weight: 500;">Please upload an Excel file to begin generating tags. Click the "Upload Excel" button above to get started.</p>
-            </div>
-          </div>
-        </div>
         <!-- Tag-list containers row (now includes filter bar for alignment) -->
         <div class="row fade-in g-1" style="animation-delay: 0.4s; padding-left: 0.5rem; padding-right: 0.5rem;">
           <!-- Filter Bar as a column -->
@@ -7185,44 +7041,8 @@
     // Start waiting for TagManager to load
     waitForTagManagerAndInit();
     
-    // Function to update upload notification banner visibility
-    function updateUploadNotificationBanner() {
-      const banner = document.getElementById('uploadNotificationBanner');
-      const fileInfoText = document.getElementById('fileInfoText');
-      
-      if (!banner) return;
-      
-      // Check if file is uploaded
-      const hasFile = fileInfoText && 
-        fileInfoText.textContent.trim() !== 'No file uploaded' && 
-        fileInfoText.textContent.trim() !== '';
-      
-      // Show banner if no file is uploaded
-      if (!hasFile) {
-        banner.style.display = 'block';
-      } else {
-        banner.style.display = 'none';
-      }
-    }
-    
-    // Expose function globally so it can be called after file uploads
-    window.updateUploadNotificationBanner = updateUploadNotificationBanner;
-    
     // Additional DOM-ready setup
     document.addEventListener('DOMContentLoaded', function() {
-      // Update upload notification banner on page load
-      updateUploadNotificationBanner();
-      
-      // Watch for changes to fileInfoText
-      const fileInfoText = document.getElementById('fileInfoText');
-      if (fileInfoText) {
-        // Use MutationObserver to watch for text changes
-        const observer = new MutationObserver(function(mutations) {
-          updateUploadNotificationBanner();
-        });
-        observer.observe(fileInfoText, { childList: true, characterData: true, subtree: true });
-      }
-      
       // DEBUG: Add global click handler to track what's causing page reloads
       document.addEventListener('click', function(e) {
         const target = e.target;
@@ -11796,65 +11616,31 @@
             body: formData
           });
 
-          let data;
-          if (response.ok) {
-            try {
-              data = await response.json();
-            } catch (jsonError) {
-              // Response is ok but not JSON - unexpected
-              if (splash) splash.style.display = 'none';
-              alert('Upload response error: Server returned invalid data');
-              console.error('Upload failed - non-JSON response from server:', jsonError);
-              return;
-            }
-          } else {
-            // Response is not ok - try to get error message
-            // Clone response before reading so we can try both JSON and text if needed
-            const clonedResponse = response.clone();
-            try {
-              data = await response.json();
-            } catch (jsonError) {
-              // Response is not JSON - might be HTML error page
-              try {
-                const errorText = await clonedResponse.text();
-                if (splash) splash.style.display = 'none';
-                alert(`Upload failed (${response.status}): ${response.statusText || 'Server error'}`);
-                console.error('Upload failed - non-JSON error response:', errorText.substring(0, 200));
-              } catch (textError) {
-                if (splash) splash.style.display = 'none';
-                alert(`Upload failed (${response.status}): ${response.statusText || 'Server error'}`);
-                console.error('Upload failed - could not read response:', textError);
-              }
-              return;
-            }
-          }
+          const data = await response.json();
 
           if (response.ok && data.success) {
-            // Hide splash screen and show success message
-            if (splash) splash.style.display = 'none';
-            if (statusElement) {
-              statusElement.textContent = 'Upload complete!';
+            // Always just reload quickly - processing happens during page load
+              if (statusElement) {
+              statusElement.textContent = 'Upload complete! Reloading...';
             }
-
-            // Update UI to reflect the uploaded file
-            if (window.updateUploadNotificationBanner) {
-              window.updateUploadNotificationBanner();
-            }
-
-            // Start polling for file processing status
-            if (typeof pollUploadStatus === 'function') {
-              pollUploadStatus(file.name);
-            }
+            
+            // Clear caches
+              if (window.TagManager && window.TagManager.clearCache) {
+                window.TagManager.clearCache();
+              }
+              sessionStorage.clear();
+              
+            // Reload after brief delay
+              setTimeout(() => {
+                window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
+            }, 800);
           } else {
             if (splash) splash.style.display = 'none';
-            const errorMsg = data.error || data.message || 'Unknown error';
-            alert('Upload failed: ' + errorMsg);
-            console.error('Upload failed:', data);
+            alert('Upload failed: ' + (data.error || 'Unknown error'));
           }
         } catch (error) {
           if (splash) splash.style.display = 'none';
-          alert('Upload failed: ' + (error.message || 'Network error - please check your connection and try again'));
-          console.error('Upload error:', error);
+          alert('Upload failed: ' + error.message);
         }
       });
 

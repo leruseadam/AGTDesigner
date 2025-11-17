@@ -1215,7 +1215,7 @@ const TagManager = {
             const fieldValues = filters[filterType] || [];
             const values = new Set();
             fieldValues.forEach(value => {
-                if (value && value.trim() !== '' && value.trim().toLowerCase() !== 'all') {
+                if (value && value.trim() !== '') {
                     values.add(value.trim());
                 }
             });
@@ -1246,7 +1246,7 @@ const TagManager = {
             
             // Update the dropdown options with special formatting for RSO/CO2 Tanker
             filterElement.innerHTML = `
-                <option value="All">All</option>
+                <option value="">All</option>
                 ${sortedValues.map(value => {
                     // Apply special font formatting for RSO/CO2 Tanker
                     if (value === 'rso/co2 tankers') {
@@ -1284,7 +1284,7 @@ const TagManager = {
                         filterElement.appendChild(option);
                         filterElement.value = currentValue;
                     } else {
-                        filterElement.value = 'All';
+                        filterElement.value = '';
                     }
                 }
             } else {
@@ -1302,7 +1302,7 @@ const TagManager = {
                         filterElement.appendChild(option);
                         filterElement.value = currentValue;
                     } else {
-                        filterElement.value = 'All';
+                        filterElement.value = '';
                     }
                 }
             }
@@ -1620,9 +1620,7 @@ const TagManager = {
                 }
 
                 const currentValue = filterElement.value;
-                const newOptions = Array.from(availableOptions[filterType]).filter(opt => 
-                    opt && opt.trim() !== '' && opt.trim().toLowerCase() !== 'all'
-                );
+                const newOptions = Array.from(availableOptions[filterType]);
                 
                 // Sort options consistently
                 const sortedOptions = [...newOptions].sort((a, b) => {
@@ -1639,16 +1637,14 @@ const TagManager = {
                 });
                 
                 // Only update if options have actually changed
-                // Include "All" in comparison since it now has value="All"
-                const currentOptions = Array.from(filterElement.options).map(opt => opt.value).filter(v => v !== '' && v.toLowerCase() !== 'all');
-                const newOptionsWithAll = ['All', ...sortedOptions];
+                const currentOptions = Array.from(filterElement.options).map(opt => opt.value).filter(v => v !== '');
                 const optionsChanged = currentOptions.length !== sortedOptions.length || 
                                      !currentOptions.every((opt, i) => opt === sortedOptions[i]);
                 
                 if (optionsChanged) {
                     // Create new options HTML with special formatting for RSO/CO2 Tanker
                     const optionsHtml = `
-                        <option value="All">All</option>
+                        <option value="">All</option>
                         ${sortedOptions.map(value => {
                             const displayValue = filterType === 'productType' ? formatProductTypeLabel(value) : value;
                             if (filterType === 'productType' && value === 'rso/co2 tankers') {
@@ -1677,7 +1673,7 @@ const TagManager = {
                             filterElement.appendChild(option);
                             filterElement.value = currentValue;
                         } else {
-                            filterElement.value = 'All';
+                            filterElement.value = '';
                         }
                     }
                 }
@@ -2343,8 +2339,7 @@ const TagManager = {
         // Show loading splash for tag population
         const tagsToShow = filteredTags || originalTags;
         if (tagsToShow && tagsToShow.length > 0) {
-            // Don't show splash on initial load - only during Excel uploads
-            // Splash will be shown by enhanced-ui.js during uploads
+            this.showActionSplash('Loading tags...');
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen
             const availableTagsContainer = document.getElementById('availableTags');
@@ -2949,11 +2944,6 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
-        // Show splash if we're loading tags and splash isn't already showing
-        const tagsToShow = filteredTags || originalTags;
-        // Don't show splash on initial load - only during Excel uploads
-        // Splash will be shown by enhanced-ui.js during uploads
-        
         // Windows optimization: Use requestAnimationFrame for smoother rendering
         if (isWindows) {
             requestAnimationFrame(() => {
@@ -3031,11 +3021,10 @@ const TagManager = {
         // Always update the current tags for display
         this.state.tags = [...tags];
         
-        // Lower threshold to use faster simplified rendering more often
         const shouldUseSimplified = !this.state.forceFullAvailableTagRender &&
             !this.state.isSearching &&
             !this.hasActiveFilters() &&
-            tags.length > (this.SIMPLIFIED_RENDER_THRESHOLD || 100);
+            tags.length > this.SIMPLIFIED_RENDER_THRESHOLD;
         this.state.simplifiedAvailableTagsActive = shouldUseSimplified;
         if (shouldUseSimplified) {
             verboseLog(`⚡ Simplified available-tag rendering enabled for ${tags.length} tags`);
@@ -3173,17 +3162,14 @@ const TagManager = {
                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                 return aName.localeCompare(bName);
             });
-            // Use DocumentFragment for batch DOM operations (faster)
-            const fragment = document.createDocumentFragment();
             sortedSimple.forEach(tag => {
-                // Use cleaned displayName for logging consistency
-                const displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
-                verboseLog('Creating tag element for:', displayName);
-                const tagElement = this.createTagElement(tag, false);
-                verboseLog('Tag element created:', tagElement);
-                fragment.appendChild(tagElement);
-            });
-            tagList.appendChild(fragment);
+            // Use cleaned displayName for logging consistency
+            const displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
+            verboseLog('Creating tag element for:', displayName);
+            const tagElement = this.createTagElement(tag, false);
+            verboseLog('Tag element created:', tagElement);
+            tagList.appendChild(tagElement);
+        });
                     // Atomically replace container content with built tags
                     requestAnimationFrame(() => {
                         availableTagsContainer.innerHTML = '';
@@ -3626,20 +3612,15 @@ const TagManager = {
                                 weightSection.appendChild(weightContent);
 
                                 // Add individual tags (sorted alphabetically by product name)
-                                // Use DocumentFragment for batch DOM operations (faster)
                                 const tagsToRender = [...tagArray].sort((a, b) => {
                                     const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
                                     const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                     return aName.localeCompare(bName);
                                 });
-                                
-                                // Use DocumentFragment for faster DOM insertion
-                                const fragment = document.createDocumentFragment();
                                 tagsToRender.forEach(tag => {
                                     const tagElement = this.createTagElement(tag, false);
-                                    fragment.appendChild(tagElement);
+                                    weightContent.appendChild(tagElement);
                                 });
-                                weightContent.appendChild(fragment);
                             });
                             
                             productTypeContent.appendChild(subcategorySection);
@@ -3736,20 +3717,15 @@ const TagManager = {
                             weightSection.appendChild(weightContent);
 
                             // Add individual tags (sorted alphabetically by product name)
-                            // Use DocumentFragment for batch DOM operations (faster)
                             const tagsToRender = [...tagArray].sort((a, b) => {
                                 const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
                                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                 return aName.localeCompare(bName);
                             });
-                            
-                            // Use DocumentFragment for faster DOM insertion
-                            const fragment = document.createDocumentFragment();
                             tagsToRender.forEach(tag => {
                                 const tagElement = this.createTagElement(tag, false);
-                                fragment.appendChild(tagElement);
+                                weightContent.appendChild(tagElement);
                             });
-                            weightContent.appendChild(fragment);
                         });
                     }
                 });
@@ -3757,21 +3733,18 @@ const TagManager = {
         });
 
         // Replace container content with built tags (this replaces any loading indicator)
-        // Use requestAnimationFrame to prevent blocking the UI
-        requestAnimationFrame(() => {
-            availableTagsContainer.innerHTML = '';
-            availableTagsContainer.appendChild(tagList);
-            
-            // Restore previous scroll position after full rebuild
-            this._restoreAvailableScrollPosition(savedScroll);
+        availableTagsContainer.innerHTML = '';
+        availableTagsContainer.appendChild(tagList);
 
-            // Add event listeners
-            this.updateSelectAllCheckboxes();
-            this.initializeSelectAllCheckbox();
-            
-            // Hide loading splash only after tags actually appear in DOM
-            this._waitForTagsToAppear();
-        });
+        // Restore previous scroll position after full rebuild
+        this._restoreAvailableScrollPosition(savedScroll);
+
+        // Add event listeners
+        this.updateSelectAllCheckboxes();
+        this.initializeSelectAllCheckbox();
+        
+        // Hide loading splash only after tags actually appear in DOM
+        this._waitForTagsToAppear();
     },
 
     renderSimplifiedAvailableTags(tags, savedScroll) {
@@ -3850,7 +3823,6 @@ const TagManager = {
                     this.updateSelectAllCheckboxes();
                     this._waitForTagsToAppear();
                     this.hideActionSplash();
-                    this.hideTagLoadingSplash();
                 });
             }
         };
@@ -3866,15 +3838,10 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
-            this.hideTagLoadingSplash();
             return;
         }
         
-        // Track when we started waiting to ensure minimum visibility time
-        const startTime = Date.now();
-        const minVisibilityTime = 300; // Minimum 300ms visibility so user can see the splash
-        
-        // Immediate check - if tags are already visible, wait for minimum visibility time
+        // Immediate check - if tags are already visible, hide splash right away
         const immediateCheck = () => {
             const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
             if (tagItems.length > 0) {
@@ -3883,34 +3850,14 @@ const TagManager = {
                     return rect.width > 0 && rect.height > 0;
                 });
                 if (visibleTags.length > 0) {
-                    const elapsed = Date.now() - startTime;
-                    const remainingTime = Math.max(0, minVisibilityTime - elapsed);
-                    verboseLog(`Tags already visible (${tagItems.length} items), waiting ${remainingTime}ms before hiding splash`);
-                    // Wait for minimum visibility time before hiding
-                    setTimeout(() => {
-                        // Double-check tags are still visible before hiding
-                        const finalCheck = document.getElementById('availableTags');
-                        if (finalCheck) {
-                            const finalTags = finalCheck.querySelectorAll('.tag-item');
-                            const finalVisible = Array.from(finalTags).filter(item => {
-                                const rect = item.getBoundingClientRect();
-                                return rect.width > 0 && rect.height > 0;
-                            });
-                            if (finalVisible.length > 0) {
-                                verboseLog(`Hiding splash after minimum visibility time (${finalVisible.length} tags visible)`);
-                                if (this.hideActionSplash) {
-                                    this.hideActionSplash();
-                                }
-                                this.hideTagLoadingSplash();
-                                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                                    AppLoadingSplash.stopAutoAdvance();
-                                    AppLoadingSplash.complete();
-                                }
-                            } else {
-                                verboseLog('Tags disappeared, keeping splash visible');
-                            }
-                        }
-                    }, remainingTime);
+                    verboseLog(`Tags already visible (${tagItems.length} items), hiding splash immediately`);
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
                     return true;
                 }
             }
@@ -3928,7 +3875,6 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
-            this.hideTagLoadingSplash();
             if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
@@ -3970,7 +3916,6 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                this.hideTagLoadingSplash();
                 // Also complete AppLoadingSplash if it's still showing
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
@@ -3987,7 +3932,6 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                this.hideTagLoadingSplash();
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
@@ -6615,13 +6559,25 @@ const TagManager = {
     async fetchAndUpdateAvailableTags() {
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
-
-            // Only show splash if explicitly requested (e.g., during Excel uploads)
-            // Don't show on initial page load or cache hydration
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
-            if (hydratedFromCache) {
+            if (!hydratedFromCache) {
+                // Show loading splash when fetching tags
+                this.showActionSplash('Loading tags...');
+            } else {
                 verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
-                // No splash needed for cache hydration - tags are already visible
+            }
+            
+            // Show loading indicator in container IMMEDIATELY to prevent blank screen
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags...</p>
+                    </div>
+                `;
             }
             
             // Preserve current scroll/anchor so refreshes don't jump the list
@@ -6636,7 +6592,6 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                this.hideTagLoadingSplash();
                 return false;
             }
             this._lastFetchTime = now;
@@ -6775,7 +6730,6 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                this.hideTagLoadingSplash();
                 return false;
             }
             
@@ -6789,7 +6743,6 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                this.hideTagLoadingSplash();
                 return false;
             }
             
@@ -6918,7 +6871,6 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
-            this.hideTagLoadingSplash();
 
             // CRITICAL FIX: Show user-friendly error message with retry button
             const availableTagsContainer = document.getElementById('availableTags');
@@ -7033,7 +6985,6 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
-            this.hideTagLoadingSplash();
         }
     },
 
@@ -7218,7 +7169,6 @@ const TagManager = {
         AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
-        // No splash screen on initial load - only show during Excel uploads
         this.checkForExistingData();
         
         // Ensure all filters default to 'All' on page load
@@ -7229,11 +7179,11 @@ const TagManager = {
             lineage: 'All',
             weight: 'All'
         };
-        // Set each filter dropdown to 'All'
+        // Set each filter dropdown to 'All' (or '')
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
         filterIds.forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.value = 'All';
+            if (el) el.value = '';
         });
         // Don't apply filters immediately - let checkForExistingData handle it
         // this.applyFilters();
@@ -7401,7 +7351,9 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // No splash screen on initial load - only show during Excel uploads
+        // Show loading splash IMMEDIATELY before any async operations
+        this.showActionSplash('Loading tags...');
+
         // Check for current uploaded file from session (non-blocking, runs in parallel)
         // Use requestAnimationFrame to ensure it doesn't block the main thread
         requestAnimationFrame(() => {
@@ -7478,15 +7430,10 @@ const TagManager = {
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length > 0) {
             verboseLog(`⚡ FAST PATH: Loaded ${cachedTags.length} tags from cache instantly`);
-            // Keep splash visible while rendering cached tags
             // Render cached tags immediately for instant display
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
             this._updateAvailableTags(cachedTags);
-            // Wait for tags to appear before hiding splash
-            if (this._waitForTagsToAppear) {
-                this._waitForTagsToAppear();
-            }
 
             // Continue loading fresh data in background (non-blocking)
             verboseLog('Cache rendered, fetching fresh data in background...');
@@ -7502,9 +7449,6 @@ const TagManager = {
             // Always make UI interactive again quickly
             if (typeof this.hideActionSplash === 'function') {
                 this.hideActionSplash();
-            }
-            if (typeof this.hideTagLoadingSplash === 'function') {
-                this.hideTagLoadingSplash();
             }
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
@@ -7553,21 +7497,10 @@ const TagManager = {
 
                     // Update available tags (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
-                    // Ensure tag loading splash is visible
-                    if (this.showTagLoadingSplash) {
-                        this.showTagLoadingSplash('Loading tags...');
-                    }
                     setTimeout(() => {
                         this.debouncedUpdateAvailableTags(data.available_tags, null);
                         // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
                         // when tags are actually fully rendered
-                        // Use _waitForTagsToAppear to ensure splash stays visible until tags appear
-                        if (this._waitForTagsToAppear) {
-                            // Wait a bit for debounced function to execute, then check for tags
-                            setTimeout(() => {
-                                this._waitForTagsToAppear();
-                            }, 100);
-                        }
                     }, 0);
 
                     // Restore previously selected tags from backend
@@ -7595,10 +7528,6 @@ const TagManager = {
                         if (fileInfoText) {
                             fileInfoText.textContent = data.filename;
                         }
-                        // Update upload notification banner
-                        if (window.updateUploadNotificationBanner) {
-                            window.updateUploadNotificationBanner();
-                        }
                     }
                     
                     // CRITICAL FIX: Don't hide splash here - wait for tags to be fully rendered
@@ -7614,12 +7543,6 @@ const TagManager = {
                 } else {
                     verboseLog('No initial data available:', data.message || 'No data found');
                     // Complete splash loading even if no data
-                    if (typeof this.hideActionSplash === 'function') {
-                        this.hideActionSplash();
-                    }
-                    if (typeof this.hideTagLoadingSplash === 'function') {
-                        this.hideTagLoadingSplash();
-                    }
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
@@ -7633,12 +7556,6 @@ const TagManager = {
             } else {
                 verboseLog('Initial data endpoint returned error:', response.status);
                 // Complete splash loading on error
-                if (typeof this.hideActionSplash === 'function') {
-                    this.hideActionSplash();
-                }
-                if (typeof this.hideTagLoadingSplash === 'function') {
-                    this.hideTagLoadingSplash();
-                }
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
@@ -7659,12 +7576,6 @@ const TagManager = {
             }
             
             // Complete splash loading on error
-            if (typeof this.hideActionSplash === 'function') {
-                this.hideActionSplash();
-            }
-            if (typeof this.hideTagLoadingSplash === 'function') {
-                this.hideTagLoadingSplash();
-            }
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             clearTimeout(splashSafetyTimeout);
@@ -8478,13 +8389,34 @@ const TagManager = {
             // Show loading feedback
             this.showActionSplash('Clearing and resetting...');
 
-            // Fire-and-forget backend API call (non-blocking)
-            fetch('/api/clear-filters', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            }).catch(() => {}); // Silently ignore errors
+            // Clear search inputs without nuking the entire DOM
+            this.resetSearchInputs();
             
-            // Clear state immediately (fast operations)
+            // Call the backend API to clear selected tags
+            let response;
+            try {
+                response = await fetch('/api/clear-filters', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (fetchError) {
+                console.error('Network error clearing filters:', fetchError);
+                // Continue with local clearing even if API fails
+                response = null;
+            }
+            
+            if (response && response.ok) {
+                try {
+                    const data = await response.json();
+                    verboseLog('Backend clear-filters response:', data);
+                } catch (jsonError) {
+                    console.error('Error parsing response:', jsonError);
+                }
+            } else if (response) {
+                console.error('Failed to clear selected tags on server:', response.status, response.statusText);
+            }
+            
+            // Clear persistent selected tags
             if (this.state) {
                 if (Array.isArray(this.state.persistentSelectedTags)) {
                     this.state.persistentSelectedTags = [];
@@ -8492,13 +8424,9 @@ const TagManager = {
                 if (this.state.selectedTags && typeof this.state.selectedTags.clear === 'function') {
                     this.state.selectedTags.clear();
                 }
-                this.state.filterCache = null;
             }
             
-            // Clear search inputs
-            this.resetSearchInputs();
-            
-            // Update selected tags display immediately (this clears the selected tags UI)
+            // Update the selected tags display immediately
             if (this.updateSelectedTags) {
                 try {
                     this.updateSelectedTags([]);
@@ -8507,52 +8435,71 @@ const TagManager = {
                 }
             }
             
-            // Use CSS class manipulation for faster bulk operations
-            const availableContainer = document.getElementById('availableTags');
-            const selectedContainer = document.getElementById('selectedTags');
-            
-            // Clear all checkboxes efficiently (no batching needed for simple property changes)
-            if (availableContainer) {
-                const availableCheckboxes = availableContainer.querySelectorAll('input[type="checkbox"]');
-                for (let i = 0; i < availableCheckboxes.length; i++) {
-                    availableCheckboxes[i].checked = false;
-                }
-                
-                // Show all tags using CSS (faster than individual style changes)
-                const availableTagItems = availableContainer.querySelectorAll('.tag-item');
-                for (let i = 0; i < availableTagItems.length; i++) {
-                    availableTagItems[i].style.display = 'block';
-                }
+            // Clear all checkboxes in available tags section
+            try {
+                const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
+                availableCheckboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                    // Trigger change event to update listeners
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+            } catch (checkboxError) {
+                console.error('Error clearing available checkboxes:', checkboxError);
             }
             
-            if (selectedContainer) {
-                const selectedCheckboxes = selectedContainer.querySelectorAll('input[type="checkbox"]');
-                for (let i = 0; i < selectedCheckboxes.length; i++) {
-                    selectedCheckboxes[i].checked = false;
-                }
+            // Clear all checkboxes in selected tags section
+            try {
+                const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
+                selectedCheckboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                    // Trigger change event to update listeners
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+            } catch (checkboxError) {
+                console.error('Error clearing selected checkboxes:', checkboxError);
             }
             
-            // Defer heavy operations to next frame (non-blocking)
-            requestAnimationFrame(() => {
+            // Show all available tags (in case some were hidden)
+            try {
+                const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
+                availableTagItems.forEach(item => {
+                    item.style.display = 'block';
+                });
+            } catch (displayError) {
+                console.error('Error showing available tags:', displayError);
+            }
+            
+            // Clear filter cache to ensure fresh data
+            if (this.state) {
+                this.state.filterCache = null;
+            }
+            
+            // Update available tags display to reflect cleared state
+            if (this.efficientlyUpdateAvailableTagsDisplay) {
                 try {
-                    // Update available tags display
-                    if (this.efficientlyUpdateAvailableTagsDisplay) {
-                        this.efficientlyUpdateAvailableTagsDisplay();
-                    }
-                    
-                    // Update select all checkboxes
-                    if (this.updateSelectAllCheckboxes) {
-                        this.updateSelectAllCheckboxes();
-                    }
-                    
-                    // Clear filters (non-blocking)
-                    if (this.clearAllFilters) {
-                        this.clearAllFilters().catch(err => console.error('Error clearing filters:', err));
-                    }
-                } catch (err) {
-                    console.error('Error in deferred clear operations:', err);
+                    this.efficientlyUpdateAvailableTagsDisplay();
+                } catch (updateError) {
+                    console.error('Error updating available tags display:', updateError);
                 }
-            });
+            }
+            
+            // Update select all checkboxes to unchecked state
+            if (this.updateSelectAllCheckboxes) {
+                try {
+                    this.updateSelectAllCheckboxes();
+                } catch (updateError) {
+                    console.error('Error updating select all checkboxes:', updateError);
+                }
+            }
+            
+            // Also clear filters
+            if (this.clearAllFilters) {
+                try {
+                    await this.clearAllFilters();
+                } catch (filterError) {
+                    console.error('Error clearing filters:', filterError);
+                }
+            }
             
             verboseLog('✅ Selected tags cleared and app reset completed successfully');
             
@@ -8570,7 +8517,7 @@ const TagManager = {
                 alert(`Failed to clear and reset: ${error.message}`);
             }
         } finally {
-            // Hide loading splash immediately
+            // Hide loading splash
             this.hideActionSplash();
             // Reset the clearing flag
             this.state.isClearing = false;
@@ -8614,123 +8561,6 @@ const TagManager = {
             verboseLog('✅ Splash hidden');
         } else {
             console.error('❌ Could not find splash element to hide');
-        }
-    },
-
-    showTagLoadingSplash(message = 'Populating inventory...') {
-        console.log('🎬 SHOWING TAG LOADING SPLASH:', message);
-        verboseLog('🎬 SHOWING TAG LOADING SPLASH:', message);
-        
-        // Try to get splash element - retry if not found immediately
-        let splash = document.getElementById('tagLoadingSplash');
-        let statusElement = document.getElementById('tagLoadingStatus');
-        
-        // If not found, wait a bit and try again (for cases where DOM isn't ready)
-        if (!splash || !statusElement) {
-            console.warn('⚠️ Splash elements not found immediately, retrying...');
-            setTimeout(() => {
-                splash = document.getElementById('tagLoadingSplash');
-                statusElement = document.getElementById('tagLoadingStatus');
-                if (splash && statusElement) {
-                    this._actuallyShowSplash(splash, statusElement, message);
-                } else {
-                    console.error('❌ Could not find tag splash elements after retry');
-                }
-            }, 100);
-            return;
-        }
-        
-        this._actuallyShowSplash(splash, statusElement, message);
-    },
-    
-    _actuallyShowSplash(splash, statusElement, message) {
-        console.log('✅ Tag splash elements found, displaying...');
-        verboseLog('✅ Tag splash elements found, displaying...');
-        
-        statusElement.textContent = message;
-        
-        // Remove any classes that might hide it
-        splash.classList.remove('fade-out', 'd-none', 'hidden');
-        
-        // CRITICAL: Set all visibility properties aggressively
-        splash.style.setProperty('display', 'flex', 'important');
-        splash.style.setProperty('z-index', '999999', 'important');
-        splash.style.setProperty('position', 'fixed', 'important');
-        splash.style.setProperty('top', '0', 'important');
-        splash.style.setProperty('left', '0', 'important');
-        splash.style.setProperty('width', '100%', 'important');
-        splash.style.setProperty('height', '100%', 'important');
-        splash.style.setProperty('visibility', 'visible', 'important');
-        splash.style.setProperty('opacity', '1', 'important');
-        // Allow pointer events on the splash content but not the overlay
-        // This prevents the splash from blocking the UI while still being visible
-        splash.style.setProperty('pointer-events', 'none', 'important');
-        
-        // Allow pointer events on the content container so it's interactive
-        const contentContainer = splash.querySelector('.tag-loading-container');
-        if (contentContainer) {
-            contentContainer.style.setProperty('pointer-events', 'auto', 'important');
-        }
-        
-        // Remove inline style="display: none" if present
-        if (splash.hasAttribute('style')) {
-            const currentStyle = splash.getAttribute('style');
-            if (currentStyle.includes('display: none')) {
-                splash.setAttribute('style', currentStyle.replace(/display:\s*none[;]?/gi, ''));
-            }
-        }
-        
-        // Force multiple reflows to ensure visibility
-        splash.offsetHeight;
-        void splash.offsetWidth;
-        
-        // Force browser to repaint in next frame
-        requestAnimationFrame(() => {
-            splash.style.setProperty('display', 'flex', 'important');
-            const computed = window.getComputedStyle(splash);
-            console.log('✅ Tag splash forced repaint:', {
-                display: splash.style.display,
-                computedDisplay: computed.display,
-                zIndex: splash.style.zIndex,
-                computedZIndex: computed.zIndex,
-                visibility: computed.visibility,
-                opacity: computed.opacity
-            });
-            verboseLog('✅ Tag splash forced repaint, display:', splash.style.display, 'computed display:', computed.display, 'z-index:', splash.style.zIndex);
-        });
-        
-        // Double-check after a short delay
-        setTimeout(() => {
-            const finalCheck = window.getComputedStyle(splash);
-            if (finalCheck.display === 'none' || finalCheck.visibility === 'hidden') {
-                console.error('❌ Splash still hidden after all attempts!', {
-                    display: finalCheck.display,
-                    visibility: finalCheck.visibility,
-                    opacity: finalCheck.opacity,
-                    zIndex: finalCheck.zIndex
-                });
-                // Last resort: try to force it again
-                splash.style.setProperty('display', 'flex', 'important');
-                splash.style.setProperty('visibility', 'visible', 'important');
-            } else {
-                console.log('✅ Splash confirmed visible');
-            }
-        }, 50);
-        
-        console.log('✅ Tag splash display set to:', splash.style.display, 'z-index:', splash.style.zIndex);
-        verboseLog('✅ Tag splash display set to:', splash.style.display, 'z-index:', splash.style.zIndex);
-    },
-
-    hideTagLoadingSplash() {
-        verboseLog('🎬 HIDING TAG LOADING SPLASH');
-        const splash = document.getElementById('tagLoadingSplash');
-        
-        if (splash) {
-            // Hide splash immediately
-            splash.style.display = 'none';
-            verboseLog('✅ Tag splash hidden');
-        } else {
-            console.error('❌ Could not find tag splash element to hide');
         }
     },
 
@@ -9610,10 +9440,6 @@ const TagManager = {
         // Update the file info text if a filename is provided
         if (fileName && fileInfoText) {
             fileInfoText.textContent = fileName;
-            // Update upload notification banner
-            if (window.updateUploadNotificationBanner) {
-                window.updateUploadNotificationBanner();
-            }
         }
     },
 
@@ -9863,7 +9689,7 @@ const TagManager = {
                 closeBtn.style.fontSize = '1em';
                 closeBtn.setAttribute('aria-label', `Clear ${label} filter`);
                 closeBtn.addEventListener('click', () => {
-                    select.value = 'All';
+                    select.value = '';
                     // Trigger change event to update filters
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                 });
@@ -9895,8 +9721,8 @@ const TagManager = {
             filterIds.forEach(filterId => {
                 const filterElement = document.getElementById(filterId);
                 if (filterElement) {
-                    filterElement.value = 'All';
-                    verboseLog(`Cleared ${filterId} (set to 'All')`);
+                    filterElement.value = '';
+                    verboseLog(`Cleared ${filterId}`);
                 }
             });
             
@@ -9916,9 +9742,11 @@ const TagManager = {
                 this.applyFilters();
             }
             
-            // Update filter dropdowns to show all options from all tags
-            if (this.updateFilterOptions) {
-                await this.updateFilterOptions(); // Regenerate all filter options from all tags
+            // Update filter dropdowns to show all options
+            if (this.state.originalFilterOptions && this.state.originalFilterOptions.vendor) {
+                if (this.updateFilters) {
+                    this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
+                }
             }
             
             // Render active filters (should be empty now)
@@ -9964,8 +9792,8 @@ const TagManager = {
         otherFilterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
             if (filterElement) {
-                filterElement.value = 'All';
-                verboseLog(`Cleared ${filterId} (set to 'All')`);
+                filterElement.value = '';
+                verboseLog(`Cleared ${filterId}`);
             }
         });
         
@@ -9997,10 +9825,6 @@ const TagManager = {
         
         if (fileInfoText) {
             fileInfoText.textContent = '';
-            // Update upload notification banner
-            if (window.updateUploadNotificationBanner) {
-                window.updateUploadNotificationBanner();
-            }
         }
         
         verboseLog('Upload UI state cleared');
@@ -10044,7 +9868,7 @@ const TagManager = {
             verboseLog('Clearing filter settings for new file upload');
             const filterSelects = document.querySelectorAll('select[id*="Filter"]');
             filterSelects.forEach(select => {
-                select.value = 'All';
+                select.value = '';
             });
             
             // Reset filter state to defaults
@@ -10592,27 +10416,9 @@ async function handleJsonPasteInput(input) {
             if (matchResult.available_tags && matchResult.available_tags.length > 0 && 
                 matchResult.available_tags !== matchResult.selected_tags) {
                 verboseLog('Updating available tags with new data');
-                
-                // Show tag loading splash before updating tags
-                if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-                    TagManager.showTagLoadingSplash('Loading tags...');
-                }
-                
                 TagManager._updateAvailableTags(matchResult.available_tags, null);
                 TagManager.saveAvailableTagsToCache(matchResult.available_tags || []);
                 TagManager.state.hydratedFromCache = false;
-                
-                // Wait for tags to appear in DOM before hiding splash
-                setTimeout(() => {
-                    if (typeof TagManager !== 'undefined' && TagManager._waitForTagsToAppear) {
-                        TagManager._waitForTagsToAppear();
-                    } else if (typeof TagManager !== 'undefined' && TagManager.hideTagLoadingSplash) {
-                        // Fallback: hide splash after a short delay if _waitForTagsToAppear is not available
-                        setTimeout(() => {
-                            TagManager.hideTagLoadingSplash();
-                        }, 500);
-                    }
-                }, 100);
             } else {
                 verboseLog('Skipping available tags update to avoid duplication');
             }
@@ -11028,7 +10834,7 @@ async function performFullAppReset() {
         filterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
             if (filterElement) {
-                filterElement.value = 'All';
+                filterElement.value = '';
                 filterElement.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
@@ -11402,12 +11208,6 @@ window.performJsonMatch = function() {
             }
             
             verboseLog(`Showing ${tagsToShow.length} items in available tags`);
-            
-            // Show tag loading splash before updating tags
-            if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-                TagManager.showTagLoadingSplash('Loading tags...');
-            }
-            
             TagManager._updateAvailableTags(tagsToShow, null);
             
             // For JSON matching, we want to show all matched tags in available tags
@@ -11437,18 +11237,6 @@ window.performJsonMatch = function() {
                 
                 verboseLog(`✅ Auto-selected all ${TagManager.state.persistentSelectedTags.length} JSON matched tags`);
             }
-            
-            // Wait for tags to appear in DOM before hiding splash
-            setTimeout(() => {
-                if (typeof TagManager !== 'undefined' && TagManager._waitForTagsToAppear) {
-                    TagManager._waitForTagsToAppear();
-                } else if (typeof TagManager !== 'undefined' && TagManager.hideTagLoadingSplash) {
-                    // Fallback: hide splash after a short delay if _waitForTagsToAppear is not available
-                    setTimeout(() => {
-                        TagManager.hideTagLoadingSplash();
-                    }, 500);
-                }
-            }, 100);
             
             // Show a notification to the user
             const notificationDiv = document.createElement('div');

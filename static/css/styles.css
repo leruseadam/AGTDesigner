@@ -301,10 +301,6 @@ p, span, div {
 }
 
 #detailedJsonMatchModal .modal-dialog {
-  max-width: 95vw !important;
-}
-
-#jsonInventoryModal .modal-dialog {
   max-width: 90vw !important;
 }
 
@@ -473,7 +469,7 @@ canvas#lava-lamp-canvas {
 /* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
 :root {
   --tag-list-vertical-offset: clamp(3.25rem, 4.5vh, 5rem);
-  --tag-list-min-height: 58rem;
+  --tag-list-min-height: 55rem;
 }
 @supports (height: 100svh) {
   :root {
@@ -1944,15 +1940,10 @@ canvas#lava-lamp-canvas {
   #availableTags .tag-list {
     margin: 0 !important;
     padding: 0 !important;
-    padding-bottom: 1rem !important; /* Professional bottom buffer */
     min-height: 100% !important;
     height: 100% !important;
     display: flex !important;
     flex-direction: column !important;
-  }
-  
-  #selectedTags .tag-list {
-    padding-bottom: 1rem !important; /* Professional bottom buffer */
   }
   
   /* Force the content to fill the entire height */
@@ -2488,7 +2479,6 @@ canvas#lava-lamp-canvas {
     flex: 1 !important;
     min-height: 0 !important;
     height: 100% !important;
-    padding-bottom: 1rem !important; /* Professional bottom buffer */
   }
   
   /* Ensure the tag list fills the available space */
@@ -2497,7 +2487,6 @@ canvas#lava-lamp-canvas {
     flex-direction: column !important;
     height: 100% !important;
     min-height: 0 !important;
-    padding-bottom: 1rem !important; /* Professional bottom buffer */
   }
   
   /* Ensure tag entries expand to fill space */
@@ -5973,7 +5962,7 @@ canvas#lava-lamp-canvas {
     overflow: hidden !important;
     filter: none !important;
     margin: 1.75rem auto !important;
-    max-width: 95vw !important;
+    max-width: 800px !important;
     width: auto !important;
     height: auto !important;
     position: relative !important;
@@ -5994,7 +5983,7 @@ canvas#lava-lamp-canvas {
     overflow-y: auto !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch !important;
-    max-height: calc(100vh - 200px) !important;
+    max-height: calc(100vh - 300px) !important;
   }
   
   #jsonMatchModal .modal-header {
@@ -6272,7 +6261,6 @@ canvas#lava-lamp-canvas {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    padding-bottom: 1rem; /* Professional bottom buffer */
   }
 
   .tag-item {
@@ -7070,9 +7058,9 @@ canvas#lava-lamp-canvas {
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
   }
 
-  /* Professional bottom buffer for tag lists */
+  /* Remove extra space at the bottom of the tag list */
   .tag-list {
-    padding-bottom: 1rem !important; /* Professional bottom buffer */
+    padding-bottom: 0 !important;
     margin-bottom: 0 !important;
   }
 

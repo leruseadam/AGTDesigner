@@ -1788,8 +1788,8 @@ class EnhancedJSONMatcher:
                 products = product_db.get_all_products()
                 logging.info(f"EnhancedJSONMatcher: Loaded {len(products)} products from ProductDatabase at {db_path}")
                 
-                # Cache for 15 minutes (reduced from 1 hour to save memory)
-                self.cache.set(cache_key, products, ttl=900)
+                # Cache for 1 hour
+                self.cache.set(cache_key, products, ttl=3600)
                 return products
                 
         except Exception as e:
@@ -1804,8 +1804,8 @@ class EnhancedJSONMatcher:
         products = df.to_dict('records')
         logging.info(f"EnhancedJSONMatcher: Loaded {len(products)} products from Excel processor")
         
-        # Cache for 15 minutes (reduced from 1 hour to save memory)
-        self.cache.set(cache_key, products, ttl=900)
+        # Cache for 1 hour
+        self.cache.set(cache_key, products, ttl=3600)
         
         return products
         
