@@ -922,7 +922,7 @@ const TagManager = {
         _memoryOptimized: true,
         _lastCleanup: Date.now()
     },
-    SIMPLIFIED_RENDER_THRESHOLD: 900,
+    SIMPLIFIED_RENDER_THRESHOLD: 200, // Lowered from 900 to improve performance
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
@@ -3754,7 +3754,7 @@ const TagManager = {
             return;
         }
 
-        const chunkSize = 200;
+        const chunkSize = 50; // Reduced from 200 to prevent blocking
         let index = 0;
 
         availableTagsContainer.innerHTML = '';
@@ -3805,6 +3805,14 @@ const TagManager = {
             this.initializeSelectAllCheckbox();
         });
 
+        // Safety timeout: always hide splash after 2 seconds max
+        const safetyTimeout = setTimeout(() => {
+            verboseLog('Safety timeout: forcing splash to hide after 2 seconds');
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+        }, 2000);
+
         const renderChunk = () => {
             const fragment = document.createDocumentFragment();
             const end = Math.min(index + chunkSize, tags.length);
@@ -3816,18 +3824,23 @@ const TagManager = {
             listWrapper.appendChild(fragment);
 
             if (index < tags.length) {
-                requestAnimationFrame(renderChunk);
+                // Use setTimeout instead of requestAnimationFrame for better performance with large lists
+                setTimeout(renderChunk, 0);
             } else {
+                clearTimeout(safetyTimeout);
                 requestAnimationFrame(() => {
                     this._restoreAvailableScrollPosition(savedScroll);
                     this.updateSelectAllCheckboxes();
                     this._waitForTagsToAppear();
-                    this.hideActionSplash();
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
                 });
             }
         };
 
-        requestAnimationFrame(renderChunk);
+        // Start rendering immediately
+        renderChunk();
     },
     
     // Wait for tags to actually appear in DOM before hiding splash
@@ -3869,9 +3882,9 @@ const TagManager = {
             return;
         }
         
-        // Aggressive timeout: hide splash after 2 seconds max, regardless of tag count
+        // Aggressive timeout: hide splash after 1 second max, regardless of tag count
         const forceHideTimeout = setTimeout(() => {
-            verboseLog('Force hiding splash after 2 second timeout');
+            verboseLog('Force hiding splash after 1 second timeout');
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
@@ -3879,10 +3892,10 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
             }
-        }, 2000);
+        }, 1000);
         
         let attempts = 0;
-        const maxAttempts = 20; // 2 seconds max (20 * 100ms) - reduced for faster response
+        const maxAttempts = 10; // 1 second max (10 * 100ms) - reduced for faster response
         let lastTagCount = 0;
         let stableCount = 0; // Count how many times tag count has been stable
         
@@ -6635,7 +6648,8 @@ const TagManager = {
             // OPTIMIZATION: Use fast_load parameter for initial load to skip slow lineage alignment
             // This dramatically speeds up tag loading when cached data is available
             const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
-            const fastLoadParam = isInitialLoad ? '&fast_load=1' : '';
+            // Always use fast_load for better performance - lineage can be aligned later if needed
+            const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
             let response;
@@ -6647,14 +6661,14 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // Increased timeout from 10s to 20s to accommodate slower lineage alignment queries
-                    const timeoutId = setTimeout(() => controller.abort(), 20000);
+                    // Reduced timeout since fast_load should be much faster
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
                     // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Use fast_load on first attempt for initial loads
-                    const fastParam = (retryCount === 0 && isInitialLoad) ? fastLoadParam : '';
+                    // Always use fast_load for better performance
+                    const fastParam = fastLoadParam;
                     response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}`, {
                         signal: controller.signal
                     });
@@ -6799,6 +6813,13 @@ const TagManager = {
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
                 
+                // Hide splash immediately after fast load
+                if (this.hideActionSplash) {
+                    setTimeout(() => {
+                        this.hideActionSplash();
+                    }, 100);
+                }
+                
                 // Optionally refresh with lineage alignment in background (non-blocking)
                 // This ensures lineage is eventually aligned without blocking initial display
                 setTimeout(async () => {
@@ -6854,6 +6875,13 @@ const TagManager = {
             // Update tag counts
             this.updateTagCount('available', tags.length);
             this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+            
+            // Safety timeout: always hide splash after 3 seconds even if tags don't appear
+            setTimeout(() => {
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+            }, 3000);
             
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');

@@ -7734,7 +7734,7 @@ def get_available_tags():
         force_full_refresh = False
         if lineage_update_ts:
             try:
-                force_full_refresh = (time.time() - float(lineage_update_ts)) < 600  # 10 minutes
+                force_full_refresh = (time.time() - float(lineage_update_ts)) < 300  # Reduced from 10 minutes to 5 minutes
             except Exception:
                 force_full_refresh = False
         if force_full_refresh:
@@ -7756,9 +7756,9 @@ def get_available_tags():
                 response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
                 return response
             
-            # Always do lineage alignment to ensure database lineage is applied (when not fast_load)
+            # Only do lineage alignment when not using fast_load - this is the slow part
             # This ensures tags always have the latest lineage from the database
-            lineage_alignment_needed = True
+            lineage_alignment_needed = not fast_load
             
             # Perform lineage alignment to assign/update lineage from database
             if lineage_alignment_needed:
