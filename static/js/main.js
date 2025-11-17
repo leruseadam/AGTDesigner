@@ -7419,12 +7419,85 @@ const TagManager = {
     showUploadRequiredNotification() {
         console.log('📢 Showing upload required notification');
         
-        // Create visible notification that works even without Bootstrap
+        // Find the upload section to place notification above it
+        const uploadSection = document.querySelector('.left-section') || document.querySelector('.file-path-display')?.parentElement;
+        
+        if (uploadSection) {
+            // Check if notification already exists
+            let existingNotification = uploadSection.querySelector('.upload-required-notification');
+            if (existingNotification) {
+                return; // Already showing
+            }
+            
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = 'upload-required-notification';
+            notification.style.cssText = `
+                width: 100%;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 0.75rem 1rem;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                margin-bottom: 0.75rem;
+                animation: slideDown 0.3s ease-out;
+            `;
+            notification.setAttribute('role', 'alert');
+            notification.setAttribute('aria-live', 'assertive');
+            
+            // Add CSS animation if not already added
+            if (!document.getElementById('upload-notification-animation-style')) {
+                const style = document.createElement('style');
+                style.id = 'upload-notification-animation-style';
+                style.textContent = `
+                    @keyframes slideDown {
+                        from {
+                            transform: translateY(-20px);
+                            opacity: 0;
+                        }
+                        to {
+                            transform: translateY(0);
+                            opacity: 1;
+                        }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            
+            notification.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; flex: 1;">
+                        <i class="fas fa-info-circle" style="margin-right: 0.5rem; font-size: 1rem;"></i>
+                        <span style="font-size: 0.9rem; font-weight: 500;">No file uploaded. Please upload an Excel file to get started.</span>
+                    </div>
+                    <button type="button" onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; margin-left: 0.5rem;">&times;</button>
+                </div>
+            `;
+            
+            // Insert before the file-path-display or at the beginning of upload section
+            const filePathDisplay = uploadSection.querySelector('.file-path-display');
+            if (filePathDisplay) {
+                uploadSection.insertBefore(notification, filePathDisplay);
+            } else {
+                uploadSection.insertBefore(notification, uploadSection.firstChild);
+            }
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 10000);
+            
+            return;
+        }
+        
+        // Fallback: Create visible notification that works even without Bootstrap (original position)
         const toastContainer = document.getElementById('toast-container') || (() => {
             const container = document.createElement('div');
             container.id = 'toast-container';
-            container.className = 'toast-container position-fixed top-0 end-0 p-3';
-            container.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 1055;';
+            container.className = 'toast-container position-fixed top-0 start-0 p-3';
+            container.style.cssText = 'position: fixed; top: 20px; left: 20px; z-index: 1055;';
             document.body.appendChild(container);
             return container;
         })();
