@@ -923,7 +923,7 @@ const TagManager = {
         _lastCleanup: Date.now()
     },
     SIMPLIFIED_RENDER_THRESHOLD: 900,
-    initialDataRetryDelays: [1500, 3500, 6000, 10000],
+    initialDataRetryDelays: [100, 300, 800], // PERFORMANCE FIX: Reduced from [1500, 3500, 6000, 10000] for faster retries
     isGenerating: false, // Add generation lock flag
 
     getAvailableTagsCacheKey() {
@@ -992,11 +992,16 @@ const TagManager = {
         }
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
-            verboseLog(`Hydrating ${cachedTags.length} tags from cache for instant display`);
+            verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache for instant display`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
             this.state.simplifiedAvailableTagsActive = false;
+            // PERFORMANCE FIX: Update state immediately for instant display
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
             this._updateAvailableTags(cachedTags, null);
+            // Update counts immediately
+            this.updateTagCount('available', cachedTags.length);
             return true;
         }
         return false;
@@ -6756,11 +6761,11 @@ const TagManager = {
             
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
-            
-            // OPTIMIZATION: Use fast_load parameter for initial load to skip slow lineage alignment
-            // This dramatically speeds up tag loading when cached data is available
+
+            // PERFORMANCE FIX: Always use fast_load by default to skip slow lineage alignment
+            // Backend will handle lineage alignment only when explicitly needed
             const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
-            const fastLoadParam = isInitialLoad ? '&fast_load=1' : '';
+            const fastLoadParam = '&fast_load=1'; // Always fast load for better performance
             
             // Add retry logic for failed requests
             let response;
@@ -6926,48 +6931,8 @@ const TagManager = {
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
                 
-                // Optionally refresh with lineage alignment in background (non-blocking)
-                // This ensures lineage is eventually aligned without blocking initial display
-                setTimeout(async () => {
-                    try {
-                        verboseLog('Background: Refreshing tags with lineage alignment...');
-                        const lineageResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=0`);
-                        if (lineageResponse.ok) {
-                            const lineageData = await lineageResponse.json();
-                            if (lineageData.tags && lineageData.tags.length > 0) {
-                                // Update tags with lineage-aligned data (source will be 'cache+db-lineage' or 'excel+db-lineage')
-                                if (lineageData.source && (lineageData.source.includes('lineage') || lineageData.source.includes('db-lineage'))) {
-                                    verboseLog(`Background: Updated ${lineageData.tags.length} tags with lineage alignment`);
-                                    this.state.tags = [...lineageData.tags];
-                                    this.state.originalTags = [...lineageData.tags];
-                                    // Only re-render if lineage data actually changed (to avoid flicker)
-                                    // Compare lineage values, not just tag names
-                                    let lineageChanged = false;
-                                    if (tags.length === lineageData.tags.length) {
-                                        for (let i = 0; i < tags.length; i++) {
-                                            const oldLin = (tags[i].Lineage || tags[i].canonical_lineage || '').toString().trim();
-                                            const newLin = (lineageData.tags[i].Lineage || lineageData.tags[i].canonical_lineage || '').toString().trim();
-                                            if (oldLin !== newLin) {
-                                                lineageChanged = true;
-                                                break;
-                                            }
-                                        }
-                                    } else {
-                                        lineageChanged = true;
-                                    }
-                                    
-                                    if (lineageChanged) {
-                                        // Update only the lineage fields in existing DOM without full re-render
-                                        // This is faster and avoids flicker
-                                        this._updateAvailableTags(lineageData.tags);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (bgError) {
-                        verboseLog('Background lineage alignment failed (non-critical):', bgError);
-                    }
-                }, 500); // Small delay to let UI settle
+                // PERFORMANCE FIX: Skip background lineage alignment to reduce server load
+                // Lineage is already correct from fast_load, no need for additional fetch
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');
@@ -7558,26 +7523,40 @@ const TagManager = {
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length > 0) {
             verboseLog(`⚡ FAST PATH: Loaded ${cachedTags.length} tags from cache instantly`);
-            // Keep splash visible while rendering cached tags
             // Render cached tags immediately for instant display
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
+            this.state.initialized = true; // CRITICAL: Mark as initialized to prevent redundant fetches
             this._updateAvailableTags(cachedTags);
+
+            // Update counts immediately
+            this.updateTagCount('available', cachedTags.length);
+
             // Wait for tags to appear before hiding splash
             if (this._waitForTagsToAppear) {
                 this._waitForTagsToAppear();
             }
 
-            // Continue loading fresh data in background (non-blocking)
-            verboseLog('Cache rendered, fetching fresh data in background...');
+            // PERFORMANCE FIX: Fetch fresh data in background but don't block UI
+            verboseLog('Cache rendered instantly, fetching fresh data in background...');
+            setTimeout(() => {
+                this.fetchAndUpdateAvailableTags().catch(err => {
+                    verboseLog('Background fetch failed (non-critical):', err);
+                });
+            }, 100); // Small delay to let UI render first
+
+            // Clear the retry timer since we have tags
+            this.clearInitialDataRetry();
+            this._checkingExistingData = false;
+            return; // Exit early - we have cached data showing
         }
 
-        // CRITICAL FIX: Increased timeout to 30 seconds to handle slow database queries
+        // PERFORMANCE FIX: Reduced timeout from 30s to 10s for faster failover
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 30000);
+            setTimeout(() => reject(new Error('Initialization timeout')), 10000);
         });
 
-        // Safety net: ensure loading overlay never blocks interaction for long
+        // PERFORMANCE FIX: Reduced safety net from 2s to 500ms for faster UI interactivity
         const splashSafetyTimeout = setTimeout(() => {
             // Always make UI interactive again quickly
             if (typeof this.hideActionSplash === 'function') {
@@ -7607,7 +7586,7 @@ const TagManager = {
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 2000); // 2 second safety net so "Loading tags" overlay never lingers
+        }, 500); // PERFORMANCE FIX: Reduced from 2000ms to 500ms for faster UI
 
         try {
             // Use the new initial-data endpoint for faster loading with timeout

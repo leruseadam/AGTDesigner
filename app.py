@@ -7735,9 +7735,14 @@ def get_available_tags():
         cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
         cached_tags = cache.get(cache_key) if not prefer_db else None
         
-        # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
-        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
-        
+        # PERFORMANCE FIX: Enable fast loading by default to skip slow lineage alignment
+        # Only do full lineage alignment when explicitly requested (fast_load=0)
+        fast_load_param = request.args.get('fast_load')
+        if fast_load_param == '0' or fast_load_param == 'false' or fast_load_param == 'False':
+            fast_load = False
+        else:
+            fast_load = True  # Default to fast load for better performance
+
         # If lineage was recently changed, force a full refresh even if fast_load requested
         lineage_update_ts = session.get('lineage_update_timestamp')
         force_full_refresh = False
@@ -7748,6 +7753,7 @@ def get_available_tags():
                 force_full_refresh = False
         if force_full_refresh:
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
+            fast_load = False  # Override fast_load when lineage was recently updated
         
         if cached_tags and not nocache:
             # OPTIMIZATION: Skip lineage alignment for fast loads - return cached tags immediately
