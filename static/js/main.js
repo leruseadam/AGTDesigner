@@ -10592,9 +10592,27 @@ async function handleJsonPasteInput(input) {
             if (matchResult.available_tags && matchResult.available_tags.length > 0 && 
                 matchResult.available_tags !== matchResult.selected_tags) {
                 verboseLog('Updating available tags with new data');
+                
+                // Show tag loading splash before updating tags
+                if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
+                    TagManager.showTagLoadingSplash('Loading tags...');
+                }
+                
                 TagManager._updateAvailableTags(matchResult.available_tags, null);
                 TagManager.saveAvailableTagsToCache(matchResult.available_tags || []);
                 TagManager.state.hydratedFromCache = false;
+                
+                // Wait for tags to appear in DOM before hiding splash
+                setTimeout(() => {
+                    if (typeof TagManager !== 'undefined' && TagManager._waitForTagsToAppear) {
+                        TagManager._waitForTagsToAppear();
+                    } else if (typeof TagManager !== 'undefined' && TagManager.hideTagLoadingSplash) {
+                        // Fallback: hide splash after a short delay if _waitForTagsToAppear is not available
+                        setTimeout(() => {
+                            TagManager.hideTagLoadingSplash();
+                        }, 500);
+                    }
+                }, 100);
             } else {
                 verboseLog('Skipping available tags update to avoid duplication');
             }
@@ -11384,6 +11402,12 @@ window.performJsonMatch = function() {
             }
             
             verboseLog(`Showing ${tagsToShow.length} items in available tags`);
+            
+            // Show tag loading splash before updating tags
+            if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
+                TagManager.showTagLoadingSplash('Loading tags...');
+            }
+            
             TagManager._updateAvailableTags(tagsToShow, null);
             
             // For JSON matching, we want to show all matched tags in available tags
@@ -11413,6 +11437,18 @@ window.performJsonMatch = function() {
                 
                 verboseLog(`✅ Auto-selected all ${TagManager.state.persistentSelectedTags.length} JSON matched tags`);
             }
+            
+            // Wait for tags to appear in DOM before hiding splash
+            setTimeout(() => {
+                if (typeof TagManager !== 'undefined' && TagManager._waitForTagsToAppear) {
+                    TagManager._waitForTagsToAppear();
+                } else if (typeof TagManager !== 'undefined' && TagManager.hideTagLoadingSplash) {
+                    // Fallback: hide splash after a short delay if _waitForTagsToAppear is not available
+                    setTimeout(() => {
+                        TagManager.hideTagLoadingSplash();
+                    }, 500);
+                }
+            }, 100);
             
             // Show a notification to the user
             const notificationDiv = document.createElement('div');
