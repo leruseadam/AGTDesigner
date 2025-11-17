@@ -61,6 +61,31 @@ if (fileInput) {
     console.log('🔄 File input change event fired');
     if (e.target.files && e.target.files.length > 0) {
       console.log('🎬 UPLOAD START: Showing splash immediately');
+      
+      // Show splash IMMEDIATELY before calling handleFiles
+      const splash = document.getElementById('excelLoadingSplash');
+      if (splash) {
+        console.log('🎬 Showing splash from file input change handler');
+        splash.classList.remove('fade-out', 'd-none', 'hidden');
+        splash.style.setProperty('display', 'flex', 'important');
+        splash.style.setProperty('z-index', '999999', 'important');
+        splash.style.setProperty('position', 'fixed', 'important');
+        splash.style.setProperty('top', '0', 'important');
+        splash.style.setProperty('left', '0', 'important');
+        splash.style.setProperty('width', '100%', 'important');
+        splash.style.setProperty('height', '100%', 'important');
+        splash.style.setProperty('visibility', 'visible', 'important');
+        splash.style.setProperty('opacity', '1', 'important');
+        splash.style.setProperty('background', 'rgba(0, 0, 0, 0.8)', 'important');
+        
+        const filenameElement = document.getElementById('excelLoadingFilename');
+        const statusElement = document.getElementById('excelLoadingStatus');
+        if (filenameElement) filenameElement.textContent = e.target.files[0].name;
+        if (statusElement) statusElement.textContent = 'Uploading file...';
+      } else {
+        console.error('❌ Splash element not found in file input handler');
+      }
+      
       handleFiles(e.target.files);
       // Prevent any other handlers from running
       e.stopPropagation();
