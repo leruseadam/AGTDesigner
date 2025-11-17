@@ -7183,6 +7183,14 @@ const TagManager = {
      */
     async refreshTagLists(options = {}) {
         const { preserveFilters = true, force = true } = options;
+        
+        // CRITICAL: Prevent duplicate calls
+        if (this._refreshingTagLists) {
+            verboseLog('⏭️ refreshTagLists already in progress, skipping duplicate call');
+            return;
+        }
+        
+        this._refreshingTagLists = true;
         verboseLog('=== refreshTagLists START ===', { preserveFilters, force });
 
         // Optionally preserve filters by skipping reset
@@ -7214,6 +7222,7 @@ const TagManager = {
             console.error('refreshTagLists error:', error);
             throw error;
         } finally {
+            this._refreshingTagLists = false;
             if (force) {
                 this._lastFetchTime = previousFetchTime;
             }
@@ -7483,15 +7492,29 @@ const TagManager = {
 
         // Check for current uploaded file from session (non-blocking, runs in parallel)
         // Use requestAnimationFrame to ensure it doesn't block the main thread
+        // Add timeout to prevent hanging
+        const fileCheckTimeout = setTimeout(() => {
+            verboseLog('File check timeout - proceeding without file data');
+            this._checkingExistingData = false;
+            if (this.hideTagLoadingSplash) {
+                this.hideTagLoadingSplash();
+            }
+        }, 10000); // 10 second timeout
+        
         requestAnimationFrame(() => {
-            fetch('/api/current-file')
+            const controller = new AbortController();
+            const fetchTimeout = setTimeout(() => controller.abort(), 8000); // 8 second timeout for fetch
+            
+            fetch('/api/current-file', { signal: controller.signal })
                 .then(fileResponse => {
+                    clearTimeout(fetchTimeout);
                     if (fileResponse.ok) {
                         return fileResponse.json();
                     }
                     return null;
                 })
                 .then(fileData => {
+                    clearTimeout(fileCheckTimeout);
                     if (fileData && fileData.success && fileData.has_file && fileData.filename) {
                         verboseLog(`Found uploaded file in session: ${fileData.filename}`);
                         // Use requestAnimationFrame for DOM updates to avoid blocking
@@ -7509,7 +7532,15 @@ const TagManager = {
                     }
                 })
                 .catch(error => {
-                    verboseLog('Error checking for current file:', error);
+                    clearTimeout(fileCheckTimeout);
+                    clearTimeout(fetchTimeout);
+                    if (error.name === 'AbortError') {
+                        verboseLog('File check timed out - proceeding without file data');
+                    } else {
+                        verboseLog('Error checking for current file:', error);
+                    }
+                    // Continue with tag loading even if file check fails
+                    this._checkingExistingData = false;
                 });
         });
 
@@ -7533,7 +7564,21 @@ const TagManager = {
         const attemptNumber = this.state.initialDataAttempts;
         const maxAttempts = retryDelays.length + 1;
         verboseLog(`[InitialData] Attempt ${attemptNumber}/${maxAttempts}`);
+        
+        // Add overall timeout to prevent infinite hanging
+        const overallTimeout = setTimeout(() => {
+            console.warn('[InitialData] Overall timeout (30s) - forcing completion');
+            this._checkingExistingData = false;
+            if (this.hideTagLoadingSplash) {
+                this.hideTagLoadingSplash();
+            }
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+        }, 30000); // 30 second overall timeout
+        
         if (attemptNumber > maxAttempts) {
+            clearTimeout(overallTimeout);
             console.warn(`[InitialData] Attempt limit exceeded (${maxAttempts}); falling back to direct tag load.`);
             // CRITICAL FIX: Fall back to direct tag loading instead of giving up
             verboseLog('Attempting direct tag load as fallback...');
@@ -7624,10 +7669,14 @@ const TagManager = {
 
         try {
             // Use the new initial-data endpoint for faster loading with timeout
+            const controller = new AbortController();
+            const fetchTimeout = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+            
             const response = await Promise.race([
-                fetch('/api/initial-data'),
+                fetch('/api/initial-data?t=' + Date.now(), { signal: controller.signal }),
                 timeoutPromise
             ]);
+            clearTimeout(fetchTimeout);
 
             if (response.ok) {
                 const data = await response.json();
@@ -7663,23 +7712,38 @@ const TagManager = {
                         }
                     }, 0);
 
-                    // Restore previously selected tags from backend
+                    // Restore previously selected tags from backend with timeout
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
                     verboseLog('About to fetch and update selected tags...');
-                    const selectedTagsResult = await this.fetchAndUpdateSelectedTags();
-                    verboseLog('fetchAndUpdateSelectedTags result:', selectedTagsResult);
-                    verboseLog('persistentSelectedTags after restore:', this.state.persistentSelectedTags);
+                    try {
+                        const selectedTagsResult = await Promise.race([
+                            this.fetchAndUpdateSelectedTags(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('Selected tags fetch timeout')), 10000))
+                        ]);
+                        verboseLog('fetchAndUpdateSelectedTags result:', selectedTagsResult);
+                        verboseLog('persistentSelectedTags after restore:', this.state.persistentSelectedTags);
+                    } catch (selectedTagsError) {
+                        verboseLog('Selected tags fetch failed or timed out:', selectedTagsError);
+                        // Continue even if selected tags fetch fails
+                    }
 
                     // Update filters (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(90, 'Setting up filters...');
                     setTimeout(() => {
-                        this.updateFilters(data.filters || {
-                            vendor: [],
-                            brand: [],
-                            productType: [],
-                            lineage: [],
-                            weight: []
-                        }, true); // Preserve existing values when loading initial data
+                        try {
+                            this.updateFilters(data.filters || {
+                                vendor: [],
+                                brand: [],
+                                productType: [],
+                                lineage: [],
+                                weight: []
+                            }, true); // Preserve existing values when loading initial data
+                        } catch (filterError) {
+                            verboseLog('Filter update failed:', filterError);
+                        }
+                        // Clear timeout and mark as complete
+                        clearTimeout(overallTimeout);
+                        this._checkingExistingData = false;
                     }, 0);
 
                     // Update file info text to show the loaded filename
@@ -7724,6 +7788,8 @@ const TagManager = {
                     return;
                 }
             } else {
+                clearTimeout(overallTimeout);
+                clearTimeout(splashSafetyTimeout);
                 verboseLog('Initial data endpoint returned error:', response.status);
                 // Complete splash loading on error
                 if (typeof this.hideActionSplash === 'function') {
@@ -7734,7 +7800,6 @@ const TagManager = {
                 }
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
-                clearTimeout(splashSafetyTimeout);
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
@@ -7743,6 +7808,8 @@ const TagManager = {
                 return;
             }
         } catch (error) {
+            clearTimeout(overallTimeout);
+            clearTimeout(splashSafetyTimeout);
             verboseLog('Error loading initial data:', error.message);
             
             // Handle timeout specifically

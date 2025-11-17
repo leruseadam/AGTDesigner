@@ -443,45 +443,9 @@ async function handleFiles(files) {
         if (typeof TagManager !== 'undefined') {
           try {
             TagManager.clearUIStateForNewFile(true); // keep filters
-            // Kick off refresh without awaiting to prevent UI stall
-            setTimeout(() => {
-              if (TagManager.refreshTagLists) {
-                console.time('post-upload-refresh-async');
-                console.log('🔄 Starting tag refresh after Excel upload...');
-                TagManager.refreshTagLists({ preserveFilters: true, force: true })
-                  .then(() => {
-                    console.log('✅ Tag refresh complete after Excel upload');
-                  })
-                  .finally(() => console.timeEnd('post-upload-refresh-async'))
-                  .catch(err => {
-                    console.error('Async refreshTagLists failed', err);
-                    // Hide splash on error
-                    if (TagManager.hideTagLoadingSplash) {
-                      TagManager.hideTagLoadingSplash();
-                    }
-                    // Don't reload - just show error and let user retry
-                    showToast('error', 'Failed to refresh tags. Please try refreshing manually.');
-                  });
-              } else {
-                // Fallback individual fetches without await
-                console.log('⚠️ refreshTagLists not available, using fallback methods');
-                Promise.all([
-                  TagManager.fetchAndUpdateAvailableTags?.(),
-                  TagManager.fetchAndUpdateSelectedTags?.(),
-                  TagManager.fetchAndPopulateFilters?.()
-                ]).then(() => {
-                  console.log('✅ Fallback tag refresh complete');
-                  if (TagManager.hideTagLoadingSplash) {
-                    TagManager.hideTagLoadingSplash();
-                  }
-                }).catch(err => {
-                  console.error('Fallback tag refresh failed', err);
-                  if (TagManager.hideTagLoadingSplash) {
-                    TagManager.hideTagLoadingSplash();
-                  }
-                });
-              }
-            }, 0);
+            // CRITICAL: Don't call refreshTagLists here - let pollUploadStatus handle it
+            // This prevents duplicate calls when both upload handler and pollUploadStatus try to refresh
+            console.log('⏭️ Skipping immediate refresh - pollUploadStatus will handle it');
           } catch (e) {
             console.error('Post-upload async refresh setup failed', e);
             // Don't reload on error - just log it and let the user continue
@@ -704,6 +668,11 @@ modals.forEach(modal => {
 });
 
 // Poll upload status and update UI when processing is complete
+// Track if tags are currently being refreshed to prevent duplicate calls
+let _tagsRefreshing = false;
+let _lastRefreshTime = 0;
+const REFRESH_COOLDOWN = 2000; // 2 second cooldown between refreshes
+
 function pollUploadStatus(filename) {
   let pollCount = 0;
   const maxPolls = 120; // Poll for up to 2 minutes (120 * 1 second)
@@ -798,11 +767,25 @@ function pollUploadStatus(filename) {
         }
         
         // Fetch all updated data in parallel to avoid serial bottlenecks
+        // CRITICAL: Prevent duplicate refresh calls
+        const now = Date.now();
+        if (_tagsRefreshing || (now - _lastRefreshTime < REFRESH_COOLDOWN)) {
+          console.log('⏭️ Skipping duplicate tag refresh (already in progress or too soon)');
+          return;
+        }
+        
+        _tagsRefreshing = true;
+        _lastRefreshTime = now;
         console.time('post-ready-data-fetch');
         console.log('🔄 Starting tag refresh after file processing complete...');
-        if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
-          await TagManager.refreshTagLists({ preserveFilters: true, force: true });
-          console.log('✅ Tag refresh complete after file processing');
+        try {
+          if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
+            await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+            console.log('✅ Tag refresh complete after file processing');
+          }
+        } finally {
+          _tagsRefreshing = false;
+        }
         } else if (typeof TagManager !== 'undefined') {
           await Promise.all([
             // Available tags
