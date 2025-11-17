@@ -295,13 +295,37 @@ async function handleFiles(files) {
             pollUploadStatus(data.filename || file.name);
           } else {
             console.warn('pollUploadStatus function not available; using manual refresh');
-            // Show tag loading splash and refresh tags manually
+
+            // Hide Excel splash FIRST
+            const excelSplash = document.getElementById('excelLoadingSplash');
+            if (excelSplash) excelSplash.style.display = 'none';
+
+            // CRITICAL: Show tag loading splash immediately
+            console.log('🎬 Background processing mode, showing tag loading splash...');
             if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-              TagManager.showTagLoadingSplash('Loading tags...');
+              TagManager.showTagLoadingSplash('Loading tags from uploaded file...');
+            } else {
+              // Fallback if TagManager not available
+              const tagSplash = document.getElementById('tagLoadingSplash');
+              const statusElement = document.getElementById('tagLoadingStatus');
+              if (tagSplash) {
+                if (statusElement) statusElement.textContent = 'Loading tags from uploaded file...';
+                tagSplash.classList.remove('fade-out', 'd-none', 'hidden');
+                tagSplash.style.setProperty('display', 'flex', 'important');
+                tagSplash.style.setProperty('z-index', '999999', 'important');
+                tagSplash.style.setProperty('opacity', '1', 'important');
+                tagSplash.style.setProperty('visibility', 'visible', 'important');
+                console.log('✅ Tag loading splash shown (fallback method)');
+              }
             }
+
             setTimeout(() => {
+              console.log('🔄 Starting manual tag refresh...');
               if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
                 TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                  .then(() => {
+                    console.log('✅ Manual tag refresh complete');
+                  })
                   .catch(err => {
                     console.error('Manual refreshTagLists failed', err);
                     if (TagManager.hideTagLoadingSplash) {
@@ -309,9 +333,22 @@ async function handleFiles(files) {
                     }
                   });
               } else if (typeof TagManager !== 'undefined') {
-                TagManager.fetchAndUpdateAvailableTags?.();
-                TagManager.fetchAndUpdateSelectedTags?.();
-                TagManager.fetchAndPopulateFilters?.();
+                console.log('⚠️ Using fallback individual tag fetch methods');
+                Promise.all([
+                  TagManager.fetchAndUpdateAvailableTags?.(),
+                  TagManager.fetchAndUpdateSelectedTags?.(),
+                  TagManager.fetchAndPopulateFilters?.()
+                ]).then(() => {
+                  console.log('✅ Fallback tag refresh complete');
+                  if (TagManager.hideTagLoadingSplash) {
+                    TagManager.hideTagLoadingSplash();
+                  }
+                }).catch(err => {
+                  console.error('Fallback tag refresh failed', err);
+                  if (TagManager.hideTagLoadingSplash) {
+                    TagManager.hideTagLoadingSplash();
+                  }
+                });
               }
             }, 2000);
           }
@@ -343,12 +380,26 @@ async function handleFiles(files) {
         // Hide Excel splash and show tag loading splash before refreshing
         const splashEl = document.getElementById('excelLoadingSplash');
         if (splashEl) splashEl.style.display = 'none';
-        
-        // Show tag loading splash immediately after Excel upload completes
+
+        // CRITICAL: Show tag loading splash immediately and keep it visible
+        console.log('🎬 Excel upload complete, showing tag loading splash...');
         if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-          TagManager.showTagLoadingSplash('Loading tags...');
+          TagManager.showTagLoadingSplash('Loading tags from uploaded file...');
+        } else {
+          // Fallback if TagManager not available
+          const tagSplash = document.getElementById('tagLoadingSplash');
+          const statusElement = document.getElementById('tagLoadingStatus');
+          if (tagSplash) {
+            if (statusElement) statusElement.textContent = 'Loading tags from uploaded file...';
+            tagSplash.classList.remove('fade-out', 'd-none', 'hidden');
+            tagSplash.style.setProperty('display', 'flex', 'important');
+            tagSplash.style.setProperty('z-index', '999999', 'important');
+            tagSplash.style.setProperty('opacity', '1', 'important');
+            tagSplash.style.setProperty('visibility', 'visible', 'important');
+            console.log('✅ Tag loading splash shown (fallback method)');
+          }
         }
-        
+
         if (typeof TagManager !== 'undefined') {
           try {
             TagManager.clearUIStateForNewFile(true); // keep filters
@@ -356,7 +407,11 @@ async function handleFiles(files) {
             setTimeout(() => {
               if (TagManager.refreshTagLists) {
                 console.time('post-upload-refresh-async');
+                console.log('🔄 Starting tag refresh after Excel upload...');
                 TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                  .then(() => {
+                    console.log('✅ Tag refresh complete after Excel upload');
+                  })
                   .finally(() => console.timeEnd('post-upload-refresh-async'))
                   .catch(err => {
                     console.error('Async refreshTagLists failed', err);
@@ -369,9 +424,22 @@ async function handleFiles(files) {
                   });
               } else {
                 // Fallback individual fetches without await
-                TagManager.fetchAndUpdateAvailableTags?.();
-                TagManager.fetchAndUpdateSelectedTags?.();
-                TagManager.fetchAndPopulateFilters?.();
+                console.log('⚠️ refreshTagLists not available, using fallback methods');
+                Promise.all([
+                  TagManager.fetchAndUpdateAvailableTags?.(),
+                  TagManager.fetchAndUpdateSelectedTags?.(),
+                  TagManager.fetchAndPopulateFilters?.()
+                ]).then(() => {
+                  console.log('✅ Fallback tag refresh complete');
+                  if (TagManager.hideTagLoadingSplash) {
+                    TagManager.hideTagLoadingSplash();
+                  }
+                }).catch(err => {
+                  console.error('Fallback tag refresh failed', err);
+                  if (TagManager.hideTagLoadingSplash) {
+                    TagManager.hideTagLoadingSplash();
+                  }
+                });
               }
             }, 0);
           } catch (e) {
@@ -386,7 +454,9 @@ async function handleFiles(files) {
           // TagManager not available - try to show splash manually and fetch tags
           console.warn('TagManager not available, attempting manual tag refresh');
           const tagSplash = document.getElementById('tagLoadingSplash');
+          const statusElement = document.getElementById('tagLoadingStatus');
           if (tagSplash) {
+            if (statusElement) statusElement.textContent = 'Loading tags from uploaded file...';
             tagSplash.style.display = 'flex';
           }
           // Try to fetch tags manually
@@ -618,16 +688,43 @@ function pollUploadStatus(filename) {
         
         console.log('File processing complete, updating UI...');
 
-        // Show tag loading splash before fetching tags
-        if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-          TagManager.showTagLoadingSplash('Loading tags...');
+        // Hide Excel splash FIRST
+        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
+          TagManager.hideExcelLoadingSplash();
+        } else {
+          const s = document.getElementById('excelLoadingSplash');
+          if (s) s.style.display = 'none';
         }
-        
+
+        // CRITICAL: Show tag loading splash immediately and keep it visible
+        console.log('🎬 File processing complete, showing tag loading splash...');
+        if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
+          TagManager.showTagLoadingSplash('Loading tags from uploaded file...');
+        } else {
+          // Fallback if TagManager not available
+          const tagSplash = document.getElementById('tagLoadingSplash');
+          const statusElement = document.getElementById('tagLoadingStatus');
+          if (tagSplash) {
+            if (statusElement) statusElement.textContent = 'Loading tags from uploaded file...';
+            tagSplash.classList.remove('fade-out', 'd-none', 'hidden');
+            tagSplash.style.setProperty('display', 'flex', 'important');
+            tagSplash.style.setProperty('z-index', '999999', 'important');
+            tagSplash.style.setProperty('opacity', '1', 'important');
+            tagSplash.style.setProperty('visibility', 'visible', 'important');
+            console.log('✅ Tag loading splash shown (fallback method)');
+          }
+        }
+
+        // Show success toast
+        showToast('success', `File "${filename}" loaded successfully!`);
+
         // Fetch all updated data in parallel to avoid serial bottlenecks
         console.time('post-ready-data-fetch');
+        console.log('🔄 Starting tag refresh after file processing complete...');
         if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
           await TagManager.refreshTagLists({ preserveFilters: true, force: true });
-        } else {
+          console.log('✅ Tag refresh complete after file processing');
+        } else if (typeof TagManager !== 'undefined') {
           await Promise.all([
             // Available tags
             (async () => {
@@ -648,78 +745,33 @@ function pollUploadStatus(filename) {
               console.log('Filter options updated');
             })()
           ]);
+          console.log('✅ Fallback tag refresh complete');
+          // Hide splash after fallback completes
+          if (TagManager.hideTagLoadingSplash) {
+            TagManager.hideTagLoadingSplash();
+          }
+        } else {
+          // TagManager not available - try manual fetch
+          console.warn('TagManager not available, attempting manual tag refresh');
+          const tagSplash = document.getElementById('tagLoadingSplash');
+          await fetch('/api/available-tags')
+            .then(response => response.json())
+            .then(data => {
+              if (data.tags) {
+                console.log('Tags fetched manually:', data.tags.length);
+              }
+              if (tagSplash) {
+                tagSplash.style.display = 'none';
+              }
+            })
+            .catch(err => {
+              console.error('Manual tag fetch failed:', err);
+              if (tagSplash) {
+                tagSplash.style.display = 'none';
+              }
+            });
         }
         console.timeEnd('post-ready-data-fetch');
-        
-        // Hide Excel splash and show tag loading splash
-        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
-          TagManager.hideExcelLoadingSplash();
-        } else {
-          const s = document.getElementById('excelLoadingSplash');
-          if (s) s.style.display = 'none';
-        }
-        
-        // Show tag loading splash immediately after Excel upload completes
-        if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
-          TagManager.showTagLoadingSplash('Loading tags...');
-        }
-        
-        showToast('success', `File "${filename}" loaded successfully!`);
-        if (typeof TagManager !== 'undefined') {
-          try {
-            TagManager.clearUIStateForNewFile?.(true);
-            setTimeout(() => {
-              if (TagManager.refreshTagLists) {
-                TagManager.refreshTagLists({ preserveFilters: true, force: true })
-                  .catch(err => {
-                    console.error('refreshTagLists failed after poll-ready', err);
-                    // Hide splash on error
-                    if (TagManager.hideTagLoadingSplash) {
-                      TagManager.hideTagLoadingSplash();
-                    }
-                    // Don't reload - just show error and let user retry
-                    showToast('error', 'Failed to refresh tags. Please try refreshing manually.');
-                  });
-              } else {
-                TagManager.fetchAndUpdateAvailableTags?.();
-                TagManager.fetchAndUpdateSelectedTags?.();
-                TagManager.fetchAndPopulateFilters?.();
-              }
-            }, 0);
-          } catch (e) {
-            console.error('Async refresh setup failed after poll-ready', e);
-            // Don't reload on error - just log it
-            if (TagManager && TagManager.hideTagLoadingSplash) {
-              TagManager.hideTagLoadingSplash();
-            }
-          }
-        } else {
-          // TagManager not available - try to show splash manually and fetch tags
-          console.warn('TagManager not available after poll-ready, attempting manual tag refresh');
-          const tagSplash = document.getElementById('tagLoadingSplash');
-          if (tagSplash) {
-            tagSplash.style.display = 'flex';
-          }
-          // Try to fetch tags manually
-          setTimeout(() => {
-            fetch('/api/available-tags')
-              .then(response => response.json())
-              .then(data => {
-                if (data.tags) {
-                  console.log('Tags fetched manually:', data.tags.length);
-                }
-                if (tagSplash) {
-                  tagSplash.style.display = 'none';
-                }
-              })
-              .catch(err => {
-                console.error('Manual tag fetch failed:', err);
-                if (tagSplash) {
-                  tagSplash.style.display = 'none';
-                }
-              });
-          }, 100);
-        }
         
         return; // Stop polling
       } else if (data.status === 'error') {
