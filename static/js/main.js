@@ -6701,12 +6701,16 @@ const TagManager = {
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
 
-            // Only show splash if explicitly requested (e.g., during Excel uploads)
-            // Don't show on initial page load or cache hydration
+            // Show splash if tags aren't already visible (no cache or failed hydration)
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
                 verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
                 // No splash needed for cache hydration - tags are already visible
+            } else {
+                verboseLog('No cached tags available; showing loading splash...');
+                if (this.showTagLoadingSplash) {
+                    this.showTagLoadingSplash('Loading tags...');
+                }
             }
             
             // Preserve current scroll/anchor so refreshes don't jump the list
@@ -7446,7 +7450,11 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // No splash screen on initial load - only show during Excel uploads
+        // Show tag loading splash immediately to provide visual feedback
+        if (this.showTagLoadingSplash) {
+            this.showTagLoadingSplash('Populating inventory...');
+        }
+
         // Check for current uploaded file from session (non-blocking, runs in parallel)
         // Use requestAnimationFrame to ensure it doesn't block the main thread
         requestAnimationFrame(() => {
