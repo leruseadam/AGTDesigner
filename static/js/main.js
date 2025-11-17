@@ -2343,9 +2343,8 @@ const TagManager = {
         // Show loading splash for tag population
         const tagsToShow = filteredTags || originalTags;
         if (tagsToShow && tagsToShow.length > 0) {
-            // Show both splash screens to ensure visibility
-            this.showTagLoadingSplash('Loading tags...');
-            this.showActionSplash('Loading tags...');
+            // Don't show splash on initial load - only during Excel uploads
+            // Splash will be shown by enhanced-ui.js during uploads
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen
             const availableTagsContainer = document.getElementById('availableTags');
@@ -2952,13 +2951,8 @@ const TagManager = {
     _updateAvailableTags(originalTags, filteredTags = null) {
         // Show splash if we're loading tags and splash isn't already showing
         const tagsToShow = filteredTags || originalTags;
-        if (tagsToShow && tagsToShow.length > 0) {
-            // Check if splash is already visible to avoid flicker
-            const splash = document.getElementById('tagLoadingSplash');
-            if (!splash || splash.style.display === 'none' || !splash.style.display) {
-                this.showTagLoadingSplash('Loading tags...');
-            }
-        }
+        // Don't show splash on initial load - only during Excel uploads
+        // Splash will be shown by enhanced-ui.js during uploads
         
         // Windows optimization: Use requestAnimationFrame for smoother rendering
         if (isWindows) {
@@ -6622,20 +6616,12 @@ const TagManager = {
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
 
-            // Show tag loading splash IMMEDIATELY at the start to ensure user sees it
-            this.showTagLoadingSplash('Loading tags...');
-            // Also show action splash for consistency
-            this.showActionSplash('Loading tags...');
-
+            // Only show splash if explicitly requested (e.g., during Excel uploads)
+            // Don't show on initial page load or cache hydration
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
                 verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
-                // Even if tags are loaded from cache, keep splash visible briefly
-                // to show user that loading is happening, then _waitForTagsToAppear will hide it
-                setTimeout(() => {
-                    // Give tags a moment to render, then check if they're visible
-                    this._waitForTagsToAppear();
-                }, 100);
+                // No splash needed for cache hydration - tags are already visible
             }
             
             // Preserve current scroll/anchor so refreshes don't jump the list
@@ -7231,11 +7217,8 @@ const TagManager = {
         this.initializeEmptyState();
         AppLoadingSplash.nextStep(); // Templates loaded
         
-        // Show tag loading splash immediately when checking for existing data
-        // This ensures it's visible even if checkForExistingData is fast
-        this.showTagLoadingSplash('Loading tags...');
-        
         // Check if there's already data loaded (e.g., from a previous session or default file)
+        // No splash screen on initial load - only show during Excel uploads
         this.checkForExistingData();
         
         // Ensure all filters default to 'All' on page load
@@ -7418,10 +7401,7 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // Show loading splash IMMEDIATELY before any async operations
-        this.showTagLoadingSplash('Loading tags...');
-        this.showActionSplash('Loading tags...');
-
+        // No splash screen on initial load - only show during Excel uploads
         // Check for current uploaded file from session (non-blocking, runs in parallel)
         // Use requestAnimationFrame to ensure it doesn't block the main thread
         requestAnimationFrame(() => {
