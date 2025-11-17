@@ -3037,10 +3037,11 @@ const TagManager = {
         // Always update the current tags for display
         this.state.tags = [...tags];
         
+        // Lower threshold to use faster simplified rendering more often
         const shouldUseSimplified = !this.state.forceFullAvailableTagRender &&
             !this.state.isSearching &&
             !this.hasActiveFilters() &&
-            tags.length > this.SIMPLIFIED_RENDER_THRESHOLD;
+            tags.length > (this.SIMPLIFIED_RENDER_THRESHOLD || 100);
         this.state.simplifiedAvailableTagsActive = shouldUseSimplified;
         if (shouldUseSimplified) {
             verboseLog(`⚡ Simplified available-tag rendering enabled for ${tags.length} tags`);
@@ -3178,14 +3179,17 @@ const TagManager = {
                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                 return aName.localeCompare(bName);
             });
+            // Use DocumentFragment for batch DOM operations (faster)
+            const fragment = document.createDocumentFragment();
             sortedSimple.forEach(tag => {
-            // Use cleaned displayName for logging consistency
-            const displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
-            verboseLog('Creating tag element for:', displayName);
-            const tagElement = this.createTagElement(tag, false);
-            verboseLog('Tag element created:', tagElement);
-            tagList.appendChild(tagElement);
-        });
+                // Use cleaned displayName for logging consistency
+                const displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
+                verboseLog('Creating tag element for:', displayName);
+                const tagElement = this.createTagElement(tag, false);
+                verboseLog('Tag element created:', tagElement);
+                fragment.appendChild(tagElement);
+            });
+            tagList.appendChild(fragment);
                     // Atomically replace container content with built tags
                     requestAnimationFrame(() => {
                         availableTagsContainer.innerHTML = '';
@@ -3628,15 +3632,20 @@ const TagManager = {
                                 weightSection.appendChild(weightContent);
 
                                 // Add individual tags (sorted alphabetically by product name)
+                                // Use DocumentFragment for batch DOM operations (faster)
                                 const tagsToRender = [...tagArray].sort((a, b) => {
                                     const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
                                     const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                     return aName.localeCompare(bName);
                                 });
+                                
+                                // Use DocumentFragment for faster DOM insertion
+                                const fragment = document.createDocumentFragment();
                                 tagsToRender.forEach(tag => {
                                     const tagElement = this.createTagElement(tag, false);
-                                    weightContent.appendChild(tagElement);
+                                    fragment.appendChild(tagElement);
                                 });
+                                weightContent.appendChild(fragment);
                             });
                             
                             productTypeContent.appendChild(subcategorySection);
@@ -3733,15 +3742,20 @@ const TagManager = {
                             weightSection.appendChild(weightContent);
 
                             // Add individual tags (sorted alphabetically by product name)
+                            // Use DocumentFragment for batch DOM operations (faster)
                             const tagsToRender = [...tagArray].sort((a, b) => {
                                 const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
                                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                 return aName.localeCompare(bName);
                             });
+                            
+                            // Use DocumentFragment for faster DOM insertion
+                            const fragment = document.createDocumentFragment();
                             tagsToRender.forEach(tag => {
                                 const tagElement = this.createTagElement(tag, false);
-                                weightContent.appendChild(tagElement);
+                                fragment.appendChild(tagElement);
                             });
+                            weightContent.appendChild(fragment);
                         });
                     }
                 });
@@ -3749,18 +3763,21 @@ const TagManager = {
         });
 
         // Replace container content with built tags (this replaces any loading indicator)
-        availableTagsContainer.innerHTML = '';
-        availableTagsContainer.appendChild(tagList);
+        // Use requestAnimationFrame to prevent blocking the UI
+        requestAnimationFrame(() => {
+            availableTagsContainer.innerHTML = '';
+            availableTagsContainer.appendChild(tagList);
+            
+            // Restore previous scroll position after full rebuild
+            this._restoreAvailableScrollPosition(savedScroll);
 
-        // Restore previous scroll position after full rebuild
-        this._restoreAvailableScrollPosition(savedScroll);
-
-        // Add event listeners
-        this.updateSelectAllCheckboxes();
-        this.initializeSelectAllCheckbox();
-        
-        // Hide loading splash only after tags actually appear in DOM
-        this._waitForTagsToAppear();
+            // Add event listeners
+            this.updateSelectAllCheckboxes();
+            this.initializeSelectAllCheckbox();
+            
+            // Hide loading splash only after tags actually appear in DOM
+            this._waitForTagsToAppear();
+        });
     },
 
     renderSimplifiedAvailableTags(tags, savedScroll) {
@@ -8665,7 +8682,15 @@ const TagManager = {
         splash.style.setProperty('height', '100%', 'important');
         splash.style.setProperty('visibility', 'visible', 'important');
         splash.style.setProperty('opacity', '1', 'important');
-        splash.style.setProperty('pointer-events', 'auto', 'important');
+        // Allow pointer events on the splash content but not the overlay
+        // This prevents the splash from blocking the UI while still being visible
+        splash.style.setProperty('pointer-events', 'none', 'important');
+        
+        // Allow pointer events on the content container so it's interactive
+        const contentContainer = splash.querySelector('.tag-loading-container');
+        if (contentContainer) {
+            contentContainer.style.setProperty('pointer-events', 'auto', 'important');
+        }
         
         // Remove inline style="display: none" if present
         if (splash.hasAttribute('style')) {
