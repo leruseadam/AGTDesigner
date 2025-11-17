@@ -3,6 +3,58 @@
 
 // Immediately attach handlers - page should already be loaded
 console.log('🔧 Enhanced UI: Loading...');
+
+// Helper function to show Excel splash - callable from anywhere
+window.showExcelUploadSplash = function(fileName) {
+  console.log('🎬 showExcelUploadSplash called for:', fileName);
+  const splash = document.getElementById('excelLoadingSplash');
+  if (!splash) {
+    console.error('❌ excelLoadingSplash element not found!');
+    // Try again after a short delay
+    setTimeout(() => {
+      const retrySplash = document.getElementById('excelLoadingSplash');
+      if (retrySplash) {
+        window.showExcelUploadSplash(fileName);
+      } else {
+        console.error('❌ excelLoadingSplash still not found after retry');
+      }
+    }, 100);
+    return;
+  }
+  
+  console.log('✅ Splash element found, showing...');
+  splash.classList.remove('fade-out', 'd-none', 'hidden');
+  splash.style.setProperty('display', 'flex', 'important');
+  splash.style.setProperty('z-index', '999999', 'important');
+  splash.style.setProperty('position', 'fixed', 'important');
+  splash.style.setProperty('top', '0', 'important');
+  splash.style.setProperty('left', '0', 'important');
+  splash.style.setProperty('width', '100%', 'important');
+  splash.style.setProperty('height', '100%', 'important');
+  splash.style.setProperty('visibility', 'visible', 'important');
+  splash.style.setProperty('opacity', '1', 'important');
+  splash.style.setProperty('background', 'rgba(0, 0, 0, 0.8)', 'important');
+  
+  // Remove inline style="display: none" if present
+  if (splash.hasAttribute('style')) {
+    const currentStyle = splash.getAttribute('style');
+    if (currentStyle.includes('display: none')) {
+      splash.setAttribute('style', currentStyle.replace(/display:\s*none[;]?/gi, ''));
+    }
+  }
+  
+  const filenameElement = document.getElementById('excelLoadingFilename');
+  const statusElement = document.getElementById('excelLoadingStatus');
+  if (filenameElement) filenameElement.textContent = fileName || 'Processing...';
+  if (statusElement) statusElement.textContent = 'Uploading file...';
+  
+  // Force reflow
+  splash.offsetHeight;
+  void splash.offsetWidth;
+  
+  console.log('✅ Excel splash shown with display:', window.getComputedStyle(splash).display);
+};
+
 const fileDropZone = document.getElementById('fileDropZone');
 const fileInput = document.getElementById('fileInput');
 const currentFileInfo = document.getElementById('currentFileInfo');
@@ -63,27 +115,10 @@ if (fileInput) {
       console.log('🎬 UPLOAD START: Showing splash immediately');
       
       // Show splash IMMEDIATELY before calling handleFiles
-      const splash = document.getElementById('excelLoadingSplash');
-      if (splash) {
-        console.log('🎬 Showing splash from file input change handler');
-        splash.classList.remove('fade-out', 'd-none', 'hidden');
-        splash.style.setProperty('display', 'flex', 'important');
-        splash.style.setProperty('z-index', '999999', 'important');
-        splash.style.setProperty('position', 'fixed', 'important');
-        splash.style.setProperty('top', '0', 'important');
-        splash.style.setProperty('left', '0', 'important');
-        splash.style.setProperty('width', '100%', 'important');
-        splash.style.setProperty('height', '100%', 'important');
-        splash.style.setProperty('visibility', 'visible', 'important');
-        splash.style.setProperty('opacity', '1', 'important');
-        splash.style.setProperty('background', 'rgba(0, 0, 0, 0.8)', 'important');
-        
-        const filenameElement = document.getElementById('excelLoadingFilename');
-        const statusElement = document.getElementById('excelLoadingStatus');
-        if (filenameElement) filenameElement.textContent = e.target.files[0].name;
-        if (statusElement) statusElement.textContent = 'Uploading file...';
+      if (typeof window.showExcelUploadSplash === 'function') {
+        window.showExcelUploadSplash(e.target.files[0].name);
       } else {
-        console.error('❌ Splash element not found in file input handler');
+        console.error('❌ showExcelUploadSplash function not available');
       }
       
       handleFiles(e.target.files);
@@ -127,6 +162,11 @@ async function handleFiles(files) {
     // CRITICAL: Show Excel loading splash screen FIRST before anything else
     const splashStartTime = Date.now();
     console.log('🎬 UPLOAD: Showing splash IMMEDIATELY for:', file.name);
+    
+    // Use global function to show splash
+    if (typeof window.showExcelUploadSplash === 'function') {
+      window.showExcelUploadSplash(file.name);
+    }
     
     function showExcelSplash(splash, filenameElement, statusElement, fileName) {
       if (!splash) {
