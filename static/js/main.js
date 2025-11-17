@@ -7647,6 +7647,58 @@ const TagManager = {
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
+                    
+                    // Show notification that no file is uploaded
+                    setTimeout(() => {
+                        // Use proper Toast class if available, otherwise create visible notification
+                        if (window.Toast && typeof window.Toast.show === 'function' && window.Toast.show.toString().includes('toast-container')) {
+                            window.Toast.show('info', 'No file uploaded. Please upload an Excel file to get started.');
+                        } else {
+                            // Create visible Bootstrap toast notification
+                            const toastContainer = document.getElementById('toast-container') || (() => {
+                                const container = document.createElement('div');
+                                container.id = 'toast-container';
+                                container.className = 'toast-container position-fixed top-0 end-0 p-3';
+                                container.style.zIndex = '1055';
+                                document.body.appendChild(container);
+                                return container;
+                            })();
+                            
+                            const toast = document.createElement('div');
+                            toast.className = 'toast show';
+                            toast.setAttribute('role', 'alert');
+                            toast.setAttribute('aria-live', 'assertive');
+                            toast.setAttribute('aria-atomic', 'true');
+                            toast.innerHTML = `
+                                <div class="toast-header bg-info text-white">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong class="me-auto">Upload Required</strong>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+                                </div>
+                                <div class="toast-body">
+                                    No file uploaded. Please upload an Excel file to get started.
+                                </div>
+                            `;
+                            toastContainer.appendChild(toast);
+                            
+                            // Initialize Bootstrap toast if available
+                            if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
+                                const bsToast = new bootstrap.Toast(toast, { delay: 8000 });
+                                bsToast.show();
+                                
+                                // Remove toast element after it's hidden
+                                toast.addEventListener('hidden.bs.toast', () => {
+                                    toast.remove();
+                                });
+                            } else {
+                                // Fallback: auto-remove after 8 seconds
+                                setTimeout(() => {
+                                    toast.remove();
+                                }, 8000);
+                            }
+                        }
+                    }, 500);
+                    
                     this._checkingExistingData = false;
                     this.scheduleInitialDataRetry('Empty initial data response');
                     return;
@@ -7658,11 +7710,63 @@ const TagManager = {
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
                 
-                // FIXED: Initialize empty state instead of loading test data
-                this.initializeEmptyState();
-                this._checkingExistingData = false;
-                this.scheduleInitialDataRetry(`HTTP ${response.status}`);
-                return;
+            // FIXED: Initialize empty state instead of loading test data
+            this.initializeEmptyState();
+            
+            // Show notification that no file is uploaded
+            setTimeout(() => {
+                // Use proper Toast class if available, otherwise create visible notification
+                if (window.Toast && typeof window.Toast.show === 'function' && window.Toast.show.toString().includes('toast-container')) {
+                    window.Toast.show('info', 'No file uploaded. Please upload an Excel file to get started.');
+                } else {
+                    // Create visible Bootstrap toast notification
+                    const toastContainer = document.getElementById('toast-container') || (() => {
+                        const container = document.createElement('div');
+                        container.id = 'toast-container';
+                        container.className = 'toast-container position-fixed top-0 end-0 p-3';
+                        container.style.zIndex = '1055';
+                        document.body.appendChild(container);
+                        return container;
+                    })();
+                    
+                    const toast = document.createElement('div');
+                    toast.className = 'toast show';
+                    toast.setAttribute('role', 'alert');
+                    toast.setAttribute('aria-live', 'assertive');
+                    toast.setAttribute('aria-atomic', 'true');
+                    toast.innerHTML = `
+                        <div class="toast-header bg-info text-white">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong class="me-auto">Upload Required</strong>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+                        </div>
+                        <div class="toast-body">
+                            No file uploaded. Please upload an Excel file to get started.
+                        </div>
+                    `;
+                    toastContainer.appendChild(toast);
+                    
+                    // Initialize Bootstrap toast if available
+                    if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
+                        const bsToast = new bootstrap.Toast(toast, { delay: 8000 });
+                        bsToast.show();
+                        
+                        // Remove toast element after it's hidden
+                        toast.addEventListener('hidden.bs.toast', () => {
+                            toast.remove();
+                        });
+                    } else {
+                        // Fallback: auto-remove after 8 seconds
+                        setTimeout(() => {
+                            toast.remove();
+                        }, 8000);
+                    }
+                }
+            }, 500);
+            
+            this._checkingExistingData = false;
+            this.scheduleInitialDataRetry(`HTTP ${response.status}`);
+            return;
             }
         } catch (error) {
             verboseLog('Error loading initial data:', error.message);
@@ -7680,6 +7784,60 @@ const TagManager = {
             
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
+            
+            // Show notification that no file is uploaded (only if not a timeout)
+            if (error.message !== 'Initialization timeout') {
+                setTimeout(() => {
+                    // Use proper Toast class if available, otherwise create visible notification
+                    if (window.Toast && typeof window.Toast.show === 'function' && window.Toast.show.toString().includes('toast-container')) {
+                        window.Toast.show('info', 'No file uploaded. Please upload an Excel file to get started.');
+                    } else {
+                        // Create visible Bootstrap toast notification
+                        const toastContainer = document.getElementById('toast-container') || (() => {
+                            const container = document.createElement('div');
+                            container.id = 'toast-container';
+                            container.className = 'toast-container position-fixed top-0 end-0 p-3';
+                            container.style.zIndex = '1055';
+                            document.body.appendChild(container);
+                            return container;
+                        })();
+                        
+                        const toast = document.createElement('div');
+                        toast.className = 'toast show';
+                        toast.setAttribute('role', 'alert');
+                        toast.setAttribute('aria-live', 'assertive');
+                        toast.setAttribute('aria-atomic', 'true');
+                        toast.innerHTML = `
+                            <div class="toast-header bg-info text-white">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong class="me-auto">Upload Required</strong>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+                            </div>
+                            <div class="toast-body">
+                                No file uploaded. Please upload an Excel file to get started.
+                            </div>
+                        `;
+                        toastContainer.appendChild(toast);
+                        
+                        // Initialize Bootstrap toast if available
+                        if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
+                            const bsToast = new bootstrap.Toast(toast, { delay: 8000 });
+                            bsToast.show();
+                            
+                            // Remove toast element after it's hidden
+                            toast.addEventListener('hidden.bs.toast', () => {
+                                toast.remove();
+                            });
+                        } else {
+                            // Fallback: auto-remove after 8 seconds
+                            setTimeout(() => {
+                                toast.remove();
+                            }, 8000);
+                        }
+                    }
+                }, 500);
+            }
+            
             this._checkingExistingData = false;
             this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
             return;

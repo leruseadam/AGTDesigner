@@ -7955,7 +7955,8 @@ def get_available_tags():
                 logging.info(f"✅ Set prefer_db=True to force database query")
         
         # If we have tags from Excel, prefer them but align lineage with database values
-        if all_tags and not prefer_db:
+        # OPTIMIZATION: Skip lineage alignment when fast_load is requested for faster response
+        if all_tags and not prefer_db and not fast_load:
             try:
                 store_name = get_current_store_name()
                 if not store_name:
@@ -8146,12 +8147,13 @@ def get_available_tags():
             except Exception as cache_error:
                 logging.warning(f"Unable to persist Excel tag cache: {cache_error}")
             elapsed = (time.time() - start_time) * 1000
-            logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
+            source_tag = 'excel-fast' if fast_load else 'excel+db-lineage'
+            logging.info(f"✅ Available tags ({source_tag}) completed ({elapsed:.1f}ms)")
             
             response_payload = {
                 'tags': safe_excel_tags,
                 'total_count': len(safe_excel_tags),
-                'source': 'excel+db-lineage'
+                'source': source_tag
             }
             if force_full_refresh:
                 session['lineage_update_timestamp'] = 0
