@@ -708,6 +708,25 @@ function pollUploadStatus(filename) {
   let pollCount = 0;
   const maxPolls = 120; // Poll for up to 2 minutes (120 * 1 second)
   
+  // Show tag loading splash immediately when polling starts
+  // This ensures user sees feedback during the entire waiting period
+  console.log('🎬 Polling started, showing tag loading splash...');
+  if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
+    TagManager.showTagLoadingSplash('Processing file and loading tags...');
+  } else {
+    // Fallback: show tag loading splash directly
+    const tagSplash = document.getElementById('tagLoadingSplash');
+    if (tagSplash) {
+      tagSplash.classList.remove('fade-out', 'd-none', 'hidden');
+      tagSplash.style.setProperty('display', 'flex', 'important');
+      tagSplash.style.setProperty('z-index', '999999', 'important');
+      tagSplash.style.setProperty('visibility', 'visible', 'important');
+      tagSplash.style.setProperty('opacity', '1', 'important');
+      const statusEl = document.getElementById('tagLoadingStatus');
+      if (statusEl) statusEl.textContent = 'Processing file and loading tags...';
+    }
+  }
+  
   const poll = async () => {
     try {
       const response = await fetch(`/api/upload-status?filename=${encodeURIComponent(filename)}`);
@@ -715,6 +734,19 @@ function pollUploadStatus(filename) {
       
       console.log(`Upload status for ${filename}: ${data.status}`);
       console.log('Upload status response:', data);
+      
+      // Update splash status during polling
+      if (data.status === 'processing') {
+        if (typeof TagManager !== 'undefined' && TagManager.showTagLoadingSplash) {
+          TagManager.showTagLoadingSplash('Processing file...');
+        } else {
+          const tagSplash = document.getElementById('tagLoadingSplash');
+          const statusEl = document.getElementById('tagLoadingStatus');
+          if (tagSplash && statusEl) {
+            statusEl.textContent = 'Processing file...';
+          }
+        }
+      }
       
       if (data.status === 'ready') {
         // File processing is complete, fetch updated data
