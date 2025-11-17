@@ -8325,10 +8325,17 @@ def get_available_tags():
                             logging.info(f"Total products in database: {total_count}")
                             
                             # Get available columns dynamically to avoid SQL errors
-                            logging.info("Getting column info...")
-                            cursor.execute("PRAGMA table_info(products)")
-                            available_columns = [row[1] for row in cursor.fetchall()]
-                            logging.info(f"Found {len(available_columns)} columns in products table")
+                            # PERFORMANCE FIX: Cache column info to avoid repeated PRAGMA calls
+                            cache_key_columns = f'db_columns_{product_db.db_path}'
+                            available_columns = cache.get(cache_key_columns)
+                            if not available_columns:
+                                logging.info("Getting column info...")
+                                cursor.execute("PRAGMA table_info(products)")
+                                available_columns = [row[1] for row in cursor.fetchall()]
+                                cache.set(cache_key_columns, available_columns, timeout=3600)  # Cache for 1 hour
+                                logging.info(f"Found {len(available_columns)} columns in products table")
+                            else:
+                                logging.info(f"Using cached column info ({len(available_columns)} columns)")
                             
                             # Filter to only columns we want, excluding internal ones
                             columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
@@ -8339,14 +8346,25 @@ def get_available_tags():
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                             
                             # Try to join with strains table, but prefer products.Lineage over strains.canonical_lineage
-                            lineage_query_join_by_name = f'''
-                                SELECT {quoted_columns}, 
-                                       COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
-                                FROM products p
-                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                ORDER BY p.id DESC
-                                LIMIT 10000
-                            '''
+                            # PERFORMANCE FIX: Reduce limit to 5000 for faster queries, skip JOIN if fast_load enabled
+                            query_limit = 5000 if fast_load else 10000
+                            if fast_load:
+                                # Skip the expensive LEFT JOIN for fast loads - just get product data
+                                lineage_query_join_by_name = f'''
+                                    SELECT {quoted_columns}, p."Lineage" AS preferred_lineage
+                                    FROM products p
+                                    ORDER BY p.id DESC
+                                    LIMIT {query_limit}
+                                '''
+                            else:
+                                lineage_query_join_by_name = f'''
+                                    SELECT {quoted_columns},
+                                           COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
+                                    FROM products p
+                                    LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                    ORDER BY p.id DESC
+                                    LIMIT {query_limit}
+                                '''
                             
                             # Fallback query if strains table/join fails
                             lineage_query_fallback = f'''
