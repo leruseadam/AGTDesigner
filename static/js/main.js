@@ -5596,7 +5596,7 @@ const TagManager = {
             if (currentTagNames.size === newTagNames.size && 
                 [...currentTagNames].every(name => newTagNames.has(name))) {
                 verboseLog('updateSelectedTags: No changes detected, skipping update');
-                console.timeEnd('updateSelectedTags');
+                // Don't call console.timeEnd here - we haven't started timing yet
                 return;
             }
         }
@@ -5604,6 +5604,12 @@ const TagManager = {
         // Dispatch event to notify drag and drop manager that tag updates are starting
         document.dispatchEvent(new CustomEvent('updateSelectedTags'));
         
+        // Clear any existing timer before starting a new one to avoid warnings
+        try {
+            console.timeEnd('updateSelectedTags');
+        } catch (e) {
+            // Timer doesn't exist, that's fine
+        }
         console.time('updateSelectedTags');
         verboseLog('updateSelectedTags called with tags:', tags);
 

@@ -14917,39 +14917,28 @@ def get_initial_data():
                     session.pop('file_path', None)
                     session.pop('uploaded_filename', None)
             
-            # If still no data after checking session, try default file
+            # If still no data after checking session, don't load default file
+            # Only return data if user explicitly uploaded a file
             if excel_processor.df is None or excel_processor.df.empty:
-                logging.info("No uploaded file found - attempting to load default file")
-                from src.core.data.excel_processor import get_default_upload_file
-
-                # Get the current store
-                has_store = has_store_selection()
-                selected_store = get_current_store_name() if has_store else None
-                logging.info(f"📍 has_store_selection() = {has_store}")
-                logging.info(f"📍 Current store name = {selected_store}")
-
-                # Get default file for this store
-                default_file = get_default_upload_file(selected_store)
-                logging.info(f"📍 Default file returned: {default_file}")
-                
-                if default_file:
-                    try:
-                        logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
-                        excel_processor.load_file(default_file)
-                        excel_processor._last_loaded_file = default_file
-                        logging.info(f"Default file loaded successfully")
-                    except Exception as e:
-                        logging.error(f"Failed to load default file: {e}")
-                        return jsonify({
-                            'success': False,
-                            'message': f'Failed to load default file: {str(e)}'
-                        })
-                else:
-                    logging.warning("No default file found")
-                    return jsonify({
-                        'success': False,
-                        'message': 'No default file found and no data currently loaded'
-                    })
+                logging.info("No uploaded file found in session - returning empty state (no default file loading)")
+                return jsonify({
+                    'success': True,
+                    'data_loaded': False,
+                    'message': 'No file uploaded yet',
+                    'available_tags': [],
+                    'selected_tags': [],
+                    'filters': {
+                        'vendor': [],
+                        'brand': [],
+                        'productType': [],
+                        'lineage': [],
+                        'weight': [],
+                        'strain': [],
+                        'doh': [],
+                        'highCbd': []
+                    },
+                    'total_records': 0
+                })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
