@@ -11793,7 +11793,38 @@
             body: formData
           });
 
-          const data = await response.json();
+          let data;
+          if (response.ok) {
+            try {
+              data = await response.json();
+            } catch (jsonError) {
+              // Response is ok but not JSON - unexpected
+              if (splash) splash.style.display = 'none';
+              alert('Upload response error: Server returned invalid data');
+              console.error('Upload failed - non-JSON response from server:', jsonError);
+              return;
+            }
+          } else {
+            // Response is not ok - try to get error message
+            // Clone response before reading so we can try both JSON and text if needed
+            const clonedResponse = response.clone();
+            try {
+              data = await response.json();
+            } catch (jsonError) {
+              // Response is not JSON - might be HTML error page
+              try {
+                const errorText = await clonedResponse.text();
+                if (splash) splash.style.display = 'none';
+                alert(`Upload failed (${response.status}): ${response.statusText || 'Server error'}`);
+                console.error('Upload failed - non-JSON error response:', errorText.substring(0, 200));
+              } catch (textError) {
+                if (splash) splash.style.display = 'none';
+                alert(`Upload failed (${response.status}): ${response.statusText || 'Server error'}`);
+                console.error('Upload failed - could not read response:', textError);
+              }
+              return;
+            }
+          }
 
           if (response.ok && data.success) {
             // Hide splash screen and show success message
@@ -11806,13 +11837,21 @@
             if (window.updateUploadNotificationBanner) {
               window.updateUploadNotificationBanner();
             }
+
+            // Start polling for file processing status
+            if (typeof pollUploadStatus === 'function') {
+              pollUploadStatus(file.name);
+            }
           } else {
             if (splash) splash.style.display = 'none';
-            alert('Upload failed: ' + (data.error || 'Unknown error'));
+            const errorMsg = data.error || data.message || 'Unknown error';
+            alert('Upload failed: ' + errorMsg);
+            console.error('Upload failed:', data);
           }
         } catch (error) {
           if (splash) splash.style.display = 'none';
-          alert('Upload failed: ' + error.message);
+          alert('Upload failed: ' + (error.message || 'Network error - please check your connection and try again'));
+          console.error('Upload error:', error);
         }
       });
 

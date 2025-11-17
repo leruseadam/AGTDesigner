@@ -1134,11 +1134,11 @@ def get_excel_processor():
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
                             # Try to load the default file for the selected store
                             selected_store = get_current_store_name() if has_store_selection() else None
-                            logging.info(f"🔍 TRACE get_excel_processor: Current store = {selected_store}")
+                            log_if_not_pa('debug', f"Current store: {selected_store}")
                             default_file = get_default_upload_file(selected_store)
-                            logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file}")
+                            log_if_not_pa('debug', f"Default file: {default_file}")
                             if default_file and os.path.exists(default_file):
-                                logging.info(f"Loading default file in get_excel_processor: {default_file}")
+                                log_if_not_pa('info', f"Loading default file: {default_file}")
                                 # Use fast loading mode for better performance
                                 success = _excel_processor.load_file(default_file)
                                 if success:
@@ -1316,15 +1316,15 @@ def get_product_database(store_name=None):
 
     if needs_reload:
         from src.core.data.product_database import ProductDatabase
-        logging.info(f"📦 Loading database for store '{effective_store}' from: {db_path}")
+        log_if_not_pa('info', f"Loading database for store '{effective_store}'")
         _product_database = ProductDatabase(db_path)
         _product_database._store_name = effective_store
         if getattr(_product_database, 'db_path', db_path) != db_path:
             logging.warning(f"ProductDatabase db_path mismatch: {_product_database.db_path} != {db_path}")
-        logging.info(f"✅ ProductDatabase created with db_path: {_product_database.db_path}")
+        log_if_not_pa('info', f"ProductDatabase created: {_product_database.db_path}")
         _product_database.init_database()
         if os.path.exists(db_path):
-            logging.info(f"✅ ProductDatabase loaded for store '{effective_store}' at: {db_path}")
+            log_if_not_pa('info', f"ProductDatabase loaded for store '{effective_store}'")
 
     return _product_database
 
@@ -1573,7 +1573,7 @@ def create_app():
             
             # Log the error
             try:
-                logging.error(f"❌ 500 ERROR: {error_type}: {error_msg}")
+                log_error(f"500 ERROR: {error_type}: {error_msg}")
                 logging.error(f"Full traceback:\n{error_traceback}")
             except:
                 pass  # Don't fail if logging fails
@@ -1621,7 +1621,7 @@ def create_app():
         except Exception as handler_error:
             # If error handler itself fails, return minimal JSON
             try:
-                logging.error(f"❌ CRITICAL: Error handler failed: {handler_error}")
+                log_error(f"Error handler failed: {handler_error}")
                 import traceback
                 logging.error(f"Error handler traceback: {traceback.format_exc()}")
             except:
@@ -2046,10 +2046,10 @@ class LabelMakerApp:
                 for test_port in range(8001, 8011):
                     if self._is_port_available(test_port):
                         port = test_port
-                        logging.info(f"✅ Found available port: {port}")
+                        log_if_not_pa('info', f"Found available port: {port}")
                         break
                 else:
-                    logging.error("❌ No available ports found in range 8001-8010")
+                    log_error("No available ports found in range 8001-8010")
                     return
         except Exception as e:
             logging.debug(f"Port check failed (this is normal): {e}")
@@ -2106,7 +2106,7 @@ def get_session_excel_processor():
                 # File already loaded by get_excel_processor() above - just verify
                 if hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None and not g.excel_processor.df.empty:
                     row_count = len(g.excel_processor.df)
-                    logging.info(f"✅ Session file already loaded by get_excel_processor(): {session_file_path} ({row_count} rows)")
+                    log_if_not_pa('info', f"Session file already loaded: {row_count} rows")
                 else:
                     logging.warning(f"⚠️ Session file not loaded by get_excel_processor(), DataFrame is empty")
             elif session_file_path:
@@ -2566,7 +2566,7 @@ def index():
                              uploaded_filename=uploaded_filename)
         
     except Exception as e:
-        logging.error(f"❌ CRITICAL ERROR in index route: {str(e)}")
+        log_error(f"CRITICAL ERROR in index route: {str(e)}")
         logging.error(f"Index route traceback: {traceback.format_exc()}")
         # Ensure cache_bust and store variables are always available
         try:
@@ -2578,7 +2578,7 @@ def index():
             return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
         except Exception as template_error:
             # If template rendering also fails, return a simple error page
-            logging.error(f"❌ Template rendering also failed: {template_error}")
+            log_error(f"Template rendering also failed: {template_error}")
             return f"""
             <html>
             <head><title>Error</title></head>
@@ -2617,7 +2617,7 @@ def upload_file():
     start_time = time.time()
     
     try:
-        logging.info("=== UPLOAD START ===")
+        log_if_not_pa('info', "=== UPLOAD START ===")
         
         # DIAGNOSTIC: Log IP and session state
         ip_address = get_client_ip()
@@ -2826,7 +2826,7 @@ def upload_file():
             
             # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
             _excel_processor = None
-            logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
+            log_if_not_pa('info', "Cleared Excel processor cache")
             
             # CRITICAL: Clear ALL caches to force complete refresh
             try:
@@ -2844,25 +2844,25 @@ def upload_file():
                 try:
                     legacy_cache_key = get_session_cache_key('available_tags_')
                     cache.delete(legacy_cache_key)
-                    logging.info(f"✅ Cleared legacy cache: available_tags_")
+                    log_if_not_pa('info', "Cleared legacy cache")
                 except:
                     pass
                 
                 for key_base in cache_keys_to_clear:
                     cache_key = get_session_cache_key(key_base)
                     cache.delete(cache_key)
-                    logging.info(f"✅ Cleared cache: {key_base}")
+                    log_if_not_pa('info', f"Cleared cache: {key_base}")
             except Exception as cache_err:
                 logging.warning(f"Failed to clear cache: {cache_err}")
             
             # CRITICAL: Verify session file path is set correctly
-            logging.info(f"✅ Session file_path after upload: {session.get('file_path')}")
-            logging.info(f"✅ Uploaded file saved at: {file_path}")
+            log_if_not_pa('debug', f"Session file_path after upload: {session.get('file_path')}")
+            log_if_not_pa('info', f"Uploaded file saved: {file.filename}")
 
             update_processing_status(file.filename, 'ready')
             
             upload_time = time.time() - start_time
-            logging.info(f"=== UPLOAD COMPLETE (instant): {upload_time:.3f}s ===")
+            log_if_not_pa('info', f"Upload complete: {upload_time:.3f}s")
             
             response_data = {
                 'success': True,
