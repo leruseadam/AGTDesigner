@@ -116,55 +116,23 @@ def cleanup_memory():
     """Cleanup memory by clearing caches and forcing garbage collection."""
     try:
         import gc
+        gc.collect()
         
         # Clear Flask cache if available
         if hasattr(app, 'cache') and app.cache:
-            try:
-                app.cache.clear()
-            except Exception as e:
-                logging.warning(f"Could not clear Flask cache: {e}")
-        
-        # Clear Excel processor dataframes from memory
-        try:
-            if hasattr(app, '_excel_processors'):
-                for processor in app._excel_processors.values():
-                    if hasattr(processor, 'df') and processor.df is not None:
-                        processor.df = None
-        except Exception as e:
-            logging.warning(f"Could not clear Excel processors: {e}")
-        
-        # Force garbage collection multiple times to ensure cleanup
-        for _ in range(3):
-            gc.collect()
+            app.cache.clear()
             
-        memory_after = get_memory_usage()
-        logging.info(f"Memory cleanup completed. Current usage: {memory_after:.1f}MB")
         return True
     except Exception as e:
         logging.error(f"Memory cleanup failed: {e}")
         return False
 
-# Track last cleanup time to avoid excessive cleanup
-_last_memory_cleanup = 0
-_cleanup_interval = 300  # Clean up every 5 minutes
-
 def check_memory_limit():
-    """Check if memory usage is within limits and trigger cleanup if needed."""
-    global _last_memory_cleanup
-    
+    """Check if memory usage is within limits."""
     memory_mb = get_memory_usage()
-    
-    # If memory is high, trigger cleanup
-    if memory_mb > MAX_MEMORY_MB * 0.8:  # 80% of limit
-        current_time = time.time()
-        # Only cleanup if it's been at least 5 minutes since last cleanup
-        if current_time - _last_memory_cleanup > _cleanup_interval:
-            logging.warning(f"Memory usage high ({memory_mb:.1f}MB), triggering cleanup")
-            cleanup_memory()
-            _last_memory_cleanup = current_time
-    
     if memory_mb > MAX_MEMORY_MB:
         logging.warning(f"Memory usage high: {memory_mb:.1f}MB (limit: {MAX_MEMORY_MB}MB)")
+        cleanup_memory()
         return False
     return True
 
@@ -302,16 +270,6 @@ from werkzeug.utils import secure_filename
 # Performance optimizations
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
-
-# Simplified logging for PythonAnywhere - reduce verbosity
-def log_if_not_pa(level, message, *args, **kwargs):
-    """Only log if not on PythonAnywhere to reduce log verbosity"""
-    if not IS_PYTHONANYWHERE:
-        getattr(logging, level)(message, *args, **kwargs)
-
-def log_error(message, *args, **kwargs):
-    """Simplified error logging - always log errors but keep them concise"""
-    logging.error(message, *args, **kwargs)
 
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Honour environment override so PythonAnywhere can skip the heavy Excel scan
@@ -1045,18 +1003,20 @@ def cleanup_old_processing_status():
     """Clean up old processing status entries to prevent memory leaks."""
     with processing_lock:
         current_time = time.time()
-        # Reduced from 15 minutes to 5 minutes to save memory
-        cutoff_time = current_time - 300  # 5 minutes
+        # Keep entries for at least 15 minutes to give frontend time to poll
+        cutoff_time = current_time - 900  # 15 minutes
         
         old_entries = []
         for filename, status in processing_status.items():
             timestamp = processing_timestamps.get(filename, 0)
             age = current_time - timestamp
             
-            # Only remove entries that are older than 5 minutes AND not currently processing
-            # Reduced 'ready' status timeout from 60 minutes to 10 minutes to save memory
+            # Only remove entries that are older than 15 minutes AND not currently processing
+            # Also, be more conservative with 'ready' status to prevent race conditions
             if age > cutoff_time and status != 'processing':
-                if status == 'ready' and age < 600:  # 10 minutes for ready status (reduced from 60)
+                # For 'ready' status, wait much longer to ensure frontend has completed
+                # Increased from 30 minutes to 60 minutes to prevent race conditions
+                if status == 'ready' and age < 3600:  # 60 minutes for ready status
                     continue
                 old_entries.append(filename)
         
@@ -1130,60 +1090,45 @@ def get_excel_processor():
                     from flask import session
                     try:
                         session_file_path = session.get('file_path')
-                        log_if_not_pa('debug', f"Session file_path: {session_file_path}")
-                        log_if_not_pa('debug', f"Session keys: {list(session.keys())}")
+                        logging.info(f"🔍 DEBUG: Session file_path = {session_file_path}")
+                        logging.info(f"🔍 DEBUG: Session keys = {list(session.keys())}")
                     except RuntimeError:
                         # No active request context during startup
                         session_file_path = None
-                        log_if_not_pa('debug', "No request context, session_file_path = None")
+                        logging.info("🔍 DEBUG: No request context, session_file_path = None")
                     
                     if session_file_path and os.path.exists(session_file_path):
-                        log_if_not_pa('info', f"Found uploaded file in session: {session_file_path}")
-                        
-                        # CRITICAL: Always force reload if session file is different from loaded file
-                        # This ensures new uploads replace old data
-                        current_loaded_file = getattr(_excel_processor, '_last_loaded_file', None)
-                        if current_loaded_file != session_file_path:
-                            log_if_not_pa('info', f"🔄 Session has different file ({session_file_path}) than loaded ({current_loaded_file}) - forcing reload")
-                            # Clear existing data first
-                            if hasattr(_excel_processor, 'df') and _excel_processor.df is not None:
-                                _excel_processor.df = pd.DataFrame()
-                                _excel_processor._last_loaded_file = None
-                            if hasattr(_excel_processor, 'selected_tags'):
-                                _excel_processor.selected_tags = []
-                            # Clear file cache to ensure fresh load
-                            if hasattr(_excel_processor, '_file_cache'):
-                                _excel_processor._file_cache.clear()
+                        logging.info(f"✅ CRITICAL FIX: Found uploaded file in session: {session_file_path}")
                         
                         # Check if already loaded to avoid reprocessing
                         if _excel_processor._last_loaded_file == session_file_path and hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
-                            log_if_not_pa('info', f"File already loaded, skipping reload")
+                            logging.info(f"⚡ File already loaded, skipping reload: {session_file_path}")
                             row_count = len(_excel_processor.df)
-                            log_if_not_pa('info', f"Using cached data: {row_count} rows")
+                            logging.info(f"✅ Using cached data: {row_count} rows")
                         else:
                             # Load the uploaded file instead of clearing the DataFrame
-                            log_if_not_pa('info', f"Loading session file: {session_file_path}")
+                            logging.info(f"📂 Loading session file: {session_file_path}")
                             success = _excel_processor.load_file(session_file_path)
                             if success:
                                 _excel_processor._last_loaded_file = session_file_path
-                                log_if_not_pa('info', f"Loaded session file: {session_file_path}")
+                                logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
                                 row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
-                                log_if_not_pa('info', f"Loaded {row_count} rows")
+                                logging.info(f"✅ Loaded {row_count} rows from session file")
                             else:
-                                log_error(f"Failed to load session file: {session_file_path}")
+                                logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
                                 _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
                     elif session_file_path:
-                        log_error(f"Session file_path exists but file not found: {session_file_path}")
+                        logging.error(f"❌ Session file_path exists but file not found: {session_file_path}")
                     else:
                         # OPTIMIZATION: Skip default file loading on startup for faster app loading
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
                             # Try to load the default file for the selected store
                             selected_store = get_current_store_name() if has_store_selection() else None
-                            log_if_not_pa('debug', f"Current store: {selected_store}")
+                            logging.info(f"🔍 TRACE get_excel_processor: Current store = {selected_store}")
                             default_file = get_default_upload_file(selected_store)
-                            log_if_not_pa('debug', f"Default file: {default_file}")
+                            logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file}")
                             if default_file and os.path.exists(default_file):
-                                log_if_not_pa('info', f"Loading default file: {default_file}")
+                                logging.info(f"Loading default file in get_excel_processor: {default_file}")
                                 # Use fast loading mode for better performance
                                 success = _excel_processor.load_file(default_file)
                                 if success:
@@ -1361,15 +1306,15 @@ def get_product_database(store_name=None):
 
     if needs_reload:
         from src.core.data.product_database import ProductDatabase
-        log_if_not_pa('info', f"Loading database for store '{effective_store}'")
+        logging.info(f"📦 Loading database for store '{effective_store}' from: {db_path}")
         _product_database = ProductDatabase(db_path)
         _product_database._store_name = effective_store
         if getattr(_product_database, 'db_path', db_path) != db_path:
             logging.warning(f"ProductDatabase db_path mismatch: {_product_database.db_path} != {db_path}")
-        log_if_not_pa('info', f"ProductDatabase created: {_product_database.db_path}")
+        logging.info(f"✅ ProductDatabase created with db_path: {_product_database.db_path}")
         _product_database.init_database()
         if os.path.exists(db_path):
-            log_if_not_pa('info', f"ProductDatabase loaded for store '{effective_store}'")
+            logging.info(f"✅ ProductDatabase loaded for store '{effective_store}' at: {db_path}")
 
     return _product_database
 
@@ -1618,7 +1563,7 @@ def create_app():
             
             # Log the error
             try:
-                log_error(f"500 ERROR: {error_type}: {error_msg}")
+                logging.error(f"❌ 500 ERROR: {error_type}: {error_msg}")
                 logging.error(f"Full traceback:\n{error_traceback}")
             except:
                 pass  # Don't fail if logging fails
@@ -1666,7 +1611,7 @@ def create_app():
         except Exception as handler_error:
             # If error handler itself fails, return minimal JSON
             try:
-                log_error(f"Error handler failed: {handler_error}")
+                logging.error(f"❌ CRITICAL: Error handler failed: {handler_error}")
                 import traceback
                 logging.error(f"Error handler traceback: {traceback.format_exc()}")
             except:
@@ -1732,12 +1677,7 @@ app = create_app()
 
 # Initialize Flask-Caching after app creation (if available)
 if CACHE_AVAILABLE:
-    # Reduced cache timeout and added memory limits
-    cache = Cache(app, config={
-        'CACHE_TYPE': 'SimpleCache', 
-        'CACHE_DEFAULT_TIMEOUT': 900,  # 15 minutes (reduced from 5 minutes default, but individual caches use 900)
-        'CACHE_THRESHOLD': 1000  # Limit cache to 1000 items max
-    })
+    cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 300})
 else:
     cache = Cache()  # Use dummy cache
 
@@ -1810,35 +1750,19 @@ def check_session_size():
         # Check size of serializable data
         import pickle
         session_data = pickle.dumps(session_copy)
-        session_size_mb = len(session_data) / (1024 * 1024)
-        
-        # Reduced limit from 3KB to check for MB-level issues
         if len(session_data) > 3000:  # 3KB limit to stay well under 4KB
-            logging.warning(f"Session too large ({len(session_data)} bytes / {session_size_mb:.2f}MB), clearing session data")
+            logging.warning(f"Session too large ({len(session_data)} bytes), clearing session data")
             # Store essential data before clearing
             selected_tags = session.get('selected_tags', [])
             selected_store = session.get('selected_store', '')
-            file_path = session.get('file_path', '')
-            
-            # Limit selected_tags to prevent huge sessions
-            if len(selected_tags) > 1000:
-                logging.warning(f"Selected tags list too large ({len(selected_tags)}), truncating to 1000")
-                selected_tags = selected_tags[:1000]
-            
             session.clear()
             # Restore essential data after clearing
             if selected_tags:
                 session['selected_tags'] = selected_tags
             if selected_store:
                 session['selected_store'] = selected_store
-            if file_path:
-                session['file_path'] = file_path
-            logging.info(f"Preserved {len(selected_tags)} selected tags during session optimization")
+                logging.info(f"Preserved {len(selected_tags)} selected tags during session optimization")
             return True
-        
-        # Also check for MB-level issues (even if under 3KB limit)
-        if session_size_mb > 1.0:  # If session is > 1MB, log warning
-            logging.warning(f"Session size is {session_size_mb:.2f}MB - consider optimizing")
     except Exception as e:
         logging.error(f"Error checking session size: {e}")
     return False
@@ -2112,10 +2036,10 @@ class LabelMakerApp:
                 for test_port in range(8001, 8011):
                     if self._is_port_available(test_port):
                         port = test_port
-                        log_if_not_pa('info', f"Found available port: {port}")
+                        logging.info(f"✅ Found available port: {port}")
                         break
                 else:
-                    log_error("No available ports found in range 8001-8010")
+                    logging.error("❌ No available ports found in range 8001-8010")
                     return
         except Exception as e:
             logging.debug(f"Port check failed (this is normal): {e}")
@@ -2172,7 +2096,7 @@ def get_session_excel_processor():
                 # File already loaded by get_excel_processor() above - just verify
                 if hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None and not g.excel_processor.df.empty:
                     row_count = len(g.excel_processor.df)
-                    log_if_not_pa('info', f"Session file already loaded: {row_count} rows")
+                    logging.info(f"✅ Session file already loaded by get_excel_processor(): {session_file_path} ({row_count} rows)")
                 else:
                     logging.warning(f"⚠️ Session file not loaded by get_excel_processor(), DataFrame is empty")
             elif session_file_path:
@@ -2632,7 +2556,7 @@ def index():
                              uploaded_filename=uploaded_filename)
         
     except Exception as e:
-        log_error(f"CRITICAL ERROR in index route: {str(e)}")
+        logging.error(f"❌ CRITICAL ERROR in index route: {str(e)}")
         logging.error(f"Index route traceback: {traceback.format_exc()}")
         # Ensure cache_bust and store variables are always available
         try:
@@ -2644,7 +2568,7 @@ def index():
             return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
         except Exception as template_error:
             # If template rendering also fails, return a simple error page
-            log_error(f"Template rendering also failed: {template_error}")
+            logging.error(f"❌ Template rendering also failed: {template_error}")
             return f"""
             <html>
             <head><title>Error</title></head>
@@ -2683,22 +2607,23 @@ def upload_file():
     start_time = time.time()
     
     try:
-        log_if_not_pa('info', "=== UPLOAD START ===")
+        logging.info("=== UPLOAD START ===")
         
         # DIAGNOSTIC: Log IP and session state
         ip_address = get_client_ip()
         session_store = session.get('selected_store')
-        log_if_not_pa('debug', f"Upload diagnostics: IP={ip_address}, Session store={session_store}")
-        log_if_not_pa('debug', f"Request headers: X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}")
+        logging.info(f"🔍 Upload diagnostics: IP={ip_address}, Session store={session_store}")
+        logging.info(f"🔍 Request headers: X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}, Remote-Addr={request.remote_addr}")
         
         # CRITICAL: Require store selection before upload
         if not has_store_selection():
-            log_error(f"Upload attempted without store selection - IP: {ip_address}")
+            logging.error(f"❌ Upload attempted without store selection - IP: {ip_address}, Session: {session_store}")
+            logging.error(f"❌ IP store selections: {list(_ip_store_selections.keys())}")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
         
         # Get current store selection
         selected_store = get_current_store_name()
-        log_if_not_pa('info', f"Store selection: {selected_store}")
+        logging.info(f"✅ Store selection found: {selected_store}")
         
         # Validate request
         if 'file' not in request.files:
@@ -2741,25 +2666,25 @@ def upload_file():
         safe_filename = f"{timestamp}_{file.filename}"
         file_path = os.path.join(uploads_dir, safe_filename)
         
-        log_if_not_pa('debug', f"Saving file to: {file_path}")
-        log_if_not_pa('debug', f"Uploads directory exists: {os.path.exists(uploads_dir)}")
+        logging.info(f"🔍 Attempting to save file to: {file_path}")
+        logging.info(f"🔍 Uploads directory: {uploads_dir}")
+        logging.info(f"🔍 Directory exists: {os.path.exists(uploads_dir)}")
         
         try:
             file.save(file_path)
-            log_if_not_pa('info', f"File saved: {file_path}")
+            logging.info(f"✅ File save completed: {file_path}")
         except Exception as save_error:
-            log_error(f"File save failed: {save_error}")
-            if not IS_PYTHONANYWHERE:
-                logging.error(traceback.format_exc())
+            logging.error(f"❌ File save failed: {save_error}")
+            logging.error(traceback.format_exc())
             return jsonify({'error': f'File save failed: {str(save_error)}'}), 500
         
         # Verify saved
         if not os.path.exists(file_path):
-            log_error(f"File does not exist after save: {file_path}")
+            logging.error(f"❌ File does not exist after save: {file_path}")
             return jsonify({'error': 'File save failed - file not found after save'}), 500
         else:
             file_size = os.path.getsize(file_path)
-            log_if_not_pa('info', f"File verified: {file_size} bytes")
+            logging.info(f"✅ File verified: {file_path} ({file_size} bytes)")
         
         # Update session with permanent flag for persistence
         session.permanent = True
@@ -2776,15 +2701,17 @@ def upload_file():
         except:
             pass
         
-        log_if_not_pa('debug', f"Session updated: file_path={file_path}, filename={file.filename}")
+        logging.info(f"✅ Session updated and saved: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
+        logging.info(f"✅ Session data: {dict(session)}")
         
         # CRITICAL: Verify session was saved by reading it back
         verify_file_path = session.get('file_path')
         verify_filename = session.get('uploaded_filename')
         if verify_file_path == file_path and verify_filename == file.filename:
-            log_if_not_pa('debug', "Session verified: file_path and filename saved")
+            logging.info(f"✅ SESSION VERIFIED: file_path and filename saved correctly")
         else:
-            log_error(f"Session verification failed: file_path={verify_file_path}, expected={file_path}")
+            logging.error(f"❌ SESSION VERIFICATION FAILED: file_path={verify_file_path}, filename={verify_filename}")
+            logging.error(f"❌ Expected file_path={file_path}, filename={file.filename}")
         
         # Mark as processing
         update_processing_status(file.filename, 'processing')
@@ -2794,7 +2721,7 @@ def upload_file():
         
         if is_pythonanywhere:
             # On PythonAnywhere: Start background thread to avoid timeout
-            log_if_not_pa('info', "[PYTHONANYWHERE] Starting background processing thread")
+            logging.info("[PYTHONANYWHERE] Starting background processing thread")
 
             # Capture variables from request context for background thread
             original_filename = file.filename
@@ -2802,35 +2729,23 @@ def upload_file():
 
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
             _excel_processor = None
-            log_if_not_pa('info', "Cleared Excel processor cache")
+            logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
 
             # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
             # Background processing will handle database storage and cache clearing
             update_processing_status(file.filename, 'ready')
-            log_if_not_pa('info', f"Marked {file.filename} as ready")
+            logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
 
             def process_in_background():
                 try:
-                    log_if_not_pa('info', f"Processing file: {file_path}")
+                    logging.info(f"[BACKGROUND] Processing file: {file_path}")
 
-                    # CRITICAL: Get a fresh processor instance for the new file
-                    # Clear any cached data first
-                    global _excel_processor
-                    _excel_processor = None
-                    
                     processor = get_excel_processor()
-                    # Force clear any existing data before loading new file
-                    if hasattr(processor, 'df') and processor.df is not None:
-                        processor.df = pd.DataFrame()
-                        processor._last_loaded_file = None
-                    # CRITICAL: Clear selected tags when loading new file
-                    if hasattr(processor, 'selected_tags'):
-                        processor.selected_tags = []
                     success = processor.load_file(file_path)
 
                     if success:
                         row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        log_if_not_pa('info', f"File loaded: {row_count} rows")
+                        logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
 
                         # Store in database
                         try:
@@ -2839,13 +2754,13 @@ def upload_file():
                             product_db = get_product_database(store_name)
 
                             if product_db and hasattr(product_db, 'store_excel_data'):
-                                log_if_not_pa('info', f"Storing {row_count} products in database")
+                                logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
                                 result = product_db.store_excel_data(processor.df, file_path)
-                                log_if_not_pa('info', f"Database storage: {result}")
+                                logging.info(f"[BACKGROUND] Database storage result: {result}")
                         except Exception as db_error:
-                            log_error(f"Database storage failed: {db_error}")
+                            logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
 
-                        log_if_not_pa('info', "Excel processor cache cleared")
+                        logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
 
                         # CRITICAL: Clear ALL caches to force complete refresh
                         try:
@@ -2860,20 +2775,19 @@ def upload_file():
                             for key_base in cache_keys_to_clear:
                                 cache_key = get_session_cache_key(key_base)
                                 cache.delete(cache_key)
-                                log_if_not_pa('info', f"Cleared cache: {key_base}")
+                                logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
                         except Exception as cache_err:
-                            log_error(f"Failed to clear cache: {cache_err}")
+                            logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
                         # Already marked as ready above, so frontend doesn't wait
-                        log_if_not_pa('info', f"Processing complete: {original_filename}")
+                        logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
                     else:
-                        log_error("Background file load returned False")
+                        logging.error("[BACKGROUND] File load returned False")
                         update_processing_status(original_filename, 'error: File load failed')
 
                 except Exception as e:
-                    log_error(f"Background processing error: {e}")
-                    if not IS_PYTHONANYWHERE:
-                        logging.error(traceback.format_exc())
+                    logging.error(f"[BACKGROUND] Processing error: {e}")
+                    logging.error(traceback.format_exc())
                     update_processing_status(original_filename, f'error: {str(e)}')
 
             # Start background thread
@@ -2904,13 +2818,7 @@ def upload_file():
             
             # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
             _excel_processor = None
-            log_if_not_pa('info', "Cleared Excel processor cache")
-            
-            # CRITICAL: Clear selected tags in session when uploading new file
-            if 'selected_tags' in session:
-                session['selected_tags'] = []
-                session.modified = True
-                log_if_not_pa('info', "Cleared selected tags in session for new file upload")
+            logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
             
             # CRITICAL: Clear ALL caches to force complete refresh
             try:
@@ -2928,25 +2836,25 @@ def upload_file():
                 try:
                     legacy_cache_key = get_session_cache_key('available_tags_')
                     cache.delete(legacy_cache_key)
-                    log_if_not_pa('info', "Cleared legacy cache")
+                    logging.info(f"✅ Cleared legacy cache: available_tags_")
                 except:
                     pass
                 
                 for key_base in cache_keys_to_clear:
                     cache_key = get_session_cache_key(key_base)
                     cache.delete(cache_key)
-                    log_if_not_pa('info', f"Cleared cache: {key_base}")
+                    logging.info(f"✅ Cleared cache: {key_base}")
             except Exception as cache_err:
                 logging.warning(f"Failed to clear cache: {cache_err}")
             
             # CRITICAL: Verify session file path is set correctly
-            log_if_not_pa('debug', f"Session file_path after upload: {session.get('file_path')}")
-            log_if_not_pa('info', f"Uploaded file saved: {file.filename}")
+            logging.info(f"✅ Session file_path after upload: {session.get('file_path')}")
+            logging.info(f"✅ Uploaded file saved at: {file_path}")
 
             update_processing_status(file.filename, 'ready')
             
             upload_time = time.time() - start_time
-            log_if_not_pa('info', f"Upload complete: {upload_time:.3f}s")
+            logging.info(f"=== UPLOAD COMPLETE (instant): {upload_time:.3f}s ===")
             
             response_data = {
                 'success': True,
@@ -7819,14 +7727,9 @@ def get_available_tags():
         cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
         cached_tags = cache.get(cache_key) if not prefer_db else None
         
-        # PERFORMANCE FIX: Enable fast loading by default to skip slow lineage alignment
-        # Only do full lineage alignment when explicitly requested (fast_load=0)
-        fast_load_param = request.args.get('fast_load')
-        if fast_load_param == '0' or fast_load_param == 'false' or fast_load_param == 'False':
-            fast_load = False
-        else:
-            fast_load = True  # Default to fast load for better performance
-
+        # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
+        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        
         # If lineage was recently changed, force a full refresh even if fast_load requested
         lineage_update_ts = session.get('lineage_update_timestamp')
         force_full_refresh = False
@@ -7837,7 +7740,6 @@ def get_available_tags():
                 force_full_refresh = False
         if force_full_refresh:
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
-            fast_load = False  # Override fast_load when lineage was recently updated
         
         if cached_tags and not nocache:
             # OPTIMIZATION: Skip lineage alignment for fast loads - return cached tags immediately
@@ -8376,17 +8278,10 @@ def get_available_tags():
                             logging.info(f"Total products in database: {total_count}")
                             
                             # Get available columns dynamically to avoid SQL errors
-                            # PERFORMANCE FIX: Cache column info to avoid repeated PRAGMA calls
-                            cache_key_columns = f'db_columns_{product_db.db_path}'
-                            available_columns = cache.get(cache_key_columns)
-                            if not available_columns:
-                                logging.info("Getting column info...")
-                                cursor.execute("PRAGMA table_info(products)")
-                                available_columns = [row[1] for row in cursor.fetchall()]
-                                cache.set(cache_key_columns, available_columns, timeout=3600)  # Cache for 1 hour
-                                logging.info(f"Found {len(available_columns)} columns in products table")
-                            else:
-                                logging.info(f"Using cached column info ({len(available_columns)} columns)")
+                            logging.info("Getting column info...")
+                            cursor.execute("PRAGMA table_info(products)")
+                            available_columns = [row[1] for row in cursor.fetchall()]
+                            logging.info(f"Found {len(available_columns)} columns in products table")
                             
                             # Filter to only columns we want, excluding internal ones
                             columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
@@ -8397,25 +8292,14 @@ def get_available_tags():
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                             
                             # Try to join with strains table, but prefer products.Lineage over strains.canonical_lineage
-                            # PERFORMANCE FIX: Reduce limit to 5000 for faster queries, skip JOIN if fast_load enabled
-                            query_limit = 5000 if fast_load else 10000
-                            if fast_load:
-                                # Skip the expensive LEFT JOIN for fast loads - just get product data
-                                lineage_query_join_by_name = f'''
-                                    SELECT {quoted_columns}, p."Lineage" AS preferred_lineage
-                                    FROM products p
-                                    ORDER BY p.id DESC
-                                    LIMIT {query_limit}
-                                '''
-                            else:
-                                lineage_query_join_by_name = f'''
-                                    SELECT {quoted_columns},
-                                           COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
-                                    FROM products p
-                                    LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                    ORDER BY p.id DESC
-                                    LIMIT {query_limit}
-                                '''
+                            lineage_query_join_by_name = f'''
+                                SELECT {quoted_columns}, 
+                                       COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
+                                FROM products p
+                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                ORDER BY p.id DESC
+                                LIMIT 10000
+                            '''
                             
                             # Fallback query if strains table/join fails
                             lineage_query_fallback = f'''
@@ -8810,18 +8694,8 @@ def set_selected_tags():
             return jsonify({'error': 'Server error: Unable to initialize data processor'}), 500
         
         # Store tags in both Excel processor and session
-        # Limit session storage to prevent memory issues
         excel_processor.selected_tags = selected_tags
-        
-        # Only store up to 2000 tags in session to prevent memory bloat
-        # Full list is stored in Excel processor which is more efficient
-        if len(selected_tags) > 2000:
-            logging.warning(f"Selected tags list large ({len(selected_tags)}), storing only first 2000 in session")
-            session['selected_tags'] = selected_tags[:2000]
-            session['selected_tags_count'] = len(selected_tags)  # Store full count
-        else:
-            session['selected_tags'] = selected_tags
-        
+        session['selected_tags'] = selected_tags
         session.modified = True
         session.permanent = True
         
@@ -12702,41 +12576,6 @@ def trend_analysis():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/clear-cache', methods=['POST'])
-@app.route('/api/memory/cleanup', methods=['POST'])
-def manual_memory_cleanup():
-    """Manually trigger memory cleanup"""
-    try:
-        memory_before = get_memory_usage()
-        cleanup_memory()
-        memory_after = get_memory_usage()
-        freed = memory_before - memory_after
-        
-        return jsonify({
-            'success': True,
-            'memory_before_mb': round(memory_before, 2),
-            'memory_after_mb': round(memory_after, 2),
-            'freed_mb': round(freed, 2),
-            'message': f'Memory cleanup completed. Freed {freed:.1f}MB'
-        })
-    except Exception as e:
-        logging.error(f"Manual memory cleanup failed: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/memory/status', methods=['GET'])
-def memory_status():
-    """Get current memory usage status"""
-    try:
-        memory_mb = get_memory_usage()
-        return jsonify({
-            'memory_usage_mb': round(memory_mb, 2),
-            'memory_limit_mb': MAX_MEMORY_MB,
-            'usage_percent': round((memory_mb / MAX_MEMORY_MB) * 100, 1),
-            'status': 'ok' if memory_mb < MAX_MEMORY_MB * 0.8 else 'warning' if memory_mb < MAX_MEMORY_MB else 'critical'
-        })
-    except Exception as e:
-        logging.error(f"Memory status check failed: {e}")
-        return jsonify({'error': str(e)}), 500
-
 def clear_cache():
     """Clear all persistent data and cache to force fresh data loading"""
     try:
@@ -13857,9 +13696,9 @@ def json_process():
         if matched_products:
             logging.info(f'✅ Successfully matched {len(matched_products)} products from JSON')
             
-            # Store in cache (reduced TTL from 1 hour to 15 minutes to save memory)
+            # Store in cache
             cache_key = get_session_cache_key('available_tags')
-            cache.set(cache_key, matched_products, timeout=900)
+            cache.set(cache_key, matched_products, timeout=3600)
             
             return jsonify({
                 'success': True,
@@ -15070,28 +14909,39 @@ def get_initial_data():
                     session.pop('file_path', None)
                     session.pop('uploaded_filename', None)
             
-            # If still no data after checking session, don't load default file
-            # Only return data if user explicitly uploaded a file
+            # If still no data after checking session, try default file
             if excel_processor.df is None or excel_processor.df.empty:
-                logging.info("No uploaded file found in session - returning empty state (no default file loading)")
-                return jsonify({
-                    'success': True,
-                    'data_loaded': False,
-                    'message': 'No file uploaded yet',
-                    'available_tags': [],
-                    'selected_tags': [],
-                    'filters': {
-                        'vendor': [],
-                        'brand': [],
-                        'productType': [],
-                        'lineage': [],
-                        'weight': [],
-                        'strain': [],
-                        'doh': [],
-                        'highCbd': []
-                    },
-                    'total_records': 0
-                })
+                logging.info("No uploaded file found - attempting to load default file")
+                from src.core.data.excel_processor import get_default_upload_file
+
+                # Get the current store
+                has_store = has_store_selection()
+                selected_store = get_current_store_name() if has_store else None
+                logging.info(f"📍 has_store_selection() = {has_store}")
+                logging.info(f"📍 Current store name = {selected_store}")
+
+                # Get default file for this store
+                default_file = get_default_upload_file(selected_store)
+                logging.info(f"📍 Default file returned: {default_file}")
+                
+                if default_file:
+                    try:
+                        logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
+                        excel_processor.load_file(default_file)
+                        excel_processor._last_loaded_file = default_file
+                        logging.info(f"Default file loaded successfully")
+                    except Exception as e:
+                        logging.error(f"Failed to load default file: {e}")
+                        return jsonify({
+                            'success': False,
+                            'message': f'Failed to load default file: {str(e)}'
+                        })
+                else:
+                    logging.warning("No default file found")
+                    return jsonify({
+                        'success': False,
+                        'message': 'No default file found and no data currently loaded'
+                    })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
@@ -17771,9 +17621,9 @@ def json_match_mixed():
                         mixed_products.append(json_product)
                         logging.info(f"JSON-only product: {json_name}")
         
-        # Store mixed products in cache and session (reduced TTL from 1 hour to 15 minutes to save memory)
+        # Store mixed products in cache and session
         cache_key = get_session_cache_key('available_tags')
-        cache.set(cache_key, mixed_products, timeout=900)
+        cache.set(cache_key, mixed_products, timeout=3600)
         
         # Set selected tags to all mixed products
         selected_names = []

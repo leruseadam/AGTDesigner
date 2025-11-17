@@ -35,22 +35,16 @@ function initializeTemplatePreview() {
         return;
     }
 
-    // Check if we've exceeded max attempts (only warn once)
+    // Check if we've exceeded max attempts
     if (templatePreviewInitAttempts >= MAX_RETRY_ATTEMPTS) {
-        if (templatePreviewInitAttempts === MAX_RETRY_ATTEMPTS) {
-            // Silent - feature not available, don't spam console
-            templatePreviewInitialized = true;
-        }
+        console.warn('Template Preview Fix: Max retry attempts reached. Preview functionality disabled.');
         return;
     }
+
+    console.log('Template Preview Fix: Initializing...');
     
     // Get all the necessary elements
     const editTemplateModal = document.getElementById('editTemplateModal');
-    
-    // Only log if modal actually exists (to reduce console noise)
-    if (editTemplateModal) {
-        console.log('Template Preview Fix: Initializing...');
-    }
     const templateSelectModal = document.getElementById('templateSelectModal');
     const scaleInputModal = document.getElementById('scaleInputModal');
     const fontSelectModal = document.getElementById('fontSelectModal');
@@ -79,21 +73,29 @@ function initializeTemplatePreview() {
         });
     }
     
-    // If modal doesn't exist, silently exit - this feature may not be implemented yet
     if (!editTemplateModal) {
-        // Only check once per page load - don't retry endlessly
-        if (templatePreviewInitAttempts === 0) {
-            // Silent exit - modal doesn't exist, this is fine
-            templatePreviewInitialized = true; // Mark as "initialized" to prevent retries
+        templatePreviewInitAttempts += 1;
+        if (templatePreviewInitAttempts < MAX_RETRY_ATTEMPTS) {
+            // Only log warnings for first few attempts
+            if (templatePreviewInitAttempts <= 3) {
+                console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/${MAX_RETRY_ATTEMPTS}) - retrying...`);
+            }
+            scheduleTemplatePreviewInit(1000); // Increased delay to reduce spam
+        } else {
+            console.warn('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
         }
         return;
     }
     
     if (!previewContainer) {
-        // Only check once per page load - don't retry endlessly
-        if (templatePreviewInitAttempts === 0) {
-            // Silent exit - container doesn't exist, this is fine
-            templatePreviewInitialized = true; // Mark as "initialized" to prevent retries
+        templatePreviewInitAttempts += 1;
+        if (templatePreviewInitAttempts < MAX_RETRY_ATTEMPTS) {
+            if (templatePreviewInitAttempts <= 3) {
+                console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/${MAX_RETRY_ATTEMPTS}) - retrying...`);
+            }
+            scheduleTemplatePreviewInit(1000);
+        } else {
+            console.warn('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
         }
         return;
     }

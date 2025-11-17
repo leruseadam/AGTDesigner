@@ -146,9 +146,7 @@ if (typeof handleFiles !== 'undefined') {
             }
 
             // Show Excel loading splash screen for manual uploads
-            if (typeof window.showExcelUploadSplash === 'function') {
-                window.showExcelUploadSplash(file.name);
-            } else if (typeof TagManager !== 'undefined' && TagManager.showExcelLoadingSplash) {
+            if (typeof TagManager !== 'undefined' && TagManager.showExcelLoadingSplash) {
                 TagManager.showExcelLoadingSplash(file.name);
             }
 

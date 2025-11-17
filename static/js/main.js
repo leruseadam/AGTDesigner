@@ -923,7 +923,7 @@ const TagManager = {
         _lastCleanup: Date.now()
     },
     SIMPLIFIED_RENDER_THRESHOLD: 900,
-    initialDataRetryDelays: [100, 300, 800], // PERFORMANCE FIX: Reduced from [1500, 3500, 6000, 10000] for faster retries
+    initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
     getAvailableTagsCacheKey() {
@@ -992,16 +992,11 @@ const TagManager = {
         }
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
-            verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache for instant display`);
+            verboseLog(`Hydrating ${cachedTags.length} tags from cache for instant display`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
             this.state.simplifiedAvailableTagsActive = false;
-            // PERFORMANCE FIX: Update state immediately for instant display
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
             this._updateAvailableTags(cachedTags, null);
-            // Update counts immediately
-            this.updateTagCount('available', cachedTags.length);
             return true;
         }
         return false;
@@ -3208,15 +3203,7 @@ const TagManager = {
         const sortedVendors = Array.from(organizedTags.entries())
             .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-        // PERFORMANCE FIX: Use chunked rendering to prevent UI freeze
-        const CHUNK_SIZE = 10; // Process 10 vendors at a time
-        let vendorIndex = 0;
-
-        const processVendorChunk = () => {
-            const chunkEnd = Math.min(vendorIndex + CHUNK_SIZE, sortedVendors.length);
-
-            for (let i = vendorIndex; i < chunkEnd; i++) {
-                const [vendor, brandGroups] = sortedVendors[i];
+        sortedVendors.forEach(([vendor, brandGroups]) => {
             const vendorSection = document.createElement('div');
             vendorSection.className = 'vendor-section mb-3';
             
@@ -3767,22 +3754,8 @@ const TagManager = {
                     }
                 });
             });
+        });
 
-            tagList.appendChild(vendorSection);
-            }
-
-            vendorIndex = chunkEnd;
-
-            // If there are more vendors to process, schedule next chunk
-            if (vendorIndex < sortedVendors.length) {
-                requestAnimationFrame(processVendorChunk);
-            } else {
-                // All vendors processed, finalize
-                finalizeRendering();
-            }
-        };
-
-        const finalizeRendering = () => {
         // Replace container content with built tags (this replaces any loading indicator)
         // Use requestAnimationFrame to prevent blocking the UI
         requestAnimationFrame(() => {
@@ -3799,10 +3772,6 @@ const TagManager = {
             // Hide loading splash only after tags actually appear in DOM
             this._waitForTagsToAppear();
         });
-        };
-
-        // Start processing the first chunk
-        processVendorChunk();
     },
 
     renderSimplifiedAvailableTags(tags, savedScroll) {
@@ -3812,9 +3781,7 @@ const TagManager = {
             return;
         }
 
-        // Optimized chunk size: 1000 tags per batch for very fast initial render
-        // This gets first 1000 tags visible almost immediately
-        const chunkSize = 1000;
+        const chunkSize = 200;
         let index = 0;
 
         availableTagsContainer.innerHTML = '';
@@ -3876,32 +3843,19 @@ const TagManager = {
             listWrapper.appendChild(fragment);
 
             if (index < tags.length) {
-                const chunkNumber = Math.floor(index / chunkSize);
-                const remainingChunks = Math.ceil((tags.length - index) / chunkSize);
-                
-                // For large datasets, render first 3 chunks immediately (no delay)
-                // This gets tags visible quickly, then use requestAnimationFrame for remaining chunks
-                if (chunkNumber < 3 || remainingChunks <= 2) {
-                    // Render immediately for first 3 chunks and last 2 chunks (faster)
-                    renderChunk();
-                } else {
-                    // Use requestAnimationFrame only for middle chunks to keep UI responsive
-                    requestAnimationFrame(renderChunk);
-                }
+                requestAnimationFrame(renderChunk);
             } else {
-                // All chunks rendered - restore state and check for tags immediately
-                this._restoreAvailableScrollPosition(savedScroll);
-                this.updateSelectAllCheckboxes();
-                // Check immediately if tags are visible (they should be after appendChild)
-                // Use microtask to check immediately after DOM update
-                Promise.resolve().then(() => {
+                requestAnimationFrame(() => {
+                    this._restoreAvailableScrollPosition(savedScroll);
+                    this.updateSelectAllCheckboxes();
                     this._waitForTagsToAppear();
+                    this.hideActionSplash();
+                    this.hideTagLoadingSplash();
                 });
             }
         };
 
-        // Start rendering immediately (no initial delay)
-        renderChunk();
+        requestAnimationFrame(renderChunk);
     },
     
     // Wait for tags to actually appear in DOM before hiding splash
@@ -3986,65 +3940,13 @@ const TagManager = {
         let lastTagCount = 0;
         let stableCount = 0; // Count how many times tag count has been stable
         
-        // First check immediately (tags might already be rendered)
-        // More aggressive: check multiple times quickly before starting polling
-        const immediateCheckForTags = (attempt = 0) => {
-            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
-            const currentTagCount = tagItems.length;
-            
-            if (currentTagCount > 0) {
-                // Tags found - check if they're visible
-                // Sample first 5 tags only (faster check)
-                const visibleTags = Array.from(tagItems).slice(0, 5);
-                const visibleCount = visibleTags.filter(item => {
-                    const rect = item.getBoundingClientRect();
-                    return rect.width > 0 && rect.height > 0;
-                }).length;
-                
-                // If at least 2 tags are visible, we're good to go (don't wait for all)
-                // For large datasets (>100), just check if any are visible
-                if (visibleCount >= 2 || (currentTagCount > 100 && visibleCount > 0)) {
-                    // Tags are visible - hide splash immediately
-                    const elapsed = Date.now() - startTime;
-                    const remainingTime = Math.max(0, minVisibilityTime - elapsed);
-                    setTimeout(() => {
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                        this.hideTagLoadingSplash();
-                        if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                            AppLoadingSplash.stopAutoAdvance();
-                            AppLoadingSplash.complete();
-                        }
-                    }, remainingTime);
-                    return true;
-                }
-            }
-            
-            // If no tags yet and we haven't tried too many times, try again quickly
-            if (attempt < 3 && currentTagCount === 0) {
-                setTimeout(() => immediateCheckForTags(attempt + 1), 10);
-                return null; // Still checking
-            }
-            
-            return false;
-        };
-        
-        // Do immediate check first with quick retries
-        const immediateResult = immediateCheckForTags(0);
-        if (immediateResult === true) {
-            return; // Tags found immediately, exit early
-        }
-        // If immediateResult is null, we're still checking, polling will start after
-        
         const checkForTags = () => {
             attempts++;
             const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
             const currentTagCount = tagItems.length;
             
             // Check if tags are actually visible (not just in DOM but rendered)
-            // Sample first 10 tags to check visibility (faster than checking all)
-            const visibleTags = Array.from(tagItems).slice(0, 10).filter(item => {
+            const visibleTags = Array.from(tagItems).filter(item => {
                 const rect = item.getBoundingClientRect();
                 return rect.width > 0 && rect.height > 0;
             });
@@ -4060,10 +3962,8 @@ const TagManager = {
             // Tags are fully loaded if:
             // 1. We have tags in the DOM
             // 2. Tags are visible (rendered)
-            // 3. Tag count has been stable for at least 1 check - faster response
-            // For large datasets (>100 tags), skip stability check to speed up
-            const shouldSkipStabilityCheck = currentTagCount > 100;
-            if (currentTagCount > 0 && visibleTags.length > 0 && (stableCount >= 1 || shouldSkipStabilityCheck)) {
+            // 3. Tag count has been stable for at least 1 check (100ms) - faster response
+            if (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 1) {
                 // Tags are fully rendered, hide splash
                 clearTimeout(forceHideTimeout);
                 verboseLog(`Tags fully loaded and rendered (${currentTagCount} items, ${visibleTags.length} visible), hiding splash`);
@@ -4097,17 +3997,12 @@ const TagManager = {
                 if (currentTagCount > 0) {
                     verboseLog(`Waiting for tags to stabilize: ${currentTagCount} tags found, stable for ${stableCount} checks`);
                 }
-                // Use shorter intervals for first few attempts (faster detection), then 100ms
-                const interval = attempts < 5 ? 50 : 100;
-                setTimeout(checkForTags, interval);
+                setTimeout(checkForTags, 100);
             }
         };
         
-        // Start checking very quickly - if immediate check didn't find tags, start polling immediately
-        // Use requestAnimationFrame to check right after next paint
-        requestAnimationFrame(() => {
-            setTimeout(checkForTags, 0);
-        });
+        // Start checking after a brief delay to allow DOM to update
+        setTimeout(checkForTags, 50);
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -5627,7 +5522,7 @@ const TagManager = {
             if (currentTagNames.size === newTagNames.size && 
                 [...currentTagNames].every(name => newTagNames.has(name))) {
                 verboseLog('updateSelectedTags: No changes detected, skipping update');
-                // Don't call console.timeEnd here - we haven't started timing yet
+                console.timeEnd('updateSelectedTags');
                 return;
             }
         }
@@ -5635,12 +5530,6 @@ const TagManager = {
         // Dispatch event to notify drag and drop manager that tag updates are starting
         document.dispatchEvent(new CustomEvent('updateSelectedTags'));
         
-        // Clear any existing timer before starting a new one to avoid warnings
-        try {
-            console.timeEnd('updateSelectedTags');
-        } catch (e) {
-            // Timer doesn't exist, that's fine
-        }
         console.time('updateSelectedTags');
         verboseLog('updateSelectedTags called with tags:', tags);
 
@@ -6727,16 +6616,12 @@ const TagManager = {
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
 
-            // Show splash if tags aren't already visible (no cache or failed hydration)
+            // Only show splash if explicitly requested (e.g., during Excel uploads)
+            // Don't show on initial page load or cache hydration
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
                 verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
                 // No splash needed for cache hydration - tags are already visible
-            } else {
-                verboseLog('No cached tags available; showing loading splash...');
-                if (this.showTagLoadingSplash) {
-                    this.showTagLoadingSplash('Loading tags...');
-                }
             }
             
             // Preserve current scroll/anchor so refreshes don't jump the list
@@ -6791,11 +6676,11 @@ const TagManager = {
             
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
-
-            // PERFORMANCE FIX: Always use fast_load by default to skip slow lineage alignment
-            // Backend will handle lineage alignment only when explicitly needed
+            
+            // OPTIMIZATION: Use fast_load parameter for initial load to skip slow lineage alignment
+            // This dramatically speeds up tag loading when cached data is available
             const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
-            const fastLoadParam = '&fast_load=1'; // Always fast load for better performance
+            const fastLoadParam = isInitialLoad ? '&fast_load=1' : '';
             
             // Add retry logic for failed requests
             let response;
@@ -6961,8 +6846,48 @@ const TagManager = {
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
                 
-                // PERFORMANCE FIX: Skip background lineage alignment to reduce server load
-                // Lineage is already correct from fast_load, no need for additional fetch
+                // Optionally refresh with lineage alignment in background (non-blocking)
+                // This ensures lineage is eventually aligned without blocking initial display
+                setTimeout(async () => {
+                    try {
+                        verboseLog('Background: Refreshing tags with lineage alignment...');
+                        const lineageResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=0`);
+                        if (lineageResponse.ok) {
+                            const lineageData = await lineageResponse.json();
+                            if (lineageData.tags && lineageData.tags.length > 0) {
+                                // Update tags with lineage-aligned data (source will be 'cache+db-lineage' or 'excel+db-lineage')
+                                if (lineageData.source && (lineageData.source.includes('lineage') || lineageData.source.includes('db-lineage'))) {
+                                    verboseLog(`Background: Updated ${lineageData.tags.length} tags with lineage alignment`);
+                                    this.state.tags = [...lineageData.tags];
+                                    this.state.originalTags = [...lineageData.tags];
+                                    // Only re-render if lineage data actually changed (to avoid flicker)
+                                    // Compare lineage values, not just tag names
+                                    let lineageChanged = false;
+                                    if (tags.length === lineageData.tags.length) {
+                                        for (let i = 0; i < tags.length; i++) {
+                                            const oldLin = (tags[i].Lineage || tags[i].canonical_lineage || '').toString().trim();
+                                            const newLin = (lineageData.tags[i].Lineage || lineageData.tags[i].canonical_lineage || '').toString().trim();
+                                            if (oldLin !== newLin) {
+                                                lineageChanged = true;
+                                                break;
+                                            }
+                                        }
+                                    } else {
+                                        lineageChanged = true;
+                                    }
+                                    
+                                    if (lineageChanged) {
+                                        // Update only the lineage fields in existing DOM without full re-render
+                                        // This is faster and avoids flicker
+                                        this._updateAvailableTags(lineageData.tags);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (bgError) {
+                        verboseLog('Background lineage alignment failed (non-critical):', bgError);
+                    }
+                }, 500); // Small delay to let UI settle
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');
@@ -7183,14 +7108,6 @@ const TagManager = {
      */
     async refreshTagLists(options = {}) {
         const { preserveFilters = true, force = true } = options;
-        
-        // CRITICAL: Prevent duplicate calls
-        if (this._refreshingTagLists) {
-            verboseLog('⏭️ refreshTagLists already in progress, skipping duplicate call');
-            return;
-        }
-        
-        this._refreshingTagLists = true;
         verboseLog('=== refreshTagLists START ===', { preserveFilters, force });
 
         // Optionally preserve filters by skipping reset
@@ -7222,7 +7139,6 @@ const TagManager = {
             console.error('refreshTagLists error:', error);
             throw error;
         } finally {
-            this._refreshingTagLists = false;
             if (force) {
                 this._lastFetchTime = previousFetchTime;
             }
@@ -7485,36 +7401,18 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // Show tag loading splash immediately to provide visual feedback
-        if (this.showTagLoadingSplash) {
-            this.showTagLoadingSplash('Populating inventory...');
-        }
-
+        // No splash screen on initial load - only show during Excel uploads
         // Check for current uploaded file from session (non-blocking, runs in parallel)
         // Use requestAnimationFrame to ensure it doesn't block the main thread
-        // Add timeout to prevent hanging
-        const fileCheckTimeout = setTimeout(() => {
-            verboseLog('File check timeout - proceeding without file data');
-            this._checkingExistingData = false;
-            if (this.hideTagLoadingSplash) {
-                this.hideTagLoadingSplash();
-            }
-        }, 10000); // 10 second timeout
-        
         requestAnimationFrame(() => {
-            const controller = new AbortController();
-            const fetchTimeout = setTimeout(() => controller.abort(), 8000); // 8 second timeout for fetch
-            
-            fetch('/api/current-file', { signal: controller.signal })
+            fetch('/api/current-file')
                 .then(fileResponse => {
-                    clearTimeout(fetchTimeout);
                     if (fileResponse.ok) {
                         return fileResponse.json();
                     }
                     return null;
                 })
                 .then(fileData => {
-                    clearTimeout(fileCheckTimeout);
                     if (fileData && fileData.success && fileData.has_file && fileData.filename) {
                         verboseLog(`Found uploaded file in session: ${fileData.filename}`);
                         // Use requestAnimationFrame for DOM updates to avoid blocking
@@ -7532,15 +7430,7 @@ const TagManager = {
                     }
                 })
                 .catch(error => {
-                    clearTimeout(fileCheckTimeout);
-                    clearTimeout(fetchTimeout);
-                    if (error.name === 'AbortError') {
-                        verboseLog('File check timed out - proceeding without file data');
-                    } else {
-                        verboseLog('Error checking for current file:', error);
-                    }
-                    // Continue with tag loading even if file check fails
-                    this._checkingExistingData = false;
+                    verboseLog('Error checking for current file:', error);
                 });
         });
 
@@ -7564,21 +7454,7 @@ const TagManager = {
         const attemptNumber = this.state.initialDataAttempts;
         const maxAttempts = retryDelays.length + 1;
         verboseLog(`[InitialData] Attempt ${attemptNumber}/${maxAttempts}`);
-        
-        // Add overall timeout to prevent infinite hanging
-        const overallTimeout = setTimeout(() => {
-            console.warn('[InitialData] Overall timeout (30s) - forcing completion');
-            this._checkingExistingData = false;
-            if (this.hideTagLoadingSplash) {
-                this.hideTagLoadingSplash();
-            }
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-        }, 30000); // 30 second overall timeout
-        
         if (attemptNumber > maxAttempts) {
-            clearTimeout(overallTimeout);
             console.warn(`[InitialData] Attempt limit exceeded (${maxAttempts}); falling back to direct tag load.`);
             // CRITICAL FIX: Fall back to direct tag loading instead of giving up
             verboseLog('Attempting direct tag load as fallback...');
@@ -7602,40 +7478,26 @@ const TagManager = {
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length > 0) {
             verboseLog(`⚡ FAST PATH: Loaded ${cachedTags.length} tags from cache instantly`);
+            // Keep splash visible while rendering cached tags
             // Render cached tags immediately for instant display
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
-            this.state.initialized = true; // CRITICAL: Mark as initialized to prevent redundant fetches
             this._updateAvailableTags(cachedTags);
-
-            // Update counts immediately
-            this.updateTagCount('available', cachedTags.length);
-
             // Wait for tags to appear before hiding splash
             if (this._waitForTagsToAppear) {
                 this._waitForTagsToAppear();
             }
 
-            // PERFORMANCE FIX: Fetch fresh data in background but don't block UI
-            verboseLog('Cache rendered instantly, fetching fresh data in background...');
-            setTimeout(() => {
-                this.fetchAndUpdateAvailableTags().catch(err => {
-                    verboseLog('Background fetch failed (non-critical):', err);
-                });
-            }, 100); // Small delay to let UI render first
-
-            // Clear the retry timer since we have tags
-            this.clearInitialDataRetry();
-            this._checkingExistingData = false;
-            return; // Exit early - we have cached data showing
+            // Continue loading fresh data in background (non-blocking)
+            verboseLog('Cache rendered, fetching fresh data in background...');
         }
 
-        // PERFORMANCE FIX: Reduced timeout from 30s to 10s for faster failover
+        // CRITICAL FIX: Increased timeout to 30 seconds to handle slow database queries
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 10000);
+            setTimeout(() => reject(new Error('Initialization timeout')), 30000);
         });
 
-        // PERFORMANCE FIX: Reduced safety net from 2s to 500ms for faster UI interactivity
+        // Safety net: ensure loading overlay never blocks interaction for long
         const splashSafetyTimeout = setTimeout(() => {
             // Always make UI interactive again quickly
             if (typeof this.hideActionSplash === 'function') {
@@ -7665,18 +7527,14 @@ const TagManager = {
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 500); // PERFORMANCE FIX: Reduced from 2000ms to 500ms for faster UI
+        }, 2000); // 2 second safety net so "Loading tags" overlay never lingers
 
         try {
             // Use the new initial-data endpoint for faster loading with timeout
-            const controller = new AbortController();
-            const fetchTimeout = setTimeout(() => controller.abort(), 8000); // 8 second timeout
-            
             const response = await Promise.race([
-                fetch('/api/initial-data?t=' + Date.now(), { signal: controller.signal }),
+                fetch('/api/initial-data'),
                 timeoutPromise
             ]);
-            clearTimeout(fetchTimeout);
 
             if (response.ok) {
                 const data = await response.json();
@@ -7712,38 +7570,23 @@ const TagManager = {
                         }
                     }, 0);
 
-                    // Restore previously selected tags from backend with timeout
+                    // Restore previously selected tags from backend
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
                     verboseLog('About to fetch and update selected tags...');
-                    try {
-                        const selectedTagsResult = await Promise.race([
-                            this.fetchAndUpdateSelectedTags(),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('Selected tags fetch timeout')), 10000))
-                        ]);
-                        verboseLog('fetchAndUpdateSelectedTags result:', selectedTagsResult);
-                        verboseLog('persistentSelectedTags after restore:', this.state.persistentSelectedTags);
-                    } catch (selectedTagsError) {
-                        verboseLog('Selected tags fetch failed or timed out:', selectedTagsError);
-                        // Continue even if selected tags fetch fails
-                    }
+                    const selectedTagsResult = await this.fetchAndUpdateSelectedTags();
+                    verboseLog('fetchAndUpdateSelectedTags result:', selectedTagsResult);
+                    verboseLog('persistentSelectedTags after restore:', this.state.persistentSelectedTags);
 
                     // Update filters (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(90, 'Setting up filters...');
                     setTimeout(() => {
-                        try {
-                            this.updateFilters(data.filters || {
-                                vendor: [],
-                                brand: [],
-                                productType: [],
-                                lineage: [],
-                                weight: []
-                            }, true); // Preserve existing values when loading initial data
-                        } catch (filterError) {
-                            verboseLog('Filter update failed:', filterError);
-                        }
-                        // Clear timeout and mark as complete
-                        clearTimeout(overallTimeout);
-                        this._checkingExistingData = false;
+                        this.updateFilters(data.filters || {
+                            vendor: [],
+                            brand: [],
+                            productType: [],
+                            lineage: [],
+                            weight: []
+                        }, true); // Preserve existing values when loading initial data
                     }, 0);
 
                     // Update file info text to show the loaded filename
@@ -7788,8 +7631,6 @@ const TagManager = {
                     return;
                 }
             } else {
-                clearTimeout(overallTimeout);
-                clearTimeout(splashSafetyTimeout);
                 verboseLog('Initial data endpoint returned error:', response.status);
                 // Complete splash loading on error
                 if (typeof this.hideActionSplash === 'function') {
@@ -7800,6 +7641,7 @@ const TagManager = {
                 }
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
+                clearTimeout(splashSafetyTimeout);
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
@@ -7808,8 +7650,6 @@ const TagManager = {
                 return;
             }
         } catch (error) {
-            clearTimeout(overallTimeout);
-            clearTimeout(splashSafetyTimeout);
             verboseLog('Error loading initial data:', error.message);
             
             // Handle timeout specifically

@@ -48,25 +48,17 @@
             // Show UI immediately - don't block on data loading
             AppLoadingSplash.updateProgress(50, 'UI Ready - Loading data in background...');
             
-            // Show tag loading splash immediately BEFORE fetching data (for page reloads)
-            // This ensures splash appears even if data loads very quickly
-            let tagSplashShown = false;
-            if (this.showTagLoadingSplash) {
-                this.showTagLoadingSplash('Loading tags from session...');
-                tagSplashShown = true;
-            }
-            if (this.showActionSplash) {
-                this.showActionSplash('Loading tags...');
-            }
-            
-            // Hide app splash after 500ms, but keep tag loading splash visible
+            // Hide splash after 500ms, even if data isn't loaded yet (faster UI)
             setTimeout(() => {
                 if (AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
-                    console.log('⚡ App splash hidden - UI is interactive');
+                    console.log('⚡ Splash hidden - UI is interactive');
                 }
-                // Don't hide tag loading splash here - it will be hidden after tags appear
+                // Also hide action splash if it's showing
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
             }, 500);
             
             // Load data in background (non-blocking)
@@ -79,22 +71,12 @@
                     if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                         console.log(`⚡ Loaded ${data.available_tags.length} tags in background`);
                         
-                        // Update tag loading splash message now that data is loaded
-                        // (splash is already shown above, just update the message)
-                        if (this.showTagLoadingSplash && tagSplashShown) {
-                            // Splash already shown, just update message if needed
-                            const statusElement = document.getElementById('tagLoadingStatus');
-                            if (statusElement) {
-                                statusElement.textContent = 'Loading tags...';
-                            }
-                        } else {
-                            // Fallback: show splash if it wasn't shown before
-                            if (this.showTagLoadingSplash) {
-                                this.showTagLoadingSplash('Loading tags...');
-                            }
-                            if (this.showActionSplash) {
-                                this.showActionSplash('Loading tags...');
-                            }
+                        // Show tag loading splash while tags are being rendered
+                        if (this.showTagLoadingSplash) {
+                            this.showTagLoadingSplash('Loading tags...');
+                        }
+                        if (this.showActionSplash) {
+                            this.showActionSplash('Loading tags...');
                         }
                         
                         // Update state immediately
@@ -161,43 +143,16 @@
                         console.log('⚡ Background data loading complete');
                     } else {
                         console.log('⚡ No initial data available - ready for file upload');
-                        // Hide tag loading splash if no data found
-                        if (tagSplashShown) {
-                            if (this.hideTagLoadingSplash) {
-                                this.hideTagLoadingSplash();
-                            }
-                            if (this.hideActionSplash) {
-                                this.hideActionSplash();
-                            }
-                        }
                         // FIXED: Don't load test data - keep UI empty for upload
                         this.initializeEmptyState();
                     }
                 } else {
                     console.log('⚡ Initial data endpoint error - ready for file upload');
-                    // Hide tag loading splash if error occurred
-                    if (tagSplashShown) {
-                        if (this.hideTagLoadingSplash) {
-                            this.hideTagLoadingSplash();
-                        }
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                    }
                     // FIXED: Don't load test data - keep UI empty for upload
                     this.initializeEmptyState();
                 }
             } catch (error) {
                 console.log('⚡ Initial data load error - UI remains interactive:', error.message);
-                // Hide tag loading splash if error occurred
-                if (tagSplashShown) {
-                    if (this.hideTagLoadingSplash) {
-                        this.hideTagLoadingSplash();
-                    }
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                }
                 // Don't load test data on timeout - just leave UI ready for upload
                 this.initializeEmptyState();
             }
