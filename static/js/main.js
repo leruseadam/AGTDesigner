@@ -3781,7 +3781,9 @@ const TagManager = {
             return;
         }
 
-        const chunkSize = 200;
+        // Optimized chunk size: 1000 tags per batch for very fast initial render
+        // This gets first 1000 tags visible almost immediately
+        const chunkSize = 1000;
         let index = 0;
 
         availableTagsContainer.innerHTML = '';
@@ -3843,19 +3845,32 @@ const TagManager = {
             listWrapper.appendChild(fragment);
 
             if (index < tags.length) {
-                requestAnimationFrame(renderChunk);
+                const chunkNumber = Math.floor(index / chunkSize);
+                const remainingChunks = Math.ceil((tags.length - index) / chunkSize);
+                
+                // For large datasets, render first 3 chunks immediately (no delay)
+                // This gets tags visible quickly, then use requestAnimationFrame for remaining chunks
+                if (chunkNumber < 3 || remainingChunks <= 2) {
+                    // Render immediately for first 3 chunks and last 2 chunks (faster)
+                    renderChunk();
+                } else {
+                    // Use requestAnimationFrame only for middle chunks to keep UI responsive
+                    requestAnimationFrame(renderChunk);
+                }
             } else {
-                requestAnimationFrame(() => {
-                    this._restoreAvailableScrollPosition(savedScroll);
-                    this.updateSelectAllCheckboxes();
+                // All chunks rendered - restore state and check for tags immediately
+                this._restoreAvailableScrollPosition(savedScroll);
+                this.updateSelectAllCheckboxes();
+                // Check immediately if tags are visible (they should be after appendChild)
+                // Use microtask to check immediately after DOM update
+                Promise.resolve().then(() => {
                     this._waitForTagsToAppear();
-                    this.hideActionSplash();
-                    this.hideTagLoadingSplash();
                 });
             }
         };
 
-        requestAnimationFrame(renderChunk);
+        // Start rendering immediately (no initial delay)
+        renderChunk();
     },
     
     // Wait for tags to actually appear in DOM before hiding splash
@@ -3940,13 +3955,65 @@ const TagManager = {
         let lastTagCount = 0;
         let stableCount = 0; // Count how many times tag count has been stable
         
+        // First check immediately (tags might already be rendered)
+        // More aggressive: check multiple times quickly before starting polling
+        const immediateCheckForTags = (attempt = 0) => {
+            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
+            const currentTagCount = tagItems.length;
+            
+            if (currentTagCount > 0) {
+                // Tags found - check if they're visible
+                // Sample first 5 tags only (faster check)
+                const visibleTags = Array.from(tagItems).slice(0, 5);
+                const visibleCount = visibleTags.filter(item => {
+                    const rect = item.getBoundingClientRect();
+                    return rect.width > 0 && rect.height > 0;
+                }).length;
+                
+                // If at least 2 tags are visible, we're good to go (don't wait for all)
+                // For large datasets (>100), just check if any are visible
+                if (visibleCount >= 2 || (currentTagCount > 100 && visibleCount > 0)) {
+                    // Tags are visible - hide splash immediately
+                    const elapsed = Date.now() - startTime;
+                    const remainingTime = Math.max(0, minVisibilityTime - elapsed);
+                    setTimeout(() => {
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        this.hideTagLoadingSplash();
+                        if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }
+                    }, remainingTime);
+                    return true;
+                }
+            }
+            
+            // If no tags yet and we haven't tried too many times, try again quickly
+            if (attempt < 3 && currentTagCount === 0) {
+                setTimeout(() => immediateCheckForTags(attempt + 1), 10);
+                return null; // Still checking
+            }
+            
+            return false;
+        };
+        
+        // Do immediate check first with quick retries
+        const immediateResult = immediateCheckForTags(0);
+        if (immediateResult === true) {
+            return; // Tags found immediately, exit early
+        }
+        // If immediateResult is null, we're still checking, polling will start after
+        
         const checkForTags = () => {
             attempts++;
             const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
             const currentTagCount = tagItems.length;
             
             // Check if tags are actually visible (not just in DOM but rendered)
-            const visibleTags = Array.from(tagItems).filter(item => {
+            // Sample first 10 tags to check visibility (faster than checking all)
+            const visibleTags = Array.from(tagItems).slice(0, 10).filter(item => {
                 const rect = item.getBoundingClientRect();
                 return rect.width > 0 && rect.height > 0;
             });
@@ -3962,8 +4029,10 @@ const TagManager = {
             // Tags are fully loaded if:
             // 1. We have tags in the DOM
             // 2. Tags are visible (rendered)
-            // 3. Tag count has been stable for at least 1 check (100ms) - faster response
-            if (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 1) {
+            // 3. Tag count has been stable for at least 1 check - faster response
+            // For large datasets (>100 tags), skip stability check to speed up
+            const shouldSkipStabilityCheck = currentTagCount > 100;
+            if (currentTagCount > 0 && visibleTags.length > 0 && (stableCount >= 1 || shouldSkipStabilityCheck)) {
                 // Tags are fully rendered, hide splash
                 clearTimeout(forceHideTimeout);
                 verboseLog(`Tags fully loaded and rendered (${currentTagCount} items, ${visibleTags.length} visible), hiding splash`);
@@ -3997,12 +4066,17 @@ const TagManager = {
                 if (currentTagCount > 0) {
                     verboseLog(`Waiting for tags to stabilize: ${currentTagCount} tags found, stable for ${stableCount} checks`);
                 }
-                setTimeout(checkForTags, 100);
+                // Use shorter intervals for first few attempts (faster detection), then 100ms
+                const interval = attempts < 5 ? 50 : 100;
+                setTimeout(checkForTags, interval);
             }
         };
         
-        // Start checking after a brief delay to allow DOM to update
-        setTimeout(checkForTags, 50);
+        // Start checking very quickly - if immediate check didn't find tags, start polling immediately
+        // Use requestAnimationFrame to check right after next paint
+        requestAnimationFrame(() => {
+            setTimeout(checkForTags, 0);
+        });
     },
 
     createTagElement(tag, isForSelectedTags = false) {
