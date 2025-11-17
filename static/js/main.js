@@ -7498,7 +7498,16 @@ const TagManager = {
                     // Update available tags (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
                     setTimeout(() => {
-                        this.debouncedUpdateAvailableTags(data.available_tags, null);
+                        // FIXED: Use immediate update on initial load to avoid debounce delay
+                        // Check if this is initial load (no tags loaded yet) or if flag is set
+                        const isInitialLoad = this.state.isInitialLoad || !this.state.tags || this.state.tags.length === 0;
+                        if (isInitialLoad) {
+                            // Use immediate update for instant tag display
+                            this._updateAvailableTags(data.available_tags, null);
+                        } else {
+                            // Use debounced update for subsequent loads
+                            this.debouncedUpdateAvailableTags(data.available_tags, null);
+                        }
                         // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
                         // when tags are actually fully rendered
                     }, 0);
@@ -7535,6 +7544,16 @@ const TagManager = {
                     // This ensures the splash stays visible until tags are fully rendered
                     AppLoadingSplash.updateProgress(95, 'Finalizing...');
                     clearTimeout(splashSafetyTimeout);
+                    
+                    // FIXED: Ensure _waitForTagsToAppear is called after tags are updated
+                    // Use requestAnimationFrame to ensure DOM has updated
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            if (this._waitForTagsToAppear) {
+                                this._waitForTagsToAppear();
+                            }
+                        }, 100); // Small delay to ensure tags are rendered
+                    });
                     
                     this.clearInitialDataRetry();
                     this._checkingExistingData = false;

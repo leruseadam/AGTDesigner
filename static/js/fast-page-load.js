@@ -1,15 +1,15 @@
 /**
  * Ultra-fast page load optimization
  * Makes initial data loading non-blocking and shows UI immediately
+ * 
+ * FIXED: No longer overrides checkForExistingData to prevent conflicts
+ * Instead, we just ensure the main checkForExistingData loads tags immediately
  */
 
 (function() {
     'use strict';
     
-    console.log('⚡ Fast page load optimization enabled');
-    
-    // Store original checkForExistingData function
-    let originalCheckForExistingData = null;
+    console.log('⚡ Fast page load optimization enabled (non-conflicting mode)');
     
     // Wait for TagManager to be available
     function waitForTagManager() {
@@ -29,7 +29,7 @@
         });
     }
     
-    // Optimize the page load
+    // Optimize the page load - but don't override checkForExistingData
     async function optimizePageLoad() {
         await waitForTagManager();
         
@@ -38,111 +38,31 @@
             return;
         }
         
-        // Store original function
-        originalCheckForExistingData = TagManager.checkForExistingData;
+        // Store original function to ensure immediate loading on initial load
+        const originalCheckForExistingData = TagManager.checkForExistingData;
         
-        // Replace with optimized version
+        // Wrap checkForExistingData to ensure immediate tag loading (no debounce on initial load)
         TagManager.checkForExistingData = async function() {
-            console.log('⚡ Optimized checkForExistingData called');
-            
-            // Show UI immediately - don't block on data loading
-            AppLoadingSplash.updateProgress(50, 'UI Ready - Loading data in background...');
-            
-            // Hide splash after 500ms, even if data isn't loaded yet (faster UI)
-            setTimeout(() => {
-                if (AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                    console.log('⚡ Splash hidden - UI is interactive');
-                }
-                // Also hide action splash if it's showing
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-            }, 500);
-            
-            // Load data in background (non-blocking)
-            try {
-                const response = await fetch('/api/initial-data');
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    
-                    if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
-                        console.log(`⚡ Loaded ${data.available_tags.length} tags in background`);
-                        
-                        // Update state immediately
-                        this.state.tags = [...data.available_tags];
-                        this.state.originalTags = [...data.available_tags];
-                        
-                        // Update UI with loaded data IMMEDIATELY (no debounce for initial load)
-                        // Use _updateAvailableTags directly to avoid debounce delay
-                        this._updateAvailableTags(data.available_tags, null);
-                        
-                        // Immediately check if tags are visible and hide splash
-                        requestAnimationFrame(() => {
-                            const container = document.getElementById('availableTags');
-                            if (container) {
-                                const tagItems = container.querySelectorAll('.tag-item');
-                                if (tagItems.length > 0) {
-                                    console.log(`⚡ Tags rendered (${tagItems.length} items), hiding splash immediately`);
-                                    if (this.hideActionSplash) {
-                                        this.hideActionSplash();
-                                    }
-                                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                                        AppLoadingSplash.stopAutoAdvance();
-                                        AppLoadingSplash.complete();
-                                    }
-                                }
-                            }
-                        });
-                        
-                        // Also ensure splash is hidden when tags appear (backup)
-                        if (this._waitForTagsToAppear) {
-                            this._waitForTagsToAppear();
-                        }
-                        
-                        // Restore selected tags (non-blocking)
-                        this.fetchAndUpdateSelectedTags().catch(err => {
-                            console.warn('Error restoring selected tags:', err);
-                        });
-                        
-                        // Update filters
-                        this.updateFilters(data.filters || {
-                            vendor: [],
-                            brand: [],
-                            productType: [],
-                            lineage: [],
-                            weight: []
-                        }, true);
-                        
-                        // Update file info
-                        if (data.filename) {
-                            const fileInfoText = document.getElementById('fileInfoText');
-                            if (fileInfoText) {
-                                fileInfoText.textContent = data.filename;
-                            }
-                        }
-                        
-                        console.log('⚡ Background data loading complete');
-                    } else {
-                        console.log('⚡ No initial data available - ready for file upload');
-                        // FIXED: Don't load test data - keep UI empty for upload
-                        this.initializeEmptyState();
-                    }
-                } else {
-                    console.log('⚡ Initial data endpoint error - ready for file upload');
-                    // FIXED: Don't load test data - keep UI empty for upload
-                    this.initializeEmptyState();
-                }
-            } catch (error) {
-                console.log('⚡ Initial data load error - UI remains interactive:', error.message);
-                // Don't load test data on timeout - just leave UI ready for upload
-                this.initializeEmptyState();
+            // Set flag to indicate this is initial load - skip debounce
+            const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
+            if (isInitialLoad) {
+                this.state.isInitialLoad = true;
             }
+            
+            // Call original function
+            const result = await originalCheckForExistingData.call(this);
+            
+            // Clear initial load flag after a short delay
+            if (isInitialLoad) {
+                setTimeout(() => {
+                    this.state.isInitialLoad = false;
+                }, 1000);
+            }
+            
+            return result;
         };
         
-        console.log('⚡ Page load optimization active');
+        console.log('⚡ Page load optimization active (non-conflicting)');
     }
     
     // Run optimization when DOM is ready
