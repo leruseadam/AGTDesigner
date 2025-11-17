@@ -170,16 +170,19 @@
                         console.log('⚡ No initial data available - ready for file upload');
                         // FIXED: Don't load test data - keep UI empty for upload
                         this.initializeEmptyState();
+                        // Show notification will be handled by initializeEmptyState
                     }
                 } else {
                     console.log('⚡ Initial data endpoint error - ready for file upload');
                     // FIXED: Don't load test data - keep UI empty for upload
                     this.initializeEmptyState();
+                    // Show notification will be handled by initializeEmptyState
                 }
             } catch (error) {
                 console.log('⚡ Initial data load error - UI remains interactive:', error.message);
                 // Don't load test data on timeout - just leave UI ready for upload
                 this.initializeEmptyState();
+                // Show notification will be handled by initializeEmptyState
             }
         };
         

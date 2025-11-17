@@ -8230,25 +8230,36 @@ def get_available_tags():
                                     # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
                                     # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                                     quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
-                                    query = f'''
-                                        SELECT {quoted_columns}, COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
-                                        FROM products p
-                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                        ORDER BY p.id DESC
-                                        LIMIT 20000
-                                    '''
-                                    try:
-                                        main_cursor.execute(query)
-                                        rows = main_cursor.fetchall()
-                                        columns = columns_to_query + ['preferred_lineage']
-                                        logging.info(f"Main database query with strain join returned {len(rows)} rows")
-                                    except Exception as join_err:
-                                        logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
+                                    
+                                    # OPTIMIZATION: Skip expensive strains JOIN when fast_load is requested
+                                    if fast_load:
+                                        # Fast path: simple query without JOIN - dramatically faster
                                         query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
                                         main_cursor.execute(query)
                                         rows = main_cursor.fetchall()
                                         columns = columns_to_query + ['preferred_lineage']
-                                        logging.info(f"Main database query (fallback) returned {len(rows)} rows")
+                                        logging.info(f"Main database fast query returned {len(rows)} rows")
+                                    else:
+                                        # Full path: join with strains table for complete lineage data
+                                        query = f'''
+                                            SELECT {quoted_columns}, COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
+                                            FROM products p
+                                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                            ORDER BY p.id DESC
+                                            LIMIT 20000
+                                        '''
+                                        try:
+                                            main_cursor.execute(query)
+                                            rows = main_cursor.fetchall()
+                                            columns = columns_to_query + ['preferred_lineage']
+                                            logging.info(f"Main database query with strain join returned {len(rows)} rows")
+                                        except Exception as join_err:
+                                            logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
+                                            query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
+                                            main_cursor.execute(query)
+                                            rows = main_cursor.fetchall()
+                                            columns = columns_to_query + ['preferred_lineage']
+                                            logging.info(f"Main database query (fallback) returned {len(rows)} rows")
                                     
                                     for row in rows:
                                         product_dict = dict(zip(columns, row))
@@ -8292,39 +8303,56 @@ def get_available_tags():
                             # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                             
-                            # Try to join with strains table, but prefer products.Lineage over strains.canonical_lineage
-                            lineage_query_join_by_name = f'''
-                                SELECT {quoted_columns}, 
-                                       COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
-                                FROM products p
-                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                ORDER BY p.id DESC
-                                LIMIT 10000
-                            '''
-                            
-                            # Fallback query if strains table/join fails
-                            lineage_query_fallback = f'''
-                                SELECT {quoted_columns}, 
-                                       p."Lineage" AS preferred_lineage
-                                FROM products p
-                                ORDER BY p.id DESC
-                                LIMIT 10000
-                            '''
-                            
-                            logging.info("Executing query with strain join (same pipeline as Excel alignment)...")
-                            query_start = time.time()
-                            
-                            try:
-                                cursor.execute(lineage_query_join_by_name)
+                            # OPTIMIZATION: Skip expensive strains JOIN when fast_load is requested
+                            if fast_load:
+                                # Fast path: simple query without JOIN - dramatically faster
+                                fast_query = f'''
+                                    SELECT {quoted_columns}, 
+                                           p."Lineage" AS preferred_lineage
+                                    FROM products p
+                                    ORDER BY p.id DESC
+                                    LIMIT 10000
+                                '''
+                                logging.info("Executing fast query (no JOIN) for fast_load...")
+                                query_start = time.time()
+                                cursor.execute(fast_query)
                                 rows = cursor.fetchall()
                                 columns = columns_to_query + ['preferred_lineage']
-                                logging.info(f"✅ Query with strain join returned {len(rows)} rows")
-                            except Exception as join_err:
-                                logging.warning(f"Strain join failed, using fallback: {join_err}")
-                                cursor.execute(lineage_query_fallback)
-                                rows = cursor.fetchall()
-                                columns = columns_to_query + ['preferred_lineage']
-                                logging.info(f"✅ Query (fallback) returned {len(rows)} rows")
+                                logging.info(f"✅ Fast query returned {len(rows)} rows")
+                            else:
+                                # Full path: join with strains table for complete lineage data
+                                lineage_query_join_by_name = f'''
+                                    SELECT {quoted_columns}, 
+                                           COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
+                                    FROM products p
+                                    LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                    ORDER BY p.id DESC
+                                    LIMIT 10000
+                                '''
+                                
+                                # Fallback query if strains table/join fails
+                                lineage_query_fallback = f'''
+                                    SELECT {quoted_columns}, 
+                                           p."Lineage" AS preferred_lineage
+                                    FROM products p
+                                    ORDER BY p.id DESC
+                                    LIMIT 10000
+                                '''
+                                
+                                logging.info("Executing query with strain join (same pipeline as Excel alignment)...")
+                                query_start = time.time()
+                                
+                                try:
+                                    cursor.execute(lineage_query_join_by_name)
+                                    rows = cursor.fetchall()
+                                    columns = columns_to_query + ['preferred_lineage']
+                                    logging.info(f"✅ Query with strain join returned {len(rows)} rows")
+                                except Exception as join_err:
+                                    logging.warning(f"Strain join failed, using fallback: {join_err}")
+                                    cursor.execute(lineage_query_fallback)
+                                    rows = cursor.fetchall()
+                                    columns = columns_to_query + ['preferred_lineage']
+                                    logging.info(f"✅ Query (fallback) returned {len(rows)} rows")
                             
                             query_time = time.time() - query_start
                             logging.info(f"✅ Query returned {len(rows)} rows in {query_time:.2f}s")
@@ -8479,7 +8507,8 @@ def get_available_tags():
 
         # Return the combined tags in the format expected by frontend
         elapsed = (time.time() - start_time) * 1000
-        logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} tags")
+        source_tag = 'database-fast' if (use_database_only and fast_load) else ('database' if use_database_only else ('excel+database-fast' if fast_load else 'excel+database'))
+        logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} tags (source: {source_tag})")
         
         if len(safe_all_tags) == 0:
             logging.warning("⚠️ WARNING: Returning empty tags array! prefer_db={}, database_tags_count={}".format(
@@ -8489,7 +8518,7 @@ def get_available_tags():
         resp = jsonify({
             'tags': safe_all_tags,  # Frontend expects 'tags' property
             'total_count': len(safe_all_tags),
-            'source': 'fresh'
+            'source': source_tag
         })
         try:
             # Disable caching at proxy/browser level for this response

@@ -7405,7 +7405,108 @@ const TagManager = {
         };
         this.updateFilters(emptyFilters, false); // Don't preserve values when initializing empty state
         
+        // Show notification that no file is uploaded (only once per session)
+        if (!this._uploadNotificationShown) {
+            this._uploadNotificationShown = true;
+            setTimeout(() => {
+                this.showUploadRequiredNotification();
+            }, 1000);
+        }
+        
         verboseLog('Empty state initialized');
+    },
+    
+    showUploadRequiredNotification() {
+        console.log('📢 Showing upload required notification');
+        
+        // Create visible notification that works even without Bootstrap
+        const toastContainer = document.getElementById('toast-container') || (() => {
+            const container = document.createElement('div');
+            container.id = 'toast-container';
+            container.className = 'toast-container position-fixed top-0 end-0 p-3';
+            container.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 1055;';
+            document.body.appendChild(container);
+            return container;
+        })();
+        
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            min-width: 300px;
+            max-width: 400px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            margin-bottom: 1rem;
+            animation: slideIn 0.3s ease-out;
+        `;
+        toast.setAttribute('role', 'alert');
+        toast.setAttribute('aria-live', 'assertive');
+        toast.setAttribute('aria-atomic', 'true');
+        
+        // Add CSS animation if not already added
+        if (!document.getElementById('toast-animation-style')) {
+            const style = document.createElement('style');
+            style.id = 'toast-animation-style';
+            style.textContent = `
+                @keyframes slideIn {
+                    from {
+                        transform: translateX(100%);
+                        opacity: 0;
+                    }
+                    to {
+                        transform: translateX(0);
+                        opacity: 1;
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        toast.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
+                <div style="display: flex; align-items: center;">
+                    <i class="fas fa-info-circle" style="margin-right: 0.5rem; font-size: 1.2rem;"></i>
+                    <strong>Upload Required</strong>
+                </div>
+                <button type="button" onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">&times;</button>
+            </div>
+            <div>
+                No file uploaded. Please upload an Excel file to get started.
+            </div>
+        `;
+        toastContainer.appendChild(toast);
+        
+        // Try Bootstrap toast if available
+        if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
+            try {
+                toast.className = 'toast show';
+                const bsToast = new bootstrap.Toast(toast, { delay: 8000 });
+                bsToast.show();
+                
+                toast.addEventListener('hidden.bs.toast', () => {
+                    if (toast.parentNode) {
+                        toast.remove();
+                    }
+                });
+            } catch (e) {
+                console.warn('Bootstrap toast failed, using fallback:', e);
+                // Fallback: auto-remove after 8 seconds
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.remove();
+                    }
+                }, 8000);
+            }
+        } else {
+            // Fallback: auto-remove after 8 seconds
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.remove();
+                }
+            }, 8000);
+        }
     },
 
     // Check if there's existing data and load it
@@ -7438,6 +7539,35 @@ const TagManager = {
                 AppLoadingSplash.complete();
             }
             
+            // Check if file actually exists in background
+            fetch('/api/current-file')
+                .then(fileResponse => {
+                    if (fileResponse.ok) {
+                        return fileResponse.json();
+                    }
+                    return null;
+                })
+                .then(fileData => {
+                    // Only show notification if no file is actually uploaded
+                    if (!fileData || !fileData.has_file) {
+                        if (!this._uploadNotificationShown) {
+                            this._uploadNotificationShown = true;
+                            setTimeout(() => {
+                                this.showUploadRequiredNotification();
+                            }, 1500);
+                        }
+                    }
+                })
+                .catch(() => {
+                    // If check fails, assume no file and show notification
+                    if (!this._uploadNotificationShown) {
+                        this._uploadNotificationShown = true;
+                        setTimeout(() => {
+                            this.showUploadRequiredNotification();
+                        }, 1500);
+                    }
+                });
+            
             // Load fresh data in background (non-blocking, fire-and-forget)
             setTimeout(async () => {
                 try {
@@ -7449,6 +7579,14 @@ const TagManager = {
                             this.state.tags = [...data.available_tags];
                             this.state.originalTags = [...data.available_tags];
                             this._updateAvailableTags(data.available_tags);
+                        } else if (!data.success || !data.available_tags || data.available_tags.length === 0) {
+                            // No file uploaded - show notification
+                            if (!this._uploadNotificationShown) {
+                                this._uploadNotificationShown = true;
+                                setTimeout(() => {
+                                    this.showUploadRequiredNotification();
+                                }, 1500);
+                            }
                         }
                     }
                 } catch (error) {
