@@ -1193,38 +1193,32 @@ document.addEventListener('DOMContentLoaded', function() {
     document.documentElement.setAttribute('data-app-scale', String(appliedScale));
   }
 
-  // Expose for other scripts
-  window.scaleAppToFit = scaleAppToFit;
+  // Expose for other scripts (but disable automatic scaling)
+  window.scaleAppToFit = function() {
+    // DISABLED: Automatic scaling removed per user request
+    // This function now does nothing to preserve original UI scale
+    return;
+  };
 
-  // Apply on ready (after content becomes visible), and on resize/orientation
+  // DISABLED: Automatic scaling events removed per user request
+  // The app will now maintain its original scale without automatic adjustments
+  
+  // Reset any existing scaling transforms on page load
   document.addEventListener('DOMContentLoaded', function() {
-    const main = document.getElementById('mainContent');
-    if (!main) return;
-
-    const tryApply = () => {
-      const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
-      if (visible) {
-        requestAnimationFrame(scaleAppToFit);
-      } else {
-        setTimeout(tryApply, 200);
-      }
-    };
-    tryApply();
+    const body = document.body;
+    const html = document.documentElement;
+    if (body) {
+      body.style.transform = '';
+      body.style.width = '';
+      body.style.height = '';
+      body.style.transformOrigin = '';
+      body.style.zoom = '';
+    }
+    if (html) {
+      html.style.zoom = '';
+      html.removeAttribute('data-app-scale');
+    }
   });
-
-  // Ensure after full load (fonts/images) we re-calc
-  window.addEventListener('load', () => {
-    requestAnimationFrame(scaleAppToFit);
-    setTimeout(scaleAppToFit, 0);
-    setTimeout(scaleAppToFit, 250);
-  });
-
-  let resizeTimer;
-  window.addEventListener('resize', () => {
-    cancelAnimationFrame(resizeTimer);
-    resizeTimer = requestAnimationFrame(scaleAppToFit);
-  });
-  window.addEventListener('orientationchange', () => setTimeout(scaleAppToFit, 0));
 })();
 
 // Expose manual control in console
