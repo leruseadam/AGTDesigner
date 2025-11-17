@@ -51,22 +51,24 @@ function initializeTemplatePreview() {
     
     if (!editTemplateModal) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
+        if (templatePreviewInitAttempts <= 3) {
+            // Reduced retries to prevent console spam
+            scheduleTemplatePreviewInit(1000);
         } else {
-            console.error('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
+            // Silently fail - don't spam console with errors
+            templatePreviewInitialized = true; // Mark as initialized to prevent further attempts
         }
         return;
     }
     
     if (!previewContainer) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
+        if (templatePreviewInitAttempts <= 3) {
+            // Reduced retries to prevent console spam
+            scheduleTemplatePreviewInit(1000);
         } else {
-            console.error('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
+            // Silently fail - don't spam console with errors
+            templatePreviewInitialized = true; // Mark as initialized to prevent further attempts
         }
         return;
     }

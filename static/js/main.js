@@ -3921,6 +3921,11 @@ const TagManager = {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
                 }
+                // Clear any backup timeout that might be set
+                if (this._waitForTagsBackupTimeout) {
+                    clearTimeout(this._waitForTagsBackupTimeout);
+                    this._waitForTagsBackupTimeout = null;
+                }
             } else if (attempts >= maxAttempts) {
                 // Timeout reached, hide splash anyway (but log warning)
                 clearTimeout(forceHideTimeout);
@@ -7439,14 +7444,15 @@ const TagManager = {
             verboseLog('Cache rendered, fetching fresh data in background...');
         }
 
-        // CRITICAL FIX: Increased timeout to 30 seconds to handle slow database queries
+        // CRITICAL FIX: Reduced timeout to 10 seconds to prevent long freezes
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 30000);
+            setTimeout(() => reject(new Error('Initialization timeout')), 10000);
         });
 
         // Safety net: ensure loading overlay never blocks interaction for long
         const splashSafetyTimeout = setTimeout(() => {
             // Always make UI interactive again quickly
+            verboseLog('⏳ Safety timeout triggered - forcing UI to be interactive');
             if (typeof this.hideActionSplash === 'function') {
                 this.hideActionSplash();
             }
@@ -7471,7 +7477,7 @@ const TagManager = {
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 2000); // 2 second safety net so "Loading tags" overlay never lingers
+        }, 3000); // 3 second safety net so "Loading tags" overlay never lingers
 
         try {
             // Use the new initial-data endpoint for faster loading with timeout
@@ -7547,10 +7553,33 @@ const TagManager = {
                     
                     // FIXED: Ensure _waitForTagsToAppear is called after tags are updated
                     // Use requestAnimationFrame to ensure DOM has updated
+                    // Also set a backup timeout to ensure splash always hides
+                    this._waitForTagsBackupTimeout = setTimeout(() => {
+                        verboseLog('Backup timeout: Forcing splash to hide after tag update');
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                        this._waitForTagsBackupTimeout = null;
+                    }, 5000); // 5 second max wait for tags
+                    
                     requestAnimationFrame(() => {
                         setTimeout(() => {
                             if (this._waitForTagsToAppear) {
                                 this._waitForTagsToAppear();
+                            } else {
+                                // If _waitForTagsToAppear doesn't exist, use backup timeout
+                                if (this._waitForTagsBackupTimeout) {
+                                    clearTimeout(this._waitForTagsBackupTimeout);
+                                }
+                                setTimeout(() => {
+                                    if (this.hideActionSplash) {
+                                        this.hideActionSplash();
+                                    }
+                                    AppLoadingSplash.stopAutoAdvance();
+                                    AppLoadingSplash.complete();
+                                }, 2000);
                             }
                         }, 100); // Small delay to ensure tags are rendered
                     });
