@@ -45,6 +45,45 @@
         TagManager.checkForExistingData = async function() {
             console.log('⚡ Optimized checkForExistingData called');
             
+            // CRITICAL: Check cache FIRST before any API calls
+            const cachedTags = this.loadAvailableTagsFromCache();
+            if (cachedTags && cachedTags.length > 0) {
+                console.log(`⚡ INSTANT: Loaded ${cachedTags.length} tags from cache - skipping API call`);
+                // Render cached tags immediately
+                this.state.tags = [...cachedTags];
+                this.state.originalTags = [...cachedTags];
+                this._updateAvailableTags(cachedTags, null);
+                
+                // Hide splash immediately
+                if (AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                
+                // Load fresh data in background (non-blocking)
+                setTimeout(async () => {
+                    try {
+                        const response = await fetch('/api/initial-data');
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
+                                console.log(`⚡ Background: Updated with ${data.available_tags.length} fresh tags`);
+                                this.state.tags = [...data.available_tags];
+                                this.state.originalTags = [...data.available_tags];
+                                this._updateAvailableTags(data.available_tags, null);
+                            }
+                        }
+                    } catch (error) {
+                        console.log('Background data refresh failed (non-critical):', error.message);
+                    }
+                }, 100);
+                
+                return;
+            }
+            
             // Show UI immediately - don't block on data loading
             AppLoadingSplash.updateProgress(50, 'UI Ready - Loading data in background...');
             

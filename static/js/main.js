@@ -7420,7 +7420,47 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // Show loading splash IMMEDIATELY before any async operations
+        // CRITICAL: Check cache FIRST before showing splash
+        const cachedTags = this.loadAvailableTagsFromCache();
+        if (cachedTags && cachedTags.length > 0) {
+            verboseLog(`⚡ INSTANT: Loaded ${cachedTags.length} tags from cache - skipping API call`);
+            // Render cached tags immediately for instant display
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            this._updateAvailableTags(cachedTags);
+            
+            // Hide splash immediately since we have cached data
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            
+            // Load fresh data in background (non-blocking, fire-and-forget)
+            setTimeout(async () => {
+                try {
+                    const response = await fetch('/api/initial-data');
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
+                            verboseLog(`Background: Updated with ${data.available_tags.length} fresh tags`);
+                            this.state.tags = [...data.available_tags];
+                            this.state.originalTags = [...data.available_tags];
+                            this._updateAvailableTags(data.available_tags);
+                        }
+                    }
+                } catch (error) {
+                    verboseLog('Background data refresh failed (non-critical):', error);
+                }
+            }, 100);
+            
+            this._checkingExistingData = false;
+            return;
+        }
+
+        // Only show splash if no cache exists
         this.showActionSplash('Loading tags...');
 
         // Check for current uploaded file from session (non-blocking, runs in parallel)
@@ -7495,18 +7535,7 @@ const TagManager = {
             }
         }
 
-        // PERFORMANCE FIX: Try cache first for instant load
-        const cachedTags = this.loadAvailableTagsFromCache();
-        if (cachedTags && cachedTags.length > 0) {
-            verboseLog(`⚡ FAST PATH: Loaded ${cachedTags.length} tags from cache instantly`);
-            // Render cached tags immediately for instant display
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
-            this._updateAvailableTags(cachedTags);
-
-            // Continue loading fresh data in background (non-blocking)
-            verboseLog('Cache rendered, fetching fresh data in background...');
-        }
+        // Cache already checked above - this is just a fallback
 
         // CRITICAL FIX: Increased timeout to 30 seconds to handle slow database queries
         const timeoutPromise = new Promise((_, reject) => {
