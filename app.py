@@ -1110,6 +1110,21 @@ def get_excel_processor():
                     if session_file_path and os.path.exists(session_file_path):
                         log_if_not_pa('info', f"Found uploaded file in session: {session_file_path}")
                         
+                        # CRITICAL: Always force reload if session file is different from loaded file
+                        # This ensures new uploads replace old data
+                        current_loaded_file = getattr(_excel_processor, '_last_loaded_file', None)
+                        if current_loaded_file != session_file_path:
+                            log_if_not_pa('info', f"🔄 Session has different file ({session_file_path}) than loaded ({current_loaded_file}) - forcing reload")
+                            # Clear existing data first
+                            if hasattr(_excel_processor, 'df') and _excel_processor.df is not None:
+                                _excel_processor.df = pd.DataFrame()
+                                _excel_processor._last_loaded_file = None
+                            if hasattr(_excel_processor, 'selected_tags'):
+                                _excel_processor.selected_tags = []
+                            # Clear file cache to ensure fresh load
+                            if hasattr(_excel_processor, '_file_cache'):
+                                _excel_processor._file_cache.clear()
+                        
                         # Check if already loaded to avoid reprocessing
                         if _excel_processor._last_loaded_file == session_file_path and hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
                             log_if_not_pa('info', f"File already loaded, skipping reload")
@@ -2747,7 +2762,19 @@ def upload_file():
                 try:
                     log_if_not_pa('info', f"Processing file: {file_path}")
 
+                    # CRITICAL: Get a fresh processor instance for the new file
+                    # Clear any cached data first
+                    global _excel_processor
+                    _excel_processor = None
+                    
                     processor = get_excel_processor()
+                    # Force clear any existing data before loading new file
+                    if hasattr(processor, 'df') and processor.df is not None:
+                        processor.df = pd.DataFrame()
+                        processor._last_loaded_file = None
+                    # CRITICAL: Clear selected tags when loading new file
+                    if hasattr(processor, 'selected_tags'):
+                        processor.selected_tags = []
                     success = processor.load_file(file_path)
 
                     if success:
@@ -2827,6 +2854,12 @@ def upload_file():
             # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
             _excel_processor = None
             log_if_not_pa('info', "Cleared Excel processor cache")
+            
+            # CRITICAL: Clear selected tags in session when uploading new file
+            if 'selected_tags' in session:
+                session['selected_tags'] = []
+                session.modified = True
+                log_if_not_pa('info', "Cleared selected tags in session for new file upload")
             
             # CRITICAL: Clear ALL caches to force complete refresh
             try:

@@ -790,6 +790,13 @@ function pollUploadStatus(filename) {
         // Show success toast
         showToast('success', `File "${filename}" loaded successfully!`);
 
+        // CRITICAL: Update file info display immediately
+        const fileInfoText = document.getElementById('fileInfoText');
+        if (fileInfoText && filename) {
+          fileInfoText.textContent = filename;
+          console.log(`✅ Updated fileInfoText with: ${filename}`);
+        }
+        
         // Fetch all updated data in parallel to avoid serial bottlenecks
         console.time('post-ready-data-fetch');
         console.log('🔄 Starting tag refresh after file processing complete...');

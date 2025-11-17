@@ -1861,21 +1861,30 @@ class ExcelProcessor:
             
             self.logger.info(f"File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
             
-            # Check file modification time for cache invalidation
-            file_mtime = os.path.getmtime(file_path)
-            cache_key = f"{file_path}_{file_mtime}"
-            
-            if cache_key in self._file_cache:
-                self.logger.debug(f"Using cached data for {file_path}")
-                self.df = self._file_cache[cache_key].copy()
-                self._on_dataset_updated(file_path, file_mtime)
-                return True
-            
-            # Clear previous data to free memory
+            # Clear previous data FIRST before checking cache (ensures old data is removed)
             if hasattr(self, 'df') and self.df is not None:
                 del self.df
                 import gc
                 gc.collect()
+                # Also clear any file cache references to ensure fresh load
+                if hasattr(self, '_file_cache'):
+                    # Only use cache if it's for the EXACT same file
+                    # Don't use cache if loading a different file
+                    if self._last_loaded_file != file_path:
+                        self._file_cache.clear()
+            
+            # Check file modification time for cache invalidation
+            file_mtime = os.path.getmtime(file_path)
+            cache_key = f"{file_path}_{file_mtime}"
+            
+            # Only use cache if loading the SAME file that was previously loaded
+            # Never use cache when loading a different file
+            if (self._last_loaded_file == file_path and 
+                cache_key in self._file_cache):
+                self.logger.debug(f"Using cached data for {file_path}")
+                self.df = self._file_cache[cache_key].copy()
+                self._on_dataset_updated(file_path, file_mtime)
+                return True
             
             # 1) Read & dedupe, force-key columns to string for .str ops
             # Use standard settings for both environments

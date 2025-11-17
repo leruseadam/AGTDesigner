@@ -2,7 +2,18 @@
 
 ## No More Stashing! 🎉
 
+### First Time Setup (Run Once on PythonAnywhere)
+Add this to your `~/.bashrc` or run it each session:
+```bash
+alias gsync='git fetch origin && git reset --hard origin/main && git clean -fd'
+```
+
 ### Quick Deploy (Recommended)
+```bash
+gsync
+```
+
+### Or Manual Commands
 ```bash
 git fetch origin
 git reset --hard origin/main
