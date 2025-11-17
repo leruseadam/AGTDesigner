@@ -3208,7 +3208,15 @@ const TagManager = {
         const sortedVendors = Array.from(organizedTags.entries())
             .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-        sortedVendors.forEach(([vendor, brandGroups]) => {
+        // PERFORMANCE FIX: Use chunked rendering to prevent UI freeze
+        const CHUNK_SIZE = 10; // Process 10 vendors at a time
+        let vendorIndex = 0;
+
+        const processVendorChunk = () => {
+            const chunkEnd = Math.min(vendorIndex + CHUNK_SIZE, sortedVendors.length);
+
+            for (let i = vendorIndex; i < chunkEnd; i++) {
+                const [vendor, brandGroups] = sortedVendors[i];
             const vendorSection = document.createElement('div');
             vendorSection.className = 'vendor-section mb-3';
             
@@ -3759,8 +3767,22 @@ const TagManager = {
                     }
                 });
             });
-        });
 
+            tagList.appendChild(vendorSection);
+            }
+
+            vendorIndex = chunkEnd;
+
+            // If there are more vendors to process, schedule next chunk
+            if (vendorIndex < sortedVendors.length) {
+                requestAnimationFrame(processVendorChunk);
+            } else {
+                // All vendors processed, finalize
+                finalizeRendering();
+            }
+        };
+
+        const finalizeRendering = () => {
         // Replace container content with built tags (this replaces any loading indicator)
         // Use requestAnimationFrame to prevent blocking the UI
         requestAnimationFrame(() => {
@@ -3777,6 +3799,10 @@ const TagManager = {
             // Hide loading splash only after tags actually appear in DOM
             this._waitForTagsToAppear();
         });
+        };
+
+        // Start processing the first chunk
+        processVendorChunk();
     },
 
     renderSimplifiedAvailableTags(tags, savedScroll) {

@@ -116,23 +116,55 @@ def cleanup_memory():
     """Cleanup memory by clearing caches and forcing garbage collection."""
     try:
         import gc
-        gc.collect()
         
         # Clear Flask cache if available
         if hasattr(app, 'cache') and app.cache:
-            app.cache.clear()
+            try:
+                app.cache.clear()
+            except Exception as e:
+                logging.warning(f"Could not clear Flask cache: {e}")
+        
+        # Clear Excel processor dataframes from memory
+        try:
+            if hasattr(app, '_excel_processors'):
+                for processor in app._excel_processors.values():
+                    if hasattr(processor, 'df') and processor.df is not None:
+                        processor.df = None
+        except Exception as e:
+            logging.warning(f"Could not clear Excel processors: {e}")
+        
+        # Force garbage collection multiple times to ensure cleanup
+        for _ in range(3):
+            gc.collect()
             
+        memory_after = get_memory_usage()
+        logging.info(f"Memory cleanup completed. Current usage: {memory_after:.1f}MB")
         return True
     except Exception as e:
         logging.error(f"Memory cleanup failed: {e}")
         return False
 
+# Track last cleanup time to avoid excessive cleanup
+_last_memory_cleanup = 0
+_cleanup_interval = 300  # Clean up every 5 minutes
+
 def check_memory_limit():
-    """Check if memory usage is within limits."""
+    """Check if memory usage is within limits and trigger cleanup if needed."""
+    global _last_memory_cleanup
+    
     memory_mb = get_memory_usage()
+    
+    # If memory is high, trigger cleanup
+    if memory_mb > MAX_MEMORY_MB * 0.8:  # 80% of limit
+        current_time = time.time()
+        # Only cleanup if it's been at least 5 minutes since last cleanup
+        if current_time - _last_memory_cleanup > _cleanup_interval:
+            logging.warning(f"Memory usage high ({memory_mb:.1f}MB), triggering cleanup")
+            cleanup_memory()
+            _last_memory_cleanup = current_time
+    
     if memory_mb > MAX_MEMORY_MB:
         logging.warning(f"Memory usage high: {memory_mb:.1f}MB (limit: {MAX_MEMORY_MB}MB)")
-        cleanup_memory()
         return False
     return True
 
@@ -1013,20 +1045,18 @@ def cleanup_old_processing_status():
     """Clean up old processing status entries to prevent memory leaks."""
     with processing_lock:
         current_time = time.time()
-        # Keep entries for at least 15 minutes to give frontend time to poll
-        cutoff_time = current_time - 900  # 15 minutes
+        # Reduced from 15 minutes to 5 minutes to save memory
+        cutoff_time = current_time - 300  # 5 minutes
         
         old_entries = []
         for filename, status in processing_status.items():
             timestamp = processing_timestamps.get(filename, 0)
             age = current_time - timestamp
             
-            # Only remove entries that are older than 15 minutes AND not currently processing
-            # Also, be more conservative with 'ready' status to prevent race conditions
+            # Only remove entries that are older than 5 minutes AND not currently processing
+            # Reduced 'ready' status timeout from 60 minutes to 10 minutes to save memory
             if age > cutoff_time and status != 'processing':
-                # For 'ready' status, wait much longer to ensure frontend has completed
-                # Increased from 30 minutes to 60 minutes to prevent race conditions
-                if status == 'ready' and age < 3600:  # 60 minutes for ready status
+                if status == 'ready' and age < 600:  # 10 minutes for ready status (reduced from 60)
                     continue
                 old_entries.append(filename)
         
@@ -1702,7 +1732,12 @@ app = create_app()
 
 # Initialize Flask-Caching after app creation (if available)
 if CACHE_AVAILABLE:
-    cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 300})
+    # Reduced cache timeout and added memory limits
+    cache = Cache(app, config={
+        'CACHE_TYPE': 'SimpleCache', 
+        'CACHE_DEFAULT_TIMEOUT': 900,  # 15 minutes (reduced from 5 minutes default, but individual caches use 900)
+        'CACHE_THRESHOLD': 1000  # Limit cache to 1000 items max
+    })
 else:
     cache = Cache()  # Use dummy cache
 
@@ -1775,19 +1810,35 @@ def check_session_size():
         # Check size of serializable data
         import pickle
         session_data = pickle.dumps(session_copy)
+        session_size_mb = len(session_data) / (1024 * 1024)
+        
+        # Reduced limit from 3KB to check for MB-level issues
         if len(session_data) > 3000:  # 3KB limit to stay well under 4KB
-            logging.warning(f"Session too large ({len(session_data)} bytes), clearing session data")
+            logging.warning(f"Session too large ({len(session_data)} bytes / {session_size_mb:.2f}MB), clearing session data")
             # Store essential data before clearing
             selected_tags = session.get('selected_tags', [])
             selected_store = session.get('selected_store', '')
+            file_path = session.get('file_path', '')
+            
+            # Limit selected_tags to prevent huge sessions
+            if len(selected_tags) > 1000:
+                logging.warning(f"Selected tags list too large ({len(selected_tags)}), truncating to 1000")
+                selected_tags = selected_tags[:1000]
+            
             session.clear()
             # Restore essential data after clearing
             if selected_tags:
                 session['selected_tags'] = selected_tags
             if selected_store:
                 session['selected_store'] = selected_store
-                logging.info(f"Preserved {len(selected_tags)} selected tags during session optimization")
+            if file_path:
+                session['file_path'] = file_path
+            logging.info(f"Preserved {len(selected_tags)} selected tags during session optimization")
             return True
+        
+        # Also check for MB-level issues (even if under 3KB limit)
+        if session_size_mb > 1.0:  # If session is > 1MB, log warning
+            logging.warning(f"Session size is {session_size_mb:.2f}MB - consider optimizing")
     except Exception as e:
         logging.error(f"Error checking session size: {e}")
     return False
@@ -8759,8 +8810,18 @@ def set_selected_tags():
             return jsonify({'error': 'Server error: Unable to initialize data processor'}), 500
         
         # Store tags in both Excel processor and session
+        # Limit session storage to prevent memory issues
         excel_processor.selected_tags = selected_tags
-        session['selected_tags'] = selected_tags
+        
+        # Only store up to 2000 tags in session to prevent memory bloat
+        # Full list is stored in Excel processor which is more efficient
+        if len(selected_tags) > 2000:
+            logging.warning(f"Selected tags list large ({len(selected_tags)}), storing only first 2000 in session")
+            session['selected_tags'] = selected_tags[:2000]
+            session['selected_tags_count'] = len(selected_tags)  # Store full count
+        else:
+            session['selected_tags'] = selected_tags
+        
         session.modified = True
         session.permanent = True
         
@@ -12641,6 +12702,41 @@ def trend_analysis():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/clear-cache', methods=['POST'])
+@app.route('/api/memory/cleanup', methods=['POST'])
+def manual_memory_cleanup():
+    """Manually trigger memory cleanup"""
+    try:
+        memory_before = get_memory_usage()
+        cleanup_memory()
+        memory_after = get_memory_usage()
+        freed = memory_before - memory_after
+        
+        return jsonify({
+            'success': True,
+            'memory_before_mb': round(memory_before, 2),
+            'memory_after_mb': round(memory_after, 2),
+            'freed_mb': round(freed, 2),
+            'message': f'Memory cleanup completed. Freed {freed:.1f}MB'
+        })
+    except Exception as e:
+        logging.error(f"Manual memory cleanup failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/memory/status', methods=['GET'])
+def memory_status():
+    """Get current memory usage status"""
+    try:
+        memory_mb = get_memory_usage()
+        return jsonify({
+            'memory_usage_mb': round(memory_mb, 2),
+            'memory_limit_mb': MAX_MEMORY_MB,
+            'usage_percent': round((memory_mb / MAX_MEMORY_MB) * 100, 1),
+            'status': 'ok' if memory_mb < MAX_MEMORY_MB * 0.8 else 'warning' if memory_mb < MAX_MEMORY_MB else 'critical'
+        })
+    except Exception as e:
+        logging.error(f"Memory status check failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
 def clear_cache():
     """Clear all persistent data and cache to force fresh data loading"""
     try:
@@ -13761,9 +13857,9 @@ def json_process():
         if matched_products:
             logging.info(f'✅ Successfully matched {len(matched_products)} products from JSON')
             
-            # Store in cache
+            # Store in cache (reduced TTL from 1 hour to 15 minutes to save memory)
             cache_key = get_session_cache_key('available_tags')
-            cache.set(cache_key, matched_products, timeout=3600)
+            cache.set(cache_key, matched_products, timeout=900)
             
             return jsonify({
                 'success': True,
@@ -17675,9 +17771,9 @@ def json_match_mixed():
                         mixed_products.append(json_product)
                         logging.info(f"JSON-only product: {json_name}")
         
-        # Store mixed products in cache and session
+        # Store mixed products in cache and session (reduced TTL from 1 hour to 15 minutes to save memory)
         cache_key = get_session_cache_key('available_tags')
-        cache.set(cache_key, mixed_products, timeout=3600)
+        cache.set(cache_key, mixed_products, timeout=900)
         
         # Set selected tags to all mixed products
         selected_names = []
