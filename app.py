@@ -271,6 +271,16 @@ from werkzeug.utils import secure_filename
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
+# Simplified logging for PythonAnywhere - reduce verbosity
+def log_if_not_pa(level, message, *args, **kwargs):
+    """Only log if not on PythonAnywhere to reduce log verbosity"""
+    if not IS_PYTHONANYWHERE:
+        getattr(logging, level)(message, *args, **kwargs)
+
+def log_error(message, *args, **kwargs):
+    """Simplified error logging - always log errors but keep them concise"""
+    logging.error(message, *args, **kwargs)
+
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Honour environment override so PythonAnywhere can skip the heavy Excel scan
 # Default is now True to improve initial load speed
@@ -1090,35 +1100,35 @@ def get_excel_processor():
                     from flask import session
                     try:
                         session_file_path = session.get('file_path')
-                        logging.info(f"🔍 DEBUG: Session file_path = {session_file_path}")
-                        logging.info(f"🔍 DEBUG: Session keys = {list(session.keys())}")
+                        log_if_not_pa('debug', f"Session file_path: {session_file_path}")
+                        log_if_not_pa('debug', f"Session keys: {list(session.keys())}")
                     except RuntimeError:
                         # No active request context during startup
                         session_file_path = None
-                        logging.info("🔍 DEBUG: No request context, session_file_path = None")
+                        log_if_not_pa('debug', "No request context, session_file_path = None")
                     
                     if session_file_path and os.path.exists(session_file_path):
-                        logging.info(f"✅ CRITICAL FIX: Found uploaded file in session: {session_file_path}")
+                        log_if_not_pa('info', f"Found uploaded file in session: {session_file_path}")
                         
                         # Check if already loaded to avoid reprocessing
                         if _excel_processor._last_loaded_file == session_file_path and hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
-                            logging.info(f"⚡ File already loaded, skipping reload: {session_file_path}")
+                            log_if_not_pa('info', f"File already loaded, skipping reload")
                             row_count = len(_excel_processor.df)
-                            logging.info(f"✅ Using cached data: {row_count} rows")
+                            log_if_not_pa('info', f"Using cached data: {row_count} rows")
                         else:
                             # Load the uploaded file instead of clearing the DataFrame
-                            logging.info(f"📂 Loading session file: {session_file_path}")
+                            log_if_not_pa('info', f"Loading session file: {session_file_path}")
                             success = _excel_processor.load_file(session_file_path)
                             if success:
                                 _excel_processor._last_loaded_file = session_file_path
-                                logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
+                                log_if_not_pa('info', f"Loaded session file: {session_file_path}")
                                 row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
-                                logging.info(f"✅ Loaded {row_count} rows from session file")
+                                log_if_not_pa('info', f"Loaded {row_count} rows")
                             else:
-                                logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
+                                log_error(f"Failed to load session file: {session_file_path}")
                                 _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
                     elif session_file_path:
-                        logging.error(f"❌ Session file_path exists but file not found: {session_file_path}")
+                        log_error(f"Session file_path exists but file not found: {session_file_path}")
                     else:
                         # OPTIMIZATION: Skip default file loading on startup for faster app loading
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
@@ -2612,18 +2622,17 @@ def upload_file():
         # DIAGNOSTIC: Log IP and session state
         ip_address = get_client_ip()
         session_store = session.get('selected_store')
-        logging.info(f"🔍 Upload diagnostics: IP={ip_address}, Session store={session_store}")
-        logging.info(f"🔍 Request headers: X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}, Remote-Addr={request.remote_addr}")
+        log_if_not_pa('debug', f"Upload diagnostics: IP={ip_address}, Session store={session_store}")
+        log_if_not_pa('debug', f"Request headers: X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}")
         
         # CRITICAL: Require store selection before upload
         if not has_store_selection():
-            logging.error(f"❌ Upload attempted without store selection - IP: {ip_address}, Session: {session_store}")
-            logging.error(f"❌ IP store selections: {list(_ip_store_selections.keys())}")
+            log_error(f"Upload attempted without store selection - IP: {ip_address}")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
         
         # Get current store selection
         selected_store = get_current_store_name()
-        logging.info(f"✅ Store selection found: {selected_store}")
+        log_if_not_pa('info', f"Store selection: {selected_store}")
         
         # Validate request
         if 'file' not in request.files:
@@ -2666,25 +2675,25 @@ def upload_file():
         safe_filename = f"{timestamp}_{file.filename}"
         file_path = os.path.join(uploads_dir, safe_filename)
         
-        logging.info(f"🔍 Attempting to save file to: {file_path}")
-        logging.info(f"🔍 Uploads directory: {uploads_dir}")
-        logging.info(f"🔍 Directory exists: {os.path.exists(uploads_dir)}")
+        log_if_not_pa('debug', f"Saving file to: {file_path}")
+        log_if_not_pa('debug', f"Uploads directory exists: {os.path.exists(uploads_dir)}")
         
         try:
             file.save(file_path)
-            logging.info(f"✅ File save completed: {file_path}")
+            log_if_not_pa('info', f"File saved: {file_path}")
         except Exception as save_error:
-            logging.error(f"❌ File save failed: {save_error}")
-            logging.error(traceback.format_exc())
+            log_error(f"File save failed: {save_error}")
+            if not IS_PYTHONANYWHERE:
+                logging.error(traceback.format_exc())
             return jsonify({'error': f'File save failed: {str(save_error)}'}), 500
         
         # Verify saved
         if not os.path.exists(file_path):
-            logging.error(f"❌ File does not exist after save: {file_path}")
+            log_error(f"File does not exist after save: {file_path}")
             return jsonify({'error': 'File save failed - file not found after save'}), 500
         else:
             file_size = os.path.getsize(file_path)
-            logging.info(f"✅ File verified: {file_path} ({file_size} bytes)")
+            log_if_not_pa('info', f"File verified: {file_size} bytes")
         
         # Update session with permanent flag for persistence
         session.permanent = True
@@ -2701,17 +2710,15 @@ def upload_file():
         except:
             pass
         
-        logging.info(f"✅ Session updated and saved: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
-        logging.info(f"✅ Session data: {dict(session)}")
+        log_if_not_pa('debug', f"Session updated: file_path={file_path}, filename={file.filename}")
         
         # CRITICAL: Verify session was saved by reading it back
         verify_file_path = session.get('file_path')
         verify_filename = session.get('uploaded_filename')
         if verify_file_path == file_path and verify_filename == file.filename:
-            logging.info(f"✅ SESSION VERIFIED: file_path and filename saved correctly")
+            log_if_not_pa('debug', "Session verified: file_path and filename saved")
         else:
-            logging.error(f"❌ SESSION VERIFICATION FAILED: file_path={verify_file_path}, filename={verify_filename}")
-            logging.error(f"❌ Expected file_path={file_path}, filename={file.filename}")
+            log_error(f"Session verification failed: file_path={verify_file_path}, expected={file_path}")
         
         # Mark as processing
         update_processing_status(file.filename, 'processing')
@@ -2721,7 +2728,7 @@ def upload_file():
         
         if is_pythonanywhere:
             # On PythonAnywhere: Start background thread to avoid timeout
-            logging.info("[PYTHONANYWHERE] Starting background processing thread")
+            log_if_not_pa('info', "[PYTHONANYWHERE] Starting background processing thread")
 
             # Capture variables from request context for background thread
             original_filename = file.filename
@@ -2729,23 +2736,23 @@ def upload_file():
 
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
             _excel_processor = None
-            logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
+            log_if_not_pa('info', "Cleared Excel processor cache")
 
             # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
             # Background processing will handle database storage and cache clearing
             update_processing_status(file.filename, 'ready')
-            logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
+            log_if_not_pa('info', f"Marked {file.filename} as ready")
 
             def process_in_background():
                 try:
-                    logging.info(f"[BACKGROUND] Processing file: {file_path}")
+                    log_if_not_pa('info', f"Processing file: {file_path}")
 
                     processor = get_excel_processor()
                     success = processor.load_file(file_path)
 
                     if success:
                         row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
+                        log_if_not_pa('info', f"File loaded: {row_count} rows")
 
                         # Store in database
                         try:
@@ -2754,13 +2761,13 @@ def upload_file():
                             product_db = get_product_database(store_name)
 
                             if product_db and hasattr(product_db, 'store_excel_data'):
-                                logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
+                                log_if_not_pa('info', f"Storing {row_count} products in database")
                                 result = product_db.store_excel_data(processor.df, file_path)
-                                logging.info(f"[BACKGROUND] Database storage result: {result}")
+                                log_if_not_pa('info', f"Database storage: {result}")
                         except Exception as db_error:
-                            logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
+                            log_error(f"Database storage failed: {db_error}")
 
-                        logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
+                        log_if_not_pa('info', "Excel processor cache cleared")
 
                         # CRITICAL: Clear ALL caches to force complete refresh
                         try:
@@ -2775,19 +2782,20 @@ def upload_file():
                             for key_base in cache_keys_to_clear:
                                 cache_key = get_session_cache_key(key_base)
                                 cache.delete(cache_key)
-                                logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
+                                log_if_not_pa('info', f"Cleared cache: {key_base}")
                         except Exception as cache_err:
-                            logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
+                            log_error(f"Failed to clear cache: {cache_err}")
 
                         # Already marked as ready above, so frontend doesn't wait
-                        logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
+                        log_if_not_pa('info', f"Processing complete: {original_filename}")
                     else:
-                        logging.error("[BACKGROUND] File load returned False")
+                        log_error("Background file load returned False")
                         update_processing_status(original_filename, 'error: File load failed')
 
                 except Exception as e:
-                    logging.error(f"[BACKGROUND] Processing error: {e}")
-                    logging.error(traceback.format_exc())
+                    log_error(f"Background processing error: {e}")
+                    if not IS_PYTHONANYWHERE:
+                        logging.error(traceback.format_exc())
                     update_processing_status(original_filename, f'error: {str(e)}')
 
             # Start background thread

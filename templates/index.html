@@ -11796,21 +11796,16 @@
           const data = await response.json();
 
           if (response.ok && data.success) {
-            // Always just reload quickly - processing happens during page load
-              if (statusElement) {
-              statusElement.textContent = 'Upload complete! Reloading...';
+            // Hide splash screen and show success message
+            if (splash) splash.style.display = 'none';
+            if (statusElement) {
+              statusElement.textContent = 'Upload complete!';
             }
-            
-            // Clear caches
-              if (window.TagManager && window.TagManager.clearCache) {
-                window.TagManager.clearCache();
-              }
-              sessionStorage.clear();
-              
-            // Reload after brief delay
-              setTimeout(() => {
-                window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
-            }, 800);
+
+            // Update UI to reflect the uploaded file
+            if (window.updateUploadNotificationBanner) {
+              window.updateUploadNotificationBanner();
+            }
           } else {
             if (splash) splash.style.display = 'none';
             alert('Upload failed: ' + (data.error || 'Unknown error'));
