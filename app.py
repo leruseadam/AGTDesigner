@@ -68,7 +68,7 @@ except ImportError as e:
             return f  # Return function unchanged (no invalidation)
         return decorator
 # Startup Performance Optimization
-# DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
+# DISABLE_STARTUP_FILE_LOADING is set below based on environment or defaults to True
 
 # PythonAnywhere Performance Optimization
 PYTHONANYWHERE_OPTIMIZATION = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
@@ -273,13 +273,14 @@ IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Honour environment override so PythonAnywhere can skip the heavy Excel scan
-# Default remains False for full-featured local runs unless explicitly disabled
+# Default is now True to improve initial load speed
 _disable_startup_env = os.environ.get('DISABLE_STARTUP_FILE_LOADING')
 if _disable_startup_env is not None:
     DISABLE_STARTUP_FILE_LOADING = _disable_startup_env.strip().lower() in ('1', 'true', 'yes')
 else:
-    # Default to disabling on resource-constrained hosts (PythonAnywhere), otherwise keep enabled
-    DISABLE_STARTUP_FILE_LOADING = PYTHONANYWHERE_OPTIMIZATION
+    # Default to True to prevent delay on initial page load
+    # Can be overridden via environment variable if needed
+    DISABLE_STARTUP_FILE_LOADING = True
 
 # OPTIMIZATION: Enable lazy loading for faster app startup
 # Set to False to load files immediately
