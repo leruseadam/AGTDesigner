@@ -45,45 +45,6 @@
         TagManager.checkForExistingData = async function() {
             console.log('⚡ Optimized checkForExistingData called');
             
-            // CRITICAL: Check cache FIRST before any API calls
-            const cachedTags = this.loadAvailableTagsFromCache();
-            if (cachedTags && cachedTags.length > 0) {
-                console.log(`⚡ INSTANT: Loaded ${cachedTags.length} tags from cache - skipping API call`);
-                // Render cached tags immediately
-                this.state.tags = [...cachedTags];
-                this.state.originalTags = [...cachedTags];
-                this._updateAvailableTags(cachedTags, null);
-                
-                // Hide splash immediately
-                if (AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-                
-                // Load fresh data in background (non-blocking)
-                setTimeout(async () => {
-                    try {
-                        const response = await fetch('/api/initial-data');
-                        if (response.ok) {
-                            const data = await response.json();
-                            if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
-                                console.log(`⚡ Background: Updated with ${data.available_tags.length} fresh tags`);
-                                this.state.tags = [...data.available_tags];
-                                this.state.originalTags = [...data.available_tags];
-                                this._updateAvailableTags(data.available_tags, null);
-                            }
-                        }
-                    } catch (error) {
-                        console.log('Background data refresh failed (non-critical):', error.message);
-                    }
-                }, 100);
-                
-                return;
-            }
-            
             // Show UI immediately - don't block on data loading
             AppLoadingSplash.updateProgress(50, 'UI Ready - Loading data in background...');
             
@@ -118,25 +79,23 @@
                         // Use _updateAvailableTags directly to avoid debounce delay
                         this._updateAvailableTags(data.available_tags, null);
                         
-                        // Force hide splash immediately - don't wait for tags to render
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                        if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                            AppLoadingSplash.stopAutoAdvance();
-                            AppLoadingSplash.complete();
-                        }
-                        
-                        // Verify tags rendered (non-blocking check)
-                        setTimeout(() => {
+                        // Immediately check if tags are visible and hide splash
+                        requestAnimationFrame(() => {
                             const container = document.getElementById('availableTags');
                             if (container) {
                                 const tagItems = container.querySelectorAll('.tag-item');
                                 if (tagItems.length > 0) {
-                                    console.log(`⚡ Tags rendered (${tagItems.length} items)`);
+                                    console.log(`⚡ Tags rendered (${tagItems.length} items), hiding splash immediately`);
+                                    if (this.hideActionSplash) {
+                                        this.hideActionSplash();
+                                    }
+                                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                                        AppLoadingSplash.stopAutoAdvance();
+                                        AppLoadingSplash.complete();
+                                    }
                                 }
                             }
-                        }, 100);
+                        });
                         
                         // Also ensure splash is hidden when tags appear (backup)
                         if (this._waitForTagsToAppear) {
@@ -170,19 +129,16 @@
                         console.log('⚡ No initial data available - ready for file upload');
                         // FIXED: Don't load test data - keep UI empty for upload
                         this.initializeEmptyState();
-                        // Show notification will be handled by initializeEmptyState
                     }
                 } else {
                     console.log('⚡ Initial data endpoint error - ready for file upload');
                     // FIXED: Don't load test data - keep UI empty for upload
                     this.initializeEmptyState();
-                    // Show notification will be handled by initializeEmptyState
                 }
             } catch (error) {
                 console.log('⚡ Initial data load error - UI remains interactive:', error.message);
                 // Don't load test data on timeout - just leave UI ready for upload
                 this.initializeEmptyState();
-                // Show notification will be handled by initializeEmptyState
             }
         };
         

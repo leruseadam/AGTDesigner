@@ -922,7 +922,7 @@ const TagManager = {
         _memoryOptimized: true,
         _lastCleanup: Date.now()
     },
-    SIMPLIFIED_RENDER_THRESHOLD: 200, // Lowered from 900 to improve performance
+    SIMPLIFIED_RENDER_THRESHOLD: 900,
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
@@ -992,25 +992,11 @@ const TagManager = {
         }
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
-            verboseLog(`⚡ Hydrating ${cachedTags.length} tags from cache for instant display`);
+            verboseLog(`Hydrating ${cachedTags.length} tags from cache for instant display`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
             this.state.simplifiedAvailableTagsActive = false;
-            
-            // Update state immediately
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
-            
-            // Render tags immediately - don't wait
             this._updateAvailableTags(cachedTags, null);
-            
-            // Hide splash immediately since we have cached data
-            if (this.hideActionSplash) {
-                setTimeout(() => {
-                    this.hideActionSplash();
-                }, 50);
-            }
-            
             return true;
         }
         return false;
@@ -3768,7 +3754,7 @@ const TagManager = {
             return;
         }
 
-        const chunkSize = 25; // Further reduced to prevent blocking with large tag lists
+        const chunkSize = 200;
         let index = 0;
 
         availableTagsContainer.innerHTML = '';
@@ -3819,14 +3805,6 @@ const TagManager = {
             this.initializeSelectAllCheckbox();
         });
 
-        // Safety timeout: always hide splash after 2 seconds max
-        const safetyTimeout = setTimeout(() => {
-            verboseLog('Safety timeout: forcing splash to hide after 2 seconds');
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-        }, 2000);
-
         const renderChunk = () => {
             const fragment = document.createDocumentFragment();
             const end = Math.min(index + chunkSize, tags.length);
@@ -3838,23 +3816,18 @@ const TagManager = {
             listWrapper.appendChild(fragment);
 
             if (index < tags.length) {
-                // Use setTimeout with small delay to yield to browser for smoother rendering
-                setTimeout(renderChunk, 10);
+                requestAnimationFrame(renderChunk);
             } else {
-                clearTimeout(safetyTimeout);
                 requestAnimationFrame(() => {
                     this._restoreAvailableScrollPosition(savedScroll);
                     this.updateSelectAllCheckboxes();
                     this._waitForTagsToAppear();
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
+                    this.hideActionSplash();
                 });
             }
         };
 
-        // Start rendering immediately
-        renderChunk();
+        requestAnimationFrame(renderChunk);
     },
     
     // Wait for tags to actually appear in DOM before hiding splash
@@ -3896,9 +3869,9 @@ const TagManager = {
             return;
         }
         
-        // Aggressive timeout: hide splash after 1 second max, regardless of tag count
+        // Aggressive timeout: hide splash after 2 seconds max, regardless of tag count
         const forceHideTimeout = setTimeout(() => {
-            verboseLog('Force hiding splash after 1 second timeout');
+            verboseLog('Force hiding splash after 2 second timeout');
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
@@ -3906,10 +3879,10 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
             }
-        }, 1000);
+        }, 2000);
         
         let attempts = 0;
-        const maxAttempts = 10; // 1 second max (10 * 100ms) - reduced for faster response
+        const maxAttempts = 20; // 2 seconds max (20 * 100ms) - reduced for faster response
         let lastTagCount = 0;
         let stableCount = 0; // Count how many times tag count has been stable
         
@@ -6607,18 +6580,6 @@ const TagManager = {
                 `;
             }
             
-            // CRITICAL: Force hide splash after 5 seconds maximum to prevent permanent freeze
-            const maxSplashTimeout = setTimeout(() => {
-                console.warn('Force hiding splash after 5 second maximum timeout');
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-            }, 5000);
-            
             // Preserve current scroll/anchor so refreshes don't jump the list
             const savedScroll = this._saveAvailableScrollPosition();
             
@@ -6674,8 +6635,7 @@ const TagManager = {
             // OPTIMIZATION: Use fast_load parameter for initial load to skip slow lineage alignment
             // This dramatically speeds up tag loading when cached data is available
             const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
-            // Always use fast_load for better performance - lineage can be aligned later if needed
-            const fastLoadParam = '&fast_load=1';
+            const fastLoadParam = isInitialLoad ? '&fast_load=1' : '';
             
             // Add retry logic for failed requests
             let response;
@@ -6687,14 +6647,14 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // Reduced timeout to 8 seconds - fail fast if server is slow
-                    const timeoutId = setTimeout(() => controller.abort(), 8000);
+                    // Increased timeout from 10s to 20s to accommodate slower lineage alignment queries
+                    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
                     // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Always use fast_load for better performance
-                    const fastParam = fastLoadParam;
+                    // Use fast_load on first attempt for initial loads
+                    const fastParam = (retryCount === 0 && isInitialLoad) ? fastLoadParam : '';
                     response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}`, {
                         signal: controller.signal
                     });
@@ -6830,11 +6790,6 @@ const TagManager = {
             // OPTIMIZATION: If this was a fast load, optionally refresh with lineage alignment in background
             // This allows tags to appear immediately while lineage is updated asynchronously
             if (responseData && responseData.source === 'cache-fast' && tags.length > 0) {
-                // Clear the max splash timeout since we got data
-                if (typeof maxSplashTimeout !== 'undefined') {
-                    clearTimeout(maxSplashTimeout);
-                }
-                
                 verboseLog('Fast load completed - tags displayed immediately');
                 // Update UI immediately with fast-loaded tags
                 this._updateAvailableTags(tags);
@@ -6843,13 +6798,6 @@ const TagManager = {
                 // Update tag counts
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
-                
-                // Hide splash immediately after fast load
-                if (this.hideActionSplash) {
-                    setTimeout(() => {
-                        this.hideActionSplash();
-                    }, 100);
-                }
                 
                 // Optionally refresh with lineage alignment in background (non-blocking)
                 // This ensures lineage is eventually aligned without blocking initial display
@@ -6907,28 +6855,11 @@ const TagManager = {
             this.updateTagCount('available', tags.length);
             this.updateTagCount('selected', this.state.persistentSelectedTags.length);
             
-            // Safety timeout: always hide splash after 3 seconds even if tags don't appear
-            setTimeout(() => {
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-            }, 3000);
-            
-            // Clear the max splash timeout since we got data
-            if (typeof maxSplashTimeout !== 'undefined') {
-                clearTimeout(maxSplashTimeout);
-            }
-            
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
             // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
             return true;
         } catch (error) {
-            // Clear the max splash timeout on error
-            if (typeof maxSplashTimeout !== 'undefined') {
-                clearTimeout(maxSplashTimeout);
-            }
-            
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
             const fallbackLoaded = await this._fallbackToLiteAvailableTags(error, savedScroll);
@@ -7405,181 +7336,7 @@ const TagManager = {
         };
         this.updateFilters(emptyFilters, false); // Don't preserve values when initializing empty state
         
-        // Show notification that no file is uploaded (only once per session)
-        if (!this._uploadNotificationShown) {
-            this._uploadNotificationShown = true;
-            setTimeout(() => {
-                this.showUploadRequiredNotification();
-            }, 1000);
-        }
-        
         verboseLog('Empty state initialized');
-    },
-    
-    showUploadRequiredNotification() {
-        console.log('📢 Showing upload required notification');
-        
-        // Find the upload section to place notification above it
-        const uploadSection = document.querySelector('.left-section') || document.querySelector('.file-path-display')?.parentElement;
-        
-        if (uploadSection) {
-            // Check if notification already exists
-            let existingNotification = uploadSection.querySelector('.upload-required-notification');
-            if (existingNotification) {
-                return; // Already showing
-            }
-            
-            // Create notification element
-            const notification = document.createElement('div');
-            notification.className = 'upload-required-notification';
-            notification.style.cssText = `
-                width: 100%;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 0.75rem 1rem;
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                margin-bottom: 0.75rem;
-                animation: slideDown 0.3s ease-out;
-            `;
-            notification.setAttribute('role', 'alert');
-            notification.setAttribute('aria-live', 'assertive');
-            
-            // Add CSS animation if not already added
-            if (!document.getElementById('upload-notification-animation-style')) {
-                const style = document.createElement('style');
-                style.id = 'upload-notification-animation-style';
-                style.textContent = `
-                    @keyframes slideDown {
-                        from {
-                            transform: translateY(-20px);
-                            opacity: 0;
-                        }
-                        to {
-                            transform: translateY(0);
-                            opacity: 1;
-                        }
-                    }
-                `;
-                document.head.appendChild(style);
-            }
-            
-            notification.innerHTML = `
-                <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <div style="display: flex; align-items: center; flex: 1;">
-                        <i class="fas fa-info-circle" style="margin-right: 0.5rem; font-size: 1rem;"></i>
-                        <span style="font-size: 0.9rem; font-weight: 500;">No file uploaded. Please upload an Excel file to get started.</span>
-                    </div>
-                    <button type="button" onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; margin-left: 0.5rem;">&times;</button>
-                </div>
-            `;
-            
-            // Insert before the file-path-display or at the beginning of upload section
-            const filePathDisplay = uploadSection.querySelector('.file-path-display');
-            if (filePathDisplay) {
-                uploadSection.insertBefore(notification, filePathDisplay);
-            } else {
-                uploadSection.insertBefore(notification, uploadSection.firstChild);
-            }
-            
-            // Auto-remove after 10 seconds
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
-                }
-            }, 10000);
-            
-            return;
-        }
-        
-        // Fallback: Create visible notification that works even without Bootstrap (original position)
-        const toastContainer = document.getElementById('toast-container') || (() => {
-            const container = document.createElement('div');
-            container.id = 'toast-container';
-            container.className = 'toast-container position-fixed top-0 start-0 p-3';
-            container.style.cssText = 'position: fixed; top: 20px; left: 20px; z-index: 1055;';
-            document.body.appendChild(container);
-            return container;
-        })();
-        
-        const toast = document.createElement('div');
-        toast.style.cssText = `
-            min-width: 300px;
-            max-width: 400px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 1rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            margin-bottom: 1rem;
-            animation: slideIn 0.3s ease-out;
-        `;
-        toast.setAttribute('role', 'alert');
-        toast.setAttribute('aria-live', 'assertive');
-        toast.setAttribute('aria-atomic', 'true');
-        
-        // Add CSS animation if not already added
-        if (!document.getElementById('toast-animation-style')) {
-            const style = document.createElement('style');
-            style.id = 'toast-animation-style';
-            style.textContent = `
-                @keyframes slideIn {
-                    from {
-                        transform: translateX(100%);
-                        opacity: 0;
-                    }
-                    to {
-                        transform: translateX(0);
-                        opacity: 1;
-                    }
-                }
-            `;
-            document.head.appendChild(style);
-        }
-        
-        toast.innerHTML = `
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
-                <div style="display: flex; align-items: center;">
-                    <i class="fas fa-info-circle" style="margin-right: 0.5rem; font-size: 1.2rem;"></i>
-                    <strong>Upload Required</strong>
-                </div>
-                <button type="button" onclick="this.parentElement.parentElement.remove()" style="background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">&times;</button>
-            </div>
-            <div>
-                No file uploaded. Please upload an Excel file to get started.
-            </div>
-        `;
-        toastContainer.appendChild(toast);
-        
-        // Try Bootstrap toast if available
-        if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
-            try {
-                toast.className = 'toast show';
-                const bsToast = new bootstrap.Toast(toast, { delay: 8000 });
-                bsToast.show();
-                
-                toast.addEventListener('hidden.bs.toast', () => {
-                    if (toast.parentNode) {
-                        toast.remove();
-                    }
-                });
-            } catch (e) {
-                console.warn('Bootstrap toast failed, using fallback:', e);
-                // Fallback: auto-remove after 8 seconds
-                setTimeout(() => {
-                    if (toast.parentNode) {
-                        toast.remove();
-                    }
-                }, 8000);
-            }
-        } else {
-            // Fallback: auto-remove after 8 seconds
-            setTimeout(() => {
-                if (toast.parentNode) {
-                    toast.remove();
-                }
-            }, 8000);
-        }
     },
 
     // Check if there's existing data and load it
@@ -7594,84 +7351,7 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // CRITICAL: Check cache FIRST before showing splash
-        const cachedTags = this.loadAvailableTagsFromCache();
-        if (cachedTags && cachedTags.length > 0) {
-            verboseLog(`⚡ INSTANT: Loaded ${cachedTags.length} tags from cache - skipping API call`);
-            // Render cached tags immediately for instant display
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
-            this._updateAvailableTags(cachedTags);
-            
-            // Hide splash immediately since we have cached data
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-            if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-            
-            // Check if file actually exists in background
-            fetch('/api/current-file')
-                .then(fileResponse => {
-                    if (fileResponse.ok) {
-                        return fileResponse.json();
-                    }
-                    return null;
-                })
-                .then(fileData => {
-                    // Only show notification if no file is actually uploaded
-                    if (!fileData || !fileData.has_file) {
-                        if (!this._uploadNotificationShown) {
-                            this._uploadNotificationShown = true;
-                            setTimeout(() => {
-                                this.showUploadRequiredNotification();
-                            }, 1500);
-                        }
-                    }
-                })
-                .catch(() => {
-                    // If check fails, assume no file and show notification
-                    if (!this._uploadNotificationShown) {
-                        this._uploadNotificationShown = true;
-                        setTimeout(() => {
-                            this.showUploadRequiredNotification();
-                        }, 1500);
-                    }
-                });
-            
-            // Load fresh data in background (non-blocking, fire-and-forget)
-            setTimeout(async () => {
-                try {
-                    const response = await fetch('/api/initial-data');
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
-                            verboseLog(`Background: Updated with ${data.available_tags.length} fresh tags`);
-                            this.state.tags = [...data.available_tags];
-                            this.state.originalTags = [...data.available_tags];
-                            this._updateAvailableTags(data.available_tags);
-                        } else if (!data.success || !data.available_tags || data.available_tags.length === 0) {
-                            // No file uploaded - show notification
-                            if (!this._uploadNotificationShown) {
-                                this._uploadNotificationShown = true;
-                                setTimeout(() => {
-                                    this.showUploadRequiredNotification();
-                                }, 1500);
-                            }
-                        }
-                    }
-                } catch (error) {
-                    verboseLog('Background data refresh failed (non-critical):', error);
-                }
-            }, 100);
-            
-            this._checkingExistingData = false;
-            return;
-        }
-
-        // Only show splash if no cache exists
+        // Show loading splash IMMEDIATELY before any async operations
         this.showActionSplash('Loading tags...');
 
         // Check for current uploaded file from session (non-blocking, runs in parallel)
@@ -7746,7 +7426,18 @@ const TagManager = {
             }
         }
 
-        // Cache already checked above - this is just a fallback
+        // PERFORMANCE FIX: Try cache first for instant load
+        const cachedTags = this.loadAvailableTagsFromCache();
+        if (cachedTags && cachedTags.length > 0) {
+            verboseLog(`⚡ FAST PATH: Loaded ${cachedTags.length} tags from cache instantly`);
+            // Render cached tags immediately for instant display
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            this._updateAvailableTags(cachedTags);
+
+            // Continue loading fresh data in background (non-blocking)
+            verboseLog('Cache rendered, fetching fresh data in background...');
+        }
 
         // CRITICAL FIX: Increased timeout to 30 seconds to handle slow database queries
         const timeoutPromise = new Promise((_, reject) => {
@@ -7858,58 +7549,6 @@ const TagManager = {
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
-                    
-                    // Show notification that no file is uploaded
-                    setTimeout(() => {
-                        // Use proper Toast class if available, otherwise create visible notification
-                        if (window.Toast && typeof window.Toast.show === 'function' && window.Toast.show.toString().includes('toast-container')) {
-                            window.Toast.show('info', 'No file uploaded. Please upload an Excel file to get started.');
-                        } else {
-                            // Create visible Bootstrap toast notification
-                            const toastContainer = document.getElementById('toast-container') || (() => {
-                                const container = document.createElement('div');
-                                container.id = 'toast-container';
-                                container.className = 'toast-container position-fixed top-0 end-0 p-3';
-                                container.style.zIndex = '1055';
-                                document.body.appendChild(container);
-                                return container;
-                            })();
-                            
-                            const toast = document.createElement('div');
-                            toast.className = 'toast show';
-                            toast.setAttribute('role', 'alert');
-                            toast.setAttribute('aria-live', 'assertive');
-                            toast.setAttribute('aria-atomic', 'true');
-                            toast.innerHTML = `
-                                <div class="toast-header bg-info text-white">
-                                    <i class="fas fa-info-circle me-2"></i>
-                                    <strong class="me-auto">Upload Required</strong>
-                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
-                                </div>
-                                <div class="toast-body">
-                                    No file uploaded. Please upload an Excel file to get started.
-                                </div>
-                            `;
-                            toastContainer.appendChild(toast);
-                            
-                            // Initialize Bootstrap toast if available
-                            if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
-                                const bsToast = new bootstrap.Toast(toast, { delay: 8000 });
-                                bsToast.show();
-                                
-                                // Remove toast element after it's hidden
-                                toast.addEventListener('hidden.bs.toast', () => {
-                                    toast.remove();
-                                });
-                            } else {
-                                // Fallback: auto-remove after 8 seconds
-                                setTimeout(() => {
-                                    toast.remove();
-                                }, 8000);
-                            }
-                        }
-                    }, 500);
-                    
                     this._checkingExistingData = false;
                     this.scheduleInitialDataRetry('Empty initial data response');
                     return;
@@ -7921,63 +7560,11 @@ const TagManager = {
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
                 
-            // FIXED: Initialize empty state instead of loading test data
-            this.initializeEmptyState();
-            
-            // Show notification that no file is uploaded
-            setTimeout(() => {
-                // Use proper Toast class if available, otherwise create visible notification
-                if (window.Toast && typeof window.Toast.show === 'function' && window.Toast.show.toString().includes('toast-container')) {
-                    window.Toast.show('info', 'No file uploaded. Please upload an Excel file to get started.');
-                } else {
-                    // Create visible Bootstrap toast notification
-                    const toastContainer = document.getElementById('toast-container') || (() => {
-                        const container = document.createElement('div');
-                        container.id = 'toast-container';
-                        container.className = 'toast-container position-fixed top-0 end-0 p-3';
-                        container.style.zIndex = '1055';
-                        document.body.appendChild(container);
-                        return container;
-                    })();
-                    
-                    const toast = document.createElement('div');
-                    toast.className = 'toast show';
-                    toast.setAttribute('role', 'alert');
-                    toast.setAttribute('aria-live', 'assertive');
-                    toast.setAttribute('aria-atomic', 'true');
-                    toast.innerHTML = `
-                        <div class="toast-header bg-info text-white">
-                            <i class="fas fa-info-circle me-2"></i>
-                            <strong class="me-auto">Upload Required</strong>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
-                        </div>
-                        <div class="toast-body">
-                            No file uploaded. Please upload an Excel file to get started.
-                        </div>
-                    `;
-                    toastContainer.appendChild(toast);
-                    
-                    // Initialize Bootstrap toast if available
-                    if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
-                        const bsToast = new bootstrap.Toast(toast, { delay: 8000 });
-                        bsToast.show();
-                        
-                        // Remove toast element after it's hidden
-                        toast.addEventListener('hidden.bs.toast', () => {
-                            toast.remove();
-                        });
-                    } else {
-                        // Fallback: auto-remove after 8 seconds
-                        setTimeout(() => {
-                            toast.remove();
-                        }, 8000);
-                    }
-                }
-            }, 500);
-            
-            this._checkingExistingData = false;
-            this.scheduleInitialDataRetry(`HTTP ${response.status}`);
-            return;
+                // FIXED: Initialize empty state instead of loading test data
+                this.initializeEmptyState();
+                this._checkingExistingData = false;
+                this.scheduleInitialDataRetry(`HTTP ${response.status}`);
+                return;
             }
         } catch (error) {
             verboseLog('Error loading initial data:', error.message);
@@ -7995,60 +7582,6 @@ const TagManager = {
             
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
-            
-            // Show notification that no file is uploaded (only if not a timeout)
-            if (error.message !== 'Initialization timeout') {
-                setTimeout(() => {
-                    // Use proper Toast class if available, otherwise create visible notification
-                    if (window.Toast && typeof window.Toast.show === 'function' && window.Toast.show.toString().includes('toast-container')) {
-                        window.Toast.show('info', 'No file uploaded. Please upload an Excel file to get started.');
-                    } else {
-                        // Create visible Bootstrap toast notification
-                        const toastContainer = document.getElementById('toast-container') || (() => {
-                            const container = document.createElement('div');
-                            container.id = 'toast-container';
-                            container.className = 'toast-container position-fixed top-0 end-0 p-3';
-                            container.style.zIndex = '1055';
-                            document.body.appendChild(container);
-                            return container;
-                        })();
-                        
-                        const toast = document.createElement('div');
-                        toast.className = 'toast show';
-                        toast.setAttribute('role', 'alert');
-                        toast.setAttribute('aria-live', 'assertive');
-                        toast.setAttribute('aria-atomic', 'true');
-                        toast.innerHTML = `
-                            <div class="toast-header bg-info text-white">
-                                <i class="fas fa-info-circle me-2"></i>
-                                <strong class="me-auto">Upload Required</strong>
-                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
-                            </div>
-                            <div class="toast-body">
-                                No file uploaded. Please upload an Excel file to get started.
-                            </div>
-                        `;
-                        toastContainer.appendChild(toast);
-                        
-                        // Initialize Bootstrap toast if available
-                        if (typeof bootstrap !== 'undefined' && bootstrap.Toast) {
-                            const bsToast = new bootstrap.Toast(toast, { delay: 8000 });
-                            bsToast.show();
-                            
-                            // Remove toast element after it's hidden
-                            toast.addEventListener('hidden.bs.toast', () => {
-                                toast.remove();
-                            });
-                        } else {
-                            // Fallback: auto-remove after 8 seconds
-                            setTimeout(() => {
-                                toast.remove();
-                            }, 8000);
-                        }
-                    }
-                }, 500);
-            }
-            
             this._checkingExistingData = false;
             this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
             return;

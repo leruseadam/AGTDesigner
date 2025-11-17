@@ -3274,211 +3274,235 @@ class ExcelProcessor:
                 self.dropdown_cache[filter_id] = []
 
     def get_available_tags(self, filters: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
-        """Return a list of tag objects with all necessary data - OPTIMIZED VERSION."""
+        """Return a list of tag objects with all necessary data."""
         if self.df is None:
             logger.warning("DataFrame is None in get_available_tags")
             return []
-
+        
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
-
-        # PERFORMANCE OPTIMIZATION: Use vectorized operations instead of iterrows()
-        # This is 50-100x faster for large datasets
-
-        # Pre-compute all fields using vectorized operations
-        df_work = filtered_df.copy()
-
-        # Helper function to safely get values and handle NaN - vectorized version
-        def safe_series_values(series, default=''):
-            """Convert a series to strings, replacing NaN with default."""
-            if series is None:
-                return pd.Series([default] * len(df_work))
-            return series.fillna(default).astype(str).str.strip()
-
-        # Extract product name column
-        product_name_col = 'Product Name*'
-        if product_name_col not in df_work.columns:
-            possible_cols = ['ProductName', 'Product Name', 'Description']
-            product_name_col = next((col for col in possible_cols if col in df_work.columns), None)
-            if not product_name_col:
-                product_name_col = 'Description'
-
-        # Vectorized field extraction
-        df_work['_product_name'] = safe_series_values(
-            df_work.get(product_name_col) if product_name_col in df_work.columns else None,
-            'Unnamed Product'
-        )
-        df_work['_product_name'] = df_work['_product_name'].replace('', 'Unnamed Product')
-
-        # Vendor/Supplier - try multiple columns
-        vendor_col = None
-        for col in ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']:
-            if col in df_work.columns:
-                vendor_col = col
-                break
-        df_work['_vendor'] = safe_series_values(df_work.get(vendor_col) if vendor_col else None)
-
-        # Brand
-        df_work['_brand'] = safe_series_values(df_work.get('Product Brand'))
-
-        # Weight
-        df_work['_weight'] = safe_series_values(df_work.get('Weight*'))
-
-        # Product Type
-        df_work['_product_type'] = safe_series_values(df_work.get('Product Type*'))
-
-        # Quantity - try multiple columns
-        quantity_col = None
-        for col in ['Quantity*', 'Quantity Received*', 'Quantity', 'qty']:
-            if col in df_work.columns:
-                quantity_col = col
-                break
-        df_work['_quantity'] = safe_series_values(df_work.get(quantity_col) if quantity_col else None)
-
-        # Lineage
-        df_work['_lineage'] = safe_series_values(df_work.get('Lineage'), 'MIXED')
-
-        # DOH
-        doh_col = 'DOH' if 'DOH' in df_work.columns else 'DOH Compliant (Yes/No)'
-        df_work['_doh'] = safe_series_values(df_work.get(doh_col) if doh_col in df_work.columns else None)
-
-        # Price
-        price_col = None
-        for col in ['Price*', 'Price', 'Price* (Tier Name for Bulk)']:
-            if col in df_work.columns:
-                price_col = col
-                break
-        df_work['_price'] = safe_series_values(df_work.get(price_col) if price_col else None)
-
-        # Units
-        df_work['_units'] = safe_series_values(df_work.get('Units'))
-
-        # THC/CBD fields
-        df_work['_total_thc'] = safe_series_values(df_work.get('Total THC'))
-        df_work['_thc_content'] = safe_series_values(df_work.get('THC Content'))
-        df_work['_total_cbd'] = safe_series_values(df_work.get('Total CBD'))
-        df_work['_cbd_content'] = safe_series_values(df_work.get('CBD Content'))
-
-        # Create deduplication keys
-        df_work['_primary_key'] = (
-            df_work['_product_name'] + '|' +
-            df_work['_vendor'] + '|' +
-            df_work['_brand'] + '|' +
-            df_work['_weight']
-        )
-
-        # Remove duplicates based on primary key
-        df_work = df_work.drop_duplicates(subset=['_primary_key'], keep='first')
-
-        logger.info(f"After deduplication: {len(df_work)} tags (removed {len(filtered_df) - len(df_work)} duplicates)")
-
-        # OPTIMIZATION: Build weight with units using vectorized operation
-        # This avoids calling _format_weight_units for each row
-        df_work['_weight_units'] = df_work['_weight'].astype(str) + df_work['_units'].astype(str)
-
-        # Calculate THC/CBD values vectorized
-        def safe_float_series(series):
-            """Convert series to float, replacing NaN/empty with 0.0"""
-            return pd.to_numeric(series.replace('', '0'), errors='coerce').fillna(0.0)
-
-        total_thc_float = safe_float_series(df_work['_total_thc'])
-        thc_content_float = safe_float_series(df_work['_thc_content'])
-        total_cbd_float = safe_float_series(df_work['_total_cbd'])
-        cbd_content_float = safe_float_series(df_work['_cbd_content'])
-
-        # Calculate AI value (THC) - use highest among Total THC and THC Content
-        df_work['_ai_value'] = df_work['_total_thc'].where(total_thc_float >= thc_content_float, df_work['_thc_content'])
-        df_work['_ai_value'] = df_work['_ai_value'].replace(['nan', 'NaN', ''], '')
-
-        # Calculate AK value (CBD) - use highest among Total CBD and CBD Content
-        df_work['_ak_value'] = df_work['_cbd_content'].where(cbd_content_float >= total_cbd_float, df_work['_total_cbd'])
-        df_work['_ak_value'] = df_work['_ak_value'].replace(['nan', 'NaN', ''], '')
-
-        # Now build tags list using to_dict('records') - fastest method
+        
         tags = []
-        seen_product_keys = set()
-
-        for idx, row_dict in enumerate(df_work.to_dict('records')):
-            # Extract pre-computed values from vectorized columns
-            product_name = row_dict.get('_product_name', 'Unnamed Product')
-            vendor_value = row_dict.get('_vendor', '')
-            brand_value = row_dict.get('_brand', '')
-            weight_value = row_dict.get('_weight', '')
-            product_type = row_dict.get('_product_type', '')
-            quantity = row_dict.get('_quantity', '')
-            lineage = row_dict.get('_lineage', 'MIXED')
-            doh_value = row_dict.get('_doh', '')
-            price_value = row_dict.get('_price', '')
-            units_value = row_dict.get('_units', '')
-            weight_with_units = row_dict.get('_weight_units', '')
-
-            # Get pre-computed THC/CBD values
-            ai_value = row_dict.get('_ai_value', '')
-            ak_value = row_dict.get('_ak_value', '')
-            total_thc_value = row_dict.get('_total_thc', '')
-            thc_content_value = row_dict.get('_thc_content', '')
-            total_cbd_value = row_dict.get('_total_cbd', '')
-            cbd_content_value = row_dict.get('_cbd_content', '')
-
-            # Build tag dictionary with all necessary fields
+        seen_product_keys = set()  # Track seen product keys to prevent duplicates
+        
+        for _, row in filtered_df.iterrows():
+            # Get quantity from various possible column names
+            quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
+            
+            # Get formatted weight with units
+            weight_with_units = self._format_weight_units(row, excel_priority=True)
+            raw_weight = row.get('Weight*', '')
+            
+            # Helper function to safely get values and handle NaN
+            def safe_get_value(value, default=''):
+                if value is None:
+                    return default
+                if isinstance(value, pd.Series):
+                    if pd.isna(value).any():
+                        return default
+                    value = value.iloc[0] if len(value) > 0 else default
+                elif pd.isna(value):
+                    return default
+                return str(value).strip()
+            
+            # Use the dynamically detected product name column
+            product_name_col = 'Product Name*'
+            if product_name_col not in self.df.columns:
+                possible_cols = ['ProductName', 'Product Name', 'Description']
+                product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
+                if not product_name_col:
+                    product_name_col = 'Description'  # Fallback to Description
+            
+            # Get the product name
+            product_name = safe_get_value(row.get(product_name_col, '')) or safe_get_value(row.get('Description', '')) or 'Unnamed Product'
+            
+            # Get vendor and brand for deduplication
+            vendor_value = (
+                safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
+                safe_get_value(row.get('Vendor', '')) or           # Alternative column name
+                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
+            )
+            brand_value = safe_get_value(row.get('Product Brand', ''))
+            weight_value = safe_get_value(raw_weight)
+            
+            # ENHANCED DEDUPLICATION: Create multiple keys for better duplicate detection
+            # Primary key: name + vendor + brand + weight (allows same product with different weights)
+            primary_key = f"{product_name}|{vendor_value}|{brand_value}|{weight_value}"
+            
+            # Secondary key: name + vendor + brand (catches same product with different weights)
+            secondary_key = f"{product_name}|{vendor_value}|{brand_value}"
+            
+            # Tertiary key: name + vendor (catches same product from same vendor)
+            tertiary_key = f"{product_name}|{vendor_value}"
+            
+            # Check for duplicates using multiple strategies
+            is_duplicate = False
+            duplicate_reason = ""
+            
+            if primary_key in seen_product_keys:
+                is_duplicate = True
+                duplicate_reason = "exact match (name+vendor+brand+weight)"
+            elif secondary_key in seen_product_keys:
+                is_duplicate = True
+                duplicate_reason = "same product with different weight"
+            elif tertiary_key in seen_product_keys:
+                # Only flag as duplicate if the weight difference is small (likely same product)
+                existing_weight = None
+                for key in seen_product_keys:
+                    if key.startswith(f"{product_name}|{vendor_value}|"):
+                        try:
+                            existing_weight = float(key.split('|')[-1])
+                            break
+                        except:
+                            continue
+                
+                if existing_weight and weight_value:
+                    try:
+                        current_weight = float(weight_value)
+                        weight_diff = abs(existing_weight - current_weight)
+                        # If weight difference is less than 10%, consider it a duplicate
+                        if weight_diff < max(existing_weight, current_weight) * 0.1:
+                            is_duplicate = True
+                            duplicate_reason = f"same product with similar weight ({existing_weight} vs {current_weight})"
+                    except:
+                        pass
+            
+            if is_duplicate:
+                logger.info(f"🔄 ENHANCED DEDUPLICATION: Skipping duplicate product '{product_name}' - {duplicate_reason}")
+                continue
+            
+            # Add all keys to seen set for future duplicate detection
+            seen_product_keys.add(primary_key)
+            seen_product_keys.add(secondary_key)
+            seen_product_keys.add(tertiary_key)
+            
+            # Get vendor from multiple possible column names
+            vendor_value = (
+                safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
+                safe_get_value(row.get('Vendor', '')) or           # Alternative column name
+                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
+            )
+            
+            # Debug logging for vendor field detection
+            if not vendor_value and product_name:
+                logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
+                logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
+            
+            # Extract THC/CBD values from the appropriate columns
+            # Use the actual column names from the Excel file
+            total_thc_value = safe_get_value(row.get('Total THC', ''))
+            thc_content_value = safe_get_value(row.get('THC Content', ''))  # Use THC Content
+            thc_test_result = safe_get_value(row.get('THC Content', ''))  # Use THC Content
+            total_cbd_value = safe_get_value(row.get('Total CBD', ''))  # Use Total CBD
+            cbd_content_value = safe_get_value(row.get('CBD Content', ''))  # Use CBD Content
+            
+            # Helper function to safely convert to float for comparison
+            def safe_float(value):
+                if not value or value in ['nan', 'NaN', '']:
+                    return 0.0
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            # For THC: Use the highest value among Total THC, THC test result, and THCA
+            total_thc_float = safe_float(total_thc_value)
+            thc_test_float = safe_float(thc_test_result)
+            thc_content_float = safe_float(thc_content_value)
+            
+            if total_thc_float > 0:
+                if thc_test_float > total_thc_float:
+                    ai_value = thc_test_result
+                else:
+                    ai_value = total_thc_value
+            else:
+                # Total THC is 0 or empty, compare THCA vs THC test result
+                if thc_content_float > 0 and thc_content_float >= thc_test_float:
+                    ai_value = thc_content_value
+                elif thc_test_float > 0:
+                    ai_value = thc_test_result
+                else:
+                    ai_value = ''
+            
+            # For CBD: merge CBDA with CBD test result, use highest value
+            total_cbd_float = safe_float(total_cbd_value)
+            cbd_content_float = safe_float(cbd_content_value)
+            
+            if cbd_content_float > total_cbd_float:
+                ak_value = cbd_content_value
+            else:
+                ak_value = total_cbd_value
+            
+            # Clean up the values (remove 'nan', empty strings, etc.)
+            if ai_value in ['nan', 'NaN', '']:
+                ai_value = ''
+            if ak_value in ['nan', 'NaN', '']:
+                ak_value = ''
+            
+            # Get price value - use the actual column name from Excel file
+            price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
+            
             tag = {
                 'Product Name*': product_name,
                 'Vendor': vendor_value,
                 'Vendor/Supplier*': vendor_value,
-                'Product Brand': brand_value,
-                'ProductBrand': brand_value,
-                'Lineage': lineage,
-                'Product Type*': product_type,
-                'Product Type': product_type,
-                'Weight*': weight_value,
-                'Weight': weight_value,
-                'Units': units_value,
-                'WeightWithUnits': weight_with_units,
-                'WeightUnits': weight_with_units,
-                'Quantity*': quantity,
-                'Quantity Received*': quantity,
-                'quantity': quantity,
-                'DOH': doh_value,
-                'DOH Compliant (Yes/No)': doh_value,
-                'Price': price_value,
-                'THC': ai_value,
-                'CBD': ak_value,
-                'AI': ai_value,
-                'AJ': thc_content_value,
-                'AK': ak_value,
-                'Total THC': total_thc_value,
-                'THCA': thc_content_value,
-                'CBDA': total_cbd_value,
-                'THC test result': thc_content_value,
-                'CBD test result': cbd_content_value,
-                # Lowercase versions for backward compatibility
+                'Product Brand': safe_get_value(row.get('Product Brand', '')),
+                'ProductBrand': safe_get_value(row.get('Product Brand', '')),
+                'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'Product Type*': safe_get_value(row.get('Product Type*', '')),
+                'Product Type': safe_get_value(row.get('Product Type*', '')),
+                'Weight*': safe_get_value(raw_weight),
+                'Weight': safe_get_value(raw_weight),
+                'Units': safe_get_value(row.get('Units', '')),  # Add Units field for label generation
+                'WeightWithUnits': safe_get_value(weight_with_units),
+                'WeightUnits': safe_get_value(weight_with_units),  # Add WeightUnits for frontend compatibility
+                'Quantity*': safe_get_value(quantity),
+                'Quantity Received*': safe_get_value(quantity),
+                'quantity': safe_get_value(quantity),
+                'DOH': safe_get_value(row.get('DOH', '')) or safe_get_value(row.get('DOH Compliant (Yes/No)', '')),  # Add DOH field for UI display
+                'DOH Compliant (Yes/No)': safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or safe_get_value(row.get('DOH', '')),  # Add alternative DOH field
+                'Price': price_value,  # Add Price field
+                'THC': ai_value,  # Add THC value
+                'CBD': ak_value,  # Add CBD value
+                'AI': ai_value,  # Add AI field for THC
+                'AJ': thc_content_value,  # Add AJ field for THC Content
+                'AK': ak_value,  # Add AK field for CBD
+                'Total THC': total_thc_value,  # Add Total THC field
+                'THCA': thc_content_value,  # Add THC Content field
+                'CBDA': total_cbd_value,  # Add Total CBD field
+                'THC test result': thc_test_result,  # Add THC test result field
+                'CBD test result': cbd_content_value,  # Add CBD Content field
+                # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
-                'productBrand': brand_value,
-                'lineage': lineage,
-                'productType': product_type,
-                'weight': weight_value,
-                'weightWithUnits': weight_with_units,
+                'productBrand': safe_get_value(row.get('Product Brand', '')),
+                'lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'productType': safe_get_value(row.get('Product Type*', '')),
+                'weight': safe_get_value(raw_weight),
+                'weightWithUnits': safe_get_value(weight_with_units),
                 'displayName': product_name
             }
             # --- Filtering logic ---
-            # Sanitize lineage - prioritize existing lineage, fall back to inference from name
-            existing_lineage = lineage.strip().upper()
+            product_brand = str(tag['productBrand']).strip().lower()
+            product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
+            weight = str(tag['weight']).strip().lower()
+
+            # Sanitize lineage - prioritize existing lineage, fall back to inference from name  
+            existing_lineage = str(row.get('Lineage', '') or '').strip().upper()
             if existing_lineage and existing_lineage in VALID_LINEAGES:
-                final_lineage = existing_lineage
+                lineage = existing_lineage
             else:
                 # No valid lineage column - infer from product name and type
-                final_lineage = self._infer_lineage_from_name(product_name, product_type)
-
-            tag['Lineage'] = final_lineage
-            tag['lineage'] = final_lineage
+                product_type_for_inference = safe_get_value(row.get('Product Type*', ''))
+                lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
+            
+            tag['Lineage'] = lineage
+            tag['lineage'] = lineage
 
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
-            weight_lower = weight_value.lower() if weight_value else ''
-
             if (
-                weight_lower == '-1g' or  # Invalid weight
+                weight == '-1g' or  # Invalid weight
                 'trade sample' in product_type_lower or  # Filter any trade sample product types
                 'sample' in product_name_lower or  # Filter products with "Sample" in name
                 'trade sample' in product_name_lower or  # Filter products with "Trade Sample" in name
@@ -7357,6 +7381,345 @@ class ExcelProcessor:
             logger.error(f"Error in get_available_tag_names: {e}")
             return []
 
+    def get_available_tags(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Return a list of tag objects with all necessary data."""
+        cache_key = self._build_cache_key('available_tags', filters or {})
+        cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
+        if cached_tags is not None:
+            # CRITICAL FIX: Always enrich cached tags with fresh database values
+            enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
+            return self._clone_tag_results(enriched_cached_tags)
+
+        def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            cached_copy = self._clone_tag_results(tag_list)
+            self._store_cache_value(self._available_tags_cache, cache_key, cached_copy)
+            return self._clone_tag_results(cached_copy)
+
+        if self.df is None:
+            logger.warning("DataFrame is None in get_available_tags, attempting to use database")
+            try:
+                from src.core.data.product_database import ProductDatabase
+                # Use default store name if not available
+                store_name = getattr(self, 'store_name', 'AGT_Bothell')
+                db = ProductDatabase(store_name)
+                products = db.get_all_products()
+                
+                logger.info(f"Retrieved {len(products)} products from database")
+                
+                # Convert database products to tag format
+                tags = []
+                for product in products:
+                    # Create combined weight from Weight* and Units if available
+                    weight_value = product.get('Weight*', '')
+                    units_value = product.get('Units', '')
+                    combined_weight = ''
+                    
+                    if weight_value and units_value and str(units_value) != 'None' and str(units_value) != '':
+                        try:
+                            if float(weight_value) == int(float(weight_value)):
+                                combined_weight = f"{int(float(weight_value))}{units_value}"
+                            else:
+                                combined_weight = f"{weight_value}{units_value}"
+                        except (ValueError, TypeError):
+                            combined_weight = f"{weight_value}{units_value}"
+                    elif weight_value:
+                        combined_weight = str(weight_value)
+                    
+                    tag = {
+                        'Product Name*': product.get('Product Name*', ''),
+                        'Product Type*': product.get('Product Type*', ''),
+                        'Vendor/Supplier*': product.get('Vendor/Supplier*', ''),
+                        'Product Brand': product.get('Product Brand', ''),
+                        'Weight*': product.get('Weight*', ''),
+                        'Units': product.get('Units', ''),  # Add Units field
+                        'CombinedWeight': combined_weight,  # Create combined weight
+                        'Price*': product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),
+                        'Lineage': product.get('Lineage', ''),
+                        'Product Strain': product.get('Product Strain', ''),
+                        'DOH': product.get('DOH', ''),
+                        'DOH Compliant (Yes/No)': product.get('DOH Compliant (Yes/No)', ''),
+                        'Ratio': product.get('Ratio', ''),
+                        'THC test result': product.get('THC test result', ''),
+                        'CBD test result': product.get('CBD test result', ''),
+                        'Source': 'Database'
+                    }
+                    tags.append(tag)
+                
+                logger.info(f"Converted {len(tags)} database products to tags")
+                
+                # Apply filters if provided
+                if filters:
+                    filtered_tags = []
+                    for tag in tags:
+                        # Apply same filtering logic as Excel processor
+                        if filters.get('productType'):
+                            tag_product_type = str(tag.get('Product Type*', '')).strip().lower()
+                            filter_product_type = str(filters['productType']).strip().lower()
+                            if tag_product_type != filter_product_type:
+                                continue
+                        
+                        if filters.get('vendor'):
+                            tag_vendor = str(tag.get('Vendor/Supplier*', '')).strip().lower()
+                            filter_vendor = str(filters['vendor']).strip().lower()
+                            if tag_vendor != filter_vendor:
+                                continue
+                        
+                        if filters.get('brand'):
+                            tag_brand = str(tag.get('Product Brand', '')).strip().lower()
+                            filter_brand = str(filters['brand']).strip().lower()
+                            if tag_brand != filter_brand:
+                                continue
+                        
+                        filtered_tags.append(tag)
+                    
+                    logger.info(f"Applied filters, returning {len(filtered_tags)} tags")
+                    return _return_with_cache(filtered_tags)
+                
+                # CRITICAL FIX: Final deduplication to catch any remaining duplicates
+                final_tags = []
+                seen_final_names = set()
+                duplicate_count = 0
+                
+                for tag in tags:
+                    product_name = tag.get('Product Name*', '')
+                    if product_name and product_name not in seen_final_names:
+                        seen_final_names.add(product_name)
+                        final_tags.append(tag)
+                    else:
+                        duplicate_count += 1
+                        logger.info(f"🔄 FINAL DEDUPLICATION: Skipping duplicate '{product_name}'")
+                
+                if duplicate_count > 0:
+                    logger.info(f"🔄 FINAL DEDUPLICATION: Removed {duplicate_count} duplicates, returning {len(final_tags)} unique products")
+                
+                return _return_with_cache(final_tags)
+                
+            except Exception as e:
+                logger.error(f"Failed to get products from database: {e}")
+                return []
+        
+        filtered_df = self.apply_filters(filters) if filters else self.df
+        logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
+        
+        tags = []
+        seen_product_names = set()  # Track seen product names to prevent duplicates
+        
+        for _, row in filtered_df.iterrows():
+            # Get quantity from various possible column names
+            quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
+            
+            # Get formatted weight with units
+            weight_with_units = self._format_weight_units(row, excel_priority=True)
+            raw_weight = row.get('Weight*', '')
+            
+            # Helper function to safely get values and handle NaN
+            def safe_get_value(value, default=''):
+                if value is None:
+                    return default
+                if isinstance(value, pd.Series):
+                    if pd.isna(value).any():
+                        return default
+                    value = value.iloc[0] if len(value) > 0 else default
+                elif pd.isna(value):
+                    return default
+                return str(value).strip()
+            
+            # Use the dynamically detected product name column
+            product_name_col = 'Product Name*'
+            if product_name_col not in self.df.columns:
+                possible_cols = ['ProductName', 'Product Name', 'Description']
+                product_name_col = next((col for col in possible_cols if col in self.df.columns), None)
+                if not product_name_col:
+                    product_name_col = 'Description'  # Fallback to Description
+            
+            # Get the product name
+            product_name = safe_get_value(row.get(product_name_col, '')) or safe_get_value(row.get('Description', '')) or 'Unnamed Product'
+            
+            # CRITICAL FIX: Allow JSON matched products to have duplicates
+            # Check if this is a JSON matched product
+            is_json_matched = row.get('Source', '') == 'JSON Match'
+            
+            # Skip if we've already seen this product name (deduplication) - but allow JSON matched products
+            if product_name in seen_product_names and not is_json_matched:
+                logger.debug(f"Skipping duplicate product: {product_name}")
+                continue
+            
+            # Add to seen set (only for non-JSON matched products to allow JSON duplicates)
+            if not is_json_matched:
+                seen_product_names.add(product_name)
+            
+            # Get vendor from multiple possible column names
+            vendor_value = (
+                safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
+                safe_get_value(row.get('Vendor', '')) or           # Alternative column name
+                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
+            )
+            
+            # Debug logging for vendor field detection
+            if not vendor_value and product_name:
+                logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
+                logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
+            
+            # Get description for DescAndWeight field
+            # DescAndWeight should contain just the description text (mapped to DESC marker in template)
+            description = safe_get_value(row.get('Description', ''))
+            product_name_for_desc = safe_get_value(row.get(product_name_col, ''))
+            
+            # Use Description if available, otherwise use Product Name
+            desc_and_weight = description if description else product_name_for_desc
+            
+            # Extract THC/CBD values from the appropriate columns
+            # Use the actual column names from the Excel file
+            total_thc_value = safe_get_value(row.get('Total THC', ''))
+            thc_content_value = safe_get_value(row.get('THC Content', ''))  # Use THC Content
+            thc_test_result = safe_get_value(row.get('THC Content', ''))  # Use THC Content
+            total_cbd_value = safe_get_value(row.get('Total CBD', ''))  # Use Total CBD
+            cbd_content_value = safe_get_value(row.get('CBD Content', ''))  # Use CBD Content
+            
+            # Helper function to safely convert to float for comparison
+            def safe_float(value):
+                if not value or value in ['nan', 'NaN', '']:
+                    return 0.0
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            # For THC: Use the highest value among Total THC, THC test result, and THCA
+            total_thc_float = safe_float(total_thc_value)
+            thc_test_float = safe_float(thc_test_result)
+            thc_content_float = safe_float(thc_content_value)
+            
+            if total_thc_float > 0:
+                if thc_test_float > total_thc_float:
+                    ai_value = thc_test_result
+                else:
+                    ai_value = total_thc_value
+            else:
+                # Total THC is 0 or empty, compare THCA vs THC test result
+                if thc_content_float > 0 and thc_content_float >= thc_test_float:
+                    ai_value = thc_content_value
+                elif thc_test_float > 0:
+                    ai_value = thc_test_result
+                else:
+                    ai_value = ''
+            
+            # For CBD: merge CBDA with CBD test result, use highest value
+            total_cbd_float = safe_float(total_cbd_value)
+            cbd_content_float = safe_float(cbd_content_value)
+            
+            if cbd_content_float > total_cbd_float:
+                ak_value = cbd_content_value
+            else:
+                ak_value = total_cbd_value
+            
+            # Clean up the values (remove 'nan', empty strings, etc.)
+            if ai_value in ['nan', 'NaN', '']:
+                ai_value = ''
+            if ak_value in ['nan', 'NaN', '']:
+                ak_value = ''
+            
+            # Get price value - use the actual column name from Excel file
+            price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
+            
+            tag = {
+                'Product Name*': product_name,
+                'Description': safe_get_value(row.get('Description', '')),  # Add Description field
+                'DescAndWeight': desc_and_weight,  # Add DescAndWeight field
+                'Vendor': vendor_value,
+                'Vendor/Supplier*': vendor_value,
+                'Product Brand': safe_get_value(row.get('Product Brand', '')),
+                'ProductBrand': safe_get_value(row.get('Product Brand', '')),
+                'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'Product Type*': safe_get_value(row.get('Product Type*', '')),
+                'Product Type': safe_get_value(row.get('Product Type*', '')),
+                'Weight*': safe_get_value(raw_weight),
+                'Weight': safe_get_value(raw_weight),
+                'WeightWithUnits': safe_get_value(weight_with_units),
+                'WeightUnits': safe_get_value(weight_with_units),  # Add WeightUnits for frontend compatibility
+                'CombinedWeight': safe_get_value(weight_with_units),  # Add CombinedWeight field for consistency with database products
+                'weightWithUnits': safe_get_value(weight_with_units),  # Add lowercase version for frontend compatibility
+                'Units': safe_get_value(row.get('Units', '')),  # Add Units field for consistency
+                'Quantity*': safe_get_value(quantity),
+                'Quantity Received*': safe_get_value(quantity),
+                'quantity': safe_get_value(quantity),
+                'DOH': safe_get_value(row.get('DOH', '')),  # Add DOH field for UI display
+                'Price': price_value,  # Add Price field
+                'THC': ai_value,  # Add THC value
+                'CBD': ak_value,  # Add CBD value
+                'AI': ai_value,  # Add AI field for THC
+                'AJ': thc_content_value,  # Add AJ field for THC Content
+                'AK': ak_value,  # Add AK field for CBD
+                'Total THC': total_thc_value,  # Add Total THC field
+                'THCA': thc_content_value,  # Add THC Content field
+                'CBDA': total_cbd_value,  # Add Total CBD field
+                'THC test result': thc_test_result,  # Add THC test result field
+                'CBD test result': cbd_content_value,  # Add CBD Content field
+                # Also include the lowercase versions for backward compatibility
+                'vendor': vendor_value,
+                'productBrand': safe_get_value(row.get('Product Brand', '')),
+                'lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'productType': safe_get_value(row.get('Product Type*', '')),
+                'weight': safe_get_value(raw_weight),
+                'weightWithUnits': safe_get_value(weight_with_units),
+                'displayName': product_name
+            }
+            # --- Filtering logic ---
+            product_brand = str(tag['productBrand']).strip().lower()
+            product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
+            weight = str(tag['weight']).strip().lower()
+
+            # Sanitize lineage - prioritize existing lineage, fall back to inference from name  
+            existing_lineage = str(row.get('Lineage', '') or '').strip().upper()
+            if existing_lineage and existing_lineage in VALID_LINEAGES:
+                lineage = existing_lineage
+            else:
+                # No valid lineage column - infer from product name and type
+                product_type_for_inference = safe_get_value(row.get('Product Type*', ''))
+                lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
+            
+            tag['Lineage'] = lineage
+            tag['lineage'] = lineage
+
+            # Filter out samples and invalid products
+            product_name_lower = product_name.lower()
+            product_type_lower = product_type.lower()
+            if (
+                weight == '-1g' or  # Invalid weight
+                'trade sample' in product_type_lower or  # Filter any trade sample product types
+                'sample' in product_name_lower or  # Filter products with "Sample" in name
+                'trade sample' in product_name_lower or  # Filter products with "Trade Sample" in name
+                any(pattern.lower() in product_name_lower for pattern in EXCLUDED_PRODUCT_PATTERNS) or  # Filter based on excluded patterns
+                any(pattern.lower() in product_type_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)  # Filter product types based on excluded patterns
+            ):
+                continue  # Skip this tag
+            tags.append(tag)
+        
+        # Sort tags by vendor first, then by brand, then by weight
+        def sort_key(tag):
+            vendor = str(tag.get('vendor', '')).strip().lower()
+            brand = str(tag.get('productBrand', '')).strip().lower()
+            weight = ExcelProcessor.parse_weight_str(tag.get('weight', ''), tag.get('weightWithUnits', ''))
+            return (vendor, brand, weight)
+        
+        sorted_tags = sorted(tags, key=sort_key)
+        logger.info(f"get_available_tags: Returning {len(sorted_tags)} tags (removed {len(filtered_df) - len(sorted_tags)} duplicates)")
+        
+        # Log enhanced deduplication summary
+        total_processed = len(sorted_tags)
+        duplicates_removed = len(filtered_df) - total_processed
+        logger.info(f"📊 EXCEL PROCESSING SUMMARY:")
+        logger.info(f"   📄 Total rows in Excel: {len(self.df)}")
+        logger.info(f"   🔍 Filtered rows: {len(filtered_df)}")
+        logger.info(f"   ✅ Unique products processed: {total_processed}")
+        logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
+        logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
+        
+        return sorted_tags
+
+
+
+    def ultra_fast_load(self, file_path: str) -> bool:
         """Ultra-fast loading with minimal processing for maximum speed"""
         try:
             self.logger.info(f"[ULTRA-FAST] Loading file: {file_path}")
