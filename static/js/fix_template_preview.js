@@ -9,7 +9,9 @@ document.addEventListener('DOMContentLoaded', function() {
     scheduleTemplatePreviewInit();
 });
 
-function scheduleTemplatePreviewInit(delay = 500) {
+function scheduleTemplatePreviewInit(delay = 2000) {
+    // Defer initialization to avoid blocking tag loading
+    // Use longer delay to let tags load first
     setTimeout(function() {
         initializeTemplatePreview();
     }, delay);
@@ -51,9 +53,10 @@ function initializeTemplatePreview() {
     
     if (!editTemplateModal) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
+        if (templatePreviewInitAttempts <= 3) {
+            // Reduced attempts and longer delay to avoid blocking tag loading
+            console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/3) - retrying...`);
+            scheduleTemplatePreviewInit(3000);
         } else {
             console.error('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
         }
@@ -62,9 +65,10 @@ function initializeTemplatePreview() {
     
     if (!previewContainer) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
+        if (templatePreviewInitAttempts <= 3) {
+            // Reduced attempts and longer delay to avoid blocking tag loading
+            console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/3) - retrying...`);
+            scheduleTemplatePreviewInit(3000);
         } else {
             console.error('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
         }

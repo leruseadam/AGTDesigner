@@ -992,11 +992,25 @@ const TagManager = {
         }
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
-            verboseLog(`Hydrating ${cachedTags.length} tags from cache for instant display`);
+            verboseLog(`⚡ Hydrating ${cachedTags.length} tags from cache for instant display`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
             this.state.simplifiedAvailableTagsActive = false;
+            
+            // Update state immediately
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            
+            // Render tags immediately - don't wait
             this._updateAvailableTags(cachedTags, null);
+            
+            // Hide splash immediately since we have cached data
+            if (this.hideActionSplash) {
+                setTimeout(() => {
+                    this.hideActionSplash();
+                }, 50);
+            }
+            
             return true;
         }
         return false;
@@ -3754,7 +3768,7 @@ const TagManager = {
             return;
         }
 
-        const chunkSize = 50; // Reduced from 200 to prevent blocking
+        const chunkSize = 25; // Further reduced to prevent blocking with large tag lists
         let index = 0;
 
         availableTagsContainer.innerHTML = '';
@@ -3824,8 +3838,8 @@ const TagManager = {
             listWrapper.appendChild(fragment);
 
             if (index < tags.length) {
-                // Use setTimeout instead of requestAnimationFrame for better performance with large lists
-                setTimeout(renderChunk, 0);
+                // Use setTimeout with small delay to yield to browser for smoother rendering
+                setTimeout(renderChunk, 10);
             } else {
                 clearTimeout(safetyTimeout);
                 requestAnimationFrame(() => {
@@ -6593,6 +6607,18 @@ const TagManager = {
                 `;
             }
             
+            // CRITICAL: Force hide splash after 5 seconds maximum to prevent permanent freeze
+            const maxSplashTimeout = setTimeout(() => {
+                console.warn('Force hiding splash after 5 second maximum timeout');
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+            }, 5000);
+            
             // Preserve current scroll/anchor so refreshes don't jump the list
             const savedScroll = this._saveAvailableScrollPosition();
             
@@ -6661,8 +6687,8 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // Reduced timeout since fast_load should be much faster
-                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    // Reduced timeout to 8 seconds - fail fast if server is slow
+                    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
                     // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
@@ -6804,6 +6830,11 @@ const TagManager = {
             // OPTIMIZATION: If this was a fast load, optionally refresh with lineage alignment in background
             // This allows tags to appear immediately while lineage is updated asynchronously
             if (responseData && responseData.source === 'cache-fast' && tags.length > 0) {
+                // Clear the max splash timeout since we got data
+                if (typeof maxSplashTimeout !== 'undefined') {
+                    clearTimeout(maxSplashTimeout);
+                }
+                
                 verboseLog('Fast load completed - tags displayed immediately');
                 // Update UI immediately with fast-loaded tags
                 this._updateAvailableTags(tags);
@@ -6883,11 +6914,21 @@ const TagManager = {
                 }
             }, 3000);
             
+            // Clear the max splash timeout since we got data
+            if (typeof maxSplashTimeout !== 'undefined') {
+                clearTimeout(maxSplashTimeout);
+            }
+            
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
             // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
             return true;
         } catch (error) {
+            // Clear the max splash timeout on error
+            if (typeof maxSplashTimeout !== 'undefined') {
+                clearTimeout(maxSplashTimeout);
+            }
+            
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
             const fallbackLoaded = await this._fallbackToLiteAvailableTags(error, savedScroll);

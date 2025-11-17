@@ -79,23 +79,25 @@
                         // Use _updateAvailableTags directly to avoid debounce delay
                         this._updateAvailableTags(data.available_tags, null);
                         
-                        // Immediately check if tags are visible and hide splash
-                        requestAnimationFrame(() => {
+                        // Force hide splash immediately - don't wait for tags to render
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }
+                        
+                        // Verify tags rendered (non-blocking check)
+                        setTimeout(() => {
                             const container = document.getElementById('availableTags');
                             if (container) {
                                 const tagItems = container.querySelectorAll('.tag-item');
                                 if (tagItems.length > 0) {
-                                    console.log(`⚡ Tags rendered (${tagItems.length} items), hiding splash immediately`);
-                                    if (this.hideActionSplash) {
-                                        this.hideActionSplash();
-                                    }
-                                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                                        AppLoadingSplash.stopAutoAdvance();
-                                        AppLoadingSplash.complete();
-                                    }
+                                    console.log(`⚡ Tags rendered (${tagItems.length} items)`);
                                 }
                             }
-                        });
+                        }, 100);
                         
                         // Also ensure splash is hidden when tags appear (backup)
                         if (this._waitForTagsToAppear) {
