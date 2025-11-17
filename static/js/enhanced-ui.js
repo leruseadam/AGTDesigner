@@ -102,29 +102,16 @@ async function handleFiles(files) {
     // CRITICAL: Show Excel loading splash screen FIRST before anything else
     const splashStartTime = Date.now();
     console.log('🎬 UPLOAD: Showing splash IMMEDIATELY for:', file.name);
-    let splash = document.getElementById('excelLoadingSplash');
-    let filenameElement = document.getElementById('excelLoadingFilename');
-    let statusElement = document.getElementById('excelLoadingStatus');
-    
-    // If not found, wait a bit and try again (for cases where DOM isn't ready)
-    if (!splash || !filenameElement || !statusElement) {
-      console.warn('⚠️ Excel splash elements not found immediately, retrying...');
-      setTimeout(() => {
-        splash = document.getElementById('excelLoadingSplash');
-        filenameElement = document.getElementById('excelLoadingFilename');
-        statusElement = document.getElementById('excelLoadingStatus');
-        if (splash && filenameElement && statusElement) {
-          showExcelSplash(splash, filenameElement, statusElement, file.name);
-        } else {
-          console.error('❌ Could not find Excel splash elements after retry');
-        }
-      }, 100);
-    }
     
     function showExcelSplash(splash, filenameElement, statusElement, fileName) {
+      if (!splash) {
+        console.error('❌ Splash element is null!');
+        return;
+      }
+      
       console.log('🎬 UPLOAD: Splash elements found - displaying NOW');
-      filenameElement.textContent = fileName;
-      statusElement.textContent = 'Uploading file...';
+      if (filenameElement) filenameElement.textContent = fileName;
+      if (statusElement) statusElement.textContent = 'Uploading file...';
       
       // Remove any classes that might hide it
       splash.classList.remove('fade-out', 'd-none', 'hidden');
@@ -140,6 +127,7 @@ async function handleFiles(files) {
       splash.style.setProperty('visibility', 'visible', 'important');
       splash.style.setProperty('opacity', '1', 'important');
       splash.style.setProperty('pointer-events', 'auto', 'important');
+      splash.style.setProperty('background', 'rgba(0, 0, 0, 0.8)', 'important');
       
       // Remove inline style="display: none" if present
       if (splash.hasAttribute('style')) {
@@ -165,13 +153,57 @@ async function handleFiles(files) {
           visibility: computed.visibility,
           opacity: computed.opacity
         });
+        
+        // Double-check after a short delay
+        setTimeout(() => {
+          const finalCheck = window.getComputedStyle(splash);
+          if (finalCheck.display === 'none' || finalCheck.visibility === 'hidden') {
+            console.error('❌ Splash still hidden after all attempts!', {
+              display: finalCheck.display,
+              visibility: finalCheck.visibility,
+              opacity: finalCheck.opacity,
+              zIndex: finalCheck.zIndex
+            });
+            // Last resort: try to force it again
+            splash.style.setProperty('display', 'flex', 'important');
+            splash.style.setProperty('visibility', 'visible', 'important');
+          } else {
+            console.log('✅ Splash confirmed visible');
+          }
+        }, 50);
       });
       
       console.log('✅ SPLASH SHOWN - display:', splash.style.display);
     }
     
-    if (splash && filenameElement && statusElement) {
+    // Try to show splash immediately
+    let splash = document.getElementById('excelLoadingSplash');
+    let filenameElement = document.getElementById('excelLoadingFilename');
+    let statusElement = document.getElementById('excelLoadingStatus');
+    
+    if (splash) {
+      // Show splash even if filename/status elements aren't found
       showExcelSplash(splash, filenameElement, statusElement, file.name);
+    } else {
+      // If not found, wait a bit and try again (for cases where DOM isn't ready)
+      console.warn('⚠️ Excel splash element not found immediately, retrying...');
+      const retryInterval = setInterval(() => {
+        splash = document.getElementById('excelLoadingSplash');
+        filenameElement = document.getElementById('excelLoadingFilename');
+        statusElement = document.getElementById('excelLoadingStatus');
+        if (splash) {
+          clearInterval(retryInterval);
+          showExcelSplash(splash, filenameElement, statusElement, file.name);
+        }
+      }, 50);
+      
+      // Stop retrying after 1 second
+      setTimeout(() => {
+        clearInterval(retryInterval);
+        if (!splash) {
+          console.error('❌ Could not find Excel splash element after retry');
+        }
+      }, 1000);
     }
     
     // Now update file info UI
