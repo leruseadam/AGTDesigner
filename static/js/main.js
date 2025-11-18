@@ -7574,7 +7574,10 @@ const TagManager = {
         console.log('⚡ Attempting fast load: fetching tags directly from /api/available-tags...');
         try {
             const fastLoadController = new AbortController();
-            const fastLoadTimeout = setTimeout(() => fastLoadController.abort(), 5000); // Reduced to 5s timeout for faster failure
+            const fastLoadTimeout = setTimeout(() => {
+                console.log('⏱️ Fast load timeout after 8 seconds');
+                fastLoadController.abort();
+            }, 8000); // Increased to 8s to allow slower servers
             
             // OPTIMIZATION: Add nocache=1 to ensure fresh data after upload
             const fastResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=1&nocache=1`, {
@@ -7634,7 +7637,11 @@ const TagManager = {
                 }
             }
         } catch (fastError) {
-            console.log('⚠️ Fast load failed or returned empty, trying full initial-data load:', fastError.name);
+            if (fastError.name === 'AbortError') {
+                console.log('⏱️ Fast load timed out after 8 seconds, trying full initial-data load...');
+            } else {
+                console.log('⚠️ Fast load failed or returned empty, trying full initial-data load:', fastError.name);
+            }
             // Continue to full initial-data load below
         }
         
@@ -7941,12 +7948,15 @@ const TagManager = {
                 console.log('⏱️ Request was aborted due to timeout - trying fallback tag fetch');
                 verboseLog('Request was aborted due to timeout, trying fallback');
                 
-                // CRITICAL FIX: Don't give up on timeout - try fallback fetch
+                // CRITICAL FIX: Don't give up on timeout - try fallback fetch with longer timeout
                 try {
                     console.log('🔄 Timeout occurred, attempting fallback: loading tags directly from /api/available-tags...');
-                    const fallbackUrl = '/api/available-tags?t=' + Date.now();
+                    const fallbackUrl = `/api/available-tags?t=${Date.now()}&fast_load=1`;
                     const fallbackController = new AbortController();
-                    const fallbackTimeout = setTimeout(() => fallbackController.abort(), 10000); // 10s for fallback
+                    const fallbackTimeout = setTimeout(() => {
+                        console.log('⏱️ Fallback timeout after 15 seconds');
+                        fallbackController.abort();
+                    }, 15000); // Increased to 15s for fallback
                     
                     const tagsResponse = await fetch(fallbackUrl, { signal: fallbackController.signal });
                     clearTimeout(fallbackTimeout);
