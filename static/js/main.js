@@ -7463,29 +7463,13 @@ const TagManager = {
                 this.hideActionSplash();
             }
 
-            // Continue loading fresh data in background (non-blocking)
-            verboseLog('Cache rendered, fetching fresh data in background...');
-            // Fetch fresh data in background without blocking
-            Promise.race([
-                fetch('/api/initial-data?fast_load=1'),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Background fetch timeout')), 10000))
-            ]).then(response => {
-                if (response.ok) {
-                    return response.json();
-                }
-                return null;
-            }).then(data => {
-                if (data && data.success && data.available_tags && data.available_tags.length > 0) {
-                    verboseLog(`Background: Updated with ${data.available_tags.length} fresh tags`);
-                    this.state.tags = [...data.available_tags];
-                    this.state.originalTags = [...data.available_tags];
-                    this._updateAvailableTags(data.available_tags);
-                }
-            }).catch(err => {
-                verboseLog('Background data fetch failed (non-critical):', err);
-            });
+            // Continue loading fresh data in background (non-blocking) - skip if we have cached tags
+            // This allows tags to appear immediately while fresh data loads in background
+            verboseLog('Cache rendered, tags visible immediately - skipping background refresh to prevent delay');
+            // Don't fetch fresh data immediately - let user interact with cached tags
+            // Fresh data will load on next user interaction or manual refresh
             
-            // Also fetch selected tags and filters in background
+            // Also fetch selected tags and filters in background (non-blocking)
             Promise.allSettled([
                 this.fetchAndUpdateSelectedTags(),
                 this.fetchAndPopulateFilters()
@@ -9362,9 +9346,6 @@ const TagManager = {
             // Upload complete, no need for separate processing step
             const processData = uploadData;
             
-            // Hide splash and show success message
-            this.hideExcelLoadingSplash();
-            this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
             verboseLog(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
             
             // Show success toast
@@ -9372,11 +9353,116 @@ const TagManager = {
                 showToast('success', `File uploaded successfully! ${uploadData.rows || 0} rows processed.`);
             }
             
-            // Refresh the page to show new data
-            setTimeout(() => {
-                verboseLog('🔄 Refreshing page to show new data...');
-                window.location.reload();
-            }, 1500);
+            // PERFORMANCE FIX: Load tags instantly instead of reloading page
+            // Show loading splash for tag loading
+            this.showActionSplash('Loading tags from uploaded file...');
+            
+            // Show loading indicator in Current Inventory
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags from uploaded file...</p>
+                    </div>
+                `;
+            }
+            
+            // Update file info immediately
+            const fileInfoText = document.getElementById('fileInfoText');
+            if (fileInfoText) {
+                fileInfoText.textContent = file.name;
+            }
+            
+            // Hide Excel loading splash and show success
+            this.hideExcelLoadingSplash();
+            this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
+            
+            // Load tags instantly using fast_load=1 and bypass cache to get fresh data
+            // Try multiple times with increasing delays to handle backend processing
+            let tagsLoaded = false;
+            const maxRetries = 3;
+            
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    // Increasing delays: 100ms (for session save), 500ms, 1000ms
+                    const delay = attempt === 0 ? 100 : attempt === 1 ? 500 : 1000;
+                    if (attempt > 0) {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload...`);
+                    } else {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        verboseLog('🔄 Loading tags instantly after upload...');
+                    }
+                    
+                    const tagsController = new AbortController();
+                    const tagsTimeout = setTimeout(() => tagsController.abort(), 8000); // 8s timeout
+                    
+                    // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
+                    const tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
+                        signal: tagsController.signal
+                    });
+                    clearTimeout(tagsTimeout);
+                    
+                    if (tagsResponse.ok) {
+                        const tagsData = await tagsResponse.json();
+                        if (tagsData.tags && tagsData.tags.length > 0) {
+                            verboseLog(`✅ Loaded ${tagsData.tags.length} tags instantly after upload (attempt ${attempt + 1})`);
+                            
+                            // Update tags immediately
+                            this.state.tags = [...tagsData.tags];
+                            this.state.originalTags = [...tagsData.tags];
+                            this._updateAvailableTags(tagsData.tags);
+                            
+                            // Load filters and selected tags in parallel (non-blocking)
+                            Promise.allSettled([
+                                this.fetchAndPopulateFilters(),
+                                this.fetchAndUpdateSelectedTags()
+                            ]).then(() => {
+                                verboseLog('✅ Filters and selected tags loaded');
+                            }).catch(err => {
+                                console.warn('Filter/selected tag loading failed:', err);
+                            });
+                            
+                            // Wait for tags to appear, then hide splash
+                            if (this._waitForTagsToAppear) {
+                                this._waitForTagsToAppear();
+                            } else if (this.hideActionSplash) {
+                                // Fallback: hide splash after short delay
+                                setTimeout(() => {
+                                    this.hideActionSplash();
+                                }, 500);
+                            }
+                            
+                            tagsLoaded = true;
+                            return; // Success - tags loaded instantly!
+                        }
+                    }
+                } catch (tagsError) {
+                    if (attempt === maxRetries - 1) {
+                        // Last attempt failed
+                        console.warn('⚠️ Failed to load tags after all retries, will reload page:', tagsError);
+                        // Fallback: reload page if all attempts fail
+                        setTimeout(() => {
+                            verboseLog('🔄 Reloading page as fallback...');
+                            window.location.reload();
+                        }, 500);
+                        return;
+                    }
+                    // Continue to next retry
+                    verboseLog(`⚠️ Attempt ${attempt + 1} failed, retrying...`);
+                }
+            }
+            
+            // If we get here, tags didn't load after all retries - reload page as fallback
+            if (!tagsLoaded) {
+                setTimeout(() => {
+                    verboseLog('🔄 Reloading page to show new data...');
+                    window.location.reload();
+                }, 500);
+            }
             
             return; // Success!
         } catch (error) {
