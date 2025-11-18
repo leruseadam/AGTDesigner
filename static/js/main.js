@@ -10312,29 +10312,51 @@ const TagManager = {
         }
         sessionStorage.setItem('noFileNotificationTime', now.toString());
         
+        // Find the upload section to place notification above it
+        const leftSection = document.querySelector('.left-section');
+        const filePathDisplay = document.querySelector('.file-path-display');
+        
         // Create or get notification element
         let notification = document.getElementById('noFileNotification');
         if (!notification) {
             notification = document.createElement('div');
             notification.id = 'noFileNotification';
-            notification.className = 'alert alert-info alert-dismissible fade show position-fixed';
-            notification.style.cssText = 'top: 20px; right: 20px; z-index: 10000; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);';
+            notification.className = 'alert alert-dismissible fade show';
+            // Use standard color scheme: purple/teal theme
+            notification.style.cssText = `
+                background: rgba(45, 34, 58, 0.95);
+                border: 2px solid rgba(160, 132, 232, 0.6);
+                border-radius: 12px;
+                color: #ffffff;
+                padding: 12px 16px;
+                margin-bottom: 12px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                backdrop-filter: blur(20px);
+            `;
             notification.innerHTML = `
-                <div class="d-flex align-items-center">
-                    <i class="fas fa-info-circle me-2" style="font-size: 1.2rem;"></i>
+                <div class="d-flex align-items-start">
+                    <i class="fas fa-info-circle me-2" style="font-size: 1.1rem; color: rgba(0, 212, 170, 0.9); margin-top: 2px;"></i>
                     <div class="flex-grow-1">
-                        <strong>No Excel File Uploaded</strong>
-                        <p class="mb-0 mt-1" style="font-size: 0.9rem;">Please upload an Excel file to load product tags.</p>
+                        <strong style="color: #ffffff; font-size: 0.95rem;">No Excel File Uploaded</strong>
+                        <p class="mb-2 mt-1" style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.8);">Please upload an Excel file to load product tags.</p>
+                        <button class="btn btn-sm" onclick="document.getElementById('fileInput').click(); this.closest('#noFileNotification').remove();" style="background: rgba(160, 132, 232, 0.8); border: 1px solid rgba(160, 132, 232, 1); color: #ffffff; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">
+                            <i class="fas fa-upload me-1"></i>Upload Excel File
+                        </button>
                     </div>
-                    <button type="button" class="btn-close ms-2" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-                <div class="mt-2">
-                    <button class="btn btn-primary btn-sm" onclick="document.getElementById('fileInput').click(); this.closest('.alert').remove();">
-                        <i class="fas fa-upload me-1"></i>Upload Excel File
-                    </button>
+                    <button type="button" class="btn-close btn-close-white ms-2" onclick="this.closest('#noFileNotification').remove();" aria-label="Close" style="opacity: 0.8;"></button>
                 </div>
             `;
-            document.body.appendChild(notification);
+            
+            // Insert notification above the file path display in the left section
+            if (leftSection && filePathDisplay) {
+                leftSection.insertBefore(notification, filePathDisplay);
+            } else if (leftSection) {
+                // If filePathDisplay not found, insert at the beginning of leftSection
+                leftSection.insertBefore(notification, leftSection.firstChild);
+            } else {
+                // Fallback: append to body (shouldn't happen)
+                document.body.appendChild(notification);
+            }
             
             // Auto-dismiss after 10 seconds
             setTimeout(() => {
