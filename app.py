@@ -14896,7 +14896,7 @@ def get_initial_data():
             excel_processor.df = None
             logging.info("Excel processor missing df attribute - set to None")
             
-        # If no data is loaded, check session first, then try default file
+        # If no data is loaded, check session first, then try default file, then database
         if excel_processor.df is None or excel_processor.df.empty:
             logging.info("No data loaded - checking session for uploaded file first")
             
@@ -14912,9 +14912,7 @@ def get_initial_data():
                         logging.info(f"✅ Loaded {len(excel_processor.df)} rows from uploaded file")
                     else:
                         logging.error(f"❌ Failed to load uploaded file from session: {session_file_path}")
-                        # Clear invalid session data
-                        session.pop('file_path', None)
-                        session.pop('uploaded_filename', None)
+                        # Don't clear session data yet - try database fallback first
                 except Exception as e:
                     logging.error(f"❌ Error loading uploaded file from session: {e}")
                     # Clear invalid session data
@@ -14949,11 +14947,52 @@ def get_initial_data():
                             'message': f'Failed to load default file: {str(e)}'
                         })
                 else:
-                    logging.warning("No default file found")
-                    return jsonify({
-                        'success': False,
-                        'message': 'No default file found and no data currently loaded'
-                    })
+                    logging.warning("No default file found - attempting database fallback")
+                    # CRITICAL FIX: Try loading from database as fallback
+                    try:
+                        store_name = get_current_store_name()
+                        if store_name:
+                            product_db = get_product_database(store_name)
+                            if product_db:
+                                logging.info(f"🔄 Attempting to load tags from database for store: {store_name}")
+                                # Get products from database
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
+                                
+                                # Check if products table exists
+                                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                                if cursor.fetchone():
+                                    # Get all products
+                                    cursor.execute("SELECT * FROM products LIMIT 10000")  # Limit to prevent memory issues
+                                    rows = cursor.fetchall()
+                                    columns = [description[0] for description in cursor.description]
+                                    
+                                    if rows:
+                                        # Convert to DataFrame
+                                        import pandas as pd
+                                        df_data = []
+                                        for row in rows:
+                                            df_data.append(dict(zip(columns, row)))
+                                        
+                                        excel_processor.df = pd.DataFrame(df_data)
+                                        excel_processor._last_loaded_file = f'database_{store_name}'
+                                        logging.info(f"✅ Loaded {len(excel_processor.df)} products from database")
+                                    else:
+                                        logging.warning("Database exists but has no products")
+                                else:
+                                    logging.warning("Products table does not exist in database")
+                    except Exception as db_error:
+                        logging.error(f"Database fallback failed: {db_error}")
+                        import traceback
+                        logging.error(traceback.format_exc())
+                    
+                    # If still no data after database fallback, return empty
+                    if excel_processor.df is None or excel_processor.df.empty:
+                        logging.warning("No data available from Excel or database")
+                        return jsonify({
+                            'success': False,
+                            'message': 'No default file found and no data currently loaded'
+                        })
         
         if hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
