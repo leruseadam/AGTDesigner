@@ -7793,7 +7793,7 @@ def get_available_tags():
                         
                         # Quick lineage alignment with timeout
                         import threading
-                        alignment_timeout = 5  # 5 second timeout for background alignment
+                        alignment_timeout = 3  # 3 second timeout for background alignment (reduced from 5s)
                         alignment_done = threading.Event()
                         
                         def do_alignment():
@@ -7803,7 +7803,8 @@ def get_available_tags():
                                 cur = conn.cursor()
                                 
                                 # Batch query for lineage (same as main path but non-blocking)
-                                product_names = [tag.get('Product Name*') or tag.get('ProductName') or '' for tag in cached_tags[:500]]  # Limit to 500 for speed
+                                # OPTIMIZATION: Limit to 300 tags for faster background alignment
+                                product_names = [tag.get('Product Name*') or tag.get('ProductName') or '' for tag in cached_tags[:300]]  # Limit to 300 for speed
                                 if product_names:
                                     normalized_names = []
                                     for name in product_names:
@@ -7813,7 +7814,8 @@ def get_available_tags():
                                             normalized = name.strip().lower()
                                         normalized_names.append(normalized)
                                     
-                                    all_search_names = list(set(product_names + normalized_names))[:500]  # Limit batch size
+                                    # OPTIMIZATION: Limit batch size to 300 for faster background alignment
+                                    all_search_names = list(set(product_names + normalized_names))[:300]  # Limit batch size
                                     placeholders = ','.join(['?'] * len(all_search_names))
                                     batch_query = f'''
                                         SELECT DISTINCT
@@ -7825,7 +7827,7 @@ def get_available_tags():
                                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                         WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                         ORDER BY p.id DESC
-                                        LIMIT 500
+                                        LIMIT 300
                                     '''
                                     cur.execute(batch_query, all_search_names + all_search_names)
                                     batch_results = cur.fetchall()

@@ -7545,15 +7545,7 @@ const TagManager = {
             const availableTagsContainer = document.getElementById('availableTags');
             const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
             if (tagItems.length === 0) {
-                console.warn('⏳ Safety timeout triggered - no tags found after 60 seconds, refreshing page to force tag load');
-                // Refresh page as last resort when safety timeout triggers and no tags are found
-                setTimeout(() => {
-                    console.log('🔄 Refreshing page after safety timeout...');
-                    window.location.reload();
-                }, 2000); // Give user a moment to see the message
-                return;
-            } else {
-                console.warn('⏳ Safety timeout triggered - tags found, attempting fallback load (non-blocking)');
+                console.warn('⏳ Safety timeout triggered - no tags found, attempting fallback load (non-blocking)');
                 // Don't show empty state immediately - wait for fallback to complete
                 // Fire-and-forget fallback fetch so UI stays responsive
                 try {
@@ -7685,7 +7677,6 @@ const TagManager = {
                 console.log('⚠️ Fast load failed or returned empty, trying full initial-data load:', fastError.name);
             }
             // Continue to full initial-data load below
-            // If fast load fails, we'll try the full load, but if that also times out, we'll refresh
         }
         
         // Fallback to full initial-data load if fast load didn't work
@@ -8054,32 +8045,14 @@ const TagManager = {
                             this.clearInitialDataRetry();
                             this._checkingExistingData = false;
                             return;
-                        } else {
-                            // Fallback returned empty - refresh page as last resort
-                            console.warn('⚠️ Fallback returned empty tags - refreshing page to force tag load');
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 1000);
                         }
-                    } else {
-                        // Fallback request failed - refresh page as last resort
-                        console.warn('⚠️ Fallback request failed - refreshing page to force tag load');
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1000);
                     }
-                } catch (fallbackError) {
-                    // All attempts failed - refresh page as last resort
-                    if (fallbackError.name === 'AbortError') {
-                        console.error('❌ Fallback also timed out after 15 seconds - refreshing page to force tag load');
+                } catch (fallbackErr) {
+                    if (fallbackErr.name === 'AbortError') {
+                        console.error('❌ Fallback also timed out after 15 seconds - server may be slow or unresponsive');
                     } else {
-                        console.error('❌ Fallback also failed - refreshing page to force tag load', fallbackError);
+                        console.error('❌ Fallback also failed after timeout:', fallbackErr);
                     }
-                    // Refresh page after a short delay to allow user to see the message
-                    setTimeout(() => {
-                        console.log('🔄 Refreshing page to force tag load...');
-                        window.location.reload();
-                    }, 1000);
                 }
                 
                 // If fallback also failed, check if there's actually a file uploaded
@@ -9780,8 +9753,8 @@ const TagManager = {
                 showToast('success', `File uploaded successfully! ${uploadData.rows || 0} rows processed.`);
             }
             
-            // CRITICAL: Force reload tags immediately after upload (bypass cache, full load)
-            console.log('🔄 Forcing tag reload after upload (bypassing cache, full load)...');
+            // CRITICAL: Force reload tags immediately after upload (bypass cache, use fast_load)
+            console.log('🔄 Forcing tag reload after upload (bypassing cache, using fast_load)...');
             try {
                 // Clear any cached tags first
                 if (this.state) {
@@ -9789,14 +9762,11 @@ const TagManager = {
                     this.state.originalTags = [];
                 }
                 
-                // Small delay to ensure backend has processed the file and updated session
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                // Force fetch with nocache=1 and fast_load=0 to ensure fresh data from newly uploaded file
-                // After upload, we need a full load to ensure the new file is processed, not cached data
+                // Force fetch with nocache and fast_load=1 to ensure fresh data but instant response
+                // fast_load=1 returns immediately with background lineage alignment (non-blocking)
                 const freshTagsController = new AbortController();
-                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 15000); // 15s timeout for full load
-                const freshTagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=0`, {
+                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 8000); // 8s timeout
+                const freshTagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
                     signal: freshTagsController.signal
                 });
                 clearTimeout(freshTagsTimeout);
