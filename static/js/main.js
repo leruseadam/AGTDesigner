@@ -7565,8 +7565,73 @@ const TagManager = {
             }
         };
 
+        // CRITICAL FIX: Try fast path first - load tags directly without waiting for initial-data
+        // This is much faster because it skips filter generation and other slow operations
+        console.log('⚡ Attempting fast load: fetching tags directly from /api/available-tags...');
         try {
-            console.log('📡 Fetching /api/initial-data...');
+            const fastLoadController = new AbortController();
+            const fastLoadTimeout = setTimeout(() => fastLoadController.abort(), 10000); // 10s timeout for fast load
+            
+            const fastResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=1`, {
+                signal: fastLoadController.signal
+            });
+            clearTimeout(fastLoadTimeout);
+            
+            if (fastResponse.ok) {
+                const fastData = await fastResponse.json();
+                if (fastData.tags && Array.isArray(fastData.tags) && fastData.tags.length > 0) {
+                    console.log(`⚡ Fast load successful: loaded ${fastData.tags.length} tags in ${fastData.source || 'fast mode'}`);
+                    
+                    // Update tags immediately
+                    this.state.tags = [...fastData.tags];
+                    this.state.originalTags = [...fastData.tags];
+                    this._updateAvailableTags(fastData.tags);
+                    
+                    // Load filters and selected tags in parallel (non-blocking)
+                    Promise.all([
+                        this.fetchAndPopulateFilters(),
+                        this.fetchAndUpdateSelectedTags()
+                    ]).then(() => {
+                        console.log('✅ Fast load: filters and selected tags loaded');
+                    }).catch(err => {
+                        console.warn('⚠️ Fast load: filter/selected tag loading failed:', err);
+                    });
+                    
+                    // Update file info if available
+                    if (fastData.filename) {
+                        const fileInfoText = document.getElementById('fileInfoText');
+                        if (fileInfoText) {
+                            fileInfoText.textContent = fastData.filename;
+                        }
+                    }
+                    
+                    clearTimeout(splashSafetyTimeout);
+                    clearTimeout(timeoutId);
+                    clearTimeout(showSplashTimeout);
+                    
+                    if (this._waitForTagsToAppear) {
+                        this._waitForTagsToAppear();
+                    } else if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                    
+                    this.clearInitialDataRetry();
+                    this._checkingExistingData = false;
+                    initialDataFetchInProgress = false;
+                    console.log('✅ Fast load complete - tags displayed');
+                    return;
+                }
+            }
+        } catch (fastError) {
+            console.log('⚠️ Fast load failed or returned empty, trying full initial-data load:', fastError.name);
+            // Continue to full initial-data load below
+        }
+        
+        // Fallback to full initial-data load if fast load didn't work
+        try {
+            console.log('📡 Fetching /api/initial-data (full load)...');
             // Use AbortController to make fetch actually cancelable
             const response = await fetch('/api/initial-data', {
                 signal: abortController.signal
