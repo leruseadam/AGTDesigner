@@ -9753,8 +9753,8 @@ const TagManager = {
                 showToast('success', `File uploaded successfully! ${uploadData.rows || 0} rows processed.`);
             }
             
-            // CRITICAL: Force reload tags immediately after upload (bypass cache)
-            console.log('🔄 Forcing tag reload after upload (bypassing cache)...');
+            // CRITICAL: Force reload tags immediately after upload (bypass cache, use fast_load)
+            console.log('🔄 Forcing tag reload after upload (bypassing cache, using fast_load)...');
             try {
                 // Clear any cached tags first
                 if (this.state) {
@@ -9762,10 +9762,11 @@ const TagManager = {
                     this.state.originalTags = [];
                 }
                 
-                // Force fetch with nocache to ensure fresh data
+                // Force fetch with nocache and fast_load=1 to ensure fresh data but instant response
+                // fast_load=1 returns immediately with background lineage alignment (non-blocking)
                 const freshTagsController = new AbortController();
-                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 10000); // 10s timeout
-                const freshTagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=0`, {
+                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 8000); // 8s timeout
+                const freshTagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
                     signal: freshTagsController.signal
                 });
                 clearTimeout(freshTagsTimeout);
@@ -9786,15 +9787,22 @@ const TagManager = {
                             }
                         }
                         
-                        // Load filters in background
+                        // Load filters in background (non-blocking)
                         this.fetchAndPopulateFilters().catch(err => {
                             console.warn('Filter loading failed:', err);
                         });
                         
-                        // Wait for tags to appear, then complete
+                        // Wait for tags to appear in background (non-blocking)
                         if (this._waitForTagsToAppear) {
-                            this._waitForTagsToAppear();
+                            // Don't await - let it run in background
+                            setTimeout(() => {
+                                this._waitForTagsToAppear();
+                            }, 100);
                         }
+                        
+                        // Hide splash immediately
+                        this.hideExcelLoadingSplash();
+                        
                         return; // Success - tags loaded, no need to reload page
                     }
                 }
