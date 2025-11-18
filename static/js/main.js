@@ -7399,6 +7399,10 @@ const TagManager = {
                             const fileInfoText = document.getElementById('fileInfoText');
                             if (fileInfoText) {
                                 fileInfoText.textContent = fileData.filename;
+                                // Remove notification when file is detected
+                                if (this.hideNoFileNotification) {
+                                    this.hideNoFileNotification();
+                                }
                             }
                             const currentFileInfo = document.getElementById('currentFileInfo');
                             if (currentFileInfo) {
@@ -7570,9 +7574,10 @@ const TagManager = {
         console.log('⚡ Attempting fast load: fetching tags directly from /api/available-tags...');
         try {
             const fastLoadController = new AbortController();
-            const fastLoadTimeout = setTimeout(() => fastLoadController.abort(), 10000); // 10s timeout for fast load
+            const fastLoadTimeout = setTimeout(() => fastLoadController.abort(), 5000); // Reduced to 5s timeout for faster failure
             
-            const fastResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=1`, {
+            // OPTIMIZATION: Add nocache=1 to ensure fresh data after upload
+            const fastResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=1&nocache=1`, {
                 signal: fastLoadController.signal
             });
             clearTimeout(fastLoadTimeout);
@@ -7602,6 +7607,10 @@ const TagManager = {
                         const fileInfoText = document.getElementById('fileInfoText');
                         if (fileInfoText) {
                             fileInfoText.textContent = fastData.filename;
+                            // Remove notification when file is detected
+                            if (this.hideNoFileNotification) {
+                                this.hideNoFileNotification();
+                            }
                         }
                     }
                     
@@ -7707,6 +7716,10 @@ const TagManager = {
                         const fileInfoText = document.getElementById('fileInfoText');
                         if (fileInfoText) {
                             fileInfoText.textContent = data.filename;
+                            // Remove notification when file is detected
+                            if (this.hideNoFileNotification) {
+                                this.hideNoFileNotification();
+                            }
                         }
                     }
                     
@@ -7803,6 +7816,10 @@ const TagManager = {
                                     const fileInfoText = document.getElementById('fileInfoText');
                                     if (fileInfoText) {
                                         fileInfoText.textContent = tagsData.filename;
+                                        // Remove notification when file is detected
+                                        if (this.hideNoFileNotification) {
+                                            this.hideNoFileNotification();
+                                        }
                                     }
                                 }
                                 
@@ -9626,6 +9643,10 @@ const TagManager = {
             // Hide splash and show success message
             this.hideExcelLoadingSplash();
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
+            
+            // Remove notification when file is uploaded
+            this.hideNoFileNotification();
+            
             verboseLog(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
             
             // Show success toast
@@ -9847,6 +9868,10 @@ const TagManager = {
         // Update the file info text if a filename is provided
         if (fileName && fileInfoText) {
             fileInfoText.textContent = fileName;
+            // Remove notification when file is detected
+            if (this.hideNoFileNotification) {
+                this.hideNoFileNotification();
+            }
         }
     },
 
@@ -10585,14 +10610,7 @@ const TagManager = {
             return;
         }
         
-        // Check if we already showed this notification recently
-        const lastNotificationTime = sessionStorage.getItem('noFileNotificationTime');
-        const now = Date.now();
-        if (lastNotificationTime && (now - parseInt(lastNotificationTime)) < 30000) {
-            // Notification shown in last 30 seconds, don't show again
-            return;
-        }
-        sessionStorage.setItem('noFileNotificationTime', now.toString());
+        // Don't check for rate limiting - always show if no file is uploaded
         
         // Find the filter bar container to place notification above it
         const filterBarContainer = document.querySelector('[data-container-type="filter"]');
@@ -10660,23 +10678,26 @@ const TagManager = {
                 }
             }
             
-            // Auto-dismiss after 10 seconds
-            setTimeout(() => {
-                if (notificationWrapper && notificationWrapper.parentNode) {
-                    // Remove without animation to prevent layout shift
-                    notification.style.opacity = '0';
-                    notification.style.transition = 'opacity 0.2s';
-                    setTimeout(() => {
-                        if (notificationWrapper && notificationWrapper.parentNode) {
-                            notificationWrapper.remove();
-                        }
-                    }, 200);
-                }
-            }, 10000);
+            // Notification will persist until file is uploaded (no auto-dismiss)
         } else {
             // Notification already exists, just show it
             notification.classList.add('show');
         }
+    },
+    
+    hideNoFileNotification() {
+        // Remove the notification when a file is uploaded
+        const notification = document.getElementById('noFileNotification');
+        if (notification) {
+            const notificationWrapper = notification.closest('.col-3');
+            if (notificationWrapper && notificationWrapper.parentNode) {
+                notificationWrapper.remove();
+            } else if (notification.parentNode) {
+                notification.remove();
+            }
+        }
+        // Clear the session storage flag
+        sessionStorage.removeItem('noFileNotificationTime');
     }
 };
 

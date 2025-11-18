@@ -288,28 +288,51 @@ async function handleFiles(files) {
         
         if (typeof TagManager !== 'undefined') {
           try {
-            // CRITICAL FIX: Wait a moment for file to be fully saved and session to update
-            // This ensures the backend has the file ready when we request tags
-            console.log('⏳ Waiting 500ms for file to be fully processed...');
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // Don't clear UI state again - it was already cleared at upload start
-            // Refresh tags immediately and await completion
-            console.log('🔄 Starting tag refresh after upload...');
+            // OPTIMIZATION: Use fast path - load tags directly without waiting
+            // This is much faster than waiting for initial delay
+            console.log('⚡ Starting fast tag load after upload...');
             if (TagManager.refreshTagLists) {
               console.time('post-upload-refresh');
               
-              // CRITICAL FIX: Add retry logic with verification
+              // OPTIMIZATION: Try fast load first (direct to available-tags endpoint)
               let tagsLoaded = false;
-              let retryCount = 0;
-              const maxRetries = 3;
+              try {
+                // Try fast direct fetch first
+                const fastUrl = `/api/available-tags?t=${Date.now()}&fast_load=1&nocache=1`;
+                console.log(`⚡ Fast fetch: ${fastUrl}`);
+                const fastResponse = await fetch(fastUrl);
+                
+                if (fastResponse.ok) {
+                  const fastData = await fastResponse.json();
+                  if (fastData.tags && Array.isArray(fastData.tags) && fastData.tags.length > 0) {
+                    console.log(`⚡ Fast load successful: ${fastData.tags.length} tags`);
+                    // Update tags immediately
+                    TagManager.state.tags = [...fastData.tags];
+                    TagManager.state.originalTags = [...fastData.tags];
+                    TagManager._updateAvailableTags(fastData.tags);
+                    
+                    // Load filters and selected tags in background (non-blocking)
+                    Promise.all([
+                      TagManager.fetchAndPopulateFilters(),
+                      TagManager.fetchAndUpdateSelectedTags()
+                    ]).catch(err => console.warn('Background filter/tag loading failed:', err));
+                    
+                    tagsLoaded = true;
+                    console.log('✅ Fast load complete - tags displayed immediately');
+                  }
+                }
+              } catch (fastErr) {
+                console.log('⚠️ Fast load failed, trying full refresh:', fastErr.name);
+              }
               
-              while (!tagsLoaded && retryCount < maxRetries) {
+              // If fast load didn't work, try full refresh (but only once, no retries)
+              if (!tagsLoaded) {
+                console.log('🔄 Fast load failed, trying full refreshTagLists...');
                 try {
                   await TagManager.refreshTagLists({ preserveFilters: true, force: true });
                   
-                  // Verify tags actually loaded
-                  await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for tags to render
+                  // Quick verification (reduced wait time)
+                  await new Promise(resolve => setTimeout(resolve, 300)); // Reduced from 1000ms
                   
                   const availableContainer = document.getElementById('availableTags');
                   const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
@@ -318,34 +341,25 @@ async function handleFiles(files) {
                   if (tagItems.length > 0 || stateTags.length > 0) {
                     console.log(`✅ Tags verified: ${tagItems.length} in DOM, ${stateTags.length} in state`);
                     tagsLoaded = true;
-                  } else {
-                    retryCount++;
-                    console.warn(`⚠️ Tags not found after refresh (attempt ${retryCount}/${maxRetries}), retrying...`);
-                    if (retryCount < maxRetries) {
-                      await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
-                    }
                   }
                 } catch (err) {
-                  retryCount++;
-                  console.error(`❌ Tag refresh failed (attempt ${retryCount}/${maxRetries}):`, err);
-                  if (retryCount < maxRetries) {
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                  } else {
-                    throw err;
-                  }
+                  console.error('❌ Full refresh failed:', err);
                 }
               }
               
               console.timeEnd('post-upload-refresh');
               
               if (tagsLoaded) {
-                console.log('✅ Tag refresh completed successfully - tags verified');
+                console.log('✅ Tag refresh completed successfully');
               } else {
-                console.error('❌ Tags did not load after all retries');
-                showToast('warning', 'Tags may not have loaded. Please refresh the page if tags are missing.');
+                console.warn('⚠️ Tags may not have loaded - will retry in background');
+                // Retry in background without blocking
+                setTimeout(() => {
+                  TagManager.fetchAndUpdateAvailableTags().catch(() => {});
+                }, 2000);
               }
               
-              // Hide splash after tags are loaded (or after retries exhausted)
+              // Hide splash after tags are loaded
               const splashEl = document.getElementById('excelLoadingSplash');
               if (splashEl) splashEl.style.display = 'none';
             } else {
