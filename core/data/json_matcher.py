@@ -987,7 +987,7 @@ class JSONMatcher:
                     best_score = score
                     best_match = candidate
 
-            if best_match and best_score >= 65:
+            if best_match and best_score >= 50:  # Reduced from 65 to find more matches
                 best_match['_similarity_score'] = best_score
                 return best_match
         except Exception as e:
@@ -2529,9 +2529,9 @@ class JSONMatcher:
                                     token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
                                     
                                     # Only use fuzzy if above threshold
-                                    if token_sort_score >= 70:  # Stricter threshold (was 50)
+                                    if token_sort_score >= 50:  # Reduced threshold from 70 to find more matches
                                         score += token_sort_score * 0.5  # Reduced weight for fuzzy
-                                    elif token_sort_score >= 60:
+                                    elif token_sort_score >= 40:
                                         score += token_sort_score * 0.3  # Very low weight for marginal matches
                                         
                                 except ImportError:
@@ -2591,13 +2591,14 @@ class JSONMatcher:
                         from fuzzywuzzy import fuzz
                         name_similarity = fuzz.token_sort_ratio(json_name, db_name)
                         
-                        # Require at least 70% name similarity for ANY match
+                        # Require at least 50% name similarity for ANY match (reduced from 70% to find more matches)
                         # This allows legitimate matches like:
                         # - "Jet Fuel Gelato Vaporizer" → "Jet Fuel Gelato Live Resin" (75%+)
                         # - "Wedding Cake Cartridge" → "Wedding Cake Live Resin" (75%+)
+                        # - "Jet Fuel Gelato" → "Jet Fuel Gelato Live Resin" (60%+) - now allowed
                         # But prevents wrong matches like:
-                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (65%)
-                        if name_similarity < 70:
+                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (40% - still rejected)
+                        if name_similarity < 50:
                             logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
                             best_match = None
                             best_score = 0
@@ -2651,12 +2652,12 @@ class JSONMatcher:
                             validated = True
                             logging.info(f"✅ VALIDATED: Common terms {set(core_terms_json) & set(core_terms_db)}")
                     else:
-                        # No clear product type terms - use score threshold
-                        validated = (best_score >= 85.0)
+                        # No clear product type terms - use score threshold (reduced from 85 to 70 to find more matches)
+                        validated = (best_score >= 70.0)
                         if validated:
-                            logging.info(f"✅ SCORE VALIDATED: {best_score:.1f} >= 85.0")
+                            logging.info(f"✅ SCORE VALIDATED: {best_score:.1f} >= 70.0")
                         else:
-                            logging.warning(f"🚫 SCORE TOO LOW: {best_score:.1f} < 85.0")
+                            logging.warning(f"🚫 SCORE TOO LOW: {best_score:.1f} < 70.0")
                             best_match = None
                 
                 if best_match is not None and validated:  # Only use validated matches

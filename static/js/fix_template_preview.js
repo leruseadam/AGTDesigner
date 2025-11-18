@@ -20,6 +20,8 @@ function initializeTemplatePreview() {
         return;
     }
 
+    console.log('Template Preview Fix: Initializing...');
+    
     // Get all the necessary elements
     const editTemplateModal = document.getElementById('editTemplateModal');
     const templateSelectModal = document.getElementById('templateSelectModal');
@@ -33,26 +35,38 @@ function initializeTemplatePreview() {
     const saveTemplateBtn = document.getElementById('saveTemplateBtn');
     const previewContainer = document.getElementById('templatePreviewModal');
     
+    console.log('Template Preview Fix: Elements found:', {
+        editTemplateModal: !!editTemplateModal,
+        templateSelectModal: !!templateSelectModal,
+        scaleInputModal: !!scaleInputModal,
+        fontSelectModal: !!fontSelectModal,
+        fontSizingModeModal: !!fontSizingModeModal,
+        fieldFontSizesSection: !!fieldFontSizesSection,
+        templateSelect: !!templateSelect,
+        scaleInput: !!scaleInput,
+        fontSelect: !!fontSelect,
+        saveTemplateBtn: !!saveTemplateBtn,
+        previewContainer: !!previewContainer
+    });
+    
     if (!editTemplateModal) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 2) {
-            // Only retry twice, silently
-            scheduleTemplatePreviewInit(2000);
+        if (templatePreviewInitAttempts <= 10) {
+            console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
+            scheduleTemplatePreviewInit(600);
         } else {
-            // Silently fail - don't spam console
-            templatePreviewInitialized = true;
+            console.error('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
         }
         return;
     }
     
     if (!previewContainer) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 2) {
-            // Only retry twice, silently
-            scheduleTemplatePreviewInit(2000);
+        if (templatePreviewInitAttempts <= 10) {
+            console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
+            scheduleTemplatePreviewInit(600);
         } else {
-            // Silently fail - don't spam console
-            templatePreviewInitialized = true;
+            console.error('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
         }
         return;
     }

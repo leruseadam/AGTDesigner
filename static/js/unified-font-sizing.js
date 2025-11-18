@@ -10,7 +10,6 @@ class UnifiedFontSizing {
     this.baseFontSize = 12;
     this.observer = null;
     this.resizeTimeout = null;
-    this.mutationTimeout = null; // Debounce mutation observer
     
     this.init();
   }
@@ -44,29 +43,9 @@ class UnifiedFontSizing {
       this.processAllTextElements();
     });
     
-    // Handle dynamic content updates - debounced to prevent layout shifts
-    const observer = new MutationObserver((mutations) => {
-      // Skip processing if the mutation is just for the notification
-      const hasNotificationChange = mutations.some(mutation => {
-        return Array.from(mutation.addedNodes).some(node => 
-          node.id === 'noFileNotification' || 
-          node.querySelector?.('#noFileNotification')
-        ) || Array.from(mutation.removedNodes).some(node => 
-          node.id === 'noFileNotification' || 
-          node.querySelector?.('#noFileNotification')
-        );
-      });
-      
-      if (hasNotificationChange) {
-        // Don't process font sizes for notification changes
-        return;
-      }
-      
-      // Debounce the processing to prevent layout shifts
-      clearTimeout(this.mutationTimeout);
-      this.mutationTimeout = setTimeout(() => {
-        this.processAllTextElements();
-      }, 150);
+    // Handle dynamic content updates
+    const observer = new MutationObserver(() => {
+      this.processAllTextElements();
     });
     
     observer.observe(document.body, {
@@ -114,12 +93,6 @@ class UnifiedFontSizing {
   
   adjustFontSize(element) {
     if (!element || !element.textContent) return;
-    
-    // Skip elements marked to skip font sizing (like notifications)
-    if (element.hasAttribute('data-skip-font-sizing') || 
-        element.closest('[data-skip-font-sizing]')) {
-      return;
-    }
 
     const isTagListText = element.classList.contains('tag-name') ||
       element.classList.contains('tag-entry') ||
