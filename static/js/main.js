@@ -7656,6 +7656,10 @@ const TagManager = {
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
                     this._checkingExistingData = false;
+                    
+                    // Show notification when no Excel file is uploaded
+                    this.showNoFileNotification();
+                    
                     this.scheduleInitialDataRetry('Empty initial data response');
                     return;
                 }
@@ -7705,6 +7709,11 @@ const TagManager = {
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
             this._checkingExistingData = false;
+            
+            // Show notification when no Excel file is uploaded (after a short delay to ensure UI is ready)
+            setTimeout(() => {
+                this.showNoFileNotification();
+            }, 500);
             
             // Don't retry on abort - just proceed with empty state
             if (error.name !== 'AbortError') {
@@ -10289,6 +10298,69 @@ const TagManager = {
         }
         
         return processedTags;
+    },
+
+    // Show notification when no Excel file is uploaded
+    showNoFileNotification() {
+        // Check if file is actually uploaded
+        const fileInfoText = document.getElementById('fileInfoText');
+        const hasFile = fileInfoText && fileInfoText.textContent && 
+                       fileInfoText.textContent.trim() !== 'No file uploaded' &&
+                       fileInfoText.textContent.trim() !== '';
+        
+        if (hasFile) {
+            // File is uploaded, don't show notification
+            return;
+        }
+        
+        // Check if we already showed this notification recently
+        const lastNotificationTime = sessionStorage.getItem('noFileNotificationTime');
+        const now = Date.now();
+        if (lastNotificationTime && (now - parseInt(lastNotificationTime)) < 30000) {
+            // Notification shown in last 30 seconds, don't show again
+            return;
+        }
+        sessionStorage.setItem('noFileNotificationTime', now.toString());
+        
+        // Create or get notification element
+        let notification = document.getElementById('noFileNotification');
+        if (!notification) {
+            notification = document.createElement('div');
+            notification.id = 'noFileNotification';
+            notification.className = 'alert alert-info alert-dismissible fade show position-fixed';
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 10000; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);';
+            notification.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <i class="fas fa-info-circle me-2" style="font-size: 1.2rem;"></i>
+                    <div class="flex-grow-1">
+                        <strong>No Excel File Uploaded</strong>
+                        <p class="mb-0 mt-1" style="font-size: 0.9rem;">Please upload an Excel file to load product tags.</p>
+                    </div>
+                    <button type="button" class="btn-close ms-2" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                <div class="mt-2">
+                    <button class="btn btn-primary btn-sm" onclick="document.getElementById('fileInput').click(); this.closest('.alert').remove();">
+                        <i class="fas fa-upload me-1"></i>Upload Excel File
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(notification);
+            
+            // Auto-dismiss after 10 seconds
+            setTimeout(() => {
+                if (notification && notification.parentNode) {
+                    notification.classList.remove('show');
+                    setTimeout(() => {
+                        if (notification && notification.parentNode) {
+                            notification.remove();
+                        }
+                    }, 300);
+                }
+            }, 10000);
+        } else {
+            // Notification already exists, just show it
+            notification.classList.add('show');
+        }
     }
 };
 
