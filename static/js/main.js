@@ -10718,10 +10718,83 @@ async function handleJsonPasteInput(input) {
                 jsonMatchedTagsCount: matchResult.json_matched_tags ? matchResult.json_matched_tags.length : 0
             });
             
+            // CRITICAL FIX: Always update available tags first to populate state.tags and state.originalTags
+            // This ensures JSON matched products are available for lookup when converting selected tag names to objects
+            if (matchResult.available_tags && matchResult.available_tags.length > 0) {
+                verboseLog('Updating available tags with new data:', matchResult.available_tags.length);
+                TagManager._updateAvailableTags(matchResult.available_tags, null);
+                TagManager.saveAvailableTagsToCache(matchResult.available_tags || []);
+                TagManager.state.hydratedFromCache = false;
+            } else {
+                verboseLog('No available tags in response');
+            }
+            
             // Use the selected tags from the JSON match response
             if (matchResult.selected_tags && matchResult.selected_tags.length > 0) {
                 verboseLog('Using selected tags from JSON match response:', matchResult.selected_tags);
-                TagManager.updateSelectedTags(matchResult.selected_tags);
+                
+                // CRITICAL FIX: Convert selected tag names (strings) to tag objects
+                // Look up each tag name in available_tags to get the full tag object
+                const availableTagsMap = new Map();
+                if (matchResult.available_tags && matchResult.available_tags.length > 0) {
+                    matchResult.available_tags.forEach(tag => {
+                        const tagName = tag['Product Name*'] || tag.ProductName || tag.displayName || '';
+                        if (tagName) {
+                            availableTagsMap.set(tagName, tag);
+                        }
+                    });
+                }
+                
+                // Also check in state.tags if available_tags doesn't have it
+                if (TagManager.state.tags && TagManager.state.tags.length > 0) {
+                    TagManager.state.tags.forEach(tag => {
+                        const tagName = tag['Product Name*'] || tag.ProductName || tag.displayName || '';
+                        if (tagName && !availableTagsMap.has(tagName)) {
+                            availableTagsMap.set(tagName, tag);
+                        }
+                    });
+                }
+                
+                // Convert selected tag names to tag objects
+                const selectedTagObjects = matchResult.selected_tags
+                    .map(tagName => {
+                        // Try to find the tag object in available_tags map
+                        const tagObj = availableTagsMap.get(tagName);
+                        if (tagObj) {
+                            return tagObj;
+                        }
+                        // If not found, try to find in state.tags
+                        const foundInState = TagManager.state.tags?.find(t => 
+                            (t['Product Name*'] || t.ProductName || t.displayName) === tagName
+                        );
+                        if (foundInState) {
+                            return foundInState;
+                        }
+                        verboseLog(`Warning: Could not find tag object for name: ${tagName}`);
+                        return null;
+                    })
+                    .filter(Boolean); // Remove null entries
+                
+                verboseLog(`Converted ${matchResult.selected_tags.length} selected tag names to ${selectedTagObjects.length} tag objects`);
+                
+                if (selectedTagObjects.length > 0) {
+                    // Update persistent selected tags with the tag names
+                    TagManager.state.persistentSelectedTags = matchResult.selected_tags;
+                    TagManager.state.selectedTags = new Set(matchResult.selected_tags);
+                    
+                    // Now call updateSelectedTags with tag objects
+                    TagManager.updateSelectedTags(selectedTagObjects);
+                } else {
+                    verboseLog('No valid tag objects found for selected tags');
+                    TagManager.state.persistentSelectedTags = [];
+                    TagManager.state.selectedTags = new Set();
+                    
+                    // Clear the selected tags display
+                    const selectedTagsContainer = document.getElementById('selectedTags');
+                    if (selectedTagsContainer) {
+                        selectedTagsContainer.innerHTML = '';
+                    }
+                }
             } else {
                 verboseLog('No selected tags in response, clearing selected tags');
                 TagManager.state.persistentSelectedTags = [];
@@ -10732,17 +10805,6 @@ async function handleJsonPasteInput(input) {
                 if (selectedTagsContainer) {
                     selectedTagsContainer.innerHTML = '';
                 }
-            }
-            
-            // Only update available tags if they are provided and different from selected tags
-            if (matchResult.available_tags && matchResult.available_tags.length > 0 && 
-                matchResult.available_tags !== matchResult.selected_tags) {
-                verboseLog('Updating available tags with new data');
-                TagManager._updateAvailableTags(matchResult.available_tags, null);
-                TagManager.saveAvailableTagsToCache(matchResult.available_tags || []);
-                TagManager.state.hydratedFromCache = false;
-            } else {
-                verboseLog('Skipping available tags update to avoid duplication');
             }
             
             // Show a notification to the user
