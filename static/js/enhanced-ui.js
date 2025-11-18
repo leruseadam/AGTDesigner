@@ -164,16 +164,78 @@ async function handleFiles(files) {
       // Update splash status
       if (statusElement) statusElement.textContent = 'Uploading file...';
       
-      const response = await fetch('/upload', {
-        method: 'POST',
-        body: formData
-      });
-      console.log('📡 Upload response status:', response.status);
+      // Add timeout to prevent hanging
+      const uploadController = new AbortController();
+      const uploadTimeout = setTimeout(() => {
+        console.log('⏱️ Upload request timeout after 30 seconds');
+        uploadController.abort();
+      }, 30000); // 30 second timeout
+      
+      let response;
+      try {
+        response = await fetch('/upload', {
+          method: 'POST',
+          body: formData,
+          signal: uploadController.signal
+        });
+        clearTimeout(uploadTimeout);
+        console.log('📡 Upload response status:', response.status);
+      } catch (fetchError) {
+        clearTimeout(uploadTimeout);
+        if (fetchError.name === 'AbortError') {
+          console.error('❌ Upload request timed out');
+          hideSplashWithDelay(splashStartTime, 800);
+          showToast('error', 'Upload timed out. The file may be too large or the server is busy. Please try again.');
+          TagManager.setLoading(false);
+          return;
+        }
+        throw fetchError;
+      }
+      
+      // Check for 504 Gateway Timeout or other server errors
+      if (response.status === 504) {
+        console.error('❌ 504 Gateway Timeout - server took too long to respond');
+        hideSplashWithDelay(splashStartTime, 800);
+        showToast('error', 'Upload timed out on the server. The file may be too large. Please try a smaller file or try again later.');
+        TagManager.setLoading(false);
+        return;
+      }
+      
+      if (!response.ok) {
+        console.error(`❌ Upload failed with status ${response.status}`);
+        // Try to get error message from response
+        let errorMessage = `Upload failed (${response.status})`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          // Response might not be JSON (could be HTML error page)
+          const text = await response.text();
+          if (text.includes('<html>')) {
+            errorMessage = 'Server returned an error page. The upload may have timed out.';
+          }
+        }
+        hideSplashWithDelay(splashStartTime, 800);
+        showToast('error', errorMessage);
+        TagManager.setLoading(false);
+        return;
+      }
       
       // Update splash status
       if (statusElement) statusElement.textContent = 'Processing data...';
       
-      const data = await response.json();
+      let data;
+      try {
+        const responseText = await response.text();
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ Failed to parse upload response as JSON:', parseError);
+        console.error('Response text:', responseText?.substring(0, 500));
+        hideSplashWithDelay(splashStartTime, 800);
+        showToast('error', 'Server returned an invalid response. The upload may have timed out.');
+        TagManager.setLoading(false);
+        return;
+      }
       console.log('📦 Upload response data:', data);
       
       if (response.ok && data.success) {

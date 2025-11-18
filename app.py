@@ -2728,8 +2728,18 @@ def upload_file():
         # Mark as processing
         update_processing_status(file.filename, 'processing')
         
+        # CRITICAL FIX: Return response IMMEDIATELY to avoid 504 timeout
         # Check if we're on PythonAnywhere - if so, use background processing
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
+        
+        # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
+        _excel_processor = None
+        logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
+
+        # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
+        # Background processing will handle database storage and cache clearing
+        update_processing_status(file.filename, 'ready')
+        logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
         
         if is_pythonanywhere:
             # On PythonAnywhere: Start background thread to avoid timeout
@@ -2738,15 +2748,6 @@ def upload_file():
             # Capture variables from request context for background thread
             original_filename = file.filename
             # Store context removed - using single database
-
-            # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
-            _excel_processor = None
-            logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
-
-            # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
-            # Background processing will handle database storage and cache clearing
-            update_processing_status(file.filename, 'ready')
-            logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
 
             def process_in_background():
                 try:
