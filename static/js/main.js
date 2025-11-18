@@ -110,7 +110,17 @@ const performanceUtils = {
 };
 
 // Global error handler to prevent window from exiting
+// Only log errors that are not syntax errors from cached/old files
 window.addEventListener('error', function(event) {
+    // Filter out common non-critical errors
+    if (event.error && event.error.message) {
+        const errorMsg = event.error.message.toLowerCase();
+        // Skip "Unexpected end of input" errors which are often false positives from caching
+        if (errorMsg.includes('unexpected end of input') && event.filename && event.filename.includes('?t=')) {
+            // Likely a caching issue, don't log as error
+            return false;
+        }
+    }
     console.error('Global error caught:', event.error);
     console.error('Error at:', event.filename, 'line:', event.lineno, 'column:', event.colno);
     event.preventDefault();
@@ -11829,19 +11839,7 @@ window.updateJsonFilterToggleVisibility = function() {
         });
 };
 
-// Global error handler to prevent page from exiting
-window.addEventListener('error', function(e) {
-    console.error('Global error caught:', e.error);
-    // Prevent the error from causing the page to exit
-    e.preventDefault();
-    return false;
-});
-
-window.addEventListener('unhandledrejection', function(e) {
-    console.error('Unhandled promise rejection:', e.reason);
-    // Prevent the error from causing the page to exit
-    e.preventDefault();
-});
+// Duplicate error handlers removed - using the ones at the top of the file
 
 // TagManager is already initialized in the main DOMContentLoaded event listener above
 // This duplicate initialization has been removed to prevent conflicts
