@@ -6554,12 +6554,23 @@ const TagManager = {
             // Reduced from 2000ms to 500ms to allow faster retries while still preventing abuse
             const now = Date.now();
             if (this._lastFetchTime && (now - this._lastFetchTime) < 500) {
+                const timeSinceLastFetch = now - this._lastFetchTime;
+                console.log(`⏱️ Rate limiting: skipping fetch (${timeSinceLastFetch}ms since last fetch, need 500ms)`);
                 verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
-                // Hide splash if we're skipping
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
+                // CRITICAL FIX: If we have no tags and this is blocking, force the fetch anyway
+                const availableContainer = document.getElementById('availableTags');
+                const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
+                if (tagItems.length === 0 && (!this.state.tags || this.state.tags.length === 0)) {
+                    console.log('⚠️ Rate limit blocking but no tags loaded - forcing fetch anyway');
+                    // Reset rate limit to allow this critical fetch
+                    this._lastFetchTime = 0;
+                } else {
+                    // Hide splash if we're skipping
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    return false;
                 }
-                return false;
             }
             this._lastFetchTime = now;
             
@@ -7157,10 +7168,40 @@ const TagManager = {
         this.clearInitialDataRetry();
         this.initializeEmptyState();
         
+        // CRITICAL FIX: Always try to load tags, even if initial-data fails
         // Check if there's already data loaded (e.g., from a previous session or default file)
         // Run in background - don't block UI
         setTimeout(() => {
-            this.checkForExistingData();
+            console.log('🔄 Starting checkForExistingData...');
+            this.checkForExistingData().then(() => {
+                console.log('✅ checkForExistingData completed');
+                // CRITICAL: If no tags loaded after checkForExistingData, try direct tag fetch
+                setTimeout(() => {
+                    const availableContainer = document.getElementById('availableTags');
+                    const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
+                    if (tagItems.length === 0 && (!this.state.tags || this.state.tags.length === 0)) {
+                        console.log('⚠️ No tags found after checkForExistingData, attempting direct tag fetch...');
+                        this.fetchAndUpdateAvailableTags().then(success => {
+                            if (success) {
+                                console.log('✅ Direct tag fetch succeeded');
+                            } else {
+                                console.warn('⚠️ Direct tag fetch failed');
+                            }
+                        }).catch(err => {
+                            console.error('❌ Direct tag fetch error:', err);
+                        });
+                    } else {
+                        console.log(`✅ Tags already loaded: ${tagItems.length} items in DOM, ${this.state.tags?.length || 0} in state`);
+                    }
+                }, 1000); // Wait 1 second to see if tags appear
+            }).catch(err => {
+                console.error('❌ checkForExistingData failed:', err);
+                // Fallback: try direct tag fetch
+                console.log('🔄 Attempting fallback direct tag fetch...');
+                this.fetchAndUpdateAvailableTags().catch(fallbackErr => {
+                    console.error('❌ Fallback tag fetch also failed:', fallbackErr);
+                });
+            });
         }, 0); // Use setTimeout to make it non-blocking
         
         // Ensure all filters default to 'All' on page load
