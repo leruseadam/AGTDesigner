@@ -2488,6 +2488,10 @@ const TagManager = {
             vendorCheckbox.type = 'checkbox';
             vendorCheckbox.className = 'select-all-checkbox me-2';
             vendorCheckbox.addEventListener('change', (e) => {
+                // PERFORMANCE: Skip during bulk clear operations
+                if (this.state.isClearing) {
+                    return;
+                }
                 const savedScroll = this._saveAvailableScrollPosition();
                 const isChecked = e.target.checked;
                 const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
@@ -2557,6 +2561,10 @@ const TagManager = {
                 brandCheckbox.type = 'checkbox';
                 brandCheckbox.className = 'select-all-checkbox me-2';
                 brandCheckbox.addEventListener('change', (e) => {
+                    // PERFORMANCE: Skip during bulk clear operations
+                    if (this.state.isClearing) {
+                        return;
+                    }
                     const savedScroll = this._saveAvailableScrollPosition();
                     const isChecked = e.target.checked;
                     const checkboxes = brandSection.querySelectorAll('input[type="checkbox"]');
@@ -2626,6 +2634,10 @@ const TagManager = {
                     productTypeCheckbox.type = 'checkbox';
                     productTypeCheckbox.className = 'select-all-checkbox me-2';
                     productTypeCheckbox.addEventListener('change', (e) => {
+                        // PERFORMANCE: Skip during bulk clear operations
+                        if (this.state.isClearing) {
+                            return;
+                        }
                         const savedScroll = this._saveAvailableScrollPosition();
                         const isChecked = e.target.checked;
                         const checkboxes = productTypeSection.querySelectorAll('input[type="checkbox"]');
@@ -2755,6 +2767,10 @@ const TagManager = {
                                 weightCheckbox.type = 'checkbox';
                                 weightCheckbox.className = 'select-all-checkbox me-2';
                                 weightCheckbox.addEventListener('change', (e) => {
+                                    // PERFORMANCE: Skip during bulk clear operations
+                                    if (this.state.isClearing) {
+                                        return;
+                                    }
                                     const savedScroll = this._saveAvailableScrollPosition();
                                     const isChecked = e.target.checked;
                                     const checkboxes = weightSection.querySelectorAll('input.tag-checkbox');
@@ -4610,6 +4626,12 @@ const TagManager = {
         // CRITICAL FIX: Don't process selection changes during deselection to prevent filter clearing
         if (this.state.isProcessingDeselection) {
             verboseLog('🚫 SKIPPING handleTagSelection - currently processing deselection');
+            return;
+        }
+        
+        // PERFORMANCE: Skip handling during bulk clear operations to prevent UI freeze
+        if (this.state.isClearing) {
+            verboseLog('🚫 SKIPPING handleTagSelection - currently clearing/resetting');
             return;
         }
         
@@ -8575,38 +8597,65 @@ const TagManager = {
                 }
             }
             
-            // Clear all checkboxes in available tags section
+            // PERFORMANCE: Clear checkboxes in batches without dispatching events to prevent UI freeze
+            // Event handlers check isClearing flag, so no need to dispatch events
             try {
                 const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
-                availableCheckboxes.forEach(checkbox => {
-                    checkbox.checked = false;
-                    // Trigger change event to update listeners
-                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                });
+                const batchSize = 100; // Process 100 checkboxes at a time
+                
+                // Clear checkboxes in batches to prevent blocking UI
+                const clearBatch = (index) => {
+                    const end = Math.min(index + batchSize, availableCheckboxes.length);
+                    for (let i = index; i < end; i++) {
+                        availableCheckboxes[i].checked = false;
+                    }
+                    
+                    if (end < availableCheckboxes.length) {
+                        // Process next batch in next frame to avoid blocking
+                        requestAnimationFrame(() => clearBatch(end));
+                    } else {
+                        // All checkboxes cleared, now clear selected tags
+                        requestAnimationFrame(() => {
+                            const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
+                            selectedCheckboxes.forEach(checkbox => {
+                                checkbox.checked = false;
+                            });
+                            
+                            // Show all available tags in next frame
+                            requestAnimationFrame(() => {
+                                try {
+                                    const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
+                                    // Use display style in batch
+                                    const tagBatchSize = 200;
+                                    const showBatch = (tagIndex) => {
+                                        const tagEnd = Math.min(tagIndex + tagBatchSize, availableTagItems.length);
+                                        for (let i = tagIndex; i < tagEnd; i++) {
+                                            availableTagItems[i].style.display = 'block';
+                                        }
+                                        if (tagEnd < availableTagItems.length) {
+                                            requestAnimationFrame(() => showBatch(tagEnd));
+                                        }
+                                    };
+                                    showBatch(0);
+                                } catch (displayError) {
+                                    console.error('Error showing available tags:', displayError);
+                                }
+                            });
+                        });
+                    }
+                };
+                
+                if (availableCheckboxes.length > 0) {
+                    clearBatch(0);
+                } else {
+                    // No checkboxes to clear, proceed directly
+                    const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
+                    selectedCheckboxes.forEach(checkbox => {
+                        checkbox.checked = false;
+                    });
+                }
             } catch (checkboxError) {
-                console.error('Error clearing available checkboxes:', checkboxError);
-            }
-            
-            // Clear all checkboxes in selected tags section
-            try {
-                const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
-                selectedCheckboxes.forEach(checkbox => {
-                    checkbox.checked = false;
-                    // Trigger change event to update listeners
-                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                });
-            } catch (checkboxError) {
-                console.error('Error clearing selected checkboxes:', checkboxError);
-            }
-            
-            // Show all available tags (in case some were hidden)
-            try {
-                const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
-                availableTagItems.forEach(item => {
-                    item.style.display = 'block';
-                });
-            } catch (displayError) {
-                console.error('Error showing available tags:', displayError);
+                console.error('Error clearing checkboxes:', checkboxError);
             }
             
             // Clear filter cache to ensure fresh data
@@ -8614,32 +8663,36 @@ const TagManager = {
                 this.state.filterCache = null;
             }
             
-            // Update available tags display to reflect cleared state
-            if (this.efficientlyUpdateAvailableTagsDisplay) {
-                try {
-                    this.efficientlyUpdateAvailableTagsDisplay();
-                } catch (updateError) {
-                    console.error('Error updating available tags display:', updateError);
-                }
-            }
-            
-            // Update select all checkboxes to unchecked state
-            if (this.updateSelectAllCheckboxes) {
-                try {
-                    this.updateSelectAllCheckboxes();
-                } catch (updateError) {
-                    console.error('Error updating select all checkboxes:', updateError);
-                }
-            }
-            
-            // Also clear filters
-            if (this.clearAllFilters) {
-                try {
-                    await this.clearAllFilters();
-                } catch (filterError) {
-                    console.error('Error clearing filters:', filterError);
-                }
-            }
+            // PERFORMANCE: Defer expensive operations to avoid blocking UI during clear
+            // Use requestAnimationFrame to batch these operations after checkbox clearing completes
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    // Update available tags display to reflect cleared state
+                    if (this.efficientlyUpdateAvailableTagsDisplay) {
+                        try {
+                            this.efficientlyUpdateAvailableTagsDisplay();
+                        } catch (updateError) {
+                            console.error('Error updating available tags display:', updateError);
+                        }
+                    }
+                    
+                    // Update select all checkboxes to unchecked state
+                    if (this.updateSelectAllCheckboxes) {
+                        try {
+                            this.updateSelectAllCheckboxes();
+                        } catch (updateError) {
+                            console.error('Error updating select all checkboxes:', updateError);
+                        }
+                    }
+                    
+                    // Also clear filters (non-blocking)
+                    if (this.clearAllFilters) {
+                        this.clearAllFilters().catch(filterError => {
+                            console.error('Error clearing filters:', filterError);
+                        });
+                    }
+                });
+            });
             
             verboseLog('✅ Selected tags cleared and app reset completed successfully');
             
