@@ -294,77 +294,94 @@ async function handleFiles(files) {
             if (TagManager.refreshTagLists) {
               console.time('post-upload-refresh');
               
-              // OPTIMIZATION: Use ultra-fast path after upload - show tags immediately without waiting
+              // CRITICAL FIX: Force refresh tags after upload with cache bypass
+              // Use nocache=1 to ensure we get fresh data from the server
               let tagsLoaded = false;
+              
+              // First, try to load tags with cache bypass to ensure fresh data
               try {
-                // Force fast_load mode for immediate display (skips slow lineage alignment)
-                const fastUrl = `/api/available-tags?t=${Date.now()}&fast_load=1`;
-                console.log(`⚡ Ultra-fast fetch after upload: ${fastUrl}`);
-                const fastResponse = await fetch(fastUrl);
+                // Force cache bypass with nocache=1 to get fresh tags after upload
+                const refreshUrl = `/api/available-tags?t=${Date.now()}&nocache=1&prefer_db=0`;
+                console.log(`🔄 Forcing tag refresh after upload (cache bypass): ${refreshUrl}`);
+                const refreshResponse = await fetch(refreshUrl);
                 
-                if (fastResponse.ok) {
-                  const fastData = await fastResponse.json();
-                  if (fastData.tags && Array.isArray(fastData.tags) && fastData.tags.length > 0) {
-                    console.log(`⚡ Ultra-fast load successful: ${fastData.tags.length} tags`);
-                    // Update tags immediately without waiting
-                    TagManager.state.tags = [...fastData.tags];
-                    TagManager.state.originalTags = [...fastData.tags];
-                    TagManager._updateAvailableTags(fastData.tags);
+                if (refreshResponse.ok) {
+                  const refreshData = await refreshResponse.json();
+                  if (refreshData.tags && Array.isArray(refreshData.tags) && refreshData.tags.length > 0) {
+                    console.log(`✅ Tag refresh successful: ${refreshData.tags.length} tags loaded`);
                     
-                    // Hide splash immediately - don't wait for filters/selected tags
+                    // Clear any cached tags FIRST to ensure fresh data
+                    if (TagManager.clearAvailableTagsCache) {
+                      TagManager.clearAvailableTagsCache();
+                    }
+                    
+                    // Update tags immediately
+                    TagManager.state.tags = [...refreshData.tags];
+                    TagManager.state.originalTags = [...refreshData.tags];
+                    TagManager._updateAvailableTags(refreshData.tags);
+                    
+                    // Hide splash
                     const splashEl = document.getElementById('excelLoadingSplash');
                     if (splashEl) splashEl.style.display = 'none';
                     
-                    // Show success notification immediately
+                    // Show success notification
                     const rowCount = data.rows || 0;
                     const filename = data.filename || file.name;
                     showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
                     
-                    // Load filters and selected tags in background (completely non-blocking)
+                    // Load filters and selected tags in background
                     Promise.all([
                       TagManager.fetchAndPopulateFilters(),
                       TagManager.fetchAndUpdateSelectedTags()
                     ]).catch(err => console.warn('Background filter/tag loading failed:', err));
                     
                     tagsLoaded = true;
-                    console.log('✅ Ultra-fast load complete - tags displayed immediately, background loading filters');
+                    console.log('✅ Tag refresh complete - tags displayed');
                     console.timeEnd('post-upload-refresh');
                     return; // Exit early - tags are loaded
+                  } else {
+                    console.warn('⚠️ Tag refresh returned empty tags, trying full refresh...');
                   }
                 }
-              } catch (fastErr) {
-                console.log('⚠️ Ultra-fast load failed, trying standard refresh:', fastErr.name);
+              } catch (refreshErr) {
+                console.log('⚠️ Tag refresh failed, trying full refreshTagLists:', refreshErr.name);
               }
               
-              // If fast load didn't work, try full refresh (but only once, no retries)
+              // If direct refresh didn't work, use full refreshTagLists with force flag
               if (!tagsLoaded) {
-                console.log('🔄 Fast load failed, trying full refreshTagLists...');
+                console.log('🔄 Using full refreshTagLists with force flag...');
                 try {
-                  // Start refresh but don't wait for it
-                  TagManager.refreshTagLists({ preserveFilters: true, force: true }).then(() => {
-                    console.log('✅ Full refresh completed');
-                  }).catch(err => {
-                    console.error('❌ Full refresh failed:', err);
-                  });
+                  // Clear cache first to ensure fresh data
+                  if (TagManager.clearAvailableTagsCache) {
+                    TagManager.clearAvailableTagsCache();
+                  }
                   
-                  // Hide splash and show success immediately - don't wait for full load
+                  // Force refresh with cache bypass
+                  await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+                  console.log('✅ Full refreshTagLists completed');
+                  
+                  // Hide splash
                   const splashEl = document.getElementById('excelLoadingSplash');
                   if (splashEl) splashEl.style.display = 'none';
                   
-                  // Show success notification immediately
+                  // Show success notification
                   const rowCount = data.rows || 0;
                   const filename = data.filename || file.name;
                   showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
                   
-                  tagsLoaded = true; // Mark as handled, loading continues in background
+                  tagsLoaded = true;
                 } catch (err) {
-                  console.error('❌ Refresh setup failed:', err);
+                  console.error('❌ Full refreshTagLists failed:', err);
                   // Still hide splash and show success
                   const splashEl = document.getElementById('excelLoadingSplash');
                   if (splashEl) splashEl.style.display = 'none';
                   const rowCount = data.rows || 0;
                   const filename = data.filename || file.name;
                   showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
+                  // Show warning about tag loading
+                  setTimeout(() => {
+                    showToast('warning', 'Tags may not have loaded. Please refresh the page if tags are missing.');
+                  }, 1000);
                 }
               }
               

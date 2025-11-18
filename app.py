@@ -7774,12 +7774,100 @@ def get_available_tags():
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
         
         if cached_tags and not nocache:
-            # OPTIMIZATION: Skip lineage alignment for fast loads - return cached tags immediately
-            # Lineage can be aligned later via a separate request if needed
+            # OPTIMIZATION: For fast loads, return cached tags immediately and do lineage alignment in background
+            # This allows instant response while lineage is updated asynchronously
             fast_path_allowed = fast_load and not force_full_refresh
             if fast_path_allowed:
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
+                logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags, lineage alignment will happen in background ({elapsed:.1f}ms)")
+                
+                # Start lineage alignment in background thread (non-blocking)
+                def background_lineage_alignment():
+                    try:
+                        store_name = get_current_store_name()
+                        if not store_name:
+                            return
+                        product_db = get_product_database(store_name)
+                        if not product_db:
+                            return
+                        
+                        # Quick lineage alignment with timeout
+                        import threading
+                        alignment_timeout = 5  # 5 second timeout for background alignment
+                        alignment_done = threading.Event()
+                        
+                        def do_alignment():
+                            try:
+                                lineage_cache = {}
+                                conn = product_db._get_connection()
+                                cur = conn.cursor()
+                                
+                                # Batch query for lineage (same as main path but non-blocking)
+                                product_names = [tag.get('Product Name*') or tag.get('ProductName') or '' for tag in cached_tags[:500]]  # Limit to 500 for speed
+                                if product_names:
+                                    normalized_names = []
+                                    for name in product_names:
+                                        try:
+                                            normalized = product_db._normalize_product_name(name)
+                                        except Exception:
+                                            normalized = name.strip().lower()
+                                        normalized_names.append(normalized)
+                                    
+                                    all_search_names = list(set(product_names + normalized_names))[:500]  # Limit batch size
+                                    placeholders = ','.join(['?'] * len(all_search_names))
+                                    batch_query = f'''
+                                        SELECT DISTINCT
+                                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                            COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                            p."Product Name*" AS product_name,
+                                            p.normalized_name AS normalized_name
+                                        FROM products p
+                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                        ORDER BY p.id DESC
+                                        LIMIT 500
+                                    '''
+                                    cur.execute(batch_query, all_search_names + all_search_names)
+                                    batch_results = cur.fetchall()
+                                    
+                                    for row in batch_results:
+                                        db_lin = row[0]
+                                        db_strain = row[1] if len(row) > 1 else None
+                                        result_product_name = row[2] if len(row) > 2 else None
+                                        if result_product_name:
+                                            lineage_cache[result_product_name] = (db_lin, db_strain)
+                                    
+                                    # Update cache with aligned data
+                                    updated_tags = cached_tags.copy()
+                                    for tag in updated_tags:
+                                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                        if name in lineage_cache:
+                                            db_lin, db_strain = lineage_cache[name]
+                                            if db_lin:
+                                                tag['Lineage'] = str(db_lin).strip().upper()
+                                                tag['currentLineage'] = str(db_lin).strip().upper()
+                                            if db_strain:
+                                                tag['Product Strain'] = str(db_strain).strip()
+                                    
+                                    # Update cache with aligned tags
+                                    cache.set(cache_key, make_json_safe(updated_tags), timeout=300)
+                                    logging.info(f"✅ Background lineage alignment completed for {len(updated_tags)} tags")
+                            except Exception as bg_err:
+                                logging.warning(f"Background lineage alignment error: {bg_err}")
+                            finally:
+                                alignment_done.set()
+                        
+                        alignment_thread = threading.Thread(target=do_alignment, daemon=True)
+                        alignment_thread.start()
+                        alignment_done.wait(timeout=alignment_timeout)
+                        
+                    except Exception as e:
+                        logging.warning(f"Background lineage alignment setup failed: {e}")
+                
+                # Start background alignment (non-blocking)
+                import threading
+                threading.Thread(target=background_lineage_alignment, daemon=True).start()
+                
                 response = make_response(jsonify({
                     'tags': cached_tags,
                     'total_count': len(cached_tags),
@@ -8176,24 +8264,127 @@ def get_available_tags():
                 # Continue to return Excel tags even if lineage alignment fails
 
             safe_excel_tags = make_json_safe(all_tags)
-            # Cache the results for faster subsequent requests (unless nocache requested)
-            # CRITICAL: Always cache, even for fast_load, so subsequent requests are instant
-            if not nocache:
-                cache.set(cache_key, safe_excel_tags, timeout=300)  # Cache for 5 minutes
-                logging.info(f"✅ Cached {len(safe_excel_tags)} tags for future fast loads")
-            try:
-                current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
-                save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
-            except Exception as cache_error:
-                logging.warning(f"Unable to persist Excel tag cache: {cache_error}")
-            elapsed = (time.time() - start_time) * 1000
-            logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
             
-            response_payload = {
-                'tags': safe_excel_tags,
-                'total_count': len(safe_excel_tags),
-                'source': 'excel+db-lineage' if not fast_load else 'excel+db-lineage-fast'
-            }
+            # OPTIMIZATION: For fast_load, return tags immediately and do lineage alignment in background
+            if fast_load:
+                # Cache tags immediately (before lineage alignment) for instant response
+                if not nocache:
+                    cache.set(cache_key, safe_excel_tags, timeout=300)
+                    logging.info(f"✅ Cached {len(safe_excel_tags)} tags for future fast loads")
+                
+                # Start background lineage alignment (same as cache path)
+                def background_lineage_alignment_fresh():
+                    try:
+                        store_name = get_current_store_name()
+                        if not store_name:
+                            return
+                        product_db = get_product_database(store_name)
+                        if not product_db:
+                            return
+                        
+                        import threading
+                        alignment_timeout = 10  # 10 second timeout for background alignment
+                        alignment_done = threading.Event()
+                        
+                        def do_alignment():
+                            try:
+                                lineage_cache = {}
+                                conn = product_db._get_connection()
+                                cur = conn.cursor()
+                                
+                                # Batch query for lineage
+                                product_names = [tag.get('Product Name*') or tag.get('ProductName') or '' for tag in all_tags[:500]]
+                                if product_names:
+                                    normalized_names = []
+                                    for name in product_names:
+                                        try:
+                                            normalized = product_db._normalize_product_name(name)
+                                        except Exception:
+                                            normalized = name.strip().lower()
+                                        normalized_names.append(normalized)
+                                    
+                                    all_search_names = list(set(product_names + normalized_names))[:500]
+                                    placeholders = ','.join(['?'] * len(all_search_names))
+                                    batch_query = f'''
+                                        SELECT DISTINCT
+                                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                            COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                            p."Product Name*" AS product_name,
+                                            p.normalized_name AS normalized_name
+                                        FROM products p
+                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                        ORDER BY p.id DESC
+                                        LIMIT 500
+                                    '''
+                                    cur.execute(batch_query, all_search_names + all_search_names)
+                                    batch_results = cur.fetchall()
+                                    
+                                    for row in batch_results:
+                                        db_lin = row[0]
+                                        db_strain = row[1] if len(row) > 1 else None
+                                        result_product_name = row[2] if len(row) > 2 else None
+                                        if result_product_name:
+                                            lineage_cache[result_product_name] = (db_lin, db_strain)
+                                    
+                                    # Update tags with lineage
+                                    updated_tags = all_tags.copy()
+                                    for tag in updated_tags:
+                                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                        if name in lineage_cache:
+                                            db_lin, db_strain = lineage_cache[name]
+                                            if db_lin:
+                                                tag['Lineage'] = str(db_lin).strip().upper()
+                                                tag['currentLineage'] = str(db_lin).strip().upper()
+                                            if db_strain:
+                                                tag['Product Strain'] = str(db_strain).strip()
+                                    
+                                    # Update cache with aligned tags
+                                    safe_updated = make_json_safe(updated_tags)
+                                    cache.set(cache_key, safe_updated, timeout=300)
+                                    logging.info(f"✅ Background lineage alignment completed for {len(updated_tags)} tags")
+                            except Exception as bg_err:
+                                logging.warning(f"Background lineage alignment error: {bg_err}")
+                            finally:
+                                alignment_done.set()
+                        
+                        alignment_thread = threading.Thread(target=do_alignment, daemon=True)
+                        alignment_thread.start()
+                        alignment_done.wait(timeout=alignment_timeout)
+                        
+                    except Exception as e:
+                        logging.warning(f"Background lineage alignment setup failed: {e}")
+                
+                # Start background alignment (non-blocking)
+                import threading
+                threading.Thread(target=background_lineage_alignment_fresh, daemon=True).start()
+                
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ Available tags (Excel, lineage in background) completed ({elapsed:.1f}ms)")
+                
+                response_payload = {
+                    'tags': safe_excel_tags,
+                    'total_count': len(safe_excel_tags),
+                    'source': 'excel-fast-lineage-bg'
+                }
+            else:
+                # Full load: cache after lineage alignment
+                if not nocache:
+                    cache.set(cache_key, safe_excel_tags, timeout=300)
+                    logging.info(f"✅ Cached {len(safe_excel_tags)} tags for future fast loads")
+                try:
+                    current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
+                    save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
+                except Exception as cache_error:
+                    logging.warning(f"Unable to persist Excel tag cache: {cache_error}")
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
+                
+                response_payload = {
+                    'tags': safe_excel_tags,
+                    'total_count': len(safe_excel_tags),
+                    'source': 'excel+db-lineage'
+                }
             if force_full_refresh:
                 session['lineage_update_timestamp'] = 0
             return jsonify(response_payload)
