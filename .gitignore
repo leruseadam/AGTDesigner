@@ -64,8 +64,8 @@ logs/
 temp/
 tmp/
 
-# Uploads and outputs - NOW TRACKED (user requested)
-# uploads folder is now included in git
+# Uploads and outputs
+uploads/
 output/
 cache/
 
