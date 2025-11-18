@@ -4718,6 +4718,23 @@
       z-index: 1050 !important;
     }
     
+    #jsonMatchModal .modal-dialog {
+      max-height: 90vh;
+      height: 90vh;
+    }
+    
+    #jsonMatchModal .modal-content {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #jsonMatchModal .modal-body {
+      overflow-y: auto;
+      flex: 1;
+      max-height: calc(90vh - 120px); /* Account for header and footer */
+    }
+    
     #jsonMatchModal + .modal-backdrop {
       z-index: 1049 !important;
     }
