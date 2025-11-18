@@ -2097,7 +2097,20 @@ def get_session_excel_processor():
                     row_count = len(g.excel_processor.df)
                     logging.info(f"✅ Session file already loaded by get_excel_processor(): {session_file_path} ({row_count} rows)")
                 else:
-                    logging.warning(f"⚠️ Session file not loaded by get_excel_processor(), DataFrame is empty")
+                    # CRITICAL FIX: Actually load the session file if it exists but isn't loaded
+                    logging.info(f"🔄 Session file exists but not loaded, loading now: {session_file_path}")
+                    try:
+                        success = g.excel_processor.load_file(session_file_path)
+                        if success and hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None:
+                            row_count = len(g.excel_processor.df)
+                            g.excel_processor._last_loaded_file = session_file_path
+                            logging.info(f"✅ Successfully loaded session file: {session_file_path} ({row_count} rows)")
+                        else:
+                            logging.warning(f"⚠️ Failed to load session file: {session_file_path}")
+                    except Exception as load_error:
+                        logging.error(f"❌ Error loading session file: {load_error}")
+                        import traceback
+                        logging.error(traceback.format_exc())
             elif session_file_path:
                 logging.warning(f"Session uploaded file does not exist: {session_file_path}")
                 # Clear invalid session data
