@@ -1070,6 +1070,35 @@ def get_excel_processor():
             if _excel_processor is None:
                 # Create processor with store-aware configuration so lineage updates persist per store
                 _excel_processor = ExcelProcessor(store_name=processor_store)
+                
+                # CRITICAL FIX: Load session file immediately when creating new processor
+                try:
+                    from flask import session
+                    try:
+                        session_file_path = session.get('file_path')
+                        if session_file_path and os.path.exists(session_file_path):
+                            logging.info(f"✅ CRITICAL FIX: Loading session file on new processor: {session_file_path}")
+                            success = _excel_processor.load_file(session_file_path)
+                            if success:
+                                _excel_processor._last_loaded_file = session_file_path
+                                row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
+                                logging.info(f"✅ CRITICAL FIX: Loaded {row_count} rows from session file on new processor")
+                                # Populate dropdown cache
+                                if hasattr(_excel_processor, '_cache_dropdown_values'):
+                                    try:
+                                        _excel_processor._cache_dropdown_values()
+                                        logging.info(f"✅ Populated dropdown cache after loading session file")
+                                    except Exception as e:
+                                        logging.error(f"Failed to populate dropdown cache: {e}")
+                            else:
+                                logging.error(f"❌ CRITICAL FIX: Failed to load session file on new processor: {session_file_path}")
+                        elif session_file_path:
+                            logging.warning(f"⚠️ Session file_path exists but file not found: {session_file_path}")
+                    except RuntimeError:
+                        # No active request context
+                        pass
+                except Exception as session_error:
+                    logging.warning(f"Error checking session for uploaded file on new processor: {session_error}")
             else:
                 # If the active store changed, update the processor's store context
                 current_processor_store = getattr(_excel_processor, '_store_name', None)
@@ -7945,6 +7974,26 @@ def get_available_tags():
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
             excel_processor = get_session_excel_processor()
+            
+            # CRITICAL FIX: If processor exists but DataFrame is empty, force reload from session file
+            if excel_processor is not None:
+                if excel_processor.df is None or excel_processor.df.empty:
+                    session_file_path = session.get('file_path')
+                    if session_file_path and os.path.exists(session_file_path):
+                        logging.info(f"🔄 CRITICAL FIX: Processor exists but DataFrame is empty, reloading from session: {session_file_path}")
+                        success = excel_processor.load_file(session_file_path)
+                        if success:
+                            excel_processor._last_loaded_file = session_file_path
+                            row_count = len(excel_processor.df) if excel_processor.df is not None else 0
+                            logging.info(f"✅ CRITICAL FIX: Reloaded {row_count} rows from session file")
+                            # Populate dropdown cache
+                            if hasattr(excel_processor, '_cache_dropdown_values'):
+                                try:
+                                    excel_processor._cache_dropdown_values()
+                                    logging.info(f"✅ Populated dropdown cache after reload")
+                                except Exception as e:
+                                    logging.error(f"Failed to populate dropdown cache after reload: {e}")
+            
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 try:
                     excel_tags = excel_processor.get_available_tags()
