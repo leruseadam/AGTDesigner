@@ -141,7 +141,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     # Special rule: Double template long brand names forced to 8pt minimum for readability
     if field_type.lower() == 'brand' and orientation.lower() == 'double':
         text_length = _brand_letter_count(text)
-        if text_length >= 16:
+        if text_length >= 12:  # Lowered threshold to catch more long brands like "fairwinds manufacturing"
             final_size = 8 * scale_factor
             logger.debug(
                 f"Double template brand length rule: text='{text}' (length={text_length}) exceeds threshold, forcing {final_size}pt"
@@ -212,16 +212,8 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 return Pt(final_size)
     
     
-    # Special guard: extremely long double-template brands cap at 6.5pt
-    if field_type.lower() == 'brand' and orientation.lower() == 'double':
-        text_length = _brand_letter_count(text)
-        if text_length >= 40:
-            final_size = 6.5 * scale_factor
-            logger.debug(
-                f"Double template brand length guard: text='{text}' (length={text_length}) "
-                f"exceeds threshold, capping at {final_size}pt"
-            )
-            return Pt(final_size)
+    # Special guard: extremely long double-template brands still maintain 8pt minimum (removed 6.5pt cap)
+    # Long brands (12+) are already forced to 8pt above, so this guard is no longer needed
     
     # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
     if orientation.lower() == 'double' and field_type.lower() == 'description':
