@@ -7445,33 +7445,47 @@ const TagManager = {
         });
 
         // Safety net: ensure loading overlay never blocks interaction for long
+        // Increased timeout to 15 seconds to allow tags to load after upload
         const splashSafetyTimeout = setTimeout(() => {
-            // Always make UI interactive again quickly
-            if (typeof this.hideActionSplash === 'function') {
-                this.hideActionSplash();
-            }
-            AppLoadingSplash.stopAutoAdvance();
-            AppLoadingSplash.complete();
-
-            // Only attempt a visible fallback load if nothing has rendered yet
+            // Check if tags have loaded before hiding splash
             const availableTagsContainer = document.getElementById('availableTags');
             const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
-            if (tagItems.length === 0) {
+            const hasTags = tagItems.length > 0 || (this.state.tags && this.state.tags.length > 0);
+            
+            if (!hasTags) {
                 console.warn('⏳ Safety timeout triggered - no tags found, attempting fallback load (non-blocking)');
                 // Fire-and-forget fallback fetch so UI stays responsive
                 try {
                     this.fetchAndUpdateAvailableTags().then(() => {
                         verboseLog('Fallback tag loading succeeded');
+                        // Hide splash after tags load
+                        if (typeof this.hideActionSplash === 'function') {
+                            this.hideActionSplash();
+                        }
                     }).catch(fallbackError => {
                         console.error('Fallback tag loading failed:', fallbackError);
+                        // Only hide splash if we're sure there are no tags
+                        if (typeof this.hideActionSplash === 'function') {
+                            this.hideActionSplash();
+                        }
                     });
                 } catch (fallbackError) {
                     console.error('Fallback tag loading threw synchronously:', fallbackError);
+                    if (typeof this.hideActionSplash === 'function') {
+                        this.hideActionSplash();
+                    }
                 }
             } else {
-                verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
+                verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - hiding splash`);
+                // Tags are loaded, safe to hide splash
+                if (typeof this.hideActionSplash === 'function') {
+                    this.hideActionSplash();
+                }
             }
-        }, 2000); // 2 second safety net so "Loading tags" overlay never lingers
+            
+            AppLoadingSplash.stopAutoAdvance();
+            AppLoadingSplash.complete();
+        }, 15000); // 15 second safety net to allow tags to load after upload
 
         try {
             // Use the new initial-data endpoint for faster loading with timeout
@@ -7499,8 +7513,16 @@ const TagManager = {
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
                     setTimeout(() => {
                         this.debouncedUpdateAvailableTags(data.available_tags, null);
-                        // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
-                        // when tags are actually fully rendered
+                        // CRITICAL: Wait for tags to appear before hiding splash
+                        // Call _waitForTagsToAppear after a delay to allow debounced function to complete
+                        setTimeout(() => {
+                            if (this._waitForTagsToAppear) {
+                                this._waitForTagsToAppear();
+                            } else if (this.hideActionSplash) {
+                                // Fallback if _waitForTagsToAppear doesn't exist
+                                this.hideActionSplash();
+                            }
+                        }, 500); // Wait for debounced function (300ms) plus buffer
                     }, 0);
 
                     // Restore previously selected tags from backend
@@ -7545,7 +7567,12 @@ const TagManager = {
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
-                clearTimeout(splashSafetyTimeout);
+                    clearTimeout(splashSafetyTimeout);
+                    
+                    // Hide action splash when no data
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
@@ -7559,6 +7586,11 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
+                
+                // Hide action splash on error
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
@@ -7579,6 +7611,11 @@ const TagManager = {
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             clearTimeout(splashSafetyTimeout);
+            
+            // Hide action splash on error
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
             
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
