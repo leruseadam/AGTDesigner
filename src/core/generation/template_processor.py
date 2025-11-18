@@ -3776,6 +3776,11 @@ class TemplateProcessor:
         is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
         is_short_wordy = (len(text_stripped) <= 18 and all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped))
 
+        # CRITICAL FIX: Check for brand markers FIRST - double templates use PRODUCTBRAND_CENTER markers
+        if any(marker in text for marker in ['PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END']):
+            self.logger.debug(f"🎯 DOUBLE BRAND MARKER DETECTED: '{text_stripped}' classified as brand (marker-based)")
+            return 'brand'
+
         # Prices
         if '$' in text:
             return 'price'

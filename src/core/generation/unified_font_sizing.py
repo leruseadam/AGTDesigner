@@ -90,6 +90,15 @@ def _brand_letter_count(text) -> int:
     if text is None:
         return 0
     text = str(text)
+    
+    # CRITICAL FIX: Extract brand name from markers before counting
+    # Handle PRODUCTBRAND_CENTER_START...PRODUCTBRAND_CENTER_END markers
+    import re
+    brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', text, re.IGNORECASE)
+    if brand_match:
+        # Extract just the brand name from between the markers
+        text = brand_match.group(1)
+    
     letter_count = sum(1 for ch in text if ch.isalpha())
     if letter_count > 0:
         return letter_count
