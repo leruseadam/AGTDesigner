@@ -6647,8 +6647,8 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // Increased timeout from 10s to 20s to accommodate slower lineage alignment queries
-                    const timeoutId = setTimeout(() => controller.abort(), 20000);
+                    // PERFORMANCE FIX: Reduced timeout to 8s - fast_load should make this fast enough
+                    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
                     // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
@@ -7434,18 +7434,56 @@ const TagManager = {
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
             this._updateAvailableTags(cachedTags);
+            
+            // Hide splash immediately since we have cached tags
+            if (this._waitForTagsToAppear) {
+                this._waitForTagsToAppear();
+            } else if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
 
             // Continue loading fresh data in background (non-blocking)
             verboseLog('Cache rendered, fetching fresh data in background...');
+            // Fetch fresh data in background without blocking
+            Promise.race([
+                fetch('/api/initial-data?fast_load=1'),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Background fetch timeout')), 10000))
+            ]).then(response => {
+                if (response.ok) {
+                    return response.json();
+                }
+                return null;
+            }).then(data => {
+                if (data && data.success && data.available_tags && data.available_tags.length > 0) {
+                    verboseLog(`Background: Updated with ${data.available_tags.length} fresh tags`);
+                    this.state.tags = [...data.available_tags];
+                    this.state.originalTags = [...data.available_tags];
+                    this._updateAvailableTags(data.available_tags);
+                }
+            }).catch(err => {
+                verboseLog('Background data fetch failed (non-critical):', err);
+            });
+            
+            // Also fetch selected tags and filters in background
+            Promise.allSettled([
+                this.fetchAndUpdateSelectedTags(),
+                this.fetchAndPopulateFilters()
+            ]).then(() => {
+                verboseLog('Background: Selected tags and filters loaded');
+            });
+            
+            clearTimeout(splashSafetyTimeout);
+            this._checkingExistingData = false;
+            return; // Exit early - we have cached data
         }
 
-        // CRITICAL FIX: Increased timeout to 30 seconds to handle slow database queries
+        // PERFORMANCE FIX: Reduced timeout to 8 seconds - if it takes longer, use cache/fallback
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 30000);
+            setTimeout(() => reject(new Error('Initialization timeout')), 8000);
         });
 
         // Safety net: ensure loading overlay never blocks interaction for long
-        // Increased timeout to 15 seconds to allow tags to load after upload
+        // Reduced to 10 seconds since we're using faster timeouts and cache
         const splashSafetyTimeout = setTimeout(() => {
             // Check if tags have loaded before hiding splash
             const availableTagsContainer = document.getElementById('availableTags');
@@ -7485,12 +7523,13 @@ const TagManager = {
             
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
-        }, 15000); // 15 second safety net to allow tags to load after upload
+        }, 10000); // 10 second safety net - should be enough with optimizations
 
         try {
-            // Use the new initial-data endpoint for faster loading with timeout
+            // PERFORMANCE FIX: Use fast_load=1 for initial loads to skip expensive lineage alignment
+            // This dramatically speeds up initial tag loading
             const response = await Promise.race([
-                fetch('/api/initial-data'),
+                fetch('/api/initial-data?fast_load=1'),
                 timeoutPromise
             ]);
 
@@ -7509,40 +7548,38 @@ const TagManager = {
                         splashMessage.textContent = 'Loading product tags...';
                     }
 
-                    // Update available tags (use setTimeout to yield to browser)
+                    // PERFORMANCE FIX: Update tags immediately without debounce delay for initial load
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
-                    setTimeout(() => {
-                        this.debouncedUpdateAvailableTags(data.available_tags, null);
-                        // CRITICAL: Wait for tags to appear before hiding splash
-                        // Call _waitForTagsToAppear after a delay to allow debounced function to complete
-                        setTimeout(() => {
-                            if (this._waitForTagsToAppear) {
-                                this._waitForTagsToAppear();
-                            } else if (this.hideActionSplash) {
-                                // Fallback if _waitForTagsToAppear doesn't exist
-                                this.hideActionSplash();
-                            }
-                        }, 500); // Wait for debounced function (300ms) plus buffer
-                    }, 0);
-
-                    // Restore previously selected tags from backend
+                    // Use direct _updateAvailableTags for instant display (no debounce delay)
+                    this._updateAvailableTags(data.available_tags, null);
+                    
+                    // Run selected tags and filters in parallel for faster loading
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
-                    verboseLog('About to fetch and update selected tags...');
-                    const selectedTagsResult = await this.fetchAndUpdateSelectedTags();
+                    verboseLog('About to fetch and update selected tags and filters in parallel...');
+                    
+                    // Run both operations in parallel instead of sequentially
+                    const [selectedTagsResult] = await Promise.allSettled([
+                        this.fetchAndUpdateSelectedTags(),
+                        this.fetchAndPopulateFilters()
+                    ]);
+                    
                     verboseLog('fetchAndUpdateSelectedTags result:', selectedTagsResult);
                     verboseLog('persistentSelectedTags after restore:', this.state.persistentSelectedTags);
 
-                    // Update filters (use setTimeout to yield to browser)
+                    // Update filters from data (already populated in parallel above, but update UI)
                     AppLoadingSplash.updateProgress(90, 'Setting up filters...');
-                    setTimeout(() => {
-                        this.updateFilters(data.filters || {
-                            vendor: [],
-                            brand: [],
-                            productType: [],
-                            lineage: [],
-                            weight: []
-                        }, true); // Preserve existing values when loading initial data
-                    }, 0);
+                    this.updateFilters(data.filters || {
+                        vendor: [],
+                        brand: [],
+                        productType: [],
+                        lineage: [],
+                        weight: []
+                    }, true); // Preserve existing values when loading initial data
+                    
+                    // Wait for tags to appear before hiding splash
+                    if (this._waitForTagsToAppear) {
+                        this._waitForTagsToAppear();
+                    }
 
                     // Update file info text to show the loaded filename
                     if (data.filename) {
