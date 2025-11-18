@@ -7463,11 +7463,13 @@ const TagManager = {
         }
 
         // CRITICAL FIX: Use AbortController to actually cancel the fetch request
+        // Increased timeout to 30 seconds to allow for slow server responses
         const abortController = new AbortController();
         const timeoutId = setTimeout(() => {
+            console.log('⏳ Request timeout - aborting fetch after 30 seconds');
             verboseLog('⏳ Request timeout - aborting fetch');
             abortController.abort();
-        }, 8000); // 8 second timeout
+        }, 30000); // 30 second timeout (increased from 8s)
 
         // Track if initial data fetch is in progress to prevent premature fallback
         let initialDataFetchInProgress = true;
@@ -7861,6 +7863,49 @@ const TagManager = {
             
             // Handle abort/timeout specifically
             if (error.name === 'AbortError' || error.message.includes('aborted')) {
+                console.log('⏱️ Request was aborted due to timeout - trying fallback tag fetch');
+                verboseLog('Request was aborted due to timeout, trying fallback');
+                
+                // CRITICAL FIX: Don't give up on timeout - try fallback fetch
+                try {
+                    console.log('🔄 Timeout occurred, attempting fallback: loading tags directly from /api/available-tags...');
+                    const fallbackUrl = '/api/available-tags?t=' + Date.now();
+                    const fallbackController = new AbortController();
+                    const fallbackTimeout = setTimeout(() => fallbackController.abort(), 10000); // 10s for fallback
+                    
+                    const tagsResponse = await fetch(fallbackUrl, { signal: fallbackController.signal });
+                    clearTimeout(fallbackTimeout);
+                    
+                    if (tagsResponse.ok) {
+                        const tagsData = await tagsResponse.json();
+                        if (tagsData.tags && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
+                            console.log(`✅ Fallback successful after timeout: loaded ${tagsData.tags.length} tags`);
+                            this.state.tags = [...tagsData.tags];
+                            this.state.originalTags = [...tagsData.tags];
+                            this._updateAvailableTags(tagsData.tags);
+                            await Promise.all([
+                                this.fetchAndPopulateFilters(),
+                                this.fetchAndUpdateSelectedTags()
+                            ]);
+                            
+                            clearTimeout(splashSafetyTimeout);
+                            if (this._waitForTagsToAppear) {
+                                this._waitForTagsToAppear();
+                            } else if (this.hideActionSplash) {
+                                this.hideActionSplash();
+                            }
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                            this.clearInitialDataRetry();
+                            this._checkingExistingData = false;
+                            return;
+                        }
+                    }
+                } catch (fallbackErr) {
+                    console.error('❌ Fallback also failed after timeout:', fallbackErr);
+                }
+                
+                // If fallback also failed, proceed with empty state
                 verboseLog('Request was aborted due to timeout, proceeding with empty state');
                 AppLoadingSplash.updateProgress(100, 'Ready to upload files');
             }
