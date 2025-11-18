@@ -7462,9 +7462,11 @@ const TagManager = {
         // CRITICAL FIX: Use AbortController to actually cancel the fetch request
         // Increased timeout to 30 seconds to allow for slow server responses
         const abortController = new AbortController();
+        let timeoutReason = 'timeout'; // Track why we aborted
         const timeoutId = setTimeout(() => {
             console.log('⏳ Request timeout - aborting fetch after 30 seconds');
             verboseLog('⏳ Request timeout - aborting fetch');
+            timeoutReason = 'timeout_30s';
             abortController.abort();
         }, 30000); // 30 second timeout (increased from 8s)
 
@@ -7935,12 +7937,19 @@ const TagManager = {
             clearTimeout(timeoutId);
             clearTimeout(showSplashTimeout);
             
-            console.error('❌ Error loading initial data:', error);
-            console.error('❌ Error details:', {
-                name: error.name,
-                message: error.message,
-                stack: error.stack
-            });
+            // Check if this was a timeout or other abort
+            const isTimeout = error.name === 'AbortError' && (timeoutReason === 'timeout_30s' || error.message.includes('timeout'));
+            
+            if (isTimeout) {
+                console.warn('⏱️ Initial data request timed out after 30 seconds');
+            } else {
+                console.error('❌ Error loading initial data:', error);
+                console.error('❌ Error details:', {
+                    name: error.name,
+                    message: error.message,
+                    stack: error.stack
+                });
+            }
             verboseLog('Error loading initial data:', error.message);
             
             // Handle abort/timeout specifically
