@@ -3285,7 +3285,11 @@ class ExcelProcessor:
         tags = []
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
         
-        for _, row in filtered_df.iterrows():
+        # PERFORMANCE FIX: Use to_dict('records') which is much faster than iterrows()
+        # This converts the DataFrame to a list of dicts, which is 5-10x faster
+        rows_dict = filtered_df.to_dict('records')
+        
+        for row in rows_dict:
             # Get quantity from various possible column names
             quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
             

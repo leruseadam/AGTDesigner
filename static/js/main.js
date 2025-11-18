@@ -2820,10 +2820,8 @@ const TagManager = {
                                     const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                     return aName.localeCompare(bName);
                                 });
-                                sortedTags.forEach(tag => {
-                                    const tagElement = this.createTagElement(tag, false);
-                                    weightContent.appendChild(tagElement);
-                                });
+                                // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
+                                this._renderTagsInBatches(sortedTags, weightContent);
 
                                 subcategorySection.appendChild(weightSection);
                             });
@@ -2903,10 +2901,8 @@ const TagManager = {
                                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                 return aName.localeCompare(bName);
                             });
-                            sortedTags.forEach(tag => {
-                                const tagElement = this.createTagElement(tag, false);
-                                weightContent.appendChild(tagElement);
-                            });
+                            // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
+                            this._renderTagsInBatches(sortedTags, weightContent);
 
                             productTypeContent.appendChild(weightSection);
                         });
@@ -3002,6 +2998,7 @@ const TagManager = {
         const savedScroll = this._saveAvailableScrollPosition();
 
         const tags = filteredTags || originalTags;
+        
         if (!tags || tags.length === 0) {
             verboseLog('No tags provided, showing empty state');
             availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
@@ -3193,14 +3190,8 @@ const TagManager = {
                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                 return aName.localeCompare(bName);
             });
-            sortedSimple.forEach(tag => {
-            // Use cleaned displayName for logging consistency
-            const displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
-            verboseLog('Creating tag element for:', displayName);
-            const tagElement = this.createTagElement(tag, false);
-            verboseLog('Tag element created:', tagElement);
-            tagList.appendChild(tagElement);
-        });
+            // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
+            this._renderTagsInBatches(sortedSimple, tagList);
                     // Atomically replace container content with built tags
                     requestAnimationFrame(() => {
                         availableTagsContainer.innerHTML = '';
@@ -3753,10 +3744,8 @@ const TagManager = {
                                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                 return aName.localeCompare(bName);
                             });
-                            tagsToRender.forEach(tag => {
-                                const tagElement = this.createTagElement(tag, false);
-                                weightContent.appendChild(tagElement);
-                            });
+                            // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
+                            this._renderTagsInBatches(tagsToRender, weightContent);
                         });
                     }
                 });
@@ -4606,6 +4595,36 @@ const TagManager = {
         tagElement.appendChild(tagInfo);
         row.appendChild(tagElement);
         return row;
+    },
+    
+    // PERFORMANCE FIX: Render tags in batches to prevent UI freeze
+    _renderTagsInBatches(tags, container) {
+        if (!tags || tags.length === 0) return;
+        
+        const BATCH_SIZE = 50; // Render 50 tags at a time
+        let index = 0;
+        
+        const renderBatch = () => {
+            const endIndex = Math.min(index + BATCH_SIZE, tags.length);
+            const fragment = document.createDocumentFragment();
+            
+            for (let i = index; i < endIndex; i++) {
+                const tagElement = this.createTagElement(tags[i], false);
+                fragment.appendChild(tagElement);
+            }
+            
+            container.appendChild(fragment);
+            index = endIndex;
+            
+            // Continue rendering if there are more tags
+            if (index < tags.length) {
+                // Use requestAnimationFrame for smooth rendering
+                requestAnimationFrame(renderBatch);
+            }
+        };
+        
+        // Start rendering
+        renderBatch();
     },
 
     getLineageBadgeLabel(lineage) {

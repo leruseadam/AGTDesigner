@@ -109,11 +109,14 @@ def apply_lineage_colors(doc):
                     color_hex = None
                     
                     # Check if ProductStrain is CBD or CBD Blend (before marker removal)
+                    # CRITICAL FIX: Also check for CBD in ProductStrain markers for nonclassic types
                     is_product_strain_cbd = False
                     strain_matches = re.findall(r"PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END", original_text)
                     for strain_content in strain_matches:
-                        if "CBD" in strain_content.upper():
+                        strain_upper = strain_content.upper()
+                        if "CBD" in strain_upper or "CBD BLEND" in strain_upper:
                             is_product_strain_cbd = True
+                            logger.debug(f"Found CBD in ProductStrain: '{strain_content}' -> is_product_strain_cbd=True")
                             break
                     
                     # Remove marker wrappers for robust matching
@@ -157,6 +160,28 @@ def apply_lineage_colors(doc):
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
                         lineage_matched = "HYBRID"
+                    elif lineage_hint_value:
+                        # CRITICAL FIX: Check lineage hint FIRST before checking text content
+                        # This ensures CBD products get the correct color even when hint token is removed
+                        hint_upper = lineage_hint_value.upper().strip()
+                        hint_key = hint_upper.replace(" ", "_")
+                        # Try multiple key variations to match COLORS dictionary
+                        color_candidate = (
+                            COLORS.get(hint_upper) or 
+                            COLORS.get(hint_key) or 
+                            COLORS.get(lineage_hint_value) or
+                            COLORS.get('CBD') if 'CBD' in hint_upper else None
+                        )
+                        if color_candidate:
+                            color_hex = color_candidate
+                            lineage_matched = f"{lineage_hint_value} (hint)"
+                            logger.debug(f"Applied color from lineage hint: '{lineage_hint_value}' -> '{hint_key}' -> color '{color_hex}'")
+                    elif not is_classic_type and is_product_strain_cbd:
+                        # CRITICAL FIX: Check for CBD in ProductStrain for nonclassic types BEFORE checking text
+                        # This ensures CBD edible drinks and other CBD nonclassic types get yellow color
+                        color_hex = COLORS['CBD']
+                        lineage_matched = "CBD (non-classic, ProductStrain)"
+                        logger.debug(f"Applied CBD color for nonclassic type with CBD ProductStrain")
                     elif "CBD" in text or "CBD_BLEND" in text:
                         # Apply CBD lineage colors if it's a classic type OR if ProductStrain is CBD
                         if is_classic_type or is_product_strain_cbd:
@@ -171,16 +196,6 @@ def apply_lineage_colors(doc):
                         # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
                         color_hex = COLORS['MIXED']  # Blue for Mixed
                         lineage_matched = "MIXED"
-                    elif not is_classic_type and is_product_strain_cbd:
-                        # For non-classic types with CBD strain, use yellow color
-                        color_hex = COLORS['CBD']
-                        lineage_matched = "CBD (non-classic)"
-                    elif lineage_hint_value:
-                        hint_key = lineage_hint_value.replace(" ", "_")
-                        color_candidate = COLORS.get(lineage_hint_value) or COLORS.get(hint_key)
-                        if color_candidate:
-                            color_hex = color_candidate
-                            lineage_matched = f"{lineage_hint_value} (hint)"
                     elif not is_classic_type and text.strip():
                         # For non-classic types without specific strain, use blue color (MIXED)
                         # BUT ONLY if there's actual content (not empty after marker removal)

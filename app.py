@@ -8035,9 +8035,10 @@ def get_available_tags():
 
                                 # CRITICAL FIX: Limit batch size to prevent query timeouts
                                 # SQLite can struggle with very large IN clauses (>1000 items)
-                                MAX_BATCH_SIZE = 500
+                                # PERFORMANCE: Use smaller batches for faster queries
+                                MAX_BATCH_SIZE = 200  # Reduced from 500 to 200 for faster queries
                                 if len(all_search_names) > MAX_BATCH_SIZE:
-                                    logging.warning(f"Batch query size ({len(all_search_names)}) exceeds limit, using first {MAX_BATCH_SIZE} items")
+                                    logging.warning(f"Batch query size ({len(all_search_names)}) exceeds limit, processing first {MAX_BATCH_SIZE} items (remaining will use cached lineage)")
                                     all_search_names = all_search_names[:MAX_BATCH_SIZE]
 
                                 placeholders = ','.join(['?'] * len(all_search_names))
@@ -8055,10 +8056,20 @@ def get_available_tags():
                                 # Execute with all search names (product names + normalized names, deduplicated)
                                 # Add query timeout to prevent hanging
                                 query_start = time.time()
-                                cur.execute(batch_query, all_search_names + all_search_names)
-                                batch_results = cur.fetchall()
-                                query_duration = (time.time() - query_start) * 1000
-                                logging.info(f"Batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                try:
+                                    cur.execute(batch_query, all_search_names + all_search_names)
+                                    batch_results = cur.fetchall()
+                                    query_duration = (time.time() - query_start) * 1000
+                                    # If query takes too long, skip remaining lineage alignment
+                                    if query_duration > 3000:  # 3 seconds max
+                                        logging.warning(f"Lineage query took {query_duration:.1f}ms - skipping remaining alignment for speed")
+                                        batch_results = []  # Skip processing results
+                                    else:
+                                        logging.info(f"Batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                except Exception as query_timeout:
+                                    logging.warning(f"Lineage query failed or timed out: {query_timeout} - skipping alignment")
+                                    batch_results = []
+                                    lineage_cache = {}
                                 
                                 # Build lookup map from results - match by product name or normalized name
                                 for row in batch_results:
@@ -10097,14 +10108,40 @@ def update_doh():
             logging.error(f"Error updating DOH in database: {db_error}")
             # Don't fail the whole request - continue with Excel update
         
-        # Now update the Excel processor DataFrame (this should always work)
+        # Check if this is a JSON matched tag (not in Excel DataFrame)
+        is_json_matched_tag = False
+        try:
+            # Check if tag exists in JSON matched cache
+            json_matched_cache_key = session.get('json_matched_cache_key')
+            if json_matched_cache_key and cache.has(json_matched_cache_key):
+                json_matched_tags = cache.get(json_matched_cache_key)
+                if json_matched_tags:
+                    # Check if any variant matches a JSON matched tag
+                    for candidate in name_variants:
+                        for json_tag in json_matched_tags:
+                            json_tag_name = json_tag.get('Product Name*') or json_tag.get('ProductName', '')
+                            if candidate and json_tag_name and str(candidate).strip().upper() == str(json_tag_name).strip().upper():
+                                is_json_matched_tag = True
+                                logging.info(f"🔍 DOH UPDATE: Tag '{candidate}' is a JSON matched tag (not in Excel)")
+                                break
+                        if is_json_matched_tag:
+                            break
+        except Exception as json_check_err:
+            logging.debug(f"Could not check JSON matched status: {json_check_err}")
+        
+        # Now update the Excel processor DataFrame (skip for JSON matched tags)
         excel_update_success = False
-        if excel_processor:
+        if excel_processor and not is_json_matched_tag:
             for candidate in name_variants:
                 if excel_processor.update_doh_in_current_data(candidate, doh_storage_value):
                     excel_update_success = True
                     canonical_variant_used = canonical_variant_used or candidate
                     break
+        elif is_json_matched_tag:
+            # For JSON matched tags, Excel update is not required
+            excel_update_success = True
+            logging.info(f"✅ DOH UPDATE: Skipped Excel update for JSON matched tag '{tag_name}' (database updated)")
+        
         if excel_update_success:
             logging.info(f"✅ Updated DOH in Excel processor DataFrame")
         else:
@@ -10128,9 +10165,14 @@ def update_doh():
         except Exception as ov_err:
             logging.warning(f"Could not save DOH override in session: {ov_err}")
 
-        # Only return error if Excel update failed (database update failure is ok)
-        if not excel_update_success:
+        # CRITICAL FIX: For JSON matched tags, database update is sufficient (Excel update not required)
+        # For regular tags, require Excel update to succeed
+        if not is_json_matched_tag and not excel_update_success:
             return jsonify({'error': 'Failed to update DOH in Excel data'}), 500
+        
+        # For JSON matched tags, database update is sufficient
+        if is_json_matched_tag and not db_update_success:
+            return jsonify({'error': 'Failed to update DOH in database'}), 500
         
         # CRITICAL FIX: Aggressively clear ALL caches to force fresh data AND reload DataFrame
         try:
