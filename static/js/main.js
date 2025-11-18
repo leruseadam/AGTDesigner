@@ -7444,10 +7444,12 @@ const TagManager = {
             verboseLog('Cache rendered, fetching fresh data in background...');
         }
 
-        // CRITICAL FIX: Reduced timeout to 10 seconds to prevent long freezes
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 10000);
-        });
+        // CRITICAL FIX: Use AbortController to actually cancel the fetch request
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => {
+            verboseLog('⏳ Request timeout - aborting fetch');
+            abortController.abort();
+        }, 8000); // 8 second timeout
 
         // Safety net: ensure loading overlay never blocks interaction for long
         const splashSafetyTimeout = setTimeout(() => {
@@ -7480,11 +7482,13 @@ const TagManager = {
         }, 3000); // 3 second safety net so "Loading tags" overlay never lingers
 
         try {
-            // Use the new initial-data endpoint for faster loading with timeout
-            const response = await Promise.race([
-                fetch('/api/initial-data'),
-                timeoutPromise
-            ]);
+            // Use AbortController to make fetch actually cancelable
+            const response = await fetch('/api/initial-data', {
+                signal: abortController.signal
+            });
+            
+            // Clear timeout if request succeeded
+            clearTimeout(timeoutId);
 
             if (response.ok) {
                 const data = await response.json();
@@ -7550,6 +7554,7 @@ const TagManager = {
                     // This ensures the splash stays visible until tags are fully rendered
                     AppLoadingSplash.updateProgress(95, 'Finalizing...');
                     clearTimeout(splashSafetyTimeout);
+                    clearTimeout(timeoutId); // Clear fetch timeout since we got data
                     
                     // FIXED: Ensure _waitForTagsToAppear is called after tags are updated
                     // Use requestAnimationFrame to ensure DOM has updated
@@ -7593,7 +7598,8 @@ const TagManager = {
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
-                clearTimeout(splashSafetyTimeout);
+                    clearTimeout(splashSafetyTimeout);
+                    clearTimeout(timeoutId); // Clear fetch timeout
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
@@ -7607,6 +7613,7 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
+                clearTimeout(timeoutId); // Clear fetch timeout
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
@@ -7615,15 +7622,18 @@ const TagManager = {
                 return;
             }
         } catch (error) {
+            // Clear timeout on error
+            clearTimeout(timeoutId);
+            
             verboseLog('Error loading initial data:', error.message);
             
-            // Handle timeout specifically
-            if (error.message === 'Initialization timeout') {
-                verboseLog('Initialization timed out, proceeding with empty state');
+            // Handle abort/timeout specifically
+            if (error.name === 'AbortError' || error.message.includes('aborted')) {
+                verboseLog('Request was aborted due to timeout, proceeding with empty state');
                 AppLoadingSplash.updateProgress(100, 'Ready to upload files');
             }
             
-            // Complete splash loading on error
+            // Complete splash loading on error - CRITICAL to prevent freeze
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             clearTimeout(splashSafetyTimeout);
@@ -7631,7 +7641,11 @@ const TagManager = {
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
             this._checkingExistingData = false;
-            this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
+            
+            // Don't retry on abort - just proceed with empty state
+            if (error.name !== 'AbortError') {
+                this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
+            }
             return;
         }
     },
