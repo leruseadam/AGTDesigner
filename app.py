@@ -13487,6 +13487,7 @@ def json_match():
             logging.warning("🔍 matched_products is empty or None!")
 
         # Ensure JSON products have a stable Product Name* so downstream lookups can find them
+        # CRITICAL FIX: Always include weight in product name to match Excel tag format (e.g., "Acapulco Gold Wax - 1g")
         def _normalize_json_product_names(products):
             if not products:
                 return products
@@ -13506,13 +13507,23 @@ def json_match():
                 base_name = str(base_name).strip()
                 if not base_name:
                     base_name = f"JSON Product {idx + 1}"
-                unique_name = base_name
-                suffix = 2
-                vendor_hint = str(product.get('Vendor/Supplier*') or product.get('Vendor') or '').strip()
+                
+                # CRITICAL FIX: Always include weight in product name to match Excel tag appearance
                 weight_hint = str(
                     product.get('Weight*') or product.get('Weight') or
                     product.get('CombinedWeight') or product.get('Quantity*') or ''
                 ).strip()
+                
+                # Build name with weight (matching Excel tag format: "Product Name - Weight")
+                if weight_hint and weight_hint not in base_name:
+                    # Only add weight if it's not already in the name
+                    unique_name = f"{base_name} - {weight_hint}"
+                else:
+                    unique_name = base_name
+                
+                # Handle duplicates by adding suffix
+                suffix = 2
+                vendor_hint = str(product.get('Vendor/Supplier*') or product.get('Vendor') or '').strip()
                 while unique_name in existing_names:
                     parts = [base_name]
                     hint_parts = [hint for hint in (weight_hint, vendor_hint) if hint]

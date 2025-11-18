@@ -8083,7 +8083,11 @@
             </div>
             <div class="mb-2"><strong>Matched Products:</strong></div>
             ${matchResult.matched_names
-              .map(product => `<div class="mb-1">• ${product}</div>`)
+              .map(product => {
+                // Use the full Product Name* which includes weight (e.g., "Acapulco Gold Wax - 1g")
+                // This matches the format used in Excel tags
+                return `<div class="mb-1">• ${product}</div>`;
+              })
               .join('')}
           `;
         } else {
