@@ -10366,6 +10366,9 @@ const TagManager = {
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
                 backdrop-filter: blur(20px);
                 width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+                flex-shrink: 0;
                 opacity: 1;
                 transition: none;
             `;
@@ -10384,14 +10387,32 @@ const TagManager = {
             `;
             
             // Insert notification above the buttons row in the left section
+            // Make sure it doesn't break the flex layout
             if (leftSection && buttonsRow) {
-                leftSection.insertBefore(notification, buttonsRow);
+                // Insert before buttons-row but after file-path-display if it exists
+                const filePathDisplay = leftSection.querySelector('.file-path-display');
+                if (filePathDisplay && filePathDisplay.nextSibling === buttonsRow) {
+                    // Insert after file-path-display
+                    leftSection.insertBefore(notification, buttonsRow);
+                } else {
+                    // Insert before buttons-row
+                    leftSection.insertBefore(notification, buttonsRow);
+                }
             } else if (leftSection) {
                 // If buttonsRow not found, insert at the beginning of leftSection
                 leftSection.insertBefore(notification, leftSection.firstChild);
             } else {
                 // Fallback: don't show notification if we can't find the right place
                 return;
+            }
+            
+            // Ensure left-section doesn't overflow and notification fits properly
+            if (leftSection) {
+                leftSection.style.overflow = 'visible';
+                leftSection.style.minWidth = '0';
+                // Constrain notification to left-section width
+                notification.style.maxWidth = '100%';
+                notification.style.overflow = 'hidden';
             }
             
             // Auto-dismiss after 10 seconds
