@@ -2320,6 +2320,7 @@ const TagManager = {
     },
 
     // Debounced version of updateAvailableTags to prevent multiple rapid calls
+    // REDUCED delay from 300ms to 100ms for faster response
     debouncedUpdateAvailableTags: debounce(function(originalTags, filteredTags = null) {
         // CRITICAL FIX: Don't update available tags during deselection
         if (this.state.isProcessingDeselection) {
@@ -2361,11 +2362,10 @@ const TagManager = {
             }
         }
         
-        // Use requestAnimationFrame to ensure smooth DOM updates
-        requestAnimationFrame(() => {
-            this._updateAvailableTags(originalTags, filteredTags);
-        });
-    }, 300),
+        // FIXED: Remove requestAnimationFrame delay for faster rendering
+        // Direct update for better performance
+        this._updateAvailableTags(originalTags, filteredTags);
+    }, 100), // Reduced from 300ms to 100ms for faster response
 
     // Helpers to preserve scroll position of the available list across re-renders
     // USER PREFERENCE: Scroll CURRENT INVENTORY to top when filter is applied
@@ -2950,14 +2950,8 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
-        // Windows optimization: Use requestAnimationFrame for smoother rendering
-        if (isWindows) {
-            requestAnimationFrame(() => {
-                this._performUpdateAvailableTags(originalTags, filteredTags);
-            });
-            return;
-        }
-        
+        // FIXED: Remove requestAnimationFrame delay for faster rendering
+        // Direct update for better performance - especially on initial load
         this._performUpdateAvailableTags(originalTags, filteredTags);
     },
     
@@ -7550,22 +7544,20 @@ const TagManager = {
                         splashMessage.textContent = 'Loading product tags...';
                     }
 
-                    // Update available tags (use setTimeout to yield to browser)
+                    // Update available tags IMMEDIATELY - no delays for initial load
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
-                    setTimeout(() => {
-                        // FIXED: Use immediate update on initial load to avoid debounce delay
-                        // Check if this is initial load (no tags loaded yet) or if flag is set
-                        const isInitialLoad = this.state.isInitialLoad || !this.state.tags || this.state.tags.length === 0;
-                        if (isInitialLoad) {
-                            // Use immediate update for instant tag display
-                            this._updateAvailableTags(data.available_tags, null);
-                        } else {
-                            // Use debounced update for subsequent loads
-                            this.debouncedUpdateAvailableTags(data.available_tags, null);
-                        }
-                        // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
-                        // when tags are actually fully rendered
-                    }, 0);
+                    // FIXED: Use immediate update on initial load to avoid debounce delay
+                    // Check if this is initial load (no tags loaded yet) or if flag is set
+                    const isInitialLoad = this.state.isInitialLoad || !this.state.tags || this.state.tags.length === 0;
+                    if (isInitialLoad) {
+                        // Use immediate update for instant tag display - no setTimeout, no debounce
+                        this._updateAvailableTags(data.available_tags, null);
+                    } else {
+                        // Use debounced update for subsequent loads
+                        this.debouncedUpdateAvailableTags(data.available_tags, null);
+                    }
+                    // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
+                    // when tags are actually fully rendered
 
                     // Restore previously selected tags from backend
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
