@@ -7718,6 +7718,7 @@ const TagManager = {
                                 source: tagsData.source
                             });
                             if (tagsData.tags && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
+                                console.log(`✅ Fallback successful: loaded ${tagsData.tags.length} tags`);
                                 verboseLog(`✅ Fallback successful: loaded ${tagsData.tags.length} tags from /api/available-tags`);
                                 // Update tags directly
                                 this.state.tags = [...tagsData.tags];
@@ -7754,13 +7755,22 @@ const TagManager = {
                                 this._checkingExistingData = false;
                                 verboseLog('Fallback tag loading completed successfully');
                                 return;
+                            } else {
+                                console.log('⚠️ Fallback returned empty tags - no data available');
                             }
+                        } else {
+                            console.log(`⚠️ Fallback response not OK: ${tagsResponse.status}`);
                         }
                     } catch (fallbackError) {
+                        console.error('❌ Fallback tag loading failed:', fallbackError);
                         verboseLog('Fallback tag loading failed:', fallbackError);
                     }
                     
+                    // If we get here, fallback also failed - hide loading and show empty state
+                    console.log('⚠️ Both initial-data and fallback returned no tags - showing empty state');
+                    
                     // Only show empty state if fallback also failed
+                    console.log('✅ Hiding loading splash and showing empty state');
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
@@ -7770,6 +7780,7 @@ const TagManager = {
                     
                     // Hide action splash if it was shown
                     if (this.hideActionSplash) {
+                        console.log('Hiding action splash...');
                         this.hideActionSplash();
                     }
                     
@@ -7780,7 +7791,9 @@ const TagManager = {
                     // Show notification when no Excel file is uploaded
                     this.showNoFileNotification();
                     
-                    this.scheduleInitialDataRetry('Empty initial data response');
+                    console.log('✅ Empty state initialized, checkForExistingData complete');
+                    // Don't retry if there's genuinely no data
+                    // this.scheduleInitialDataRetry('Empty initial data response');
                     return;
                 }
             } else {
