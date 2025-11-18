@@ -943,15 +943,35 @@ document.addEventListener('DOMContentLoaded', function() {
     const page = document.body;
     if (!main || !page) return;
 
+    // CRITICAL: Don't reset transforms if content is still loading/changing
+    // This prevents flicker and zoom issues during dynamic content updates
+    // Check if essential UI elements exist before scaling
+    const hasFilters = document.querySelector('[data-container-type="filter"]') !== null;
+    const hasMainContent = main.children.length > 0;
+    const isContentReady = hasFilters && hasMainContent;
+    
+    if (!isContentReady) {
+      // Content is still loading, skip scaling to prevent zoom issues
+      return;
+    }
+
     // Temporarily reset transform to measure full, natural page size
+    // Use a more gentle approach - only reset if we have a previous scale
+    const hasExistingScale = page.style.transform && page.style.transform !== 'none';
     const prevTransformMain = main.style.transform;
     const prevTransformBody = page.style.transform;
     const prevWidthBody = page.style.width;
     const prevHeightBody = page.style.height;
-    main.style.transform = 'none';
-    page.style.transform = 'none';
-    page.style.width = '';
-    page.style.height = '';
+    
+    // Only reset if we need to measure (not on every call)
+    if (hasExistingScale) {
+      main.style.transform = 'none';
+      page.style.transform = 'none';
+      page.style.width = '';
+      page.style.height = '';
+      // Force a reflow to ensure measurements are accurate
+      void main.offsetHeight;
+    }
 
     // Compute a visual bounding box of visible, non-fixed children within main content
     const container = main;
@@ -1037,20 +1057,33 @@ document.addEventListener('DOMContentLoaded', function() {
   // Debounce scaleAppToFit to prevent zoom flashing
   let scaleDebounceTimer;
   let isScaling = false;
+  let lastScaleTime = 0;
+  const SCALE_COOLDOWN = 1000; // Minimum 1 second between scales
   const debouncedScaleAppToFit = () => {
     if (isScaling) return; // Prevent concurrent calls
+    
+    // Enforce cooldown period to prevent rapid rescaling
+    const now = Date.now();
+    if (now - lastScaleTime < SCALE_COOLDOWN) {
+      // Too soon since last scale - extend the debounce
+      clearTimeout(scaleDebounceTimer);
+      scaleDebounceTimer = setTimeout(debouncedScaleAppToFit, SCALE_COOLDOWN - (now - lastScaleTime));
+      return;
+    }
+    
     clearTimeout(scaleDebounceTimer);
     scaleDebounceTimer = setTimeout(() => {
       isScaling = true;
       try {
         scaleAppToFit();
+        lastScaleTime = Date.now();
       } finally {
         // Use requestAnimationFrame to ensure scaling completes before allowing next call
         requestAnimationFrame(() => {
           isScaling = false;
         });
       }
-    }, 150); // Debounce to 150ms to prevent rapid fire calls
+    }, 300); // Increased debounce to 300ms to prevent rapid fire calls
   };
 
   // Expose for other scripts (use debounced version)
@@ -1089,12 +1122,22 @@ document.addEventListener('DOMContentLoaded', function() {
   });
 
   let resizeTimer;
+  let lastResizeTime = 0;
+  const RESIZE_COOLDOWN = 500; // Minimum 500ms between resize-triggered scales
   window.addEventListener('resize', () => {
+    const now = Date.now();
+    if (now - lastResizeTime < RESIZE_COOLDOWN) {
+      // Too soon - skip this resize event
+      return;
+    }
+    lastResizeTime = now;
     cancelAnimationFrame(resizeTimer);
     resizeTimer = requestAnimationFrame(debouncedScaleAppToFit);
   });
   window.addEventListener('orientationchange', () => {
-    setTimeout(debouncedScaleAppToFit, 300); // Delay to let orientation change complete
+    // Reset cooldown on orientation change (user-initiated, should scale immediately)
+    lastScaleTime = 0;
+    setTimeout(debouncedScaleAppToFit, 500); // Increased delay to let orientation change complete
   });
 })();
 

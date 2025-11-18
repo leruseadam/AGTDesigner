@@ -7210,8 +7210,20 @@ const TagManager = {
                 const availableContainer = document.getElementById('availableTags');
                 const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
                 if (tagItems.length === 0 && (!this.state.tags || this.state.tags.length === 0)) {
-                    console.log('⚠️ No tags found after checkForExistingData - this is expected when no Excel file is uploaded');
-                    console.log('✅ Empty state should already be shown - no further fetch needed');
+                    // Check if a file actually exists before concluding "no file uploaded"
+                    fetch('/api/current-file?t=' + Date.now())
+                        .then(res => res.json())
+                        .then(fileData => {
+                            if (fileData.filename) {
+                                console.warn(`⚠️ No tags found but file exists (${fileData.filename}) - may still be processing`);
+                            } else {
+                                console.log('⚠️ No tags found after checkForExistingData - this is expected when no Excel file is uploaded');
+                                console.log('✅ Empty state should already be shown - no further fetch needed');
+                            }
+                        })
+                        .catch(() => {
+                            console.log('⚠️ No tags found after checkForExistingData - could not verify file status');
+                        });
                 } else {
                     console.log(`✅ Tags already loaded: ${tagItems.length} items in DOM, ${this.state.tags?.length || 0} in state`);
                 }
@@ -8061,7 +8073,7 @@ const TagManager = {
                 }
                 
                 // If fallback also failed, check if there's actually a file uploaded
-                // If no file, show empty state. If file exists, show warning.
+                // If no file, show empty state. If file exists, show warning and retry.
                 console.log('🔍 Checking if file exists in session...');
                 try {
                     const fileCheckController = new AbortController();
@@ -8074,8 +8086,30 @@ const TagManager = {
                     if (fileCheckResponse.ok) {
                         const fileData = await fileCheckResponse.json();
                         if (fileData.filename) {
-                            console.warn(`⚠️ File exists (${fileData.filename}) but tags are not loading - server may be slow`);
-                            // Don't show toast here - it's too early, user might just need to wait
+                            console.warn(`⚠️ File exists (${fileData.filename}) but tags are not loading - server may be slow or still processing`);
+                            // File exists but tags aren't loading - likely still processing
+                            // Don't show empty state, instead show a message and retry after delay
+                            const availableTagsContainer = document.getElementById('availableTags');
+                            if (availableTagsContainer) {
+                                availableTagsContainer.innerHTML = `
+                                    <div class="text-center py-5">
+                                        <div class="upload-prompt">
+                                            <i class="fas fa-spinner fa-spin fa-3x text-muted mb-3"></i>
+                                            <h5 class="text-muted">Processing file...</h5>
+                                            <p class="text-muted">File "${fileData.filename}" is being processed. Tags will appear shortly.</p>
+                                            <p class="text-muted small">If tags don't appear, try refreshing the page.</p>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                            // Retry loading tags after a delay
+                            setTimeout(() => {
+                                console.log('🔄 Retrying tag load after timeout...');
+                                this.fetchAndUpdateAvailableTags().catch(err => {
+                                    console.warn('Retry also failed:', err);
+                                });
+                            }, 5000);
+                            return; // Don't show empty state if file exists
                         } else {
                             console.log('✅ No file uploaded - showing empty state is correct');
                         }
@@ -9768,8 +9802,9 @@ const TagManager = {
                 }
                 
                 // Force fetch with nocache to ensure fresh data
+                // CRITICAL: After upload, backend may need time to process - use longer timeout
                 const freshTagsController = new AbortController();
-                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 10000); // 10s timeout
+                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 30000); // 30s timeout for post-upload processing
                 const freshTagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=0`, {
                     signal: freshTagsController.signal
                 });
@@ -9801,18 +9836,27 @@ const TagManager = {
                             this._waitForTagsToAppear();
                         }
                         return; // Success - tags loaded, no need to reload page
+                    } else {
+                        console.warn('⚠️ Tag refresh returned empty tags - file may still be processing');
                     }
+                } else {
+                    console.warn('⚠️ Tag refresh request failed:', freshTagsResponse.status);
                 }
             } catch (refreshError) {
-                console.warn('⚠️ Failed to refresh tags after upload, will reload page:', refreshError);
+                if (refreshError.name === 'AbortError') {
+                    console.warn('⚠️ Tag refresh timed out after upload - file may still be processing, will reload page');
+                } else {
+                    console.warn('⚠️ Failed to refresh tags after upload, will reload page:', refreshError);
+                }
             }
             
             // Fallback: Refresh the page to show new data if direct tag refresh failed
+            // Wait a bit longer after upload to give backend time to process
             setTimeout(() => {
-                verboseLog('🔄 Refreshing page to show new data (fallback)...');
+                verboseLog('🔄 Refreshing page to show new data (fallback after upload)...');
                 // Add cache-busting parameter to ensure fresh load
                 window.location.href = window.location.pathname + '?t=' + Date.now();
-            }, 2000);
+            }, 3000); // Increased to 3s to give backend more time
             
             return; // Success!
         } catch (error) {

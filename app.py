@@ -7749,34 +7749,26 @@ def get_available_tags():
         # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         
-        # If lineage was recently changed, force a full refresh even if fast_load requested
-        # CRITICAL FIX: Check lineage_update_timestamp and force database refresh if lineage was updated recently
+        # If lineage was recently changed, ensure lineage alignment happens (but don't block fast_load)
+        # OPTIMIZATION: Allow fast_load to work, but ensure lineage alignment happens in background
         lineage_update_ts = session.get('lineage_update_timestamp')
-        force_full_refresh = False
-        force_db_refresh = False
+        force_lineage_alignment = False
         if lineage_update_ts:
             try:
                 time_since_update = time.time() - float(lineage_update_ts)
-                force_full_refresh = time_since_update < 600  # 10 minutes
-                # Force database refresh if lineage was updated in the last 30 minutes
-                force_db_refresh = time_since_update < 1800  # 30 minutes
+                # Only force lineage alignment if lineage was updated in the last 5 minutes
+                # After that, normal cache with lineage alignment is sufficient
+                force_lineage_alignment = time_since_update < 300  # 5 minutes
             except Exception:
-                force_full_refresh = False
-                force_db_refresh = False
+                force_lineage_alignment = False
         
-        # If lineage was recently updated, bypass cache and force database query
-        if force_db_refresh:
-            logging.info(f"⚠️  Recent lineage updates detected ({(time.time() - float(lineage_update_ts)):.0f}s ago) – forcing database refresh and bypassing cache.")
-            cached_tags = None  # Force bypass of cache
-            prefer_db = True  # Force database query
-            nocache = True  # Force no cache
-        elif force_full_refresh:
-            logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
+        if force_lineage_alignment:
+            logging.info(f"⚠️  Recent lineage updates detected ({(time.time() - float(lineage_update_ts)):.0f}s ago) – will align lineage from database.")
         
         if cached_tags and not nocache:
-            # OPTIMIZATION: Skip lineage alignment for fast loads - return cached tags immediately
-            # Lineage can be aligned later via a separate request if needed
-            fast_path_allowed = fast_load and not force_full_refresh
+            # OPTIMIZATION: Allow fast_load even after lineage updates, but still do lineage alignment
+            # Fast path: return cached tags immediately if fast_load requested and no forced alignment
+            fast_path_allowed = fast_load and not force_lineage_alignment
             if fast_path_allowed:
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
@@ -7789,13 +7781,16 @@ def get_available_tags():
                 response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
                 return response
             
-            # Always do lineage alignment to ensure database lineage is applied (when not fast_load)
+            # Do lineage alignment to ensure database lineage is applied
             # This ensures tags always have the latest lineage from the database
             lineage_alignment_needed = True
             
             # Perform lineage alignment to assign/update lineage from database
             if lineage_alignment_needed:
                 # Quick lineage alignment with timeout to prevent blocking
+                # OPTIMIZATION: Set a maximum time budget for lineage alignment (2 seconds)
+                alignment_start = time.time()
+                alignment_timeout = 2.0  # Maximum 2 seconds for lineage alignment
                 try:
                     store_name = get_current_store_name()
                     product_db = get_product_database(store_name)
@@ -7847,35 +7842,62 @@ def get_available_tags():
                             name_to_tag[name] = tag
                         
                         # Batch query: fetch all lineage data at once
-                        if product_names:
+                        # OPTIMIZATION: Skip lineage alignment if we're running out of time budget
+                        if product_names and (time.time() - alignment_start) < alignment_timeout:
                             try:
                                 all_search_names = list(set(product_names + normalized_names))
+                                
+                                # Check time budget before processing
+                                if (time.time() - alignment_start) >= alignment_timeout:
+                                    logging.warning(f"Lineage alignment timeout ({alignment_timeout}s) - skipping batch query")
+                                    raise TimeoutError("Lineage alignment timeout")
 
-                                # CRITICAL FIX: Limit batch size to prevent query timeouts
-                                # SQLite can struggle with very large IN clauses (>1000 items)
-                                MAX_BATCH_SIZE = 500
-                                if len(all_search_names) > MAX_BATCH_SIZE:
-                                    logging.warning(f"Cache batch query size ({len(all_search_names)}) exceeds limit, using first {MAX_BATCH_SIZE} items")
-                                    all_search_names = all_search_names[:MAX_BATCH_SIZE]
-
-                                placeholders = ','.join(['?'] * len(all_search_names))
-                                batch_query = f'''
-                                    SELECT DISTINCT
-                                        COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
-                                        COALESCE(s.strain_name, p."Product Strain") AS current_strain,
-                                        p."Product Name*" AS product_name,
-                                        p.normalized_name AS normalized_name
-                                    FROM products p
-                                    LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                    WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
-                                    ORDER BY p.id DESC
-                                '''
-                                # Add query timing to detect slow queries
+                                # OPTIMIZATION: Limit batch size to prevent query timeouts and improve performance
+                                # SQLite can struggle with very large IN clauses (>500 items)
+                                # Use smaller batches for faster queries
+                                MAX_BATCH_SIZE = 300  # Reduced from 500 for faster queries
                                 query_start = time.time()
-                                cur.execute(batch_query, all_search_names + all_search_names)
-                                batch_results = cur.fetchall()
-                                query_duration = (time.time() - query_start) * 1000
-                                logging.info(f"Cache batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                
+                                if len(all_search_names) > MAX_BATCH_SIZE:
+                                    logging.info(f"Batch query size ({len(all_search_names)}) exceeds limit, processing in chunks of {MAX_BATCH_SIZE}")
+                                    # Process in chunks instead of truncating
+                                    all_search_names_chunked = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
+                                    batch_results = []
+                                    for chunk in all_search_names_chunked:
+                                        placeholders = ','.join(['?'] * len(chunk))
+                                        chunk_query = f'''
+                                            SELECT DISTINCT
+                                                COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                                COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                                p."Product Name*" AS product_name,
+                                                p.normalized_name AS normalized_name
+                                            FROM products p
+                                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                            ORDER BY p.id DESC
+                                        '''
+                                        cur.execute(chunk_query, chunk + chunk)
+                                        batch_results.extend(cur.fetchall())
+                                    query_duration = (time.time() - query_start) * 1000
+                                    logging.info(f"Cache batch lineage query (chunked) completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                else:
+                                    # Single query for smaller batches
+                                    placeholders = ','.join(['?'] * len(all_search_names))
+                                    batch_query = f'''
+                                        SELECT DISTINCT
+                                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                            COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                            p."Product Name*" AS product_name,
+                                            p.normalized_name AS normalized_name
+                                        FROM products p
+                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                        ORDER BY p.id DESC
+                                    '''
+                                    cur.execute(batch_query, all_search_names + all_search_names)
+                                    batch_results = cur.fetchall()
+                                    query_duration = (time.time() - query_start) * 1000
+                                    logging.info(f"Cache batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
                                 
                                 # Build lookup map from results
                                 for row in batch_results:
@@ -7943,12 +7965,15 @@ def get_available_tags():
                                     tag['productStrain'] = clean_strain
                             except Exception as _loop_err:
                                 logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
+                        alignment_duration = time.time() - alignment_start
                         if updated:
                             # Refresh cache with aligned data
                             cache.set(cache_key, make_json_safe(cached_tags), timeout=300)
-                            logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides to cached tags")
+                            logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides in {alignment_duration:.2f}s")
                         else:
-                            logging.debug(f"✅ Lineage alignment completed - all tags already have database lineage")
+                            logging.debug(f"✅ Lineage alignment completed in {alignment_duration:.2f}s - all tags already have database lineage")
+                except TimeoutError:
+                    logging.warning(f"Lineage alignment timeout after {time.time() - alignment_start:.2f}s - returning cached tags without alignment")
                 except Exception as e:
                     logging.warning(f"UI lineage alignment (cache) skipped due to error: {e}")
 
@@ -8066,32 +8091,51 @@ def get_available_tags():
                                 # Combine both lists for the IN clause
                                 all_search_names = list(set(product_names + normalized_names))
 
-                                # CRITICAL FIX: Limit batch size to prevent query timeouts
-                                # SQLite can struggle with very large IN clauses (>1000 items)
-                                MAX_BATCH_SIZE = 500
-                                if len(all_search_names) > MAX_BATCH_SIZE:
-                                    logging.warning(f"Batch query size ({len(all_search_names)}) exceeds limit, using first {MAX_BATCH_SIZE} items")
-                                    all_search_names = all_search_names[:MAX_BATCH_SIZE]
-
-                                placeholders = ','.join(['?'] * len(all_search_names))
-                                batch_query = f'''
-                                    SELECT DISTINCT
-                                        COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
-                                        COALESCE(s.strain_name, p."Product Strain") AS current_strain,
-                                        p."Product Name*" AS product_name,
-                                        p.normalized_name AS normalized_name
-                                    FROM products p
-                                    LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                    WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
-                                    ORDER BY p.id DESC
-                                '''
-                                # Execute with all search names (product names + normalized names, deduplicated)
-                                # Add query timeout to prevent hanging
+                                # OPTIMIZATION: Limit batch size to prevent query timeouts and improve performance
+                                # SQLite can struggle with very large IN clauses (>500 items)
+                                MAX_BATCH_SIZE = 300  # Reduced from 500 for faster queries
                                 query_start = time.time()
-                                cur.execute(batch_query, all_search_names + all_search_names)
-                                batch_results = cur.fetchall()
-                                query_duration = (time.time() - query_start) * 1000
-                                logging.info(f"Batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                
+                                if len(all_search_names) > MAX_BATCH_SIZE:
+                                    logging.info(f"Batch query size ({len(all_search_names)}) exceeds limit, processing in chunks of {MAX_BATCH_SIZE}")
+                                    # Process in chunks instead of truncating
+                                    all_search_names_chunked = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
+                                    batch_results = []
+                                    for chunk in all_search_names_chunked:
+                                        placeholders = ','.join(['?'] * len(chunk))
+                                        chunk_query = f'''
+                                            SELECT DISTINCT
+                                                COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                                COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                                p."Product Name*" AS product_name,
+                                                p.normalized_name AS normalized_name
+                                            FROM products p
+                                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                            ORDER BY p.id DESC
+                                        '''
+                                        cur.execute(chunk_query, chunk + chunk)
+                                        batch_results.extend(cur.fetchall())
+                                    query_duration = (time.time() - query_start) * 1000
+                                    logging.info(f"Batch lineage query (chunked) completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                else:
+                                    # Single query for smaller batches
+                                    placeholders = ','.join(['?'] * len(all_search_names))
+                                    batch_query = f'''
+                                        SELECT DISTINCT
+                                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                            COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                            p."Product Name*" AS product_name,
+                                            p.normalized_name AS normalized_name
+                                        FROM products p
+                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                        ORDER BY p.id DESC
+                                    '''
+                                    cur.execute(batch_query, all_search_names + all_search_names)
+                                    batch_results = cur.fetchall()
+                                    query_duration = (time.time() - query_start) * 1000
+                                    logging.info(f"Batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
                                 
                                 # Build lookup map from results - match by product name or normalized name
                                 for row in batch_results:
