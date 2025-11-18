@@ -9530,17 +9530,63 @@ def update_lineage():
             session.modified = True
             logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
             
-            # CRITICAL FIX: Force WAL checkpoint to ensure changes are persisted to disk
+            # CRITICAL FIX: Force WAL checkpoint to ensure changes are persisted to disk permanently
             try:
-                # Use a new connection to force checkpoint
-                checkpoint_conn = product_db._get_connection()
+                # Use a separate connection for checkpoint to avoid transaction interference
+                import sqlite3
+                checkpoint_conn = sqlite3.connect(
+                    product_db.db_path,
+                    timeout=10.0,
+                    check_same_thread=False
+                )
                 checkpoint_cursor = checkpoint_conn.cursor()
-                # Force WAL checkpoint to ensure all changes are written to database file
-                checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                
+                # First, ensure journal mode is WAL
+                try:
+                    checkpoint_cursor.execute("PRAGMA journal_mode")
+                    journal_mode = checkpoint_cursor.fetchone()[0]
+                    if journal_mode.upper() != 'WAL':
+                        logging.warning(f"Journal mode is {journal_mode}, switching to WAL")
+                        checkpoint_cursor.execute("PRAGMA journal_mode=WAL")
+                except Exception as wal_error:
+                    logging.warning(f"Could not check/set WAL mode: {wal_error}")
+                
+                # Force FULL checkpoint to ensure complete persistence to disk
+                # FULL checkpoint mode ensures all WAL data is written and WAL file is reset
+                checkpoint_cursor.execute("PRAGMA wal_checkpoint(FULL)")
+                checkpoint_result = checkpoint_cursor.fetchone()
+                
+                # Checkpoint result: (busy, log, checkpointed)
+                # - busy: 0 if checkpoint completed, 1 if still busy
+                # - log: number of pages in WAL file
+                # - checkpointed: number of pages checkpointed
+                if checkpoint_result:
+                    busy, log, checkpointed = checkpoint_result
+                    if busy == 0:
+                        logging.info(f"✅ LINEAGE UPDATE: WAL checkpoint completed - {checkpointed} pages written, {log} remaining")
+                    else:
+                        logging.warning(f"⚠️  LINEAGE UPDATE: WAL checkpoint still busy, {log} pages remaining")
+                        # Try TRUNCATE mode as fallback for immediate persistence
+                        checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                        checkpoint_result2 = checkpoint_cursor.fetchone()
+                        if checkpoint_result2 and checkpoint_result2[0] == 0:
+                            logging.info(f"✅ LINEAGE UPDATE: TRUNCATE checkpoint completed")
+                
+                # Force synchronous mode to ensure writes are flushed to disk
+                checkpoint_cursor.execute("PRAGMA synchronous=FULL")
+                
+                # Commit any pending changes (should be none, but ensure consistency)
+                checkpoint_conn.commit()
+                
+                # Close the checkpoint connection to ensure all data is flushed
                 checkpoint_cursor.close()
-                logging.info(f"✅ LINEAGE UPDATE: Forced WAL checkpoint to ensure persistence")
+                checkpoint_conn.close()
+                
+                logging.info(f"✅ LINEAGE UPDATE: Forced WAL checkpoint and connection flush - changes persisted permanently")
             except Exception as checkpoint_error:
-                logging.warning(f"WAL checkpoint failed (non-critical): {checkpoint_error}")
+                logging.error(f"❌ WAL checkpoint failed: {checkpoint_error}")
+                import traceback
+                logging.error(f"Checkpoint error traceback: {traceback.format_exc()}")
             
             # Invalidate Excel processor caches (non-blocking)
             if excel_processor and hasattr(excel_processor, '_invalidate_caches'):
@@ -9765,6 +9811,59 @@ def update_strain_lineage():
             
             result = cursor.fetchone()
             affected_product_count = result[0] if result else 0
+            
+            # CRITICAL FIX: Force WAL checkpoint to ensure strain lineage changes are persisted to disk permanently
+            try:
+                # Use a separate connection for checkpoint to avoid transaction interference
+                import sqlite3
+                checkpoint_conn = sqlite3.connect(
+                    product_db.db_path,
+                    timeout=10.0,
+                    check_same_thread=False
+                )
+                checkpoint_cursor = checkpoint_conn.cursor()
+                
+                # First, ensure journal mode is WAL
+                try:
+                    checkpoint_cursor.execute("PRAGMA journal_mode")
+                    journal_mode = checkpoint_cursor.fetchone()[0]
+                    if journal_mode.upper() != 'WAL':
+                        logging.warning(f"Journal mode is {journal_mode}, switching to WAL")
+                        checkpoint_cursor.execute("PRAGMA journal_mode=WAL")
+                except Exception as wal_error:
+                    logging.warning(f"Could not check/set WAL mode: {wal_error}")
+                
+                # Force FULL checkpoint to ensure complete persistence to disk
+                checkpoint_cursor.execute("PRAGMA wal_checkpoint(FULL)")
+                checkpoint_result = checkpoint_cursor.fetchone()
+                
+                if checkpoint_result:
+                    busy, log, checkpointed = checkpoint_result
+                    if busy == 0:
+                        logging.info(f"✅ STRAIN LINEAGE UPDATE: WAL checkpoint completed - {checkpointed} pages written, {log} remaining")
+                    else:
+                        logging.warning(f"⚠️  STRAIN LINEAGE UPDATE: WAL checkpoint still busy, {log} pages remaining")
+                        # Try TRUNCATE mode as fallback for immediate persistence
+                        checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                        checkpoint_result2 = checkpoint_cursor.fetchone()
+                        if checkpoint_result2 and checkpoint_result2[0] == 0:
+                            logging.info(f"✅ STRAIN LINEAGE UPDATE: TRUNCATE checkpoint completed")
+                
+                # Force synchronous mode to ensure writes are flushed to disk
+                checkpoint_cursor.execute("PRAGMA synchronous=FULL")
+                
+                # Commit any pending changes (should be none, but ensure consistency)
+                checkpoint_conn.commit()
+                
+                # Close the checkpoint connection to ensure all data is flushed
+                checkpoint_cursor.close()
+                checkpoint_conn.close()
+                
+                logging.info(f"✅ STRAIN LINEAGE UPDATE: Forced WAL checkpoint and connection flush - changes persisted permanently")
+            except Exception as checkpoint_error:
+                logging.error(f"❌ Strain WAL checkpoint failed: {checkpoint_error}")
+                import traceback
+                logging.error(f"Checkpoint error traceback: {traceback.format_exc()}")
             
             return jsonify({
                 'success': True, 
@@ -9995,6 +10094,63 @@ def batch_update_lineage():
                 logging.info(f"Updated lineage in Excel processor DataFrame for {updated_count}/{len(changes_made)} items")
         except Exception as e_df:
             logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
+        
+        # CRITICAL FIX: Force WAL checkpoint to ensure batch lineage changes are persisted to disk permanently
+        try:
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
+            if product_db:
+                # Use a separate connection for checkpoint to avoid transaction interference
+                import sqlite3
+                checkpoint_conn = sqlite3.connect(
+                    product_db.db_path,
+                    timeout=10.0,
+                    check_same_thread=False
+                )
+                checkpoint_cursor = checkpoint_conn.cursor()
+                
+                # First, ensure journal mode is WAL
+                try:
+                    checkpoint_cursor.execute("PRAGMA journal_mode")
+                    journal_mode = checkpoint_cursor.fetchone()[0]
+                    if journal_mode.upper() != 'WAL':
+                        logging.warning(f"Journal mode is {journal_mode}, switching to WAL")
+                        checkpoint_cursor.execute("PRAGMA journal_mode=WAL")
+                except Exception as wal_error:
+                    logging.warning(f"Could not check/set WAL mode: {wal_error}")
+                
+                # Force FULL checkpoint to ensure complete persistence to disk
+                checkpoint_cursor.execute("PRAGMA wal_checkpoint(FULL)")
+                checkpoint_result = checkpoint_cursor.fetchone()
+                
+                if checkpoint_result:
+                    busy, log, checkpointed = checkpoint_result
+                    if busy == 0:
+                        logging.info(f"✅ BATCH LINEAGE UPDATE: WAL checkpoint completed - {checkpointed} pages written, {log} remaining")
+                    else:
+                        logging.warning(f"⚠️  BATCH LINEAGE UPDATE: WAL checkpoint still busy, {log} pages remaining")
+                        # Try TRUNCATE mode as fallback for immediate persistence
+                        checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                        checkpoint_result2 = checkpoint_cursor.fetchone()
+                        if checkpoint_result2 and checkpoint_result2[0] == 0:
+                            logging.info(f"✅ BATCH LINEAGE UPDATE: TRUNCATE checkpoint completed")
+                
+                # Force synchronous mode to ensure writes are flushed to disk
+                checkpoint_cursor.execute("PRAGMA synchronous=FULL")
+                
+                # Commit any pending changes (should be none, but ensure consistency)
+                checkpoint_conn.commit()
+                
+                # Close the checkpoint connection to ensure all data is flushed
+                checkpoint_cursor.close()
+                checkpoint_conn.close()
+                
+                logging.info(f"✅ BATCH LINEAGE UPDATE: Forced WAL checkpoint and connection flush - changes persisted permanently")
+        except Exception as checkpoint_error:
+            logging.error(f"❌ Batch WAL checkpoint failed: {checkpoint_error}")
+            import traceback
+            logging.error(f"Checkpoint error traceback: {traceback.format_exc()}")
+        
         # Clear caches to ensure refreshed data after batch lineage updates
         clear_available_tags_cache(reason='batch_lineage_update')
         
@@ -16106,6 +16262,59 @@ def bulk_update_lineage():
                 })
         
         conn.commit()
+        
+        # CRITICAL FIX: Force WAL checkpoint to ensure bulk lineage changes are persisted to disk permanently
+        try:
+            # Use a separate connection for checkpoint to avoid transaction interference
+            import sqlite3
+            checkpoint_conn = sqlite3.connect(
+                product_db.db_path,
+                timeout=10.0,
+                check_same_thread=False
+            )
+            checkpoint_cursor = checkpoint_conn.cursor()
+            
+            # First, ensure journal mode is WAL
+            try:
+                checkpoint_cursor.execute("PRAGMA journal_mode")
+                journal_mode = checkpoint_cursor.fetchone()[0]
+                if journal_mode.upper() != 'WAL':
+                    logging.warning(f"Journal mode is {journal_mode}, switching to WAL")
+                    checkpoint_cursor.execute("PRAGMA journal_mode=WAL")
+            except Exception as wal_error:
+                logging.warning(f"Could not check/set WAL mode: {wal_error}")
+            
+            # Force FULL checkpoint to ensure complete persistence to disk
+            checkpoint_cursor.execute("PRAGMA wal_checkpoint(FULL)")
+            checkpoint_result = checkpoint_cursor.fetchone()
+            
+            if checkpoint_result:
+                busy, log, checkpointed = checkpoint_result
+                if busy == 0:
+                    logging.info(f"✅ BULK LINEAGE UPDATE: WAL checkpoint completed - {checkpointed} pages written, {log} remaining")
+                else:
+                    logging.warning(f"⚠️  BULK LINEAGE UPDATE: WAL checkpoint still busy, {log} pages remaining")
+                    # Try TRUNCATE mode as fallback for immediate persistence
+                    checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    checkpoint_result2 = checkpoint_cursor.fetchone()
+                    if checkpoint_result2 and checkpoint_result2[0] == 0:
+                        logging.info(f"✅ BULK LINEAGE UPDATE: TRUNCATE checkpoint completed")
+            
+            # Force synchronous mode to ensure writes are flushed to disk
+            checkpoint_cursor.execute("PRAGMA synchronous=FULL")
+            
+            # Commit any pending changes (should be none, but ensure consistency)
+            checkpoint_conn.commit()
+            
+            # Close the checkpoint connection to ensure all data is flushed
+            checkpoint_cursor.close()
+            checkpoint_conn.close()
+            
+            logging.info(f"✅ BULK LINEAGE UPDATE: Forced WAL checkpoint and connection flush - changes persisted permanently")
+        except Exception as checkpoint_error:
+            logging.error(f"❌ Bulk WAL checkpoint failed: {checkpoint_error}")
+            import traceback
+            logging.error(f"Checkpoint error traceback: {traceback.format_exc()}")
         
         successful_updates = [r for r in results if r['success']]
         failed_updates = [r for r in results if not r['success']]

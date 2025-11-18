@@ -7605,12 +7605,13 @@ const TagManager = {
         try {
             const fastLoadController = new AbortController();
             const fastLoadTimeout = setTimeout(() => {
-                console.log('⏱️ Fast load timeout after 8 seconds');
+                console.log('⏱️ Fast load timeout after 3 seconds');
                 fastLoadController.abort();
-            }, 8000); // Increased to 8s to allow slower servers
+            }, 3000); // Reduced to 3s for faster failure detection
             
-            // OPTIMIZATION: Add nocache=1 to ensure fresh data after upload
-            const fastResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=1&nocache=1`, {
+            // OPTIMIZATION: Use cache for fast loads (much faster) - only bypass cache when explicitly needed
+            // nocache=1 forces full rebuild which is slow, so we only use it when we know data changed
+            const fastResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=1`, {
                 signal: fastLoadController.signal
             });
             clearTimeout(fastLoadTimeout);
@@ -7668,7 +7669,7 @@ const TagManager = {
             }
         } catch (fastError) {
             if (fastError.name === 'AbortError') {
-                console.log('⏱️ Fast load timed out after 8 seconds, trying full initial-data load...');
+                console.log('⏱️ Fast load timed out after 3 seconds, trying full initial-data load...');
             } else {
                 console.log('⚠️ Fast load failed or returned empty, trying full initial-data load:', fastError.name);
             }
