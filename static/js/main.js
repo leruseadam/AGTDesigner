@@ -750,12 +750,18 @@ const AppLoadingSplash = {
         }
         this._emergencyTimer = setTimeout(() => {
             this.emergencyHide();
-        }, 7000);
+        }, 2000); // Reduced to 2 seconds - must hide quickly
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
         
         if (splash) {
+            // CRITICAL: Make splash non-blocking - allow interaction through it
+            splash.style.pointerEvents = 'none';
+            const content = splash.querySelector('.splash-content');
+            if (content) {
+                content.style.pointerEvents = 'auto';
+            }
             splash.style.display = 'flex';
             splash.classList.remove('fade-out');
         }
@@ -7164,17 +7170,26 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
         
-        // Show application splash screen
+        // FIXED: Make UI immediately interactive - don't block on splash
+        // Show splash briefly then hide it immediately to make UI interactive
         AppLoadingSplash.show();
         AppLoadingSplash.startAutoAdvance();
+        
+        // Hide splash immediately after a very short delay to ensure UI is interactive
+        setTimeout(() => {
+            AppLoadingSplash.stopAutoAdvance();
+            AppLoadingSplash.complete();
+        }, 100); // Hide splash after 100ms - UI should be interactive immediately
         
         // Initialize empty state first
         this.clearInitialDataRetry();
         this.initializeEmptyState();
-        AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
-        this.checkForExistingData();
+        // Run in background - don't block UI
+        setTimeout(() => {
+            this.checkForExistingData();
+        }, 0); // Use setTimeout to make it non-blocking
         
         // Ensure all filters default to 'All' on page load
         this.state.filters = {
@@ -7457,6 +7472,7 @@ const TagManager = {
         }, 8000); // 8 second timeout
 
         // Safety net: ensure loading overlay never blocks interaction for long
+        // CRITICAL: Make this timeout very short to prevent any freeze
         const splashSafetyTimeout = setTimeout(() => {
             // Always make UI interactive again quickly
             verboseLog('⏳ Safety timeout triggered - forcing UI to be interactive');
@@ -7465,6 +7481,13 @@ const TagManager = {
             }
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
+            
+            // CRITICAL: Ensure main content is always interactive
+            const mainContent = document.getElementById('mainContent');
+            if (mainContent) {
+                mainContent.style.pointerEvents = 'auto';
+                mainContent.style.opacity = '1';
+            }
 
             // Only attempt a visible fallback load if nothing has rendered yet
             const availableTagsContainer = document.getElementById('availableTags');
@@ -7484,7 +7507,7 @@ const TagManager = {
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 3000); // 3 second safety net so "Loading tags" overlay never lingers
+        }, 1000); // 1 second safety net - UI must be interactive within 1 second
 
         try {
             // Use AbortController to make fetch actually cancelable
