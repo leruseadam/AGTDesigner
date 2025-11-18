@@ -7492,10 +7492,32 @@ const TagManager = {
             abortController.abort();
         }, 8000); // 8 second timeout
 
+        // Track if initial data fetch is in progress to prevent premature fallback
+        let initialDataFetchInProgress = true;
+        
         // Safety net: ensure loading overlay never blocks interaction for long
-        // CRITICAL: Make this timeout very short to prevent any freeze
+        // Increased timeout to 60 seconds to allow for slow tag loading
         const splashSafetyTimeout = setTimeout(() => {
-            // Always make UI interactive again quickly
+            // Check if fetch is still in progress - if so, don't trigger fallback yet
+            if (initialDataFetchInProgress) {
+                verboseLog('⏳ Safety timeout triggered but initial fetch still in progress - extending timeout');
+                // Extend timeout by another 30 seconds
+                setTimeout(() => {
+                    if (initialDataFetchInProgress) {
+                        verboseLog('⏳ Extended timeout expired - forcing UI interactive');
+                        initialDataFetchInProgress = false;
+                        this._handleSafetyTimeoutFallback();
+                    }
+                }, 30000);
+                return;
+            }
+            
+            this._handleSafetyTimeoutFallback();
+        }, 60000); // Increased to 60 seconds to give tags time to load
+        
+        // Helper function to handle safety timeout fallback
+        this._handleSafetyTimeoutFallback = () => {
+            // Always make UI interactive again
             verboseLog('⏳ Safety timeout triggered - forcing UI to be interactive');
             if (typeof this.hideActionSplash === 'function') {
                 this.hideActionSplash();
@@ -7569,13 +7591,16 @@ const TagManager = {
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 3000); // Increased to 3 seconds to give tags more time to load
+        };
 
         try {
             // Use AbortController to make fetch actually cancelable
             const response = await fetch('/api/initial-data', {
                 signal: abortController.signal
             });
+            
+            // Mark fetch as complete
+            initialDataFetchInProgress = false;
             
             // Clear timeout if request succeeded
             clearTimeout(timeoutId);
@@ -7725,6 +7750,9 @@ const TagManager = {
                 return;
             }
         } catch (error) {
+            // Mark fetch as complete even on error
+            initialDataFetchInProgress = false;
+            
             // Clear all timeouts on error
             clearTimeout(timeoutId);
             clearTimeout(showSplashTimeout);
@@ -10397,17 +10425,17 @@ const TagManager = {
                     <div class="flex-grow-1">
                         <strong style="color: #ffffff; font-size: 0.95rem;">No Excel File Uploaded</strong>
                         <p class="mb-2 mt-1" style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.8);">Please upload an Excel file to load product tags.</p>
-                        <button class="btn btn-sm" onclick="const notif = document.getElementById('noFileNotification'); if(notif && notif.closest('.col-12')) { notif.closest('.col-12').remove(); } document.getElementById('fileInput').click();" style="background: rgba(160, 132, 232, 0.8); border: 1px solid rgba(160, 132, 232, 1); color: #ffffff; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">
+                        <button class="btn btn-sm" onclick="const notif = document.getElementById('noFileNotification'); if(notif && notif.closest('.col-3')) { notif.closest('.col-3').remove(); } document.getElementById('fileInput').click();" style="background: rgba(160, 132, 232, 0.8); border: 1px solid rgba(160, 132, 232, 1); color: #ffffff; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">
                             <i class="fas fa-upload me-1"></i>Upload Excel File
                         </button>
                     </div>
-                    <button type="button" class="btn-close btn-close-white ms-2" onclick="const notif = document.getElementById('noFileNotification'); if(notif && notif.closest('.col-12')) { notif.closest('.col-12').remove(); }" aria-label="Close" style="opacity: 0.8;"></button>
+                    <button type="button" class="btn-close btn-close-white ms-2" onclick="const notif = document.getElementById('noFileNotification'); if(notif && notif.closest('.col-3')) { notif.closest('.col-3').remove(); }" aria-label="Close" style="opacity: 0.8;"></button>
                 </div>
             `;
             
-            // Wrap notification in a Bootstrap column to match grid structure
+            // Wrap notification in a Bootstrap column to match grid structure (1/4 width)
             const notificationWrapper = document.createElement('div');
-            notificationWrapper.className = 'col-12 mb-3';
+            notificationWrapper.className = 'col-3 mb-3';
             notificationWrapper.appendChild(notification);
             
             // Insert notification above the filter bar
