@@ -2097,20 +2097,7 @@ def get_session_excel_processor():
                     row_count = len(g.excel_processor.df)
                     logging.info(f"✅ Session file already loaded by get_excel_processor(): {session_file_path} ({row_count} rows)")
                 else:
-                    # CRITICAL FIX: Actually load the session file if it exists but isn't loaded
-                    logging.info(f"🔄 Session file exists but not loaded, loading now: {session_file_path}")
-                    try:
-                        success = g.excel_processor.load_file(session_file_path)
-                        if success and hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None:
-                            row_count = len(g.excel_processor.df)
-                            g.excel_processor._last_loaded_file = session_file_path
-                            logging.info(f"✅ Successfully loaded session file: {session_file_path} ({row_count} rows)")
-                        else:
-                            logging.warning(f"⚠️ Failed to load session file: {session_file_path}")
-                    except Exception as load_error:
-                        logging.error(f"❌ Error loading session file: {load_error}")
-                        import traceback
-                        logging.error(traceback.format_exc())
+                    logging.warning(f"⚠️ Session file not loaded by get_excel_processor(), DataFrame is empty")
             elif session_file_path:
                 logging.warning(f"Session uploaded file does not exist: {session_file_path}")
                 # Clear invalid session data
@@ -2728,18 +2715,8 @@ def upload_file():
         # Mark as processing
         update_processing_status(file.filename, 'processing')
         
-        # CRITICAL FIX: Return response IMMEDIATELY to avoid 504 timeout
         # Check if we're on PythonAnywhere - if so, use background processing
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
-        
-        # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
-        _excel_processor = None
-        logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
-
-        # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
-        # Background processing will handle database storage and cache clearing
-        update_processing_status(file.filename, 'ready')
-        logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
         
         if is_pythonanywhere:
             # On PythonAnywhere: Start background thread to avoid timeout
@@ -2748,6 +2725,15 @@ def upload_file():
             # Capture variables from request context for background thread
             original_filename = file.filename
             # Store context removed - using single database
+
+            # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
+            _excel_processor = None
+            logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
+
+            # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
+            # Background processing will handle database storage and cache clearing
+            update_processing_status(file.filename, 'ready')
+            logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
 
             def process_in_background():
                 try:
@@ -2812,23 +2798,17 @@ def upload_file():
             upload_time = time.time() - start_time
             logging.info(f"=== UPLOAD COMPLETE (ready immediately, processing in background): {upload_time:.3f}s ===")
 
-            # CRITICAL FIX: Return response immediately to prevent 504 timeout
             response_data = {
                 'success': True,
                 'message': 'File uploaded and ready',
                 'filename': file.filename,
-                'processing': False,  # CHANGED: Marked as not processing so frontend loads immediately
-                'rows': 0  # Will be updated by background thread
+                'processing': False  # CHANGED: Marked as not processing so frontend loads immediately
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
                 response_data['detected_store'] = detected_store
                 response_data['selected_store'] = selected_store
-            
-            # Return response immediately - don't wait for background processing
-            response = make_response(jsonify(response_data))
-            response.headers['X-Upload-Time'] = f"{upload_time:.3f}s"
-            return response
+            return jsonify(response_data)
             
         else:
             # Local development: FAST UPLOAD - just save file, don't process
@@ -7750,126 +7730,23 @@ def get_available_tags():
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         
         # If lineage was recently changed, force a full refresh even if fast_load requested
-        # CRITICAL FIX: Check lineage_update_timestamp and force database refresh if lineage was updated recently
         lineage_update_ts = session.get('lineage_update_timestamp')
         force_full_refresh = False
-        force_db_refresh = False
         if lineage_update_ts:
             try:
-                time_since_update = time.time() - float(lineage_update_ts)
-                force_full_refresh = time_since_update < 600  # 10 minutes
-                # Force database refresh if lineage was updated in the last 30 minutes
-                force_db_refresh = time_since_update < 1800  # 30 minutes
+                force_full_refresh = (time.time() - float(lineage_update_ts)) < 600  # 10 minutes
             except Exception:
                 force_full_refresh = False
-                force_db_refresh = False
-        
-        # If lineage was recently updated, bypass cache and force database query
-        if force_db_refresh:
-            logging.info(f"⚠️  Recent lineage updates detected ({(time.time() - float(lineage_update_ts)):.0f}s ago) – forcing database refresh and bypassing cache.")
-            cached_tags = None  # Force bypass of cache
-            prefer_db = True  # Force database query
-            nocache = True  # Force no cache
-        elif force_full_refresh:
+        if force_full_refresh:
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
         
         if cached_tags and not nocache:
-            # OPTIMIZATION: For fast loads, return cached tags immediately and do lineage alignment in background
-            # This allows instant response while lineage is updated asynchronously
+            # OPTIMIZATION: Skip lineage alignment for fast loads - return cached tags immediately
+            # Lineage can be aligned later via a separate request if needed
             fast_path_allowed = fast_load and not force_full_refresh
             if fast_path_allowed:
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags, lineage alignment will happen in background ({elapsed:.1f}ms)")
-                
-                # Start lineage alignment in background thread (non-blocking)
-                def background_lineage_alignment():
-                    try:
-                        store_name = get_current_store_name()
-                        if not store_name:
-                            return
-                        product_db = get_product_database(store_name)
-                        if not product_db:
-                            return
-                        
-                        # Quick lineage alignment with timeout
-                        import threading
-                        alignment_timeout = 3  # 3 second timeout for background alignment (reduced from 5s)
-                        alignment_done = threading.Event()
-                        
-                        def do_alignment():
-                            try:
-                                lineage_cache = {}
-                                conn = product_db._get_connection()
-                                cur = conn.cursor()
-                                
-                                # Batch query for lineage (same as main path but non-blocking)
-                                # OPTIMIZATION: Limit to 300 tags for faster background alignment
-                                product_names = [tag.get('Product Name*') or tag.get('ProductName') or '' for tag in cached_tags[:300]]  # Limit to 300 for speed
-                                if product_names:
-                                    normalized_names = []
-                                    for name in product_names:
-                                        try:
-                                            normalized = product_db._normalize_product_name(name)
-                                        except Exception:
-                                            normalized = name.strip().lower()
-                                        normalized_names.append(normalized)
-                                    
-                                    # OPTIMIZATION: Limit batch size to 300 for faster background alignment
-                                    all_search_names = list(set(product_names + normalized_names))[:300]  # Limit batch size
-                                    placeholders = ','.join(['?'] * len(all_search_names))
-                                    batch_query = f'''
-                                        SELECT DISTINCT
-                                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
-                                            COALESCE(s.strain_name, p."Product Strain") AS current_strain,
-                                            p."Product Name*" AS product_name,
-                                            p.normalized_name AS normalized_name
-                                        FROM products p
-                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
-                                        ORDER BY p.id DESC
-                                        LIMIT 300
-                                    '''
-                                    cur.execute(batch_query, all_search_names + all_search_names)
-                                    batch_results = cur.fetchall()
-                                    
-                                    for row in batch_results:
-                                        db_lin = row[0]
-                                        db_strain = row[1] if len(row) > 1 else None
-                                        result_product_name = row[2] if len(row) > 2 else None
-                                        if result_product_name:
-                                            lineage_cache[result_product_name] = (db_lin, db_strain)
-                                    
-                                    # Update cache with aligned data
-                                    updated_tags = cached_tags.copy()
-                                    for tag in updated_tags:
-                                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                        if name in lineage_cache:
-                                            db_lin, db_strain = lineage_cache[name]
-                                            if db_lin:
-                                                tag['Lineage'] = str(db_lin).strip().upper()
-                                                tag['currentLineage'] = str(db_lin).strip().upper()
-                                            if db_strain:
-                                                tag['Product Strain'] = str(db_strain).strip()
-                                    
-                                    # Update cache with aligned tags
-                                    cache.set(cache_key, make_json_safe(updated_tags), timeout=300)
-                                    logging.info(f"✅ Background lineage alignment completed for {len(updated_tags)} tags")
-                            except Exception as bg_err:
-                                logging.warning(f"Background lineage alignment error: {bg_err}")
-                            finally:
-                                alignment_done.set()
-                        
-                        alignment_thread = threading.Thread(target=do_alignment, daemon=True)
-                        alignment_thread.start()
-                        alignment_done.wait(timeout=alignment_timeout)
-                        
-                    except Exception as e:
-                        logging.warning(f"Background lineage alignment setup failed: {e}")
-                
-                # Start background alignment (non-blocking)
-                import threading
-                threading.Thread(target=background_lineage_alignment, daemon=True).start()
-                
+                logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
                 response = make_response(jsonify({
                     'tags': cached_tags,
                     'total_count': len(cached_tags),
@@ -8062,15 +7939,9 @@ def get_available_tags():
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
             excel_processor = get_session_excel_processor()
-            logging.info(f"📦 AVAILABLE-TAGS: excel_processor={excel_processor}, has_df={hasattr(excel_processor, 'df') if excel_processor else False}")
-            if excel_processor and hasattr(excel_processor, 'df'):
-                df_info = f"df is None: {excel_processor.df is None}, df.empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'}"
-                logging.info(f"📦 AVAILABLE-TAGS: DataFrame status - {df_info}")
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 try:
-                    logging.info(f"📦 AVAILABLE-TAGS: Calling get_available_tags() on processor with {len(excel_processor.df)} rows")
                     excel_tags = excel_processor.get_available_tags()
-                    logging.info(f"📦 AVAILABLE-TAGS: get_available_tags() returned {len(excel_tags)} tags")
                     all_tags.extend(excel_tags)
                     logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
                 except Exception as e:
@@ -8266,127 +8137,22 @@ def get_available_tags():
                 # Continue to return Excel tags even if lineage alignment fails
 
             safe_excel_tags = make_json_safe(all_tags)
+            # Cache the results for faster subsequent requests (unless nocache requested)
+            if not nocache:
+                cache.set(cache_key, safe_excel_tags, timeout=300)  # Cache for 5 minutes
+            try:
+                current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
+                save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
+            except Exception as cache_error:
+                logging.warning(f"Unable to persist Excel tag cache: {cache_error}")
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
             
-            # OPTIMIZATION: For fast_load, return tags immediately and do lineage alignment in background
-            if fast_load:
-                # Cache tags immediately (before lineage alignment) for instant response
-                if not nocache:
-                    cache.set(cache_key, safe_excel_tags, timeout=300)
-                    logging.info(f"✅ Cached {len(safe_excel_tags)} tags for future fast loads")
-                
-                # Start background lineage alignment (same as cache path)
-                def background_lineage_alignment_fresh():
-                    try:
-                        store_name = get_current_store_name()
-                        if not store_name:
-                            return
-                        product_db = get_product_database(store_name)
-                        if not product_db:
-                            return
-                        
-                        import threading
-                        alignment_timeout = 10  # 10 second timeout for background alignment
-                        alignment_done = threading.Event()
-                        
-                        def do_alignment():
-                            try:
-                                lineage_cache = {}
-                                conn = product_db._get_connection()
-                                cur = conn.cursor()
-                                
-                                # Batch query for lineage
-                                product_names = [tag.get('Product Name*') or tag.get('ProductName') or '' for tag in all_tags[:500]]
-                                if product_names:
-                                    normalized_names = []
-                                    for name in product_names:
-                                        try:
-                                            normalized = product_db._normalize_product_name(name)
-                                        except Exception:
-                                            normalized = name.strip().lower()
-                                        normalized_names.append(normalized)
-                                    
-                                    all_search_names = list(set(product_names + normalized_names))[:500]
-                                    placeholders = ','.join(['?'] * len(all_search_names))
-                                    batch_query = f'''
-                                        SELECT DISTINCT
-                                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
-                                            COALESCE(s.strain_name, p."Product Strain") AS current_strain,
-                                            p."Product Name*" AS product_name,
-                                            p.normalized_name AS normalized_name
-                                        FROM products p
-                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
-                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
-                                        ORDER BY p.id DESC
-                                        LIMIT 500
-                                    '''
-                                    cur.execute(batch_query, all_search_names + all_search_names)
-                                    batch_results = cur.fetchall()
-                                    
-                                    for row in batch_results:
-                                        db_lin = row[0]
-                                        db_strain = row[1] if len(row) > 1 else None
-                                        result_product_name = row[2] if len(row) > 2 else None
-                                        if result_product_name:
-                                            lineage_cache[result_product_name] = (db_lin, db_strain)
-                                    
-                                    # Update tags with lineage
-                                    updated_tags = all_tags.copy()
-                                    for tag in updated_tags:
-                                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                        if name in lineage_cache:
-                                            db_lin, db_strain = lineage_cache[name]
-                                            if db_lin:
-                                                tag['Lineage'] = str(db_lin).strip().upper()
-                                                tag['currentLineage'] = str(db_lin).strip().upper()
-                                            if db_strain:
-                                                tag['Product Strain'] = str(db_strain).strip()
-                                    
-                                    # Update cache with aligned tags
-                                    safe_updated = make_json_safe(updated_tags)
-                                    cache.set(cache_key, safe_updated, timeout=300)
-                                    logging.info(f"✅ Background lineage alignment completed for {len(updated_tags)} tags")
-                            except Exception as bg_err:
-                                logging.warning(f"Background lineage alignment error: {bg_err}")
-                            finally:
-                                alignment_done.set()
-                        
-                        alignment_thread = threading.Thread(target=do_alignment, daemon=True)
-                        alignment_thread.start()
-                        alignment_done.wait(timeout=alignment_timeout)
-                        
-                    except Exception as e:
-                        logging.warning(f"Background lineage alignment setup failed: {e}")
-                
-                # Start background alignment (non-blocking)
-                import threading
-                threading.Thread(target=background_lineage_alignment_fresh, daemon=True).start()
-                
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Available tags (Excel, lineage in background) completed ({elapsed:.1f}ms)")
-                
-                response_payload = {
-                    'tags': safe_excel_tags,
-                    'total_count': len(safe_excel_tags),
-                    'source': 'excel-fast-lineage-bg'
-                }
-            else:
-                # Full load: cache after lineage alignment
-                if not nocache:
-                    cache.set(cache_key, safe_excel_tags, timeout=300)
-                    logging.info(f"✅ Cached {len(safe_excel_tags)} tags for future fast loads")
-                try:
-                    current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
-                    save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
-                except Exception as cache_error:
-                    logging.warning(f"Unable to persist Excel tag cache: {cache_error}")
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
-                
-                response_payload = {
-                    'tags': safe_excel_tags,
-                    'total_count': len(safe_excel_tags),
-                    'source': 'excel+db-lineage'
-                }
+            response_payload = {
+                'tags': safe_excel_tags,
+                'total_count': len(safe_excel_tags),
+                'source': 'excel+db-lineage'
+            }
             if force_full_refresh:
                 session['lineage_update_timestamp'] = 0
             return jsonify(response_payload)
@@ -9728,93 +9494,27 @@ def update_lineage():
         # CRITICAL FIX: Fast cache invalidation - don't block response
         cache_clear_start = time.time()
         try:
-            # Clear all available_tags cache keys (including file-specific ones)
-            # This ensures lineage changes persist across page reloads
-            session_file_path = session.get('file_path', '')
-            cache_key_with_path = get_session_cache_key(f'available_tags_{session_file_path}')
-            cache_key_generic = get_session_cache_key('available_tags')
+            # Clear only essential caches - fast and non-blocking
+            cache_key = get_session_cache_key('available_tags')
+            cache.delete(cache_key)
             # Also clear web cache
             web_cache_key = get_session_cache_key('web_available_tags')
-            
-            # Delete all related cache keys
-            cache.delete(cache_key_with_path)
-            cache.delete(cache_key_generic)
             cache.delete(web_cache_key)
-            
-            # Also clear any cached tags with different file paths (in case user switches files)
-            # Clear the persistent file-based cache as well
-            try:
-                store_name_for_cache = get_current_store_name()
-                if store_name_for_cache:
-                    cache_file_path = get_available_tags_cache_path(store_name_for_cache)
-                    if os.path.exists(cache_file_path):
-                        os.remove(cache_file_path)
-                        logging.info(f"✅ LINEAGE UPDATE: Cleared persistent cache file: {cache_file_path}")
-            except Exception as file_cache_error:
-                logging.warning(f"Could not clear persistent cache file: {file_cache_error}")
-            
-            # Set lineage update timestamp to force database refresh on next page load
             session['lineage_update_timestamp'] = time.time()
             session.modified = True
-            logging.info(f"✅ LINEAGE UPDATE: Cleared all cache keys and updated timestamp")
+            logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
             
-            # CRITICAL FIX: Force WAL checkpoint to ensure changes are persisted to disk permanently
+            # CRITICAL FIX: Force WAL checkpoint to ensure changes are persisted to disk
             try:
-                # Use a separate connection for checkpoint to avoid transaction interference
-                import sqlite3
-                checkpoint_conn = sqlite3.connect(
-                    product_db.db_path,
-                    timeout=10.0,
-                    check_same_thread=False
-                )
+                # Use a new connection to force checkpoint
+                checkpoint_conn = product_db._get_connection()
                 checkpoint_cursor = checkpoint_conn.cursor()
-                
-                # First, ensure journal mode is WAL
-                try:
-                    checkpoint_cursor.execute("PRAGMA journal_mode")
-                    journal_mode = checkpoint_cursor.fetchone()[0]
-                    if journal_mode.upper() != 'WAL':
-                        logging.warning(f"Journal mode is {journal_mode}, switching to WAL")
-                        checkpoint_cursor.execute("PRAGMA journal_mode=WAL")
-                except Exception as wal_error:
-                    logging.warning(f"Could not check/set WAL mode: {wal_error}")
-                
-                # Force FULL checkpoint to ensure complete persistence to disk
-                # FULL checkpoint mode ensures all WAL data is written and WAL file is reset
-                checkpoint_cursor.execute("PRAGMA wal_checkpoint(FULL)")
-                checkpoint_result = checkpoint_cursor.fetchone()
-                
-                # Checkpoint result: (busy, log, checkpointed)
-                # - busy: 0 if checkpoint completed, 1 if still busy
-                # - log: number of pages in WAL file
-                # - checkpointed: number of pages checkpointed
-                if checkpoint_result:
-                    busy, log, checkpointed = checkpoint_result
-                    if busy == 0:
-                        logging.info(f"✅ LINEAGE UPDATE: WAL checkpoint completed - {checkpointed} pages written, {log} remaining")
-                    else:
-                        logging.warning(f"⚠️  LINEAGE UPDATE: WAL checkpoint still busy, {log} pages remaining")
-                        # Try TRUNCATE mode as fallback for immediate persistence
-                        checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                        checkpoint_result2 = checkpoint_cursor.fetchone()
-                        if checkpoint_result2 and checkpoint_result2[0] == 0:
-                            logging.info(f"✅ LINEAGE UPDATE: TRUNCATE checkpoint completed")
-                
-                # Force synchronous mode to ensure writes are flushed to disk
-                checkpoint_cursor.execute("PRAGMA synchronous=FULL")
-                
-                # Commit any pending changes (should be none, but ensure consistency)
-                checkpoint_conn.commit()
-                
-                # Close the checkpoint connection to ensure all data is flushed
+                # Force WAL checkpoint to ensure all changes are written to database file
+                checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 checkpoint_cursor.close()
-                checkpoint_conn.close()
-                
-                logging.info(f"✅ LINEAGE UPDATE: Forced WAL checkpoint and connection flush - changes persisted permanently")
+                logging.info(f"✅ LINEAGE UPDATE: Forced WAL checkpoint to ensure persistence")
             except Exception as checkpoint_error:
-                logging.error(f"❌ WAL checkpoint failed: {checkpoint_error}")
-                import traceback
-                logging.error(f"Checkpoint error traceback: {traceback.format_exc()}")
+                logging.warning(f"WAL checkpoint failed (non-critical): {checkpoint_error}")
             
             # Invalidate Excel processor caches (non-blocking)
             if excel_processor and hasattr(excel_processor, '_invalidate_caches'):
@@ -10039,59 +9739,6 @@ def update_strain_lineage():
             
             result = cursor.fetchone()
             affected_product_count = result[0] if result else 0
-            
-            # CRITICAL FIX: Force WAL checkpoint to ensure strain lineage changes are persisted to disk permanently
-            try:
-                # Use a separate connection for checkpoint to avoid transaction interference
-                import sqlite3
-                checkpoint_conn = sqlite3.connect(
-                    product_db.db_path,
-                    timeout=10.0,
-                    check_same_thread=False
-                )
-                checkpoint_cursor = checkpoint_conn.cursor()
-                
-                # First, ensure journal mode is WAL
-                try:
-                    checkpoint_cursor.execute("PRAGMA journal_mode")
-                    journal_mode = checkpoint_cursor.fetchone()[0]
-                    if journal_mode.upper() != 'WAL':
-                        logging.warning(f"Journal mode is {journal_mode}, switching to WAL")
-                        checkpoint_cursor.execute("PRAGMA journal_mode=WAL")
-                except Exception as wal_error:
-                    logging.warning(f"Could not check/set WAL mode: {wal_error}")
-                
-                # Force FULL checkpoint to ensure complete persistence to disk
-                checkpoint_cursor.execute("PRAGMA wal_checkpoint(FULL)")
-                checkpoint_result = checkpoint_cursor.fetchone()
-                
-                if checkpoint_result:
-                    busy, log, checkpointed = checkpoint_result
-                    if busy == 0:
-                        logging.info(f"✅ STRAIN LINEAGE UPDATE: WAL checkpoint completed - {checkpointed} pages written, {log} remaining")
-                    else:
-                        logging.warning(f"⚠️  STRAIN LINEAGE UPDATE: WAL checkpoint still busy, {log} pages remaining")
-                        # Try TRUNCATE mode as fallback for immediate persistence
-                        checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                        checkpoint_result2 = checkpoint_cursor.fetchone()
-                        if checkpoint_result2 and checkpoint_result2[0] == 0:
-                            logging.info(f"✅ STRAIN LINEAGE UPDATE: TRUNCATE checkpoint completed")
-                
-                # Force synchronous mode to ensure writes are flushed to disk
-                checkpoint_cursor.execute("PRAGMA synchronous=FULL")
-                
-                # Commit any pending changes (should be none, but ensure consistency)
-                checkpoint_conn.commit()
-                
-                # Close the checkpoint connection to ensure all data is flushed
-                checkpoint_cursor.close()
-                checkpoint_conn.close()
-                
-                logging.info(f"✅ STRAIN LINEAGE UPDATE: Forced WAL checkpoint and connection flush - changes persisted permanently")
-            except Exception as checkpoint_error:
-                logging.error(f"❌ Strain WAL checkpoint failed: {checkpoint_error}")
-                import traceback
-                logging.error(f"Checkpoint error traceback: {traceback.format_exc()}")
             
             return jsonify({
                 'success': True, 
@@ -10322,63 +9969,6 @@ def batch_update_lineage():
                 logging.info(f"Updated lineage in Excel processor DataFrame for {updated_count}/{len(changes_made)} items")
         except Exception as e_df:
             logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
-        
-        # CRITICAL FIX: Force WAL checkpoint to ensure batch lineage changes are persisted to disk permanently
-        try:
-            store_name = get_current_store_name()
-            product_db = get_product_database(store_name)
-            if product_db:
-                # Use a separate connection for checkpoint to avoid transaction interference
-                import sqlite3
-                checkpoint_conn = sqlite3.connect(
-                    product_db.db_path,
-                    timeout=10.0,
-                    check_same_thread=False
-                )
-                checkpoint_cursor = checkpoint_conn.cursor()
-                
-                # First, ensure journal mode is WAL
-                try:
-                    checkpoint_cursor.execute("PRAGMA journal_mode")
-                    journal_mode = checkpoint_cursor.fetchone()[0]
-                    if journal_mode.upper() != 'WAL':
-                        logging.warning(f"Journal mode is {journal_mode}, switching to WAL")
-                        checkpoint_cursor.execute("PRAGMA journal_mode=WAL")
-                except Exception as wal_error:
-                    logging.warning(f"Could not check/set WAL mode: {wal_error}")
-                
-                # Force FULL checkpoint to ensure complete persistence to disk
-                checkpoint_cursor.execute("PRAGMA wal_checkpoint(FULL)")
-                checkpoint_result = checkpoint_cursor.fetchone()
-                
-                if checkpoint_result:
-                    busy, log, checkpointed = checkpoint_result
-                    if busy == 0:
-                        logging.info(f"✅ BATCH LINEAGE UPDATE: WAL checkpoint completed - {checkpointed} pages written, {log} remaining")
-                    else:
-                        logging.warning(f"⚠️  BATCH LINEAGE UPDATE: WAL checkpoint still busy, {log} pages remaining")
-                        # Try TRUNCATE mode as fallback for immediate persistence
-                        checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                        checkpoint_result2 = checkpoint_cursor.fetchone()
-                        if checkpoint_result2 and checkpoint_result2[0] == 0:
-                            logging.info(f"✅ BATCH LINEAGE UPDATE: TRUNCATE checkpoint completed")
-                
-                # Force synchronous mode to ensure writes are flushed to disk
-                checkpoint_cursor.execute("PRAGMA synchronous=FULL")
-                
-                # Commit any pending changes (should be none, but ensure consistency)
-                checkpoint_conn.commit()
-                
-                # Close the checkpoint connection to ensure all data is flushed
-                checkpoint_cursor.close()
-                checkpoint_conn.close()
-                
-                logging.info(f"✅ BATCH LINEAGE UPDATE: Forced WAL checkpoint and connection flush - changes persisted permanently")
-        except Exception as checkpoint_error:
-            logging.error(f"❌ Batch WAL checkpoint failed: {checkpoint_error}")
-            import traceback
-            logging.error(f"Checkpoint error traceback: {traceback.format_exc()}")
-        
         # Clear caches to ensure refreshed data after batch lineage updates
         clear_available_tags_cache(reason='batch_lineage_update')
         
@@ -13871,7 +13461,6 @@ def json_match():
             logging.warning("🔍 matched_products is empty or None!")
 
         # Ensure JSON products have a stable Product Name* so downstream lookups can find them
-        # CRITICAL FIX: Always include weight in product name to match Excel tag format (e.g., "Acapulco Gold Wax - 1g")
         def _normalize_json_product_names(products):
             if not products:
                 return products
@@ -13891,23 +13480,13 @@ def json_match():
                 base_name = str(base_name).strip()
                 if not base_name:
                     base_name = f"JSON Product {idx + 1}"
-                
-                # CRITICAL FIX: Always include weight in product name to match Excel tag appearance
+                unique_name = base_name
+                suffix = 2
+                vendor_hint = str(product.get('Vendor/Supplier*') or product.get('Vendor') or '').strip()
                 weight_hint = str(
                     product.get('Weight*') or product.get('Weight') or
                     product.get('CombinedWeight') or product.get('Quantity*') or ''
                 ).strip()
-                
-                # Build name with weight (matching Excel tag format: "Product Name - Weight")
-                if weight_hint and weight_hint not in base_name:
-                    # Only add weight if it's not already in the name
-                    unique_name = f"{base_name} - {weight_hint}"
-                else:
-                    unique_name = base_name
-                
-                # Handle duplicates by adding suffix
-                suffix = 2
-                vendor_hint = str(product.get('Vendor/Supplier*') or product.get('Vendor') or '').strip()
                 while unique_name in existing_names:
                     parts = [base_name]
                     hint_parts = [hint for hint in (weight_hint, vendor_hint) if hint]
@@ -15402,10 +14981,7 @@ def get_initial_data():
             # PERFORMANCE: Cache the result for 5 minutes
             cache.set(cache_key, initial_data, timeout=300)
         else:
-            logging.warning("Excel processor has no data - no database fallback (user must upload Excel file)")
-            # FIXED: Don't load from database when no Excel file is uploaded
-            # User must explicitly upload an Excel file to see tags
-            # This prevents old tags from loading when no file is uploaded
+            logging.warning("Excel processor has no data - attempting database fallback for initial data")
             available_tags = []
             filters = {
                 'vendor': [],
@@ -15417,12 +14993,78 @@ def get_initial_data():
                 'doh': [],
                 'highCbd': []
             }
+            try:
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name) if store_name else None
+                if product_db:
+                    db_products = product_db.get_all_products()
+                    vendors = set()
+                    brands = set()
+                    product_types = set()
+                    lineages = set()
+                    weights = set()
+                    strains = set()
+                    doh_values = set()
+                    high_cbd_values = set()
+                    
+                    for product in db_products:
+                        try:
+                            processed = process_database_product_for_api(product)
+                        except Exception as tag_error:
+                            logging.debug(f"INITIAL DATA: Skipping product due to processing error: {tag_error}")
+                            continue
+                        available_tags.append(processed)
+                        
+                        vendor_val = processed.get('Vendor') or processed.get('Vendor/Supplier*')
+                        if vendor_val:
+                            vendors.add(str(vendor_val).strip())
+                        brand_val = processed.get('Product Brand') or processed.get('Brand')
+                        if brand_val:
+                            brands.add(str(brand_val).strip())
+                        type_val = processed.get('Product Type*') or processed.get('ProductType')
+                        if type_val:
+                            product_types.add(str(type_val).strip())
+                        lineage_val = processed.get('Lineage') or processed.get('canonical_lineage') or processed.get('currentLineage')
+                        if lineage_val:
+                            lineages.add(str(lineage_val).strip())
+                        weight_val = processed.get('Weight*') or processed.get('CombinedWeight')
+                        if weight_val:
+                            weights.add(str(weight_val).strip())
+                        strain_val = processed.get('Product Strain') or processed.get('strain')
+                        if strain_val:
+                            strains.add(str(strain_val).strip())
+                        doh_val = processed.get('DOH') or processed.get('DOH Compliant (Yes/No)')
+                        if doh_val:
+                            doh_values.add(str(doh_val).strip())
+                        high_cbd_val = processed.get('High CBD') or processed.get('HighCBD')
+                        if high_cbd_val:
+                            high_cbd_values.add(str(high_cbd_val).strip())
+                    
+                    def sorted_list(values):
+                        return sorted(v for v in values if v and v != 'None')
+                    
+                    filters.update({
+                        'vendor': sorted_list(vendors),
+                        'brand': sorted_list(brands),
+                        'productType': sorted_list(product_types),
+                        'lineage': sorted_list(lineages),
+                        'weight': sorted_list(weights),
+                        'strain': sorted_list(strains),
+                        'doh': sorted_list(doh_values),
+                        'highCbd': sorted_list(high_cbd_values)
+                    })
+                    
+                    logging.info(f"INITIAL DATA: Database fallback produced {len(available_tags)} tags")
+                else:
+                    logging.warning("INITIAL DATA: No product database available for fallback")
+            except Exception as db_error:
+                logging.error(f"INITIAL DATA: Database fallback failed: {db_error}")
             
             initial_data = {
                 'success': True,
-                'data_loaded': False,
-                'filename': 'no_data',
-                'filepath': '',
+                'data_loaded': bool(available_tags),
+                'filename': 'database_fallback' if available_tags else 'no_data',
+                'filepath': 'database_fallback',
                 'columns': [],
                 'filters': filters,
                 'available_tags': available_tags,
@@ -16490,59 +16132,6 @@ def bulk_update_lineage():
                 })
         
         conn.commit()
-        
-        # CRITICAL FIX: Force WAL checkpoint to ensure bulk lineage changes are persisted to disk permanently
-        try:
-            # Use a separate connection for checkpoint to avoid transaction interference
-            import sqlite3
-            checkpoint_conn = sqlite3.connect(
-                product_db.db_path,
-                timeout=10.0,
-                check_same_thread=False
-            )
-            checkpoint_cursor = checkpoint_conn.cursor()
-            
-            # First, ensure journal mode is WAL
-            try:
-                checkpoint_cursor.execute("PRAGMA journal_mode")
-                journal_mode = checkpoint_cursor.fetchone()[0]
-                if journal_mode.upper() != 'WAL':
-                    logging.warning(f"Journal mode is {journal_mode}, switching to WAL")
-                    checkpoint_cursor.execute("PRAGMA journal_mode=WAL")
-            except Exception as wal_error:
-                logging.warning(f"Could not check/set WAL mode: {wal_error}")
-            
-            # Force FULL checkpoint to ensure complete persistence to disk
-            checkpoint_cursor.execute("PRAGMA wal_checkpoint(FULL)")
-            checkpoint_result = checkpoint_cursor.fetchone()
-            
-            if checkpoint_result:
-                busy, log, checkpointed = checkpoint_result
-                if busy == 0:
-                    logging.info(f"✅ BULK LINEAGE UPDATE: WAL checkpoint completed - {checkpointed} pages written, {log} remaining")
-                else:
-                    logging.warning(f"⚠️  BULK LINEAGE UPDATE: WAL checkpoint still busy, {log} pages remaining")
-                    # Try TRUNCATE mode as fallback for immediate persistence
-                    checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                    checkpoint_result2 = checkpoint_cursor.fetchone()
-                    if checkpoint_result2 and checkpoint_result2[0] == 0:
-                        logging.info(f"✅ BULK LINEAGE UPDATE: TRUNCATE checkpoint completed")
-            
-            # Force synchronous mode to ensure writes are flushed to disk
-            checkpoint_cursor.execute("PRAGMA synchronous=FULL")
-            
-            # Commit any pending changes (should be none, but ensure consistency)
-            checkpoint_conn.commit()
-            
-            # Close the checkpoint connection to ensure all data is flushed
-            checkpoint_cursor.close()
-            checkpoint_conn.close()
-            
-            logging.info(f"✅ BULK LINEAGE UPDATE: Forced WAL checkpoint and connection flush - changes persisted permanently")
-        except Exception as checkpoint_error:
-            logging.error(f"❌ Bulk WAL checkpoint failed: {checkpoint_error}")
-            import traceback
-            logging.error(f"Checkpoint error traceback: {traceback.format_exc()}")
         
         successful_updates = [r for r in results if r['success']]
         failed_updates = [r for r in results if not r['success']]

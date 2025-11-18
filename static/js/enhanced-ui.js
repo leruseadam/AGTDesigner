@@ -164,78 +164,16 @@ async function handleFiles(files) {
       // Update splash status
       if (statusElement) statusElement.textContent = 'Uploading file...';
       
-      // Add timeout to prevent hanging
-      const uploadController = new AbortController();
-      const uploadTimeout = setTimeout(() => {
-        console.log('⏱️ Upload request timeout after 30 seconds');
-        uploadController.abort();
-      }, 30000); // 30 second timeout
-      
-      let response;
-      try {
-        response = await fetch('/upload', {
-          method: 'POST',
-          body: formData,
-          signal: uploadController.signal
-        });
-        clearTimeout(uploadTimeout);
-        console.log('📡 Upload response status:', response.status);
-      } catch (fetchError) {
-        clearTimeout(uploadTimeout);
-        if (fetchError.name === 'AbortError') {
-          console.error('❌ Upload request timed out');
-          hideSplashWithDelay(splashStartTime, 800);
-          showToast('error', 'Upload timed out. The file may be too large or the server is busy. Please try again.');
-          TagManager.setLoading(false);
-          return;
-        }
-        throw fetchError;
-      }
-      
-      // Check for 504 Gateway Timeout or other server errors
-      if (response.status === 504) {
-        console.error('❌ 504 Gateway Timeout - server took too long to respond');
-        hideSplashWithDelay(splashStartTime, 800);
-        showToast('error', 'Upload timed out on the server. The file may be too large. Please try a smaller file or try again later.');
-        TagManager.setLoading(false);
-        return;
-      }
-      
-      if (!response.ok) {
-        console.error(`❌ Upload failed with status ${response.status}`);
-        // Try to get error message from response
-        let errorMessage = `Upload failed (${response.status})`;
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch (e) {
-          // Response might not be JSON (could be HTML error page)
-          const text = await response.text();
-          if (text.includes('<html>')) {
-            errorMessage = 'Server returned an error page. The upload may have timed out.';
-          }
-        }
-        hideSplashWithDelay(splashStartTime, 800);
-        showToast('error', errorMessage);
-        TagManager.setLoading(false);
-        return;
-      }
+      const response = await fetch('/upload', {
+        method: 'POST',
+        body: formData
+      });
+      console.log('📡 Upload response status:', response.status);
       
       // Update splash status
       if (statusElement) statusElement.textContent = 'Processing data...';
       
-      let data;
-      try {
-        const responseText = await response.text();
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('❌ Failed to parse upload response as JSON:', parseError);
-        console.error('Response text:', responseText?.substring(0, 500));
-        hideSplashWithDelay(splashStartTime, 800);
-        showToast('error', 'Server returned an invalid response. The upload may have timed out.');
-        TagManager.setLoading(false);
-        return;
-      }
+      const data = await response.json();
       console.log('📦 Upload response data:', data);
       
       if (response.ok && data.success) {
@@ -283,141 +221,35 @@ async function handleFiles(files) {
           }
         }
         
-        // Update splash status but allow hiding immediately
-        if (statusElement) statusElement.textContent = 'Processing complete';
-        
+        // Hide splash immediately and refresh data asynchronously (non-blocking)
+        const splashEl = document.getElementById('excelLoadingSplash');
+        if (splashEl) splashEl.style.display = 'none';
         if (typeof TagManager !== 'undefined') {
           try {
-            // OPTIMIZATION: Use fast path - load tags directly without waiting
-            // This is much faster than waiting for initial delay
-            console.log('⚡ Starting fast tag load after upload...');
-            if (TagManager.refreshTagLists) {
-              console.time('post-upload-refresh');
-              
-              // CRITICAL FIX: Force refresh tags after upload with cache bypass
-              // Use nocache=1 to ensure we get fresh data from the server
-              let tagsLoaded = false;
-              
-              // First, try to load tags with cache bypass to ensure fresh data
-              try {
-                // Force cache bypass with nocache=1 to get fresh tags after upload
-                const refreshUrl = `/api/available-tags?t=${Date.now()}&nocache=1&prefer_db=0`;
-                console.log(`🔄 Forcing tag refresh after upload (cache bypass): ${refreshUrl}`);
-                const refreshResponse = await fetch(refreshUrl);
-                
-                if (refreshResponse.ok) {
-                  const refreshData = await refreshResponse.json();
-                  if (refreshData.tags && Array.isArray(refreshData.tags) && refreshData.tags.length > 0) {
-                    console.log(`✅ Tag refresh successful: ${refreshData.tags.length} tags loaded`);
-                    
-                    // Clear any cached tags FIRST to ensure fresh data
-                    if (TagManager.clearAvailableTagsCache) {
-                      TagManager.clearAvailableTagsCache();
-                    }
-                    
-                    // Update tags immediately
-                    TagManager.state.tags = [...refreshData.tags];
-                    TagManager.state.originalTags = [...refreshData.tags];
-                    TagManager._updateAvailableTags(refreshData.tags);
-                    
-                    // Hide splash
-                    const splashEl = document.getElementById('excelLoadingSplash');
-                    if (splashEl) splashEl.style.display = 'none';
-                    
-                    // Show success notification
-                    const rowCount = data.rows || 0;
-                    const filename = data.filename || file.name;
-                    showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
-                    
-                    // Load filters and selected tags in background
-                    Promise.all([
-                      TagManager.fetchAndPopulateFilters(),
-                      TagManager.fetchAndUpdateSelectedTags()
-                    ]).catch(err => console.warn('Background filter/tag loading failed:', err));
-                    
-                    tagsLoaded = true;
-                    console.log('✅ Tag refresh complete - tags displayed');
-                    console.timeEnd('post-upload-refresh');
-                    return; // Exit early - tags are loaded
-                  } else {
-                    console.warn('⚠️ Tag refresh returned empty tags, trying full refresh...');
-                  }
-                }
-              } catch (refreshErr) {
-                console.log('⚠️ Tag refresh failed, trying full refreshTagLists:', refreshErr.name);
+            TagManager.clearUIStateForNewFile(true); // keep filters
+            // Kick off refresh without awaiting to prevent UI stall
+            setTimeout(() => {
+              if (TagManager.refreshTagLists) {
+                console.time('post-upload-refresh-async');
+                TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                  .finally(() => console.timeEnd('post-upload-refresh-async'))
+                  .catch(err => {
+                    console.error('Async refreshTagLists failed', err);
+                    // Last resort fallback
+                    window.location.reload();
+                  });
+              } else {
+                // Fallback individual fetches without await
+                TagManager.fetchAndUpdateAvailableTags?.();
+                TagManager.fetchAndUpdateSelectedTags?.();
+                TagManager.fetchAndPopulateFilters?.();
               }
-              
-              // If direct refresh didn't work, use full refreshTagLists with force flag
-              if (!tagsLoaded) {
-                console.log('🔄 Using full refreshTagLists with force flag...');
-                try {
-                  // Clear cache first to ensure fresh data
-                  if (TagManager.clearAvailableTagsCache) {
-                    TagManager.clearAvailableTagsCache();
-                  }
-                  
-                  // Force refresh with cache bypass
-                  await TagManager.refreshTagLists({ preserveFilters: true, force: true });
-                  console.log('✅ Full refreshTagLists completed');
-                  
-                  // Hide splash
-                  const splashEl = document.getElementById('excelLoadingSplash');
-                  if (splashEl) splashEl.style.display = 'none';
-                  
-                  // Show success notification
-                  const rowCount = data.rows || 0;
-                  const filename = data.filename || file.name;
-                  showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
-                  
-                  tagsLoaded = true;
-                } catch (err) {
-                  console.error('❌ Full refreshTagLists failed:', err);
-                  // Still hide splash and show success
-                  const splashEl = document.getElementById('excelLoadingSplash');
-                  if (splashEl) splashEl.style.display = 'none';
-                  const rowCount = data.rows || 0;
-                  const filename = data.filename || file.name;
-                  showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
-                  // Show warning about tag loading
-                  setTimeout(() => {
-                    showToast('warning', 'Tags may not have loaded. Please refresh the page if tags are missing.');
-                  }, 1000);
-                }
-              }
-              
-              console.timeEnd('post-upload-refresh');
-            } else {
-              // Fallback: try individual methods
-              console.warn('⚠️ refreshTagLists not available, using fallback methods');
-              const splashEl = document.getElementById('excelLoadingSplash');
-              if (splashEl) splashEl.style.display = 'none';
-              
-              // Try to load tags individually
-              Promise.all([
-                TagManager.fetchAndUpdateAvailableTags?.() || Promise.resolve(),
-                TagManager.fetchAndUpdateSelectedTags?.() || Promise.resolve(),
-                TagManager.fetchAndPopulateFilters?.() || Promise.resolve()
-              ]).then(() => {
-                console.log('✅ Fallback tag loading completed');
-                // Show success notification
-                const rowCount = data.rows || 0;
-                const filename = data.filename || file.name;
-                showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
-              }).catch(err => {
-                console.error('❌ Fallback tag loading failed:', err);
-                showToast('error', 'Failed to load tags. Please refresh the page.');
-              });
-            }
+            }, 0);
           } catch (e) {
-            console.error('❌ Post-upload refresh setup failed:', e);
-            const splashEl = document.getElementById('excelLoadingSplash');
-            if (splashEl) splashEl.style.display = 'none';
-            showToast('error', 'Upload succeeded but tag loading failed. Please refresh the page.');
+            console.error('Post-upload async refresh setup failed, reloading', e);
+            window.location.reload();
           }
         } else {
-          console.error('❌ TagManager not available');
-          const splashEl = document.getElementById('excelLoadingSplash');
-          if (splashEl) splashEl.style.display = 'none';
           window.location.reload();
         }
         
@@ -630,62 +462,63 @@ function pollUploadStatus(filename) {
         console.log('File processing complete, updating UI...');
 
         // Fetch all updated data in parallel to avoid serial bottlenecks
-        console.log('🔄 Starting tag refresh after background processing...');
         console.time('post-ready-data-fetch');
-        
-        // Update splash status
-        const statusEl = document.querySelector('#excelLoadingSplash .upload-status');
-        if (statusEl) statusEl.textContent = 'Loading tags...';
-        
-        try {
-          if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
-            await TagManager.refreshTagLists({ preserveFilters: true, force: true });
-            console.log('✅ Tag refresh completed after background processing');
-          } else {
-            // Fallback: load tags individually
-            await Promise.all([
-              // Available tags
-              (async () => {
-                console.log('Fetching available tags (fallback)...');
-                const res = await TagManager.fetchAndUpdateAvailableTags();
-                console.log('Available tags result:', res);
-              })(),
-              // Selected tags
-              (async () => {
-                console.log('Fetching selected tags (fallback)...');
-                const res = await TagManager.fetchAndUpdateSelectedTags();
-                console.log('Selected tags result:', res);
-              })(),
-              // Filter options
-              (async () => {
-                console.log('Fetching filter options (fallback)...');
-                await TagManager.fetchAndPopulateFilters();
-                console.log('Filter options updated');
-              })()
-            ]);
-            console.log('✅ Fallback tag loading completed');
-          }
-        } catch (refreshError) {
-          console.error('❌ Tag refresh failed after background processing:', refreshError);
-          showToast('error', 'File processed but tag loading failed. Please refresh the page.');
+        if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
+          await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+        } else {
+          await Promise.all([
+            // Available tags
+            (async () => {
+              console.log('Fetching available tags (fallback)...');
+              const res = await TagManager.fetchAndUpdateAvailableTags();
+              console.log('Available tags result:', res);
+            })(),
+            // Selected tags
+            (async () => {
+              console.log('Fetching selected tags (fallback)...');
+              const res = await TagManager.fetchAndUpdateSelectedTags();
+              console.log('Selected tags result:', res);
+            })(),
+            // Filter options
+            (async () => {
+              console.log('Fetching filter options (fallback)...');
+              await TagManager.fetchAndPopulateFilters();
+              console.log('Filter options updated');
+            })()
+          ]);
         }
-        
         console.timeEnd('post-ready-data-fetch');
         
-        // Hide splash after tags are loaded
+        // Hide splash and trigger async, non-blocking refresh
         if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
           TagManager.hideExcelLoadingSplash();
         } else {
           const s = document.getElementById('excelLoadingSplash');
           if (s) s.style.display = 'none';
         }
-        
-        // Show success notification with row count if available
-        const rowCount = data.rows || data.rows_processed || 0;
-        if (rowCount > 0) {
-          showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
+        showToast('success', `File "${filename}" loaded successfully!`);
+        if (typeof TagManager !== 'undefined') {
+          try {
+            TagManager.clearUIStateForNewFile?.(true);
+            setTimeout(() => {
+              if (TagManager.refreshTagLists) {
+                TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                  .catch(err => {
+                    console.error('refreshTagLists failed after poll-ready', err);
+                    window.location.reload();
+                  });
+              } else {
+                TagManager.fetchAndUpdateAvailableTags?.();
+                TagManager.fetchAndUpdateSelectedTags?.();
+                TagManager.fetchAndPopulateFilters?.();
+              }
+            }, 0);
+          } catch (e) {
+            console.error('Async refresh setup failed after poll-ready', e);
+            window.location.reload();
+          }
         } else {
-          showToast('success', `File "${filename}" loaded successfully!`);
+          window.location.reload();
         }
         
         return; // Stop polling
@@ -733,12 +566,7 @@ function pollUploadStatus(filename) {
         if (data.file_exists) {
           // File exists but status was cleared - treat as ready
           console.log(`File ${filename} exists but status was cleared - treating as ready`);
-          const rowCount = data.rows || data.rows_processed || 0;
-          if (rowCount > 0) {
-            showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
-          } else {
-            showToast('success', `File "${filename}" loaded successfully!`);
-          }
+          showToast('success', `File "${filename}" loaded successfully!`);
           return; // Stop polling
         } else {
           // File doesn't exist - stop polling
@@ -1051,68 +879,38 @@ document.addEventListener('DOMContentLoaded', function() {
     document.documentElement.setAttribute('data-app-scale', String(appliedScale));
   }
 
-  // Debounce scaleAppToFit to prevent zoom flashing
-  let scaleDebounceTimer;
-  let isScaling = false;
-  const debouncedScaleAppToFit = () => {
-    if (isScaling) return; // Prevent concurrent calls
-    clearTimeout(scaleDebounceTimer);
-    scaleDebounceTimer = setTimeout(() => {
-      isScaling = true;
-      try {
-        scaleAppToFit();
-      } finally {
-        // Use requestAnimationFrame to ensure scaling completes before allowing next call
-        requestAnimationFrame(() => {
-          isScaling = false;
-        });
-      }
-    }, 150); // Debounce to 150ms to prevent rapid fire calls
-  };
-
-  // Expose for other scripts (use debounced version)
-  window.scaleAppToFit = debouncedScaleAppToFit;
+  // Expose for other scripts
+  window.scaleAppToFit = scaleAppToFit;
 
   // Apply on ready (after content becomes visible), and on resize/orientation
-  // But wait for initial content to load to prevent zoom flashing
   document.addEventListener('DOMContentLoaded', function() {
     const main = document.getElementById('mainContent');
     if (!main) return;
 
-    // Wait longer for content to stabilize before first scale
-    setTimeout(() => {
-      const tryApply = () => {
-        const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
-        if (visible) {
-          debouncedScaleAppToFit();
-        } else {
-          setTimeout(tryApply, 200);
-        }
-      };
-      tryApply();
-    }, 1000); // Wait 1 second for initial content to load
+    const tryApply = () => {
+      const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
+      if (visible) {
+        requestAnimationFrame(scaleAppToFit);
+      } else {
+        setTimeout(tryApply, 200);
+      }
+    };
+    tryApply();
   });
 
-  // Ensure after full load (fonts/images) we re-calc - but only once
-  let loadScaleApplied = false;
+  // Ensure after full load (fonts/images) we re-calc
   window.addEventListener('load', () => {
-    if (!loadScaleApplied) {
-      loadScaleApplied = true;
-      // Single call after load, with delay to let everything settle
-      setTimeout(() => {
-        debouncedScaleAppToFit();
-      }, 500);
-    }
+    requestAnimationFrame(scaleAppToFit);
+    setTimeout(scaleAppToFit, 0);
+    setTimeout(scaleAppToFit, 250);
   });
 
   let resizeTimer;
   window.addEventListener('resize', () => {
     cancelAnimationFrame(resizeTimer);
-    resizeTimer = requestAnimationFrame(debouncedScaleAppToFit);
+    resizeTimer = requestAnimationFrame(scaleAppToFit);
   });
-  window.addEventListener('orientationchange', () => {
-    setTimeout(debouncedScaleAppToFit, 300); // Delay to let orientation change complete
-  });
+  window.addEventListener('orientationchange', () => setTimeout(scaleAppToFit, 0));
 })();
 
 // Expose manual control in console

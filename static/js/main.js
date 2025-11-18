@@ -750,18 +750,12 @@ const AppLoadingSplash = {
         }
         this._emergencyTimer = setTimeout(() => {
             this.emergencyHide();
-        }, 2000); // Reduced to 2 seconds - must hide quickly
+        }, 7000);
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
         
         if (splash) {
-            // CRITICAL: Make splash non-blocking - allow interaction through it
-            splash.style.pointerEvents = 'none';
-            const content = splash.querySelector('.splash-content');
-            if (content) {
-                content.style.pointerEvents = 'auto';
-            }
             splash.style.display = 'flex';
             splash.classList.remove('fade-out');
         }
@@ -845,11 +839,9 @@ const AppLoadingSplash = {
             setTimeout(() => {
                 mainContent.classList.add('loaded');
                 mainContent.style.opacity = '1';
-                // Don't call scaleAppToFit during initial load - it causes zoom flashing
-                // It will be called automatically after content loads
-                // if (window.scaleAppToFit) {
-                //     try { window.scaleAppToFit(); } catch (e) { console.warn('scaleAppToFit error', e); }
-                // }
+                if (window.scaleAppToFit) {
+                    try { window.scaleAppToFit(); } catch (e) { console.warn('scaleAppToFit error', e); }
+                }
             }, 100);
         }
         
@@ -2322,7 +2314,6 @@ const TagManager = {
     },
 
     // Debounced version of updateAvailableTags to prevent multiple rapid calls
-    // REDUCED delay from 300ms to 100ms for faster response
     debouncedUpdateAvailableTags: debounce(function(originalTags, filteredTags = null) {
         // CRITICAL FIX: Don't update available tags during deselection
         if (this.state.isProcessingDeselection) {
@@ -2349,12 +2340,26 @@ const TagManager = {
         const tagsToShow = filteredTags || originalTags;
         if (tagsToShow && tagsToShow.length > 0) {
             this.showActionSplash('Loading tags...');
+            
+            // Show loading indicator in container IMMEDIATELY to prevent blank screen
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags...</p>
+                    </div>
+                `;
+            }
         }
         
-        // FIXED: Remove requestAnimationFrame delay for faster rendering
-        // Direct update for better performance
-        this._updateAvailableTags(originalTags, filteredTags);
-    }, 100), // Reduced from 300ms to 100ms for faster response
+        // Use requestAnimationFrame to ensure smooth DOM updates
+        requestAnimationFrame(() => {
+            this._updateAvailableTags(originalTags, filteredTags);
+        });
+    }, 300),
 
     // Helpers to preserve scroll position of the available list across re-renders
     // USER PREFERENCE: Scroll CURRENT INVENTORY to top when filter is applied
@@ -2939,8 +2944,14 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
-        // FIXED: Remove requestAnimationFrame delay for faster rendering
-        // Direct update for better performance - especially on initial load
+        // Windows optimization: Use requestAnimationFrame for smoother rendering
+        if (isWindows) {
+            requestAnimationFrame(() => {
+                this._performUpdateAvailableTags(originalTags, filteredTags);
+            });
+            return;
+        }
+        
         this._performUpdateAvailableTags(originalTags, filteredTags);
     },
     
@@ -2970,7 +2981,22 @@ const TagManager = {
             return;
         }
         
-        // Removed: Loading spinner indicator
+        // Show loading indicator immediately if container is empty or only has loading indicator
+        const currentContent = availableTagsContainer.innerHTML.trim();
+        const hasLoadingIndicator = currentContent.includes('spinner-border') || currentContent.includes('Loading');
+        const isEmpty = !currentContent || currentContent === '' || currentContent === '<div class="tag-entry">No tags available</div>';
+        
+        if (isEmpty || hasLoadingIndicator) {
+            // Keep showing loading indicator until tags are rendered
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-white">Loading tags...</p>
+                </div>
+            `;
+        }
         
         verboseLog('Tags received, showing simple test first');
         verboseLog('=== TAGS BEING RENDERED ===');
@@ -3010,6 +3036,21 @@ const TagManager = {
         
         verboseLog('After update - this.state.tags length:', this.state.tags.length);
         verboseLog('After update - this.state.originalTags length:', this.state.originalTags.length);
+        
+        // Keep loading indicator visible while building tags - don't clear yet
+        // We'll replace it with actual tags once they're built
+        // Only clear if there's no loading indicator (reuse currentContent from above)
+        if (!hasLoadingIndicator) {
+            // Show loading indicator if not already showing
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-white">Loading tags...</p>
+                </div>
+            `;
+        }
         
         // Schedule scroll restoration after rebuild
         const restoreScrollAfterBuild = () => this._restoreAvailableScrollPosition(savedScroll);
@@ -3879,11 +3920,6 @@ const TagManager = {
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
-                }
-                // Clear any backup timeout that might be set
-                if (this._waitForTagsBackupTimeout) {
-                    clearTimeout(this._waitForTagsBackupTimeout);
-                    this._waitForTagsBackupTimeout = null;
                 }
             } else if (attempts >= maxAttempts) {
                 // Timeout reached, hide splash anyway (but log warning)
@@ -6521,15 +6557,6 @@ const TagManager = {
     },
 
     async fetchAndUpdateAvailableTags() {
-        // Prevent concurrent fetches
-        if (this._fetchInProgress) {
-            verboseLog('Fetch already in progress, skipping duplicate call');
-            return false;
-        }
-        this._fetchInProgress = true;
-        
-        // Initialize savedScroll early so it's always available in catch block
-        let savedScroll = null;
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
@@ -6540,30 +6567,32 @@ const TagManager = {
                 verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
             }
             
+            // Show loading indicator in container IMMEDIATELY to prevent blank screen
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags...</p>
+                    </div>
+                `;
+            }
+            
             // Preserve current scroll/anchor so refreshes don't jump the list
-            savedScroll = this._saveAvailableScrollPosition();
+            const savedScroll = this._saveAvailableScrollPosition();
             
             // Rate limiting: prevent rapid successive calls
             // Reduced from 2000ms to 500ms to allow faster retries while still preventing abuse
             const now = Date.now();
             if (this._lastFetchTime && (now - this._lastFetchTime) < 500) {
-                const timeSinceLastFetch = now - this._lastFetchTime;
-                console.log(`⏱️ Rate limiting: skipping fetch (${timeSinceLastFetch}ms since last fetch, need 500ms)`);
                 verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
-                // CRITICAL FIX: If we have no tags and this is blocking, force the fetch anyway
-                const availableContainer = document.getElementById('availableTags');
-                const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
-                if (tagItems.length === 0 && (!this.state.tags || this.state.tags.length === 0)) {
-                    console.log('⚠️ Rate limit blocking but no tags loaded - forcing fetch anyway');
-                    // Reset rate limit to allow this critical fetch
-                    this._lastFetchTime = 0;
-                } else {
-                    // Hide splash if we're skipping
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                    return false;
+                // Hide splash if we're skipping
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
                 }
+                return false;
             }
             this._lastFetchTime = now;
             
@@ -6621,14 +6650,11 @@ const TagManager = {
                     // Increased timeout from 10s to 20s to accommodate slower lineage alignment queries
                     const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-                    // OPTIMIZATION: Always use cache and fast_load for faster response
-                    // Skip slow lineage alignment on initial loads and after upload
+                    // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Use fast_load on first attempt for initial loads OR after upload
-                    // fast_load skips expensive lineage alignment queries
-                    const isAfterUpload = document.getElementById('excelLoadingSplash')?.style.display === 'flex';
-                    const fastParam = (retryCount === 0 && (isInitialLoad || isAfterUpload)) ? '&fast_load=1' : '';
+                    // Use fast_load on first attempt for initial loads
+                    const fastParam = (retryCount === 0 && isInitialLoad) ? fastLoadParam : '';
                     response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}`, {
                         signal: controller.signal
                     });
@@ -6818,10 +6844,6 @@ const TagManager = {
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');
-                // CRITICAL: Wait for tags to appear after fast load
-                if (this._waitForTagsToAppear) {
-                    this._waitForTagsToAppear();
-                }
                 return true;
             }
             
@@ -6835,10 +6857,7 @@ const TagManager = {
             
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
-            // CRITICAL: Wait for tags to appear after updating
-            if (this._waitForTagsToAppear) {
-                this._waitForTagsToAppear();
-            }
+            // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
             return true;
         } catch (error) {
             console.error('Error fetching available tags:', error);
@@ -6871,9 +6890,6 @@ const TagManager = {
             }
 
             return false;
-        } finally {
-            // Always clear the fetch in progress flag
-            this._fetchInProgress = false;
         }
     },
 
@@ -6906,10 +6922,6 @@ const TagManager = {
     
     async _fallbackToLiteAvailableTags(originalError, savedScrollPosition) {
         try {
-            // Ensure savedScrollPosition is defined
-            if (!savedScrollPosition) {
-                savedScrollPosition = this._saveAvailableScrollPosition();
-            }
             verboseLog('Attempting fallback to /api/available-tags-lite due to error:', originalError?.message || originalError);
             const response = await fetch(`/api/available-tags-lite?t=${Date.now()}`);
             if (!response.ok) {
@@ -6958,9 +6970,7 @@ const TagManager = {
             
             this.validateSelectedTags();
             this._updateAvailableTags(tags);
-            if (savedScrollPosition) {
-                this._restoreAvailableScrollPosition(savedScrollPosition);
-            }
+            this._restoreAvailableScrollPosition(savedScrollPosition);
             this.updateTagCount('available', tags.length);
             this.updateTagCount('selected', this.state.persistentSelectedTags.length);
             
@@ -7149,80 +7159,17 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
         
-        // FIXED: Make UI immediately interactive - don't block on splash
-        // Show splash briefly then hide it immediately to make UI interactive
+        // Show application splash screen
         AppLoadingSplash.show();
         AppLoadingSplash.startAutoAdvance();
-        
-        // Hide splash immediately after a very short delay to ensure UI is interactive
-        setTimeout(() => {
-            AppLoadingSplash.stopAutoAdvance();
-            AppLoadingSplash.complete();
-        }, 100); // Hide splash after 100ms - UI should be interactive immediately
         
         // Initialize empty state first
         this.clearInitialDataRetry();
         this.initializeEmptyState();
+        AppLoadingSplash.nextStep(); // Templates loaded
         
-        // OPTIMIZATION: Check if file exists before trying to load tags
-        // This prevents unnecessary API calls when no Excel file is uploaded
-        setTimeout(async () => {
-            console.log('🔍 Checking if Excel file exists before loading tags...');
-            try {
-                // Quick check to see if there's a file in session
-                const fileCheckController = new AbortController();
-                const fileCheckTimeout = setTimeout(() => fileCheckController.abort(), 3000); // 3s timeout for quick check
-                const fileCheckResponse = await fetch('/api/current-file?t=' + Date.now(), {
-                    signal: fileCheckController.signal
-                });
-                clearTimeout(fileCheckTimeout);
-                
-                if (fileCheckResponse.ok) {
-                    const fileData = await fileCheckResponse.json();
-                    if (!fileData.filename) {
-                        console.log('✅ No Excel file uploaded - skipping tag load, showing empty state');
-                        // No file exists, so we're already in empty state - no need to load tags
-                        this._checkingExistingData = false;
-                        return;
-                    } else {
-                        console.log(`📁 Excel file found: ${fileData.filename} - proceeding with tag load`);
-                    }
-                } else {
-                    console.log('⚠️ Could not check file status, proceeding with tag load attempt');
-                }
-            } catch (fileCheckErr) {
-                // If file check fails, proceed with tag load attempt (might be network issue)
-                console.log('⚠️ File check failed, proceeding with tag load attempt:', fileCheckErr.name);
-            }
-            
-            // Only proceed with tag loading if we get here (file exists or check failed)
-            console.log('🔄 Starting checkForExistingData...');
-            this.checkForExistingData().then(() => {
-                console.log('✅ checkForExistingData completed');
-                // CRITICAL FIX: Don't try another fetch if we've already determined there's no data
-                // The checkForExistingData function already tried both initial-data and fallback
-                // If both returned empty, there's no point trying again
-                const availableContainer = document.getElementById('availableTags');
-                const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
-                if (tagItems.length === 0 && (!this.state.tags || this.state.tags.length === 0)) {
-                    console.log('⚠️ No tags found after checkForExistingData - this is expected when no Excel file is uploaded');
-                    console.log('✅ Empty state should already be shown - no further fetch needed');
-                } else {
-                    console.log(`✅ Tags already loaded: ${tagItems.length} items in DOM, ${this.state.tags?.length || 0} in state`);
-                }
-            }).catch(err => {
-                console.error('❌ checkForExistingData failed:', err);
-                // Only try fallback if checkForExistingData actually failed (not just empty)
-                if (err && !err.message.includes('Empty') && !err.message.includes('No data')) {
-                    console.log('🔄 Attempting fallback direct tag fetch...');
-                    this.fetchAndUpdateAvailableTags().catch(fallbackErr => {
-                        console.error('❌ Fallback tag fetch also failed:', fallbackErr);
-                    });
-                } else {
-                    console.log('⚠️ checkForExistingData returned empty (no file uploaded) - not retrying');
-                }
-            });
-        }, 0); // Use setTimeout to make it non-blocking
+        // Check if there's already data loaded (e.g., from a previous session or default file)
+        this.checkForExistingData();
         
         // Ensure all filters default to 'All' on page load
         this.state.filters = {
@@ -7404,13 +7351,8 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // FIXED: Don't show splash immediately - make UI interactive first
-        // Only show splash if we're actually loading (after a short delay)
-        const showSplashTimeout = setTimeout(() => {
-            if (this._checkingExistingData) {
-                this.showActionSplash('Loading tags...');
-            }
-        }, 500); // Only show splash if loading takes more than 500ms
+        // Show loading splash IMMEDIATELY before any async operations
+        this.showActionSplash('Loading tags...');
 
         // Check for current uploaded file from session (non-blocking, runs in parallel)
         // Use requestAnimationFrame to ensure it doesn't block the main thread
@@ -7430,10 +7372,6 @@ const TagManager = {
                             const fileInfoText = document.getElementById('fileInfoText');
                             if (fileInfoText) {
                                 fileInfoText.textContent = fileData.filename;
-                                // Remove notification when file is detected
-                                if (this.hideNoFileNotification) {
-                                    this.hideNoFileNotification();
-                                }
                             }
                             const currentFileInfo = document.getElementById('currentFileInfo');
                             if (currentFileInfo) {
@@ -7448,7 +7386,18 @@ const TagManager = {
                 });
         });
 
-        // Removed: Loading spinner in container
+        // Show loading indicator in container IMMEDIATELY to prevent blank screen
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (availableTagsContainer) {
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-white">Loading tags...</p>
+                </div>
+            `;
+        }
 
         const retryDelays = Array.isArray(this.initialDataRetryDelays) && this.initialDataRetryDelays.length > 0
             ? this.initialDataRetryDelays
@@ -7490,242 +7439,50 @@ const TagManager = {
             verboseLog('Cache rendered, fetching fresh data in background...');
         }
 
-        // CRITICAL FIX: Use AbortController to actually cancel the fetch request
-        // Increased timeout to 30 seconds to allow for slow server responses
-        const abortController = new AbortController();
-        let timeoutReason = 'timeout'; // Track why we aborted
-        const timeoutId = setTimeout(() => {
-            console.log('⏳ Request timeout - aborting fetch after 30 seconds');
-            verboseLog('⏳ Request timeout - aborting fetch');
-            timeoutReason = 'timeout_30s';
-            abortController.abort();
-        }, 30000); // 30 second timeout (increased from 8s)
+        // CRITICAL FIX: Increased timeout to 30 seconds to handle slow database queries
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Initialization timeout')), 30000);
+        });
 
-        // Track if initial data fetch is in progress to prevent premature fallback
-        let initialDataFetchInProgress = true;
-        
         // Safety net: ensure loading overlay never blocks interaction for long
-        // Increased timeout to 60 seconds to allow for slow tag loading
         const splashSafetyTimeout = setTimeout(() => {
-            // Check if fetch is still in progress - if so, don't trigger fallback yet
-            if (initialDataFetchInProgress) {
-                verboseLog('⏳ Safety timeout triggered but initial fetch still in progress - extending timeout');
-                // Extend timeout by another 30 seconds
-                setTimeout(() => {
-                    if (initialDataFetchInProgress) {
-                        verboseLog('⏳ Extended timeout expired - forcing UI interactive');
-                        initialDataFetchInProgress = false;
-                        this._handleSafetyTimeoutFallback();
-                    }
-                }, 30000);
-                return;
-            }
-            
-            this._handleSafetyTimeoutFallback();
-        }, 60000); // Increased to 60 seconds to give tags time to load
-        
-        // Helper function to handle safety timeout fallback
-        this._handleSafetyTimeoutFallback = () => {
-            // Always make UI interactive again
-            verboseLog('⏳ Safety timeout triggered - forcing UI to be interactive');
+            // Always make UI interactive again quickly
             if (typeof this.hideActionSplash === 'function') {
                 this.hideActionSplash();
             }
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
-            
-            // CRITICAL: Ensure main content is always interactive
-            const mainContent = document.getElementById('mainContent');
-            if (mainContent) {
-                mainContent.style.pointerEvents = 'auto';
-                mainContent.style.opacity = '1';
-            }
 
             // Only attempt a visible fallback load if nothing has rendered yet
             const availableTagsContainer = document.getElementById('availableTags');
             const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
             if (tagItems.length === 0) {
                 console.warn('⏳ Safety timeout triggered - no tags found, attempting fallback load (non-blocking)');
-                // Don't show empty state immediately - wait for fallback to complete
                 // Fire-and-forget fallback fetch so UI stays responsive
                 try {
                     this.fetchAndUpdateAvailableTags().then(() => {
                         verboseLog('Fallback tag loading succeeded');
-                        // CRITICAL: Wait for tags to appear after fallback load
-                        if (this._waitForTagsToAppear) {
-                            this._waitForTagsToAppear();
-                        }
                     }).catch(fallbackError => {
                         console.error('Fallback tag loading failed:', fallbackError);
-                        // Only show empty state if fallback actually failed
-                        if (availableTagsContainer) {
-                            const stillNoTags = availableTagsContainer.querySelectorAll('.tag-item').length === 0;
-                            if (stillNoTags) {
-                                availableTagsContainer.innerHTML = `
-                                    <div class="text-center py-5">
-                                        <div class="upload-prompt">
-                                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                            <h5 class="text-muted">No product data loaded</h5>
-                                            <p class="text-muted">Upload an Excel file to get started</p>
-                                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                                <i class="fas fa-upload me-2"></i>Upload Excel File
-                                            </button>
-                                        </div>
-                                    </div>
-                                `;
-                            }
-                        }
                     });
                 } catch (fallbackError) {
                     console.error('Fallback tag loading threw synchronously:', fallbackError);
-                    // Show empty state only if we're sure there are no tags
-                    if (availableTagsContainer) {
-                        const stillNoTags = availableTagsContainer.querySelectorAll('.tag-item').length === 0;
-                        if (stillNoTags) {
-                            availableTagsContainer.innerHTML = `
-                                <div class="text-center py-5">
-                                    <div class="upload-prompt">
-                                        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                        <h5 class="text-muted">No product data loaded</h5>
-                                        <p class="text-muted">Upload an Excel file to get started</p>
-                                        <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                            <i class="fas fa-upload me-2"></i>Upload Excel File
-                                        </button>
-                                    </div>
-                                </div>
-                            `;
-                        }
-                    }
                 }
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        };
+        }, 2000); // 2 second safety net so "Loading tags" overlay never lingers
 
-        // CRITICAL FIX: Try fast path first - load tags directly without waiting for initial-data
-        // This is much faster because it skips filter generation and other slow operations
-        console.log('⚡ Attempting fast load: fetching tags directly from /api/available-tags...');
         try {
-            const fastLoadController = new AbortController();
-            const fastLoadTimeout = setTimeout(() => {
-                console.log('⏱️ Fast load timeout after 6 seconds');
-                fastLoadController.abort();
-            }, 6000); // 6s timeout - gives time for cache miss but not too long
-            
-            // OPTIMIZATION: Use cache for fast loads (much faster) - only bypass cache when explicitly needed
-            // nocache=1 forces full rebuild which is slow, so we only use it when we know data changed
-            const fastResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=1`, {
-                signal: fastLoadController.signal
-            });
-            clearTimeout(fastLoadTimeout);
-            
-            if (fastResponse.ok) {
-                const fastData = await fastResponse.json();
-                if (fastData.tags && Array.isArray(fastData.tags) && fastData.tags.length > 0) {
-                    console.log(`⚡ Fast load successful: loaded ${fastData.tags.length} tags in ${fastData.source || 'fast mode'}`);
-                    
-                    // Update tags immediately
-                    this.state.tags = [...fastData.tags];
-                    this.state.originalTags = [...fastData.tags];
-                    this._updateAvailableTags(fastData.tags);
-                    
-                    // Load filters and selected tags in parallel (non-blocking)
-                    Promise.all([
-                        this.fetchAndPopulateFilters(),
-                        this.fetchAndUpdateSelectedTags()
-                    ]).then(() => {
-                        console.log('✅ Fast load: filters and selected tags loaded');
-                    }).catch(err => {
-                        console.warn('⚠️ Fast load: filter/selected tag loading failed:', err);
-                    });
-                    
-                    // Update file info if available
-                    if (fastData.filename) {
-                        const fileInfoText = document.getElementById('fileInfoText');
-                        if (fileInfoText) {
-                            fileInfoText.textContent = fastData.filename;
-                            // Remove notification when file is detected
-                            if (this.hideNoFileNotification) {
-                                this.hideNoFileNotification();
-                            }
-                        }
-                    }
-                    
-                    clearTimeout(splashSafetyTimeout);
-                    clearTimeout(timeoutId);
-                    clearTimeout(showSplashTimeout);
-                    
-                    if (this._waitForTagsToAppear) {
-                        this._waitForTagsToAppear();
-                    } else if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                    
-                    this.clearInitialDataRetry();
-                    this._checkingExistingData = false;
-                    initialDataFetchInProgress = false;
-                    console.log('✅ Fast load complete - tags displayed');
-                    return;
-                }
-            }
-        } catch (fastError) {
-            if (fastError.name === 'AbortError') {
-                console.log('⏱️ Fast load timed out after 6 seconds, trying full initial-data load...');
-            } else {
-                console.log('⚠️ Fast load failed or returned empty, trying full initial-data load:', fastError.name);
-            }
-            // Continue to full initial-data load below
-        }
-        
-        // Fallback to full initial-data load if fast load didn't work
-        try {
-            console.log('📡 Fetching /api/initial-data (full load)...');
-            // Use AbortController to make fetch actually cancelable
-            const response = await fetch('/api/initial-data', {
-                signal: abortController.signal
-            });
-            
-            console.log(`📡 /api/initial-data response status: ${response.status}, ok: ${response.ok}`);
-            
-            // Mark fetch as complete
-            initialDataFetchInProgress = false;
-            
-            // Clear timeout if request succeeded
-            clearTimeout(timeoutId);
+            // Use the new initial-data endpoint for faster loading with timeout
+            const response = await Promise.race([
+                fetch('/api/initial-data'),
+                timeoutPromise
+            ]);
 
             if (response.ok) {
-                console.log('📦 Parsing initial-data response...');
                 const data = await response.json();
-                console.log('📦 Initial data response:', {
-                    success: data.success,
-                    hasAvailableTags: !!data.available_tags,
-                    availableTagsCount: data.available_tags ? data.available_tags.length : 0,
-                    dataLoaded: data.data_loaded,
-                    filename: data.filename
-                });
                 verboseLog('Initial data response:', data);
-                // Check if data is actually loaded - if not, show notification
-                if (!data.data_loaded || !data.available_tags || !Array.isArray(data.available_tags) || data.available_tags.length === 0) {
-                    console.log('⚠️ Initial data indicates no file uploaded, showing notification');
-                    this.initializeEmptyState();
-                    this._checkingExistingData = false;
-                    initialDataFetchInProgress = false;
-                    clearTimeout(splashSafetyTimeout);
-                    clearTimeout(timeoutId);
-                    clearTimeout(showSplashTimeout);
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                    setTimeout(() => {
-                        this.showNoFileNotification();
-                    }, 300);
-                    return;
-                }
-                
                 if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                     verboseLog(`Found ${data.available_tags.length} existing tags, loading data...`);
 
@@ -7738,20 +7495,13 @@ const TagManager = {
                         splashMessage.textContent = 'Loading product tags...';
                     }
 
-                    // Update available tags IMMEDIATELY - no delays for initial load
+                    // Update available tags (use setTimeout to yield to browser)
                     AppLoadingSplash.updateProgress(75, 'Processing tags...');
-                    // FIXED: Use immediate update on initial load to avoid debounce delay
-                    // Check if this is initial load (no tags loaded yet) or if flag is set
-                    const isInitialLoad = this.state.isInitialLoad || !this.state.tags || this.state.tags.length === 0;
-                    if (isInitialLoad) {
-                        // Use immediate update for instant tag display - no setTimeout, no debounce
-                        this._updateAvailableTags(data.available_tags, null);
-                    } else {
-                        // Use debounced update for subsequent loads
+                    setTimeout(() => {
                         this.debouncedUpdateAvailableTags(data.available_tags, null);
-                    }
-                    // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
-                    // when tags are actually fully rendered
+                        // CRITICAL: Don't hide splash here - _waitForTagsToAppear() will handle it
+                        // when tags are actually fully rendered
+                    }, 0);
 
                     // Restore previously selected tags from backend
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
@@ -7777,10 +7527,6 @@ const TagManager = {
                         const fileInfoText = document.getElementById('fileInfoText');
                         if (fileInfoText) {
                             fileInfoText.textContent = data.filename;
-                            // Remove notification when file is detected
-                            if (this.hideNoFileNotification) {
-                                this.hideNoFileNotification();
-                            }
                         }
                     }
                     
@@ -7789,191 +7535,30 @@ const TagManager = {
                     // This ensures the splash stays visible until tags are fully rendered
                     AppLoadingSplash.updateProgress(95, 'Finalizing...');
                     clearTimeout(splashSafetyTimeout);
-                    clearTimeout(timeoutId); // Clear fetch timeout since we got data
-                    
-                    // FIXED: Ensure _waitForTagsToAppear is called after tags are updated
-                    // Also set a backup timeout to ensure splash always hides
-                    this._waitForTagsBackupTimeout = setTimeout(() => {
-                        verboseLog('Backup timeout: Forcing splash to hide after tag update');
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                        AppLoadingSplash.stopAutoAdvance();
-                        AppLoadingSplash.complete();
-                        this._waitForTagsBackupTimeout = null;
-                    }, 3000); // 3 second max wait for tags (reduced from 5s)
-                    
-                    // FIXED: Call immediately without requestAnimationFrame delay for faster response
-                    setTimeout(() => {
-                        if (this._waitForTagsToAppear) {
-                            this._waitForTagsToAppear();
-                        } else {
-                            // If _waitForTagsToAppear doesn't exist, use backup timeout
-                            if (this._waitForTagsBackupTimeout) {
-                                clearTimeout(this._waitForTagsBackupTimeout);
-                            }
-                            setTimeout(() => {
-                                if (this.hideActionSplash) {
-                                    this.hideActionSplash();
-                                }
-                                AppLoadingSplash.stopAutoAdvance();
-                                AppLoadingSplash.complete();
-                            }, 1000); // Reduced from 2000ms
-                        }
-                    }, 50); // Reduced from 100ms to 50ms for faster response
                     
                     this.clearInitialDataRetry();
                     this._checkingExistingData = false;
-                    clearTimeout(showSplashTimeout); // Clear splash timeout since we're done
                     verboseLog('Initial data loaded successfully');
                     return;
                 } else {
-                    console.log('⚠️ No initial data available:', data.message || 'No data found');
                     verboseLog('No initial data available:', data.message || 'No data found');
-                    
-                    // CRITICAL FIX: Try loading tags directly from /api/available-tags as fallback
-                    // This handles cases where initial-data returns empty but a file exists in session
-                    console.log('🔄 Attempting fallback: loading tags directly from /api/available-tags...');
-                    verboseLog('Attempting fallback: loading tags directly from /api/available-tags...');
-                    try {
-                        const fallbackUrl = '/api/available-tags?t=' + Date.now();
-                        console.log(`📡 Fetching fallback: ${fallbackUrl}`);
-                        
-                        // Add timeout to prevent hanging
-                        const fallbackController = new AbortController();
-                        const fallbackTimeout = setTimeout(() => {
-                            console.log('⏱️ Fallback fetch timeout after 5 seconds');
-                            fallbackController.abort();
-                        }, 5000);
-                        
-                        const tagsResponse = await fetch(fallbackUrl, {
-                            signal: fallbackController.signal
-                        });
-                        clearTimeout(fallbackTimeout);
-                        console.log(`📡 Fallback response status: ${tagsResponse.status}, ok: ${tagsResponse.ok}`);
-                        if (tagsResponse.ok) {
-                            const tagsData = await tagsResponse.json();
-                            console.log('📦 Fallback tags data:', {
-                                hasTags: !!tagsData.tags,
-                                tagsCount: tagsData.tags ? tagsData.tags.length : 0,
-                                source: tagsData.source
-                            });
-                            if (tagsData.tags && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
-                                console.log(`✅ Fallback successful: loaded ${tagsData.tags.length} tags`);
-                                verboseLog(`✅ Fallback successful: loaded ${tagsData.tags.length} tags from /api/available-tags`);
-                                // Update tags directly
-                                this.state.tags = [...tagsData.tags];
-                                this.state.originalTags = [...tagsData.tags];
-                                this._updateAvailableTags(tagsData.tags);
-                                
-                                // Load filters and selected tags
-                                await Promise.all([
-                                    this.fetchAndPopulateFilters(),
-                                    this.fetchAndUpdateSelectedTags()
-                                ]);
-                                
-                                // Update file info if available
-                                if (tagsData.filename) {
-                                    const fileInfoText = document.getElementById('fileInfoText');
-                                    if (fileInfoText) {
-                                        fileInfoText.textContent = tagsData.filename;
-                                        // Remove notification when file is detected
-                                        if (this.hideNoFileNotification) {
-                                            this.hideNoFileNotification();
-                                        }
-                                    }
-                                }
-                                
-                                clearTimeout(splashSafetyTimeout);
-                                clearTimeout(timeoutId);
-                                clearTimeout(showSplashTimeout);
-                                
-                                if (this._waitForTagsToAppear) {
-                                    this._waitForTagsToAppear();
-                                } else if (this.hideActionSplash) {
-                                    this.hideActionSplash();
-                                }
-                                AppLoadingSplash.stopAutoAdvance();
-                                AppLoadingSplash.complete();
-                                
-                                this.clearInitialDataRetry();
-                                this._checkingExistingData = false;
-                                verboseLog('Fallback tag loading completed successfully');
-                                return;
-                            } else {
-                                console.log('⚠️ Fallback returned empty tags - no data available');
-                            }
-                        } else {
-                            console.log(`⚠️ Fallback response not OK: ${tagsResponse.status}`);
-                        }
-                    } catch (fallbackError) {
-                        console.error('❌ Fallback tag loading failed:', fallbackError);
-                        if (fallbackError.name === 'AbortError') {
-                            console.log('⏱️ Fallback fetch was aborted (timeout)');
-                        }
-                        verboseLog('Fallback tag loading failed:', fallbackError);
-                    }
-                    
-                    // If we get here, fallback also failed or timed out - hide loading and show empty state
-                    console.log('⚠️ Both initial-data and fallback returned no tags (or timed out) - showing empty state');
-                    
-                    // Only show empty state if fallback also failed
-                    console.log('✅ Hiding loading splash and showing empty state');
-                    // CRITICAL FIX: Force hide all splash screens
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
-                    AppLoadingSplash.hide(); // Force hide
-                    clearTimeout(splashSafetyTimeout);
-                    clearTimeout(timeoutId); // Clear fetch timeout
-                    clearTimeout(showSplashTimeout); // Clear splash timeout
-                    
-                    // Hide action splash if it was shown
-                    if (this.hideActionSplash) {
-                        console.log('Hiding action splash...');
-                        this.hideActionSplash();
-                    }
-                    
-                    // CRITICAL: Also hide the excel loading splash if it exists
-                    const excelSplash = document.getElementById('excelLoadingSplash');
-                    if (excelSplash) {
-                        console.log('Hiding excel loading splash...');
-                        excelSplash.style.display = 'none';
-                    }
-                    
-                    // CRITICAL: Hide any other loading overlays
-                    const actionSplash = document.getElementById('actionSplash');
-                    if (actionSplash) {
-                        console.log('Hiding action splash element...');
-                        actionSplash.style.display = 'none';
-                    }
+                clearTimeout(splashSafetyTimeout);
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
                     this._checkingExistingData = false;
-                    
-                    // Show notification when no Excel file is uploaded
-                    this.showNoFileNotification();
-                    
-                    console.log('✅ Empty state initialized, checkForExistingData complete');
-                    // Don't retry if there's genuinely no data
-                    // this.scheduleInitialDataRetry('Empty initial data response');
+                    this.scheduleInitialDataRetry('Empty initial data response');
                     return;
                 }
             } else {
-                console.error(`❌ Initial data endpoint returned error: ${response.status}`);
                 verboseLog('Initial data endpoint returned error:', response.status);
                 // Complete splash loading on error
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
-                clearTimeout(timeoutId); // Clear fetch timeout
-                clearTimeout(showSplashTimeout); // Clear splash timeout
-                
-                // Hide action splash if it was shown
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
@@ -7982,131 +7567,23 @@ const TagManager = {
                 return;
             }
         } catch (error) {
-            // Mark fetch as complete even on error
-            initialDataFetchInProgress = false;
-            
-            // Clear all timeouts on error
-            clearTimeout(timeoutId);
-            clearTimeout(showSplashTimeout);
-            
-            // Check if this was a timeout or other abort
-            const isTimeout = error.name === 'AbortError' && (timeoutReason === 'timeout_30s' || error.message.includes('timeout'));
-            
-            if (isTimeout) {
-                console.warn('⏱️ Initial data request timed out after 30 seconds');
-            } else {
-                console.error('❌ Error loading initial data:', error);
-                console.error('❌ Error details:', {
-                    name: error.name,
-                    message: error.message,
-                    stack: error.stack
-                });
-            }
             verboseLog('Error loading initial data:', error.message);
             
-            // Handle abort/timeout specifically
-            if (error.name === 'AbortError' || error.message.includes('aborted')) {
-                console.log('⏱️ Request was aborted due to timeout - trying fallback tag fetch');
-                verboseLog('Request was aborted due to timeout, trying fallback');
-                
-                // CRITICAL FIX: Don't give up on timeout - try fallback fetch with longer timeout
-                try {
-                    console.log('🔄 Timeout occurred, attempting fallback: loading tags directly from /api/available-tags...');
-                    const fallbackUrl = `/api/available-tags?t=${Date.now()}&fast_load=1`;
-                    const fallbackController = new AbortController();
-                    const fallbackTimeout = setTimeout(() => {
-                        console.log('⏱️ Fallback timeout after 15 seconds');
-                        fallbackController.abort();
-                    }, 15000); // Increased to 15s for fallback
-                    
-                    const tagsResponse = await fetch(fallbackUrl, { signal: fallbackController.signal });
-                    clearTimeout(fallbackTimeout);
-                    
-                    if (tagsResponse.ok) {
-                        const tagsData = await tagsResponse.json();
-                        if (tagsData.tags && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
-                            console.log(`✅ Fallback successful after timeout: loaded ${tagsData.tags.length} tags`);
-                            this.state.tags = [...tagsData.tags];
-                            this.state.originalTags = [...tagsData.tags];
-                            this._updateAvailableTags(tagsData.tags);
-                            await Promise.all([
-                                this.fetchAndPopulateFilters(),
-                                this.fetchAndUpdateSelectedTags()
-                            ]);
-                            
-                            clearTimeout(splashSafetyTimeout);
-                            if (this._waitForTagsToAppear) {
-                                this._waitForTagsToAppear();
-                            } else if (this.hideActionSplash) {
-                                this.hideActionSplash();
-                            }
-                            AppLoadingSplash.stopAutoAdvance();
-                            AppLoadingSplash.complete();
-                            this.clearInitialDataRetry();
-                            this._checkingExistingData = false;
-                            return;
-                        }
-                    }
-                } catch (fallbackErr) {
-                    if (fallbackErr.name === 'AbortError') {
-                        console.error('❌ Fallback also timed out after 15 seconds - server may be slow or unresponsive');
-                    } else {
-                        console.error('❌ Fallback also failed after timeout:', fallbackErr);
-                    }
-                }
-                
-                // If fallback also failed, check if there's actually a file uploaded
-                // If no file, show empty state. If file exists, show warning.
-                console.log('🔍 Checking if file exists in session...');
-                try {
-                    const fileCheckController = new AbortController();
-                    const fileCheckTimeout = setTimeout(() => fileCheckController.abort(), 5000);
-                    const fileCheckResponse = await fetch('/api/current-file?t=' + Date.now(), {
-                        signal: fileCheckController.signal
-                    });
-                    clearTimeout(fileCheckTimeout);
-                    
-                    if (fileCheckResponse.ok) {
-                        const fileData = await fileCheckResponse.json();
-                        if (fileData.filename) {
-                            console.warn(`⚠️ File exists (${fileData.filename}) but tags are not loading - server may be slow`);
-                            // Don't show toast here - it's too early, user might just need to wait
-                        } else {
-                            console.log('✅ No file uploaded - showing empty state is correct');
-                        }
-                    }
-                } catch (fileCheckErr) {
-                    console.warn('⚠️ Could not check file status:', fileCheckErr.name);
-                }
-                
-                // If fallback also failed, proceed with empty state
-                verboseLog('Request was aborted due to timeout, proceeding with empty state');
+            // Handle timeout specifically
+            if (error.message === 'Initialization timeout') {
+                verboseLog('Initialization timed out, proceeding with empty state');
                 AppLoadingSplash.updateProgress(100, 'Ready to upload files');
             }
             
-            // Complete splash loading on error - CRITICAL to prevent freeze
+            // Complete splash loading on error
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             clearTimeout(splashSafetyTimeout);
             
-            // Hide action splash if it was shown
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-            
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
             this._checkingExistingData = false;
-            
-            // Show notification when no Excel file is uploaded (after a short delay to ensure UI is ready)
-            setTimeout(() => {
-                this.showNoFileNotification();
-            }, 500);
-            
-            // Don't retry on abort - just proceed with empty state
-            if (error.name !== 'AbortError') {
-                this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
-            }
+            this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
             return;
         }
     },
@@ -9742,10 +9219,6 @@ const TagManager = {
             // Hide splash and show success message
             this.hideExcelLoadingSplash();
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
-            
-            // Remove notification when file is uploaded
-            this.hideNoFileNotification();
-            
             verboseLog(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
             
             // Show success toast
@@ -9753,69 +9226,11 @@ const TagManager = {
                 showToast('success', `File uploaded successfully! ${uploadData.rows || 0} rows processed.`);
             }
             
-            // CRITICAL: Force reload tags immediately after upload (bypass cache, use fast_load)
-            console.log('🔄 Forcing tag reload after upload (bypassing cache, using fast_load)...');
-            try {
-                // Clear any cached tags first
-                if (this.state) {
-                    this.state.tags = [];
-                    this.state.originalTags = [];
-                }
-                
-                // Force fetch with nocache and fast_load=1 to ensure fresh data but instant response
-                // fast_load=1 returns immediately with background lineage alignment (non-blocking)
-                const freshTagsController = new AbortController();
-                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 8000); // 8s timeout
-                const freshTagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
-                    signal: freshTagsController.signal
-                });
-                clearTimeout(freshTagsTimeout);
-                
-                if (freshTagsResponse.ok) {
-                    const freshTagsData = await freshTagsResponse.json();
-                    if (freshTagsData.tags && freshTagsData.tags.length > 0) {
-                        console.log(`✅ Loaded ${freshTagsData.tags.length} fresh tags after upload`);
-                        this.state.tags = [...freshTagsData.tags];
-                        this.state.originalTags = [...freshTagsData.tags];
-                        this._updateAvailableTags(freshTagsData.tags);
-                        
-                        // Update file info
-                        if (freshTagsData.filename || file.name) {
-                            const fileInfoText = document.getElementById('fileInfoText');
-                            if (fileInfoText) {
-                                fileInfoText.textContent = freshTagsData.filename || file.name;
-                            }
-                        }
-                        
-                        // Load filters in background (non-blocking)
-                        this.fetchAndPopulateFilters().catch(err => {
-                            console.warn('Filter loading failed:', err);
-                        });
-                        
-                        // Wait for tags to appear in background (non-blocking)
-                        if (this._waitForTagsToAppear) {
-                            // Don't await - let it run in background
-                            setTimeout(() => {
-                                this._waitForTagsToAppear();
-                            }, 100);
-                        }
-                        
-                        // Hide splash immediately
-                        this.hideExcelLoadingSplash();
-                        
-                        return; // Success - tags loaded, no need to reload page
-                    }
-                }
-            } catch (refreshError) {
-                console.warn('⚠️ Failed to refresh tags after upload, will reload page:', refreshError);
-            }
-            
-            // Fallback: Refresh the page to show new data if direct tag refresh failed
+            // Refresh the page to show new data
             setTimeout(() => {
-                verboseLog('🔄 Refreshing page to show new data (fallback)...');
-                // Add cache-busting parameter to ensure fresh load
-                window.location.href = window.location.pathname + '?t=' + Date.now();
-            }, 2000);
+                verboseLog('🔄 Refreshing page to show new data...');
+                window.location.reload();
+            }, 1500);
             
             return; // Success!
         } catch (error) {
@@ -10025,10 +9440,6 @@ const TagManager = {
         // Update the file info text if a filename is provided
         if (fileName && fileInfoText) {
             fileInfoText.textContent = fileName;
-            // Remove notification when file is detected
-            if (this.hideNoFileNotification) {
-                this.hideNoFileNotification();
-            }
         }
     },
 
@@ -10752,104 +10163,6 @@ const TagManager = {
         }
         
         return processedTags;
-    },
-
-    // Show notification when no Excel file is uploaded
-    showNoFileNotification() {
-        // Check if file is actually uploaded
-        const fileInfoText = document.getElementById('fileInfoText');
-        const hasFile = fileInfoText && fileInfoText.textContent && 
-                       fileInfoText.textContent.trim() !== 'No file uploaded' &&
-                       fileInfoText.textContent.trim() !== '';
-        
-        if (hasFile) {
-            // File is uploaded, don't show notification
-            return;
-        }
-        
-        // Don't check for rate limiting - always show if no file is uploaded
-        
-        // Find the available tags container (CURRENT INVENTORY section)
-        const availableTagsContainer = document.getElementById('availableTags');
-        
-        // Create or get notification element
-        let notification = document.getElementById('noFileNotification');
-        if (!notification) {
-            notification = document.createElement('div');
-            notification.id = 'noFileNotification';
-            notification.className = 'alert alert-dismissible show'; // Removed 'fade' to prevent CSS transitions
-            // Use standard color scheme: purple/teal theme
-            // Add data attribute to help unified font sizing skip this element
-            notification.setAttribute('data-skip-font-sizing', 'true');
-            notification.style.cssText = `
-                background: rgba(45, 34, 58, 0.95);
-                border: 2px solid rgba(160, 132, 232, 0.6);
-                border-radius: 12px;
-                color: #ffffff;
-                padding: 16px 20px;
-                margin: 16px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-                backdrop-filter: blur(20px);
-                width: calc(100% - 32px);
-                max-width: 100%;
-                box-sizing: border-box;
-                opacity: 1;
-                transition: none;
-            `;
-            notification.innerHTML = `
-                <div class="d-flex align-items-start">
-                    <i class="fas fa-info-circle me-3" style="font-size: 1.3rem; color: rgba(0, 212, 170, 0.9); margin-top: 2px;"></i>
-                    <div class="flex-grow-1">
-                        <strong style="color: #ffffff; font-size: 1.1rem; display: block; margin-bottom: 8px;">No Excel File Uploaded</strong>
-                        <p class="mb-3" style="font-size: 0.95rem; color: rgba(255, 255, 255, 0.9); line-height: 1.5;">Please upload an Excel file to load product tags and get started.</p>
-                        <button class="btn btn-sm" onclick="const notif = document.getElementById('noFileNotification'); if(notif) { notif.remove(); } document.getElementById('fileInput').click();" style="background: rgba(160, 132, 232, 0.9); border: 1px solid rgba(160, 132, 232, 1); color: #ffffff; padding: 8px 16px; border-radius: 8px; font-size: 0.9rem; font-weight: 600;">
-                            <i class="fas fa-upload me-2"></i>Upload Excel File
-                        </button>
-                    </div>
-                    <button type="button" class="btn-close btn-close-white ms-2" onclick="const notif = document.getElementById('noFileNotification'); if(notif) { notif.remove(); }" aria-label="Close" style="opacity: 0.8;"></button>
-                </div>
-            `;
-            
-            // Insert notification inside the available tags container
-            if (availableTagsContainer) {
-                // Clear any existing content first
-                const tagList = availableTagsContainer.querySelector('.tag-list');
-                if (tagList) {
-                    // Insert at the beginning of the tag list container
-                    tagList.insertBefore(notification, tagList.firstChild);
-                } else {
-                    // If no tag-list, insert directly into container
-                    availableTagsContainer.insertBefore(notification, availableTagsContainer.firstChild);
-                }
-            } else {
-                // Fallback: try to find main content area
-                const mainContent = document.getElementById('mainContent');
-                if (mainContent) {
-                    // Insert at the beginning of main content
-                    mainContent.insertBefore(notification, mainContent.firstChild);
-                } else {
-                    // Last resort: don't show notification if we can't find the right place
-                    console.warn('Could not find availableTags container to show notification');
-                    return;
-                }
-            }
-            
-            // Notification will persist until file is uploaded (no auto-dismiss)
-        } else {
-            // Notification already exists, just show it
-            notification.classList.add('show');
-            notification.style.display = 'block';
-        }
-    },
-    
-    hideNoFileNotification() {
-        // Remove the notification when a file is uploaded
-        const notification = document.getElementById('noFileNotification');
-        if (notification && notification.parentNode) {
-            notification.remove();
-        }
-        // Clear the session storage flag
-        sessionStorage.removeItem('noFileNotificationTime');
     }
 };
 

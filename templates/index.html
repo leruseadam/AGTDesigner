@@ -4718,23 +4718,6 @@
       z-index: 1050 !important;
     }
     
-    #jsonMatchModal .modal-dialog {
-      max-height: 90vh;
-      height: 90vh;
-    }
-    
-    #jsonMatchModal .modal-content {
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    #jsonMatchModal .modal-body {
-      overflow-y: auto;
-      flex: 1;
-      max-height: calc(90vh - 120px); /* Account for header and footer */
-    }
-    
     #jsonMatchModal + .modal-backdrop {
       z-index: 1049 !important;
     }
@@ -8083,11 +8066,7 @@
             </div>
             <div class="mb-2"><strong>Matched Products:</strong></div>
             ${matchResult.matched_names
-              .map(product => {
-                // Use the full Product Name* which includes weight (e.g., "Acapulco Gold Wax - 1g")
-                // This matches the format used in Excel tags
-                return `<div class="mb-1">• ${product}</div>`;
-              })
+              .map(product => `<div class="mb-1">• ${product}</div>`)
               .join('')}
           `;
         } else {
@@ -11304,14 +11283,10 @@
     
     // showDatabaseModal override is now installed EARLIER in the page
     
-    // Verify functions are available (wrapped in try-catch to prevent syntax errors)
-    try {
-      console.log('Function verification:');
-      console.log('openDatabaseAnalytics available:', typeof window.openDatabaseAnalytics);
-      console.log('openLineageEditor available:', typeof window.openLineageEditor);
-    } catch (e) {
-      console.warn('Function verification error:', e);
-    }
+    // Verify functions are available
+    console.log('Function verification:');
+    console.log('openDatabaseAnalytics available:', typeof window.openDatabaseAnalytics);
+    console.log('openLineageEditor available:', typeof window.openLineageEditor);
   </script>
   
   <!-- Lineage Editor Modals -->
@@ -11729,9 +11704,6 @@
     setTimeout(trimFilename, 500);
   })();
   </script>
-  
-  <!-- TAG LOADING FIX: Optimizes tag loading after Excel upload -->
-  <script src="{{ url_for('static', filename='FIX_TAG_LOADING_AFTER_UPLOAD.js') }}?v={{ cache_bust }}"></script>
   
   </body>
 </html> 
