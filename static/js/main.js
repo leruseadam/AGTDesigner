@@ -10314,7 +10314,7 @@ const TagManager = {
         
         // Find the upload section to place notification above it
         const leftSection = document.querySelector('.left-section');
-        const filePathDisplay = document.querySelector('.file-path-display');
+        const buttonsRow = document.querySelector('.buttons-row');
         
         // Create or get notification element
         let notification = document.getElementById('noFileNotification');
@@ -10332,6 +10332,7 @@ const TagManager = {
                 margin-bottom: 12px;
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
                 backdrop-filter: blur(20px);
+                width: 100%;
             `;
             notification.innerHTML = `
                 <div class="d-flex align-items-start">
@@ -10347,15 +10348,15 @@ const TagManager = {
                 </div>
             `;
             
-            // Insert notification above the file path display in the left section
-            if (leftSection && filePathDisplay) {
-                leftSection.insertBefore(notification, filePathDisplay);
+            // Insert notification above the buttons row in the left section
+            if (leftSection && buttonsRow) {
+                leftSection.insertBefore(notification, buttonsRow);
             } else if (leftSection) {
-                // If filePathDisplay not found, insert at the beginning of leftSection
+                // If buttonsRow not found, insert at the beginning of leftSection
                 leftSection.insertBefore(notification, leftSection.firstChild);
             } else {
-                // Fallback: append to body (shouldn't happen)
-                document.body.appendChild(notification);
+                // Fallback: don't show notification if we can't find the right place
+                return;
             }
             
             // Auto-dismiss after 10 seconds
