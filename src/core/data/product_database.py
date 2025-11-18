@@ -6447,8 +6447,12 @@ class ProductDatabase:
             logging.error(f"Error clearing database data: {e}")
             raise
 
-    def get_all_products(self) -> List[Dict[str, Any]]:
-        """Get all products from the database for export."""
+    def get_all_products(self, limit: int = None) -> List[Dict[str, Any]]:
+        """Get all products from the database for export.
+        
+        Args:
+            limit: Optional limit on number of products to return (for fast loading)
+        """
         try:
             self.init_database()
             
@@ -6469,8 +6473,12 @@ class ProductDatabase:
             query = f'''
                 SELECT p.id, {", ".join(select_columns)}
                 FROM products p
-                ORDER BY p.id
+                ORDER BY p.id DESC
             '''
+            
+            # PERFORMANCE: Add LIMIT for fast loading
+            if limit:
+                query += f' LIMIT {limit}'
             
             cursor.execute(query)
             results = cursor.fetchall()
