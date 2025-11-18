@@ -7356,8 +7356,13 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // Show loading splash IMMEDIATELY before any async operations
-        this.showActionSplash('Loading tags...');
+        // FIXED: Don't show splash immediately - make UI interactive first
+        // Only show splash if we're actually loading (after a short delay)
+        const showSplashTimeout = setTimeout(() => {
+            if (this._checkingExistingData) {
+                this.showActionSplash('Loading tags...');
+            }
+        }, 500); // Only show splash if loading takes more than 500ms
 
         // Check for current uploaded file from session (non-blocking, runs in parallel)
         // Use requestAnimationFrame to ensure it doesn't block the main thread
@@ -7591,6 +7596,7 @@ const TagManager = {
                     
                     this.clearInitialDataRetry();
                     this._checkingExistingData = false;
+                    clearTimeout(showSplashTimeout); // Clear splash timeout since we're done
                     verboseLog('Initial data loaded successfully');
                     return;
                 } else {
@@ -7600,6 +7606,12 @@ const TagManager = {
                     AppLoadingSplash.complete();
                     clearTimeout(splashSafetyTimeout);
                     clearTimeout(timeoutId); // Clear fetch timeout
+                    clearTimeout(showSplashTimeout); // Clear splash timeout
+                    
+                    // Hide action splash if it was shown
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
                     
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
@@ -7614,6 +7626,12 @@ const TagManager = {
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
                 clearTimeout(timeoutId); // Clear fetch timeout
+                clearTimeout(showSplashTimeout); // Clear splash timeout
+                
+                // Hide action splash if it was shown
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
                 
                 // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
@@ -7622,8 +7640,9 @@ const TagManager = {
                 return;
             }
         } catch (error) {
-            // Clear timeout on error
+            // Clear all timeouts on error
             clearTimeout(timeoutId);
+            clearTimeout(showSplashTimeout);
             
             verboseLog('Error loading initial data:', error.message);
             
@@ -7637,6 +7656,11 @@ const TagManager = {
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             clearTimeout(splashSafetyTimeout);
+            
+            // Hide action splash if it was shown
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
             
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();

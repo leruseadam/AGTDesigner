@@ -20,8 +20,6 @@ function initializeTemplatePreview() {
         return;
     }
 
-    console.log('Template Preview Fix: Initializing...');
-    
     // Get all the necessary elements
     const editTemplateModal = document.getElementById('editTemplateModal');
     const templateSelectModal = document.getElementById('templateSelectModal');
@@ -35,40 +33,26 @@ function initializeTemplatePreview() {
     const saveTemplateBtn = document.getElementById('saveTemplateBtn');
     const previewContainer = document.getElementById('templatePreviewModal');
     
-    console.log('Template Preview Fix: Elements found:', {
-        editTemplateModal: !!editTemplateModal,
-        templateSelectModal: !!templateSelectModal,
-        scaleInputModal: !!scaleInputModal,
-        fontSelectModal: !!fontSelectModal,
-        fontSizingModeModal: !!fontSizingModeModal,
-        fieldFontSizesSection: !!fieldFontSizesSection,
-        templateSelect: !!templateSelect,
-        scaleInput: !!scaleInput,
-        fontSelect: !!fontSelect,
-        saveTemplateBtn: !!saveTemplateBtn,
-        previewContainer: !!previewContainer
-    });
-    
     if (!editTemplateModal) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 3) {
-            // Reduced retries to prevent console spam
-            scheduleTemplatePreviewInit(1000);
+        if (templatePreviewInitAttempts <= 2) {
+            // Only retry twice, silently
+            scheduleTemplatePreviewInit(2000);
         } else {
-            // Silently fail - don't spam console with errors
-            templatePreviewInitialized = true; // Mark as initialized to prevent further attempts
+            // Silently fail - don't spam console
+            templatePreviewInitialized = true;
         }
         return;
     }
     
     if (!previewContainer) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 3) {
-            // Reduced retries to prevent console spam
-            scheduleTemplatePreviewInit(1000);
+        if (templatePreviewInitAttempts <= 2) {
+            // Only retry twice, silently
+            scheduleTemplatePreviewInit(2000);
         } else {
-            // Silently fail - don't spam console with errors
-            templatePreviewInitialized = true; // Mark as initialized to prevent further attempts
+            // Silently fail - don't spam console
+            templatePreviewInitialized = true;
         }
         return;
     }
