@@ -67,6 +67,7 @@
                 
                 if (response.ok) {
                     const data = await response.json();
+                    console.log('⚡ Initial data response:', data);
                     
                     if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                         console.log(`⚡ Loaded ${data.available_tags.length} tags in background`);
@@ -126,19 +127,49 @@
                         
                         console.log('⚡ Background data loading complete');
                     } else {
-                        console.log('⚡ No initial data available - ready for file upload');
-                        // FIXED: Don't load test data - keep UI empty for upload
+                        console.warn('⚡ No initial data available:', data);
+                        // Fallback to original checkForExistingData if available
+                        if (originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
+                            console.log('⚡ Falling back to original checkForExistingData');
+                            try {
+                                await originalCheckForExistingData.call(this);
+                            } catch (fallbackError) {
+                                console.error('⚡ Fallback failed:', fallbackError);
+                                this.initializeEmptyState();
+                            }
+                        } else {
+                            this.initializeEmptyState();
+                        }
+                    }
+                } else {
+                    console.error('⚡ Initial data endpoint error:', response.status, response.statusText);
+                    // Fallback to original checkForExistingData if available
+                    if (originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
+                        console.log('⚡ Falling back to original checkForExistingData');
+                        try {
+                            await originalCheckForExistingData.call(this);
+                        } catch (fallbackError) {
+                            console.error('⚡ Fallback failed:', fallbackError);
+                            this.initializeEmptyState();
+                        }
+                    } else {
+                        this.initializeEmptyState();
+                    }
+                }
+            } catch (error) {
+                console.error('⚡ Initial data load error:', error);
+                // Fallback to original checkForExistingData if available
+                if (originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
+                    console.log('⚡ Falling back to original checkForExistingData after error');
+                    try {
+                        await originalCheckForExistingData.call(this);
+                    } catch (fallbackError) {
+                        console.error('⚡ Fallback failed:', fallbackError);
                         this.initializeEmptyState();
                     }
                 } else {
-                    console.log('⚡ Initial data endpoint error - ready for file upload');
-                    // FIXED: Don't load test data - keep UI empty for upload
                     this.initializeEmptyState();
                 }
-            } catch (error) {
-                console.log('⚡ Initial data load error - UI remains interactive:', error.message);
-                // Don't load test data on timeout - just leave UI ready for upload
-                this.initializeEmptyState();
             }
         };
         
