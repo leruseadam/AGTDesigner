@@ -7175,32 +7175,28 @@ const TagManager = {
             console.log('🔄 Starting checkForExistingData...');
             this.checkForExistingData().then(() => {
                 console.log('✅ checkForExistingData completed');
-                // CRITICAL: If no tags loaded after checkForExistingData, try direct tag fetch
-                setTimeout(() => {
-                    const availableContainer = document.getElementById('availableTags');
-                    const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
-                    if (tagItems.length === 0 && (!this.state.tags || this.state.tags.length === 0)) {
-                        console.log('⚠️ No tags found after checkForExistingData, attempting direct tag fetch...');
-                        this.fetchAndUpdateAvailableTags().then(success => {
-                            if (success) {
-                                console.log('✅ Direct tag fetch succeeded');
-                            } else {
-                                console.warn('⚠️ Direct tag fetch failed');
-                            }
-                        }).catch(err => {
-                            console.error('❌ Direct tag fetch error:', err);
-                        });
-                    } else {
-                        console.log(`✅ Tags already loaded: ${tagItems.length} items in DOM, ${this.state.tags?.length || 0} in state`);
-                    }
-                }, 1000); // Wait 1 second to see if tags appear
+                // CRITICAL FIX: Don't try another fetch if we've already determined there's no data
+                // The checkForExistingData function already tried both initial-data and fallback
+                // If both returned empty, there's no point trying again
+                const availableContainer = document.getElementById('availableTags');
+                const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
+                if (tagItems.length === 0 && (!this.state.tags || this.state.tags.length === 0)) {
+                    console.log('⚠️ No tags found after checkForExistingData - this is expected when no Excel file is uploaded');
+                    console.log('✅ Empty state should already be shown - no further fetch needed');
+                } else {
+                    console.log(`✅ Tags already loaded: ${tagItems.length} items in DOM, ${this.state.tags?.length || 0} in state`);
+                }
             }).catch(err => {
                 console.error('❌ checkForExistingData failed:', err);
-                // Fallback: try direct tag fetch
-                console.log('🔄 Attempting fallback direct tag fetch...');
-                this.fetchAndUpdateAvailableTags().catch(fallbackErr => {
-                    console.error('❌ Fallback tag fetch also failed:', fallbackErr);
-                });
+                // Only try fallback if checkForExistingData actually failed (not just empty)
+                if (err && !err.message.includes('Empty') && !err.message.includes('No data')) {
+                    console.log('🔄 Attempting fallback direct tag fetch...');
+                    this.fetchAndUpdateAvailableTags().catch(fallbackErr => {
+                        console.error('❌ Fallback tag fetch also failed:', fallbackErr);
+                    });
+                } else {
+                    console.log('⚠️ checkForExistingData returned empty (no file uploaded) - not retrying');
+                }
             });
         }, 0); // Use setTimeout to make it non-blocking
         
@@ -7785,9 +7781,11 @@ const TagManager = {
                     
                     // Only show empty state if fallback also failed
                     console.log('✅ Hiding loading splash and showing empty state');
+                    // CRITICAL FIX: Force hide all splash screens
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
+                    AppLoadingSplash.hide(); // Force hide
                     clearTimeout(splashSafetyTimeout);
                     clearTimeout(timeoutId); // Clear fetch timeout
                     clearTimeout(showSplashTimeout); // Clear splash timeout
@@ -7796,6 +7794,20 @@ const TagManager = {
                     if (this.hideActionSplash) {
                         console.log('Hiding action splash...');
                         this.hideActionSplash();
+                    }
+                    
+                    // CRITICAL: Also hide the excel loading splash if it exists
+                    const excelSplash = document.getElementById('excelLoadingSplash');
+                    if (excelSplash) {
+                        console.log('Hiding excel loading splash...');
+                        excelSplash.style.display = 'none';
+                    }
+                    
+                    // CRITICAL: Hide any other loading overlays
+                    const actionSplash = document.getElementById('actionSplash');
+                    if (actionSplash) {
+                        console.log('Hiding action splash element...');
+                        actionSplash.style.display = 'none';
                     }
                     
                     // FIXED: Initialize empty state instead of loading test data
