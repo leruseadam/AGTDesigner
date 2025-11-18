@@ -6632,10 +6632,12 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // OPTIMIZATION: Use fast_load parameter for initial load to skip slow lineage alignment
+            // OPTIMIZATION: Use fast_load parameter for initial load OR post-upload to skip slow lineage alignment
             // This dramatically speeds up tag loading when cached data is available
             const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
-            const fastLoadParam = isInitialLoad ? '&fast_load=1' : '';
+            // Also use fast_load after uploads (when called from refreshTagLists with force=true)
+            const isPostUpload = this._isPostUploadLoad || false;
+            const fastLoadParam = (isInitialLoad || isPostUpload) ? '&fast_load=1' : '';
             
             // Add retry logic for failed requests
             let response;
@@ -6653,8 +6655,8 @@ const TagManager = {
                     // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Use fast_load on first attempt for initial loads
-                    const fastParam = (retryCount === 0 && isInitialLoad) ? fastLoadParam : '';
+                    // Use fast_load on first attempt for initial loads or post-upload loads
+                    const fastParam = (retryCount === 0 && (isInitialLoad || isPostUpload)) ? fastLoadParam : '';
                     response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}`, {
                         signal: controller.signal
                     });
@@ -7072,6 +7074,9 @@ const TagManager = {
             this._lastFetchTime = 0;
         }
 
+        // Set flag to enable fast_load for post-upload tag loading
+        this._isPostUploadLoad = true;
+
         try {
             const results = await Promise.all([
                 this.fetchAndUpdateAvailableTags(),
@@ -7090,6 +7095,8 @@ const TagManager = {
             console.error('refreshTagLists error:', error);
             throw error;
         } finally {
+            // Clear post-upload flag
+            this._isPostUploadLoad = false;
             if (force) {
                 this._lastFetchTime = previousFetchTime;
             }
@@ -7351,52 +7358,66 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // Show loading splash IMMEDIATELY before any async operations
-        this.showActionSplash('Loading tags...');
-
-        // Check for current uploaded file from session (non-blocking, runs in parallel)
-        // Use requestAnimationFrame to ensure it doesn't block the main thread
-        requestAnimationFrame(() => {
-            fetch('/api/current-file')
-                .then(fileResponse => {
-                    if (fileResponse.ok) {
-                        return fileResponse.json();
+        // Check for current uploaded file FIRST to determine if we should show loading or upload prompt
+        let hasFile = false;
+        try {
+            const fileResponse = await fetch('/api/current-file');
+            if (fileResponse.ok) {
+                const fileData = await fileResponse.json();
+                if (fileData && fileData.success && fileData.has_file && fileData.filename) {
+                    hasFile = true;
+                    verboseLog(`Found uploaded file in session: ${fileData.filename}`);
+                    // Update file info
+                    const fileInfoText = document.getElementById('fileInfoText');
+                    if (fileInfoText) {
+                        fileInfoText.textContent = fileData.filename;
                     }
-                    return null;
-                })
-                .then(fileData => {
-                    if (fileData && fileData.success && fileData.has_file && fileData.filename) {
-                        verboseLog(`Found uploaded file in session: ${fileData.filename}`);
-                        // Use requestAnimationFrame for DOM updates to avoid blocking
-                        requestAnimationFrame(() => {
-                            const fileInfoText = document.getElementById('fileInfoText');
-                            if (fileInfoText) {
-                                fileInfoText.textContent = fileData.filename;
-                            }
-                            const currentFileInfo = document.getElementById('currentFileInfo');
-                            if (currentFileInfo) {
-                                currentFileInfo.textContent = fileData.filename;
-                            }
-                        });
-                        verboseLog(`File info updated: ${fileData.filename} (${fileData.row_count || 0} rows)`);
+                    const currentFileInfo = document.getElementById('currentFileInfo');
+                    if (currentFileInfo) {
+                        currentFileInfo.textContent = fileData.filename;
                     }
-                })
-                .catch(error => {
-                    verboseLog('Error checking for current file:', error);
-                });
-        });
+                    verboseLog(`File info updated: ${fileData.filename} (${fileData.row_count || 0} rows)`);
+                }
+            }
+        } catch (error) {
+            verboseLog('Error checking for current file:', error);
+        }
 
-        // Show loading indicator in container IMMEDIATELY to prevent blank screen
+        // Show loading splash only if file exists, otherwise show upload prompt
         const availableTagsContainer = document.getElementById('availableTags');
         if (availableTagsContainer) {
-            availableTagsContainer.innerHTML = `
-                <div class="text-center py-4">
-                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">Loading...</span>
+            if (hasFile) {
+                // File exists - show loading indicator
+                this.showActionSplash('Loading tags...');
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags...</p>
                     </div>
-                    <p class="mt-2 text-white">Loading tags...</p>
-                </div>
-            `;
+                `;
+            } else {
+                // No file - show upload prompt instead of loading splash
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-5">
+                        <div class="upload-prompt">
+                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No product data loaded</h5>
+                            <p class="text-muted">Upload an Excel file to get started</p>
+                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                <i class="fas fa-upload me-2"></i>Upload Excel File
+                            </button>
+                        </div>
+                    </div>
+                `;
+                // No file, so exit early
+                this._checkingExistingData = false;
+                return;
+            }
         }
 
         const retryDelays = Array.isArray(this.initialDataRetryDelays) && this.initialDataRetryDelays.length > 0
@@ -7611,6 +7632,23 @@ const TagManager = {
                         this.hideActionSplash();
                     }
                     
+                    // Show upload prompt in Current Inventory when no file/data
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    if (availableTagsContainer) {
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-5">
+                                <div class="upload-prompt">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <h5 class="text-muted">No product data loaded</h5>
+                                    <p class="text-muted">Upload an Excel file to get started</p>
+                                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                        <i class="fas fa-upload me-2"></i>Upload Excel File
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
                     // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
                     this._checkingExistingData = false;
@@ -7627,6 +7665,23 @@ const TagManager = {
                 // Hide action splash on error
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
+                }
+                
+                // Show upload prompt in Current Inventory on error (likely no file)
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                    availableTagsContainer.innerHTML = `
+                        <div class="text-center py-5">
+                            <div class="upload-prompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No product data loaded</h5>
+                                <p class="text-muted">Upload an Excel file to get started</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-upload me-2"></i>Upload Excel File
+                                </button>
+                            </div>
+                        </div>
+                    `;
                 }
                 
                 // FIXED: Initialize empty state instead of loading test data
@@ -7652,6 +7707,23 @@ const TagManager = {
             // Hide action splash on error
             if (this.hideActionSplash) {
                 this.hideActionSplash();
+            }
+            
+            // Show upload prompt in Current Inventory on error/timeout
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-5">
+                        <div class="upload-prompt">
+                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No product data loaded</h5>
+                            <p class="text-muted">Upload an Excel file to get started</p>
+                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                <i class="fas fa-upload me-2"></i>Upload Excel File
+                            </button>
+                        </div>
+                    </div>
+                `;
             }
             
             // FIXED: Initialize empty state instead of loading test data
