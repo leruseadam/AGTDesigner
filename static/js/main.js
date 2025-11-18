@@ -3011,13 +3011,6 @@ const TagManager = {
         verboseLog('After update - this.state.tags length:', this.state.tags.length);
         verboseLog('After update - this.state.originalTags length:', this.state.originalTags.length);
         
-        // Keep loading indicator visible while building tags - don't clear yet
-        // We'll replace it with actual tags once they're built
-        // Only clear if there's no loading indicator (reuse currentContent from above)
-        if (!hasLoadingIndicator) {
-            // Removed: Loading spinner indicator
-        }
-        
         // Schedule scroll restoration after rebuild
         const restoreScrollAfterBuild = () => this._restoreAvailableScrollPosition(savedScroll);
         setTimeout(restoreScrollAfterBuild, 0);
