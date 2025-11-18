@@ -1211,12 +1211,22 @@ class ProductDatabase:
                     
                     # CRITICAL: Check if strain has sovereign_lineage before using Excel lineage
                     lineage_to_use = self._normalize_lineage(product_data.get('Lineage'))
+                    
+                    # CRITICAL FIX: Ensure CBD Blend products get CBD lineage
+                    product_strain = product_data.get('Product Strain', '').strip()
+                    if product_strain and str(product_strain).lower() == 'cbd blend':
+                        if lineage_to_use and str(lineage_to_use).strip().upper() != 'CBD':
+                            logger.info(f"🧬 CBD BLEND FIX: Setting lineage to 'CBD' for product '{product_name}' (strain: '{product_strain}', was: '{lineage_to_use}')")
+                        lineage_to_use = 'CBD'
+                    
                     if strain_id:
                         cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
                         sovereign_result = cursor.fetchone()
                         if sovereign_result and sovereign_result[0]:
-                            lineage_to_use = str(sovereign_result[0]).strip()
-                            logger.info(f"🔒 NEW PRODUCT: Using sovereign lineage '{lineage_to_use}' for '{product_name}' (ignoring Excel)")
+                            # Only use sovereign lineage if it's not a CBD Blend product (CBD Blend should always be CBD)
+                            if not (product_strain and str(product_strain).lower() == 'cbd blend'):
+                                lineage_to_use = str(sovereign_result[0]).strip()
+                                logger.info(f"🔒 NEW PRODUCT: Using sovereign lineage '{lineage_to_use}' for '{product_name}' (ignoring Excel)")
                     
                     # Build column list and values list based on what exists
                     columns_to_insert = []
@@ -1463,10 +1473,18 @@ class ProductDatabase:
                     if index < 5:
                         logger.info(f"[WEIGHT DEBUG] Final values - Weight: '{weight_value}' | Units: '{units_value}'")
                     
+                    # CRITICAL FIX: Ensure CBD Blend products get CBD lineage
+                    product_strain = row_dict.get('Product Strain', '').strip()
+                    lineage_value = row_dict.get('Lineage', '').strip()
+                    if product_strain and str(product_strain).lower() == 'cbd blend':
+                        if lineage_value and str(lineage_value).strip().upper() != 'CBD':
+                            logger.info(f"🧬 CBD BLEND FIX: Setting lineage to 'CBD' for product '{row_dict.get('Product Name*', 'Unknown')}' (strain: '{product_strain}', was: '{lineage_value}')")
+                        lineage_value = 'CBD'
+                    
                     product_data = {
                         'Product Name*': row_dict.get('Product Name*', ''),
                         'Product Type*': self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type'),
-                        'Lineage': row_dict.get('Lineage', ''),
+                        'Lineage': lineage_value,
                         'Vendor/Supplier*': self._ensure_crucial_value(row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')), 'Unknown Vendor', 'Vendor'),
                         'Vendor': self._ensure_crucial_value(row_dict.get('Vendor', row_dict.get('Vendor/Supplier*', '')), 'Unknown Vendor', 'Vendor'),
                         'Product Brand': self._ensure_crucial_value(row_dict.get('Product Brand', ''), 'Unknown Brand', 'Product Brand'),
@@ -3434,8 +3452,13 @@ class ProductDatabase:
                     logger.warning(f"Could not check strain_id for product {product_id}: {strain_error}")
                     strain_id = None
             
+            # CRITICAL FIX: Ensure CBD Blend products get CBD lineage (takes priority over sovereign lineage)
+            product_strain = product_data.get('Product Strain', '').strip()
+            if product_strain and str(product_strain).lower() == 'cbd blend':
+                final_lineage = 'CBD'
+                logger.info(f"🧬 CBD BLEND FIX: Setting lineage to 'CBD' for product ID {product_id} (strain: '{product_strain}')")
             # If sovereign lineage exists, USE IT and ignore Excel lineage
-            if sovereign_lineage:
+            elif sovereign_lineage:
                 final_lineage = sovereign_lineage
                 logger.debug(f"✅ LINEAGE PRIORITY: Using sovereign lineage '{final_lineage}' for product ID {product_id} (ignoring Excel)")
             else:

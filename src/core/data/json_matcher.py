@@ -9397,6 +9397,16 @@ class JSONMatcher:
             
             logging.info(f"💾 Adding educated guess to database: {product_name}")
             
+            # CRITICAL FIX: Ensure CBD Blend products get CBD lineage
+            if strain and str(strain).strip().lower() == 'cbd blend':
+                if lineage and str(lineage).strip().upper() != 'CBD':
+                    logging.info(f"🧬 CBD BLEND FIX: Setting lineage to 'CBD' for educated guess '{product_name}' (strain: '{strain}', was: '{lineage}')")
+                lineage = 'CBD'
+            elif not lineage and strain:
+                # If no lineage but we have a strain, determine lineage using the same logic as _determine_lineage_for_product
+                lineage = self._determine_lineage_for_product(product_type, lineage or '', product_name, strain)
+                logging.info(f"🧬 Determined lineage '{lineage}' for educated guess '{product_name}' (type: '{product_type}', strain: '{strain}')")
+            
             # Add to product database
             if hasattr(self, 'product_db') and self.product_db:
                 # Check if product already exists
@@ -10976,6 +10986,16 @@ class JSONMatcher:
                             logging.info(f"🗄️ Found strain '{strain}' in database for product '{product_name}' in database entry")
                     except Exception as db_error:
                         logging.warning(f"Failed to search database for strain in database entry: {db_error}")
+            
+            # CRITICAL FIX: Ensure CBD Blend products get CBD lineage
+            if strain and str(strain).strip().lower() == 'cbd blend':
+                if lineage and str(lineage).strip().upper() != 'CBD':
+                    logging.info(f"🧬 CBD BLEND FIX: Setting lineage to 'CBD' for product '{product_name}' (strain: '{strain}', was: '{lineage}')")
+                lineage = 'CBD'
+            elif not lineage and strain:
+                # If no lineage but we have a strain, determine lineage using the same logic as _determine_lineage_for_product
+                lineage = self._determine_lineage_for_product(product_type, lineage or '', product_name, strain)
+                logging.info(f"🧬 Determined lineage '{lineage}' for product '{product_name}' (type: '{product_type}', strain: '{strain}')")
             
             if not product_name:
                 logging.warning("Cannot create database entry: missing product name")
