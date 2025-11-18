@@ -35,6 +35,15 @@
         
         if (!window.TagManager || !TagManager.checkForExistingData) {
             console.warn('⚠️ TagManager not available, skipping optimization');
+            // Fallback: Try to load tags directly if TagManager.init exists
+            if (window.TagManager && typeof window.TagManager.init === 'function') {
+                console.log('⚠️ Attempting fallback tag load via TagManager.init()');
+                try {
+                    window.TagManager.init();
+                } catch (fallbackError) {
+                    console.error('⚠️ Fallback tag load failed:', fallbackError);
+                }
+            }
             return;
         }
         

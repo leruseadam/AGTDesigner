@@ -1165,13 +1165,13 @@ class ProductDatabase:
                 if existing:
                     product_id, occurrences, existing_name = existing
                     
-                    # Log duplicate detection and update
-                    logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
+                    # Log duplicate detection and update at DEBUG level to avoid blocking I/O during bulk operations
+                    logger.debug(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
                     
                     # Update existing product with new data (new data always replaces old values)
                     self._update_existing_product(cursor, product_id, product_data)
                     conn.commit()
-                    logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
+                    logger.debug(f"Successfully replaced existing product '{existing_name}' with new Excel data")
                     return product_id
                 
                 # If no exact match, check by name and vendor only (ignore brand differences)
@@ -1186,10 +1186,10 @@ class ProductDatabase:
                 vendor_match = cursor.fetchone()
                 if vendor_match:
                     product_id, occurrences, existing_name, existing_brand = vendor_match
-                    logger.info(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
+                    logger.debug(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
                     self._update_existing_product(cursor, product_id, product_data)
                     conn.commit()
-                    logger.info(f"Successfully updated product '{existing_name}' with new Excel data")
+                    logger.debug(f"Successfully updated product '{existing_name}' with new Excel data")
                     return product_id
                 
                 # Check for similar products (same name + vendor, different brand)
@@ -3403,9 +3403,9 @@ class ProductDatabase:
                     changes.append(f"Units: {old_units} → {new_units}")
                 
                 if changes:
-                    logger.info(f"Product ID {product_id} data changes: {'; '.join(changes)}")
+                    logger.debug(f"Product ID {product_id} data changes: {'; '.join(changes)}")
                 else:
-                    logger.info(f"Product ID {product_id} updated with same values (no changes detected)")
+                    logger.debug(f"Product ID {product_id} updated with same values (no changes detected)")
             
             # Calculate AI and AK values
             ai_value = self._calculate_ai_value(product_data)
@@ -3429,7 +3429,7 @@ class ProductDatabase:
                         sovereign_result = cursor.fetchone()
                         if sovereign_result and sovereign_result[0]:
                             sovereign_lineage = str(sovereign_result[0]).strip()
-                            logger.info(f"🔒 SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
+                            logger.debug(f"🔒 SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
                 except Exception as strain_error:
                     logger.warning(f"Could not check strain_id for product {product_id}: {strain_error}")
                     strain_id = None
@@ -3437,7 +3437,7 @@ class ProductDatabase:
             # If sovereign lineage exists, USE IT and ignore Excel lineage
             if sovereign_lineage:
                 final_lineage = sovereign_lineage
-                logger.info(f"✅ LINEAGE PRIORITY: Using sovereign lineage '{final_lineage}' for product ID {product_id} (ignoring Excel)")
+                logger.debug(f"✅ LINEAGE PRIORITY: Using sovereign lineage '{final_lineage}' for product ID {product_id} (ignoring Excel)")
             else:
                 # No sovereign lineage - use normal Excel/database priority logic
                 incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
@@ -3457,13 +3457,13 @@ class ProductDatabase:
                 # Determine final lineage: prefer incoming if valid, otherwise preserve existing
                 if has_valid_incoming_lineage:
                     final_lineage = incoming_lineage_clean
-                    logger.info(f"✅ LINEAGE UPDATE: Using incoming lineage '{final_lineage}' for product ID {product_id}")
+                    logger.debug(f"✅ LINEAGE UPDATE: Using incoming lineage '{final_lineage}' for product ID {product_id}")
                 elif has_existing_lineage:
                     final_lineage = current_lineage_clean
-                    logger.info(f"✅ LINEAGE PRESERVE: Preserving existing lineage '{final_lineage}' for product ID {product_id} (incoming was empty)")
+                    logger.debug(f"✅ LINEAGE PRESERVE: Preserving existing lineage '{final_lineage}' for product ID {product_id} (incoming was empty)")
                 else:
                     final_lineage = incoming_lineage_clean  # Even if empty, use it
-                    logger.info(f"⚠️ LINEAGE EMPTY: No lineage to preserve for product ID {product_id}")
+                    logger.debug(f"⚠️ LINEAGE EMPTY: No lineage to preserve for product ID {product_id}")
             
             # CRITICAL FIX: Excel values for DOH, Price, and Product Type always overwrite database
             # These fields are the source of truth from Excel uploads
@@ -3531,8 +3531,8 @@ class ProductDatabase:
                 product_id
             ))
             
-            # CRITICAL: Ensure lineage change is logged (commit handled by caller)
-            logger.info(f"✅ Successfully updated product ID {product_id} with lineage '{final_lineage}'")
+            # CRITICAL: Log lineage update at DEBUG level to avoid blocking I/O during bulk operations
+            logger.debug(f"✅ Successfully updated product ID {product_id} with lineage '{final_lineage}'")
             
         except Exception as e:
             logger.error(f"Error updating existing product {product_id}: {e}")
