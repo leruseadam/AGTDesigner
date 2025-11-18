@@ -2349,19 +2349,6 @@ const TagManager = {
         const tagsToShow = filteredTags || originalTags;
         if (tagsToShow && tagsToShow.length > 0) {
             this.showActionSplash('Loading tags...');
-            
-            // Show loading indicator in container IMMEDIATELY to prevent blank screen
-            const availableTagsContainer = document.getElementById('availableTags');
-            if (availableTagsContainer) {
-                availableTagsContainer.innerHTML = `
-                    <div class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2 text-white">Loading tags...</p>
-                    </div>
-                `;
-            }
         }
         
         // FIXED: Remove requestAnimationFrame delay for faster rendering
@@ -2983,22 +2970,7 @@ const TagManager = {
             return;
         }
         
-        // Show loading indicator immediately if container is empty or only has loading indicator
-        const currentContent = availableTagsContainer.innerHTML.trim();
-        const hasLoadingIndicator = currentContent.includes('spinner-border') || currentContent.includes('Loading');
-        const isEmpty = !currentContent || currentContent === '' || currentContent === '<div class="tag-entry">No tags available</div>';
-        
-        if (isEmpty || hasLoadingIndicator) {
-            // Keep showing loading indicator until tags are rendered
-            availableTagsContainer.innerHTML = `
-                <div class="text-center py-4">
-                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2 text-white">Loading tags...</p>
-                </div>
-            `;
-        }
+        // Removed: Loading spinner indicator
         
         verboseLog('Tags received, showing simple test first');
         verboseLog('=== TAGS BEING RENDERED ===');
@@ -3043,15 +3015,7 @@ const TagManager = {
         // We'll replace it with actual tags once they're built
         // Only clear if there's no loading indicator (reuse currentContent from above)
         if (!hasLoadingIndicator) {
-            // Show loading indicator if not already showing
-            availableTagsContainer.innerHTML = `
-                <div class="text-center py-4">
-                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2 text-white">Loading tags...</p>
-                </div>
-            `;
+            // Removed: Loading spinner indicator
         }
         
         // Schedule scroll restoration after rebuild
@@ -6583,19 +6547,6 @@ const TagManager = {
                 verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
             }
             
-            // Show loading indicator in container IMMEDIATELY to prevent blank screen
-            const availableTagsContainer = document.getElementById('availableTags');
-            if (availableTagsContainer) {
-                availableTagsContainer.innerHTML = `
-                    <div class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2 text-white">Loading tags...</p>
-                    </div>
-                `;
-            }
-            
             // Preserve current scroll/anchor so refreshes don't jump the list
             savedScroll = this._saveAvailableScrollPosition();
             
@@ -7432,18 +7383,7 @@ const TagManager = {
                 });
         });
 
-        // Show loading indicator in container IMMEDIATELY to prevent blank screen
-        const availableTagsContainer = document.getElementById('availableTags');
-        if (availableTagsContainer) {
-            availableTagsContainer.innerHTML = `
-                <div class="text-center py-4">
-                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2 text-white">Loading tags...</p>
-                </div>
-            `;
-        }
+        // Removed: Loading spinner in container
 
         const retryDelays = Array.isArray(this.initialDataRetryDelays) && this.initialDataRetryDelays.length > 0
             ? this.initialDataRetryDelays
