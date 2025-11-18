@@ -351,8 +351,16 @@ async function handleFiles(files) {
               
               if (tagsLoaded) {
                 console.log('✅ Tag refresh completed successfully');
+                // Show success notification after tags are loaded
+                const rowCount = data.rows || 0;
+                const filename = data.filename || file.name;
+                showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
               } else {
                 console.warn('⚠️ Tags may not have loaded - will retry in background');
+                // Show success notification even if tags are loading in background
+                const rowCount = data.rows || 0;
+                const filename = data.filename || file.name;
+                showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed. Loading tags...`);
                 // Retry in background without blocking
                 setTimeout(() => {
                   TagManager.fetchAndUpdateAvailableTags().catch(() => {});
@@ -375,6 +383,10 @@ async function handleFiles(files) {
                 TagManager.fetchAndPopulateFilters?.() || Promise.resolve()
               ]).then(() => {
                 console.log('✅ Fallback tag loading completed');
+                // Show success notification
+                const rowCount = data.rows || 0;
+                const filename = data.filename || file.name;
+                showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
               }).catch(err => {
                 console.error('❌ Fallback tag loading failed:', err);
                 showToast('error', 'Failed to load tags. Please refresh the page.');
@@ -651,7 +663,14 @@ function pollUploadStatus(filename) {
           const s = document.getElementById('excelLoadingSplash');
           if (s) s.style.display = 'none';
         }
-        showToast('success', `File "${filename}" loaded successfully!`);
+        
+        // Show success notification with row count if available
+        const rowCount = data.rows || data.rows_processed || 0;
+        if (rowCount > 0) {
+          showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
+        } else {
+          showToast('success', `File "${filename}" loaded successfully!`);
+        }
         
         return; // Stop polling
       } else if (data.status === 'error') {
@@ -698,7 +717,12 @@ function pollUploadStatus(filename) {
         if (data.file_exists) {
           // File exists but status was cleared - treat as ready
           console.log(`File ${filename} exists but status was cleared - treating as ready`);
-          showToast('success', `File "${filename}" loaded successfully!`);
+          const rowCount = data.rows || data.rows_processed || 0;
+          if (rowCount > 0) {
+            showToast('success', `File "${filename}" uploaded successfully! ${rowCount.toLocaleString()} rows processed.`);
+          } else {
+            showToast('success', `File "${filename}" loaded successfully!`);
+          }
           return; // Stop polling
         } else {
           // File doesn't exist - stop polling

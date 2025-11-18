@@ -8164,8 +8164,10 @@ def get_available_tags():
 
             safe_excel_tags = make_json_safe(all_tags)
             # Cache the results for faster subsequent requests (unless nocache requested)
+            # CRITICAL: Always cache, even for fast_load, so subsequent requests are instant
             if not nocache:
                 cache.set(cache_key, safe_excel_tags, timeout=300)  # Cache for 5 minutes
+                logging.info(f"✅ Cached {len(safe_excel_tags)} tags for future fast loads")
             try:
                 current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
                 save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
@@ -8177,7 +8179,7 @@ def get_available_tags():
             response_payload = {
                 'tags': safe_excel_tags,
                 'total_count': len(safe_excel_tags),
-                'source': 'excel+db-lineage'
+                'source': 'excel+db-lineage' if not fast_load else 'excel+db-lineage-fast'
             }
             if force_full_refresh:
                 session['lineage_update_timestamp'] = 0

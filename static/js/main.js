@@ -7605,9 +7605,9 @@ const TagManager = {
         try {
             const fastLoadController = new AbortController();
             const fastLoadTimeout = setTimeout(() => {
-                console.log('⏱️ Fast load timeout after 3 seconds');
+                console.log('⏱️ Fast load timeout after 6 seconds');
                 fastLoadController.abort();
-            }, 3000); // Reduced to 3s for faster failure detection
+            }, 6000); // 6s timeout - gives time for cache miss but not too long
             
             // OPTIMIZATION: Use cache for fast loads (much faster) - only bypass cache when explicitly needed
             // nocache=1 forces full rebuild which is slow, so we only use it when we know data changed
@@ -7669,7 +7669,7 @@ const TagManager = {
             }
         } catch (fastError) {
             if (fastError.name === 'AbortError') {
-                console.log('⏱️ Fast load timed out after 3 seconds, trying full initial-data load...');
+                console.log('⏱️ Fast load timed out after 6 seconds, trying full initial-data load...');
             } else {
                 console.log('⚠️ Fast load failed or returned empty, trying full initial-data load:', fastError.name);
             }
