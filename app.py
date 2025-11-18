@@ -7771,13 +7771,13 @@ def get_available_tags():
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
         
         if cached_tags and not nocache:
-            # Always do lineage alignment to ensure database lineage is applied
-            # Even with fast_load, we still need lineage alignment for correct display
-            lineage_alignment_needed = True
+            # PERFORMANCE: Skip lineage alignment when fast_load is requested to speed up tag loading
+            # Lineage alignment can be done later if needed, but shouldn't block initial tag display
+            lineage_alignment_needed = not fast_load  # Skip alignment on fast_load
             
             # Perform lineage alignment to assign/update lineage from database
             # Use optimized version that's faster but still completes
-            if lineage_alignment_needed:
+            if lineage_alignment_needed and not fast_load:
                 # Quick lineage alignment with timeout to prevent blocking
                 try:
                     store_name = get_current_store_name()
@@ -8010,7 +8010,8 @@ def get_available_tags():
                 logging.info(f"✅ Set prefer_db=True to force database query")
         
         # If we have tags from Excel, prefer them but align lineage with database values
-        if all_tags and not prefer_db:
+        # PERFORMANCE: Skip expensive lineage alignment when fast_load is requested
+        if all_tags and not prefer_db and not fast_load:
             try:
                 store_name = get_current_store_name()
                 if not store_name:
@@ -8294,12 +8295,14 @@ def get_available_tags():
                                     # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
                                     # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                                     quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
+                                    # PERFORMANCE: Use smaller limit when fast_load is enabled
+                                    limit = 1000 if fast_load else 20000
                                     query = f'''
                                         SELECT {quoted_columns}, COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
                                         FROM products p
                                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                         ORDER BY p.id DESC
-                                        LIMIT 20000
+                                        LIMIT {limit}
                                     '''
                                     try:
                                         main_cursor.execute(query)
@@ -8308,7 +8311,9 @@ def get_available_tags():
                                         logging.info(f"Main database query with strain join returned {len(rows)} rows")
                                     except Exception as join_err:
                                         logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
-                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
+                                        # PERFORMANCE: Use smaller limit when fast_load is enabled
+                                        limit = 1000 if fast_load else 20000
+                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT {limit}'
                                         main_cursor.execute(query)
                                         rows = main_cursor.fetchall()
                                         columns = columns_to_query + ['preferred_lineage']
@@ -8356,6 +8361,8 @@ def get_available_tags():
                             # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                             
+                            # PERFORMANCE: Use smaller limit when fast_load is enabled
+                            limit = 1000 if fast_load else 10000
                             # Try to join with strains table, but prefer products.Lineage over strains.canonical_lineage
                             lineage_query_join_by_name = f'''
                                 SELECT {quoted_columns}, 
@@ -8363,7 +8370,7 @@ def get_available_tags():
                                 FROM products p
                                 LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                 ORDER BY p.id DESC
-                                LIMIT 10000
+                                LIMIT {limit}
                             '''
                             
                             # Fallback query if strains table/join fails
@@ -8372,7 +8379,7 @@ def get_available_tags():
                                        p."Lineage" AS preferred_lineage
                                 FROM products p
                                 ORDER BY p.id DESC
-                                LIMIT 10000
+                                LIMIT {limit}
                             '''
                             
                             logging.info("Executing query with strain join (same pipeline as Excel alignment)...")
