@@ -7708,7 +7708,18 @@ const TagManager = {
                     try {
                         const fallbackUrl = '/api/available-tags?t=' + Date.now();
                         console.log(`📡 Fetching fallback: ${fallbackUrl}`);
-                        const tagsResponse = await fetch(fallbackUrl);
+                        
+                        // Add timeout to prevent hanging
+                        const fallbackController = new AbortController();
+                        const fallbackTimeout = setTimeout(() => {
+                            console.log('⏱️ Fallback fetch timeout after 5 seconds');
+                            fallbackController.abort();
+                        }, 5000);
+                        
+                        const tagsResponse = await fetch(fallbackUrl, {
+                            signal: fallbackController.signal
+                        });
+                        clearTimeout(fallbackTimeout);
                         console.log(`📡 Fallback response status: ${tagsResponse.status}, ok: ${tagsResponse.ok}`);
                         if (tagsResponse.ok) {
                             const tagsData = await tagsResponse.json();
@@ -7763,11 +7774,14 @@ const TagManager = {
                         }
                     } catch (fallbackError) {
                         console.error('❌ Fallback tag loading failed:', fallbackError);
+                        if (fallbackError.name === 'AbortError') {
+                            console.log('⏱️ Fallback fetch was aborted (timeout)');
+                        }
                         verboseLog('Fallback tag loading failed:', fallbackError);
                     }
                     
-                    // If we get here, fallback also failed - hide loading and show empty state
-                    console.log('⚠️ Both initial-data and fallback returned no tags - showing empty state');
+                    // If we get here, fallback also failed or timed out - hide loading and show empty state
+                    console.log('⚠️ Both initial-data and fallback returned no tags (or timed out) - showing empty state');
                     
                     // Only show empty state if fallback also failed
                     console.log('✅ Hiding loading splash and showing empty state');
