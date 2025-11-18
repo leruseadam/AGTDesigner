@@ -288,28 +288,66 @@ async function handleFiles(files) {
         
         if (typeof TagManager !== 'undefined') {
           try {
+            // CRITICAL FIX: Wait a moment for file to be fully saved and session to update
+            // This ensures the backend has the file ready when we request tags
+            console.log('⏳ Waiting 500ms for file to be fully processed...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
             // Don't clear UI state again - it was already cleared at upload start
             // Refresh tags immediately and await completion
             console.log('🔄 Starting tag refresh after upload...');
             if (TagManager.refreshTagLists) {
               console.time('post-upload-refresh');
-              await TagManager.refreshTagLists({ preserveFilters: true, force: true })
-                .then(() => {
-                  console.timeEnd('post-upload-refresh');
-                  console.log('✅ Tag refresh completed successfully');
-                  // Hide splash after tags are loaded
-                  const splashEl = document.getElementById('excelLoadingSplash');
-                  if (splashEl) splashEl.style.display = 'none';
-                })
-                .catch(err => {
-                  console.error('❌ Tag refresh failed:', err);
-                  console.timeEnd('post-upload-refresh');
-                  // Hide splash even on error
-                  const splashEl = document.getElementById('excelLoadingSplash');
-                  if (splashEl) splashEl.style.display = 'none';
-                  // Show error to user
-                  showToast('error', 'Tags loaded but refresh failed. Please refresh the page.');
-                });
+              
+              // CRITICAL FIX: Add retry logic with verification
+              let tagsLoaded = false;
+              let retryCount = 0;
+              const maxRetries = 3;
+              
+              while (!tagsLoaded && retryCount < maxRetries) {
+                try {
+                  await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+                  
+                  // Verify tags actually loaded
+                  await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for tags to render
+                  
+                  const availableContainer = document.getElementById('availableTags');
+                  const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
+                  const stateTags = TagManager.state?.tags || [];
+                  
+                  if (tagItems.length > 0 || stateTags.length > 0) {
+                    console.log(`✅ Tags verified: ${tagItems.length} in DOM, ${stateTags.length} in state`);
+                    tagsLoaded = true;
+                  } else {
+                    retryCount++;
+                    console.warn(`⚠️ Tags not found after refresh (attempt ${retryCount}/${maxRetries}), retrying...`);
+                    if (retryCount < maxRetries) {
+                      await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
+                    }
+                  }
+                } catch (err) {
+                  retryCount++;
+                  console.error(`❌ Tag refresh failed (attempt ${retryCount}/${maxRetries}):`, err);
+                  if (retryCount < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                  } else {
+                    throw err;
+                  }
+                }
+              }
+              
+              console.timeEnd('post-upload-refresh');
+              
+              if (tagsLoaded) {
+                console.log('✅ Tag refresh completed successfully - tags verified');
+              } else {
+                console.error('❌ Tags did not load after all retries');
+                showToast('warning', 'Tags may not have loaded. Please refresh the page if tags are missing.');
+              }
+              
+              // Hide splash after tags are loaded (or after retries exhausted)
+              const splashEl = document.getElementById('excelLoadingSplash');
+              if (splashEl) splashEl.style.display = 'none';
             } else {
               // Fallback: try individual methods
               console.warn('⚠️ refreshTagLists not available, using fallback methods');
