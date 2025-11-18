@@ -879,38 +879,68 @@ document.addEventListener('DOMContentLoaded', function() {
     document.documentElement.setAttribute('data-app-scale', String(appliedScale));
   }
 
-  // Expose for other scripts
-  window.scaleAppToFit = scaleAppToFit;
+  // Debounce scaleAppToFit to prevent zoom flashing
+  let scaleDebounceTimer;
+  let isScaling = false;
+  const debouncedScaleAppToFit = () => {
+    if (isScaling) return; // Prevent concurrent calls
+    clearTimeout(scaleDebounceTimer);
+    scaleDebounceTimer = setTimeout(() => {
+      isScaling = true;
+      try {
+        scaleAppToFit();
+      } finally {
+        // Use requestAnimationFrame to ensure scaling completes before allowing next call
+        requestAnimationFrame(() => {
+          isScaling = false;
+        });
+      }
+    }, 150); // Debounce to 150ms to prevent rapid fire calls
+  };
+
+  // Expose for other scripts (use debounced version)
+  window.scaleAppToFit = debouncedScaleAppToFit;
 
   // Apply on ready (after content becomes visible), and on resize/orientation
+  // But wait for initial content to load to prevent zoom flashing
   document.addEventListener('DOMContentLoaded', function() {
     const main = document.getElementById('mainContent');
     if (!main) return;
 
-    const tryApply = () => {
-      const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
-      if (visible) {
-        requestAnimationFrame(scaleAppToFit);
-      } else {
-        setTimeout(tryApply, 200);
-      }
-    };
-    tryApply();
+    // Wait longer for content to stabilize before first scale
+    setTimeout(() => {
+      const tryApply = () => {
+        const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
+        if (visible) {
+          debouncedScaleAppToFit();
+        } else {
+          setTimeout(tryApply, 200);
+        }
+      };
+      tryApply();
+    }, 1000); // Wait 1 second for initial content to load
   });
 
-  // Ensure after full load (fonts/images) we re-calc
+  // Ensure after full load (fonts/images) we re-calc - but only once
+  let loadScaleApplied = false;
   window.addEventListener('load', () => {
-    requestAnimationFrame(scaleAppToFit);
-    setTimeout(scaleAppToFit, 0);
-    setTimeout(scaleAppToFit, 250);
+    if (!loadScaleApplied) {
+      loadScaleApplied = true;
+      // Single call after load, with delay to let everything settle
+      setTimeout(() => {
+        debouncedScaleAppToFit();
+      }, 500);
+    }
   });
 
   let resizeTimer;
   window.addEventListener('resize', () => {
     cancelAnimationFrame(resizeTimer);
-    resizeTimer = requestAnimationFrame(scaleAppToFit);
+    resizeTimer = requestAnimationFrame(debouncedScaleAppToFit);
   });
-  window.addEventListener('orientationchange', () => setTimeout(scaleAppToFit, 0));
+  window.addEventListener('orientationchange', () => {
+    setTimeout(debouncedScaleAppToFit, 300); // Delay to let orientation change complete
+  });
 })();
 
 // Expose manual control in console

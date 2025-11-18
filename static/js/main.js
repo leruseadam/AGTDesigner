@@ -845,9 +845,11 @@ const AppLoadingSplash = {
             setTimeout(() => {
                 mainContent.classList.add('loaded');
                 mainContent.style.opacity = '1';
-                if (window.scaleAppToFit) {
-                    try { window.scaleAppToFit(); } catch (e) { console.warn('scaleAppToFit error', e); }
-                }
+                // Don't call scaleAppToFit during initial load - it causes zoom flashing
+                // It will be called automatically after content loads
+                // if (window.scaleAppToFit) {
+                //     try { window.scaleAppToFit(); } catch (e) { console.warn('scaleAppToFit error', e); }
+                // }
             }, 100);
         }
         
