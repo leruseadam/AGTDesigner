@@ -7182,7 +7182,12 @@ const TagManager = {
                     if (!fileData.filename) {
                         console.log('✅ No Excel file uploaded - skipping tag load, showing empty state');
                         // No file exists, so we're already in empty state - no need to load tags
+                        this.initializeEmptyState();
                         this._checkingExistingData = false;
+                        // Show notification when no file is uploaded (force show since API confirmed no file)
+                        setTimeout(() => {
+                            this.showNoFileNotification(true); // Force show since API confirmed no file
+                        }, 300);
                         return;
                     } else {
                         console.log(`📁 Excel file found: ${fileData.filename} - proceeding with tag load`);
@@ -10747,18 +10752,41 @@ const TagManager = {
     },
 
     // Show notification when no Excel file is uploaded
-    showNoFileNotification() {
-        // Check if file is actually uploaded
-        const fileInfoText = document.getElementById('fileInfoText');
-        const hasFile = fileInfoText && fileInfoText.textContent && 
-                       fileInfoText.textContent.trim() !== 'No file uploaded' &&
-                       fileInfoText.textContent.trim() !== '';
-        
-        if (hasFile) {
-            // File is uploaded, don't show notification
+    showNoFileNotification(forceShow = false) {
+        // If forceShow is true, skip all checks and show immediately
+        if (forceShow) {
+            this._showNoFileNotificationElement();
             return;
         }
         
+        // Check if file is actually uploaded by checking both DOM and making a quick API call
+        const fileInfoText = document.getElementById('fileInfoText');
+        const hasFileInDOM = fileInfoText && fileInfoText.textContent && 
+                            fileInfoText.textContent.trim() !== 'No file uploaded' &&
+                            fileInfoText.textContent.trim() !== '';
+        
+        // If DOM suggests a file exists, still verify with API (but don't block on it)
+        if (hasFileInDOM) {
+            // Quick async check - if API says no file, show notification anyway
+            fetch('/api/current-file?t=' + Date.now())
+                .then(res => res.json())
+                .then(fileData => {
+                    if (!fileData.filename) {
+                        // API confirms no file - show notification
+                        this._showNoFileNotificationElement();
+                    }
+                })
+                .catch(() => {
+                    // If API check fails, trust DOM (don't show if DOM says file exists)
+                });
+            return; // Don't show if DOM suggests file exists
+        }
+        
+        // DOM indicates no file - show notification immediately
+        this._showNoFileNotificationElement();
+    },
+    
+    _showNoFileNotificationElement() {
         // Don't check for rate limiting - always show if no file is uploaded
         
         // Find the filter bar container to place notification above it
