@@ -7647,6 +7647,58 @@ const TagManager = {
                     return;
                 } else {
                     verboseLog('No initial data available:', data.message || 'No data found');
+                    
+                    // CRITICAL FIX: Try loading tags directly from /api/available-tags as fallback
+                    // This handles cases where initial-data returns empty but a file exists in session
+                    verboseLog('Attempting fallback: loading tags directly from /api/available-tags...');
+                    try {
+                        const tagsResponse = await fetch('/api/available-tags?t=' + Date.now());
+                        if (tagsResponse.ok) {
+                            const tagsData = await tagsResponse.json();
+                            if (tagsData.tags && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
+                                verboseLog(`✅ Fallback successful: loaded ${tagsData.tags.length} tags from /api/available-tags`);
+                                // Update tags directly
+                                this.state.tags = [...tagsData.tags];
+                                this.state.originalTags = [...tagsData.tags];
+                                this._updateAvailableTags(tagsData.tags);
+                                
+                                // Load filters and selected tags
+                                await Promise.all([
+                                    this.fetchAndPopulateFilters(),
+                                    this.fetchAndUpdateSelectedTags()
+                                ]);
+                                
+                                // Update file info if available
+                                if (tagsData.filename) {
+                                    const fileInfoText = document.getElementById('fileInfoText');
+                                    if (fileInfoText) {
+                                        fileInfoText.textContent = tagsData.filename;
+                                    }
+                                }
+                                
+                                clearTimeout(splashSafetyTimeout);
+                                clearTimeout(timeoutId);
+                                clearTimeout(showSplashTimeout);
+                                
+                                if (this._waitForTagsToAppear) {
+                                    this._waitForTagsToAppear();
+                                } else if (this.hideActionSplash) {
+                                    this.hideActionSplash();
+                                }
+                                AppLoadingSplash.stopAutoAdvance();
+                                AppLoadingSplash.complete();
+                                
+                                this.clearInitialDataRetry();
+                                this._checkingExistingData = false;
+                                verboseLog('Fallback tag loading completed successfully');
+                                return;
+                            }
+                        }
+                    } catch (fallbackError) {
+                        verboseLog('Fallback tag loading failed:', fallbackError);
+                    }
+                    
+                    // Only show empty state if fallback also failed
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
