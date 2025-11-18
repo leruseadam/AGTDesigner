@@ -11283,10 +11283,14 @@
     
     // showDatabaseModal override is now installed EARLIER in the page
     
-    // Verify functions are available
-    console.log('Function verification:');
-    console.log('openDatabaseAnalytics available:', typeof window.openDatabaseAnalytics);
-    console.log('openLineageEditor available:', typeof window.openLineageEditor);
+    // Verify functions are available (wrapped in try-catch to prevent syntax errors)
+    try {
+      console.log('Function verification:');
+      console.log('openDatabaseAnalytics available:', typeof window.openDatabaseAnalytics);
+      console.log('openLineageEditor available:', typeof window.openLineageEditor);
+    } catch (e) {
+      console.warn('Function verification error:', e);
+    }
   </script>
   
   <!-- Lineage Editor Modals -->

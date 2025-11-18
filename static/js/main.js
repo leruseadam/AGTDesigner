@@ -7494,15 +7494,32 @@ const TagManager = {
             const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
             if (tagItems.length === 0) {
                 console.warn('⏳ Safety timeout triggered - no tags found, attempting fallback load (non-blocking)');
+                // Show empty state immediately so UI is usable
+                if (availableTagsContainer) {
+                    availableTagsContainer.innerHTML = `
+                        <div class="text-center py-5">
+                            <div class="upload-prompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No product data loaded</h5>
+                                <p class="text-muted">Upload an Excel file to get started</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-upload me-2"></i>Upload Excel File
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
                 // Fire-and-forget fallback fetch so UI stays responsive
                 try {
                     this.fetchAndUpdateAvailableTags().then(() => {
                         verboseLog('Fallback tag loading succeeded');
                     }).catch(fallbackError => {
                         console.error('Fallback tag loading failed:', fallbackError);
+                        // UI is already showing empty state, so user can still interact
                     });
                 } catch (fallbackError) {
                     console.error('Fallback tag loading threw synchronously:', fallbackError);
+                    // UI is already showing empty state, so user can still interact
                 }
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
