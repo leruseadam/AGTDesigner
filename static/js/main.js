@@ -2922,11 +2922,16 @@ const TagManager = {
             tagList.appendChild(vendorSection);
         });
 
+        // PERFORMANCE FIX: Use document fragment for faster DOM updates
         // Atomically replace container content with built tags (this replaces any loading indicator)
         // Use requestAnimationFrame to ensure smooth transition
         requestAnimationFrame(() => {
+            // Use document fragment for faster DOM manipulation
+            const fragment = document.createDocumentFragment();
+            fragment.appendChild(tagList);
+            
             availableTagsContainer.innerHTML = '';
-            availableTagsContainer.appendChild(tagList);
+            availableTagsContainer.appendChild(fragment);
             
             // After tags are in DOM, restore scroll and initialize
             this._restoreAvailableScrollPosition(savedScroll);
@@ -6687,8 +6692,11 @@ const TagManager = {
                     // Use cache if available - only bypass cache on explicit refresh or error recovery
                     const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Use fast_load on first attempt for initial loads or post-upload loads
-                    const fastParam = (retryCount === 0 && (isInitialLoad || isPostUpload)) ? fastLoadParam : '';
+                    // PERFORMANCE FIX: Always use fast_load=1 for faster tag population
+                    // Lineage alignment can be done later if needed
+                    // Use fast_load on first attempt for initial loads or post-upload loads, otherwise always use it
+                    const fastLoadParam = '&fast_load=1';
+                    const fastParam = (retryCount === 0 && (isInitialLoad || isPostUpload)) ? fastLoadParam : fastLoadParam;
                     response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}`, {
                         signal: controller.signal
                     });

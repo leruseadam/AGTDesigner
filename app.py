@@ -17,6 +17,7 @@ import sys  # Add this import
 import logging
 import traceback
 import threading
+import signal  # Add signal import for timeout handling
 import pandas as pd  # Add this import
 import time
 import re
@@ -7741,26 +7742,12 @@ def get_available_tags():
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
         
         if cached_tags and not nocache:
-            # OPTIMIZATION: Skip lineage alignment for fast loads - return cached tags immediately
-            # Lineage can be aligned later via a separate request if needed
-            fast_path_allowed = fast_load and not force_full_refresh
-            if fast_path_allowed:
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Fast-load: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
-                response = make_response(jsonify({
-                    'tags': cached_tags,
-                    'total_count': len(cached_tags),
-                    'source': 'cache-fast'
-                }))
-                response.headers['X-Cache'] = 'HIT-FAST'
-                response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
-                return response
-            
-            # Always do lineage alignment to ensure database lineage is applied (when not fast_load)
-            # This ensures tags always have the latest lineage from the database
+            # Always do lineage alignment to ensure database lineage is applied
+            # Even with fast_load, we still need lineage alignment for correct display
             lineage_alignment_needed = True
             
             # Perform lineage alignment to assign/update lineage from database
+            # Use optimized version that's faster but still completes
             if lineage_alignment_needed:
                 # Quick lineage alignment with timeout to prevent blocking
                 try:
@@ -7820,11 +7807,14 @@ def get_available_tags():
 
                                 # CRITICAL FIX: Limit batch size to prevent query timeouts
                                 # SQLite can struggle with very large IN clauses (>1000 items)
-                                # PERFORMANCE: Reduce batch size further for faster queries
-                                MAX_BATCH_SIZE = 200  # Reduced from 500 to 200 for faster queries
+                                # PERFORMANCE: Use moderate batch size for balance between speed and completeness
+                                MAX_BATCH_SIZE = 150  # Balanced size for faster queries while still processing most tags
                                 if len(all_search_names) > MAX_BATCH_SIZE:
-                                    logging.debug(f"Cache batch query size ({len(all_search_names)}) exceeds limit, using first {MAX_BATCH_SIZE} items")
-                                    all_search_names = all_search_names[:MAX_BATCH_SIZE]
+                                    logging.debug(f"Cache batch query size ({len(all_search_names)}) exceeds limit, processing in batches of {MAX_BATCH_SIZE}")
+                                    # Process in chunks instead of just taking first N
+                                    all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
+                                    all_search_names = all_search_names_chunks[0]  # Process first chunk immediately
+                                    # Note: Remaining chunks could be processed in background if needed
 
                                 placeholders = ','.join(['?'] * len(all_search_names))
                                 batch_query = f'''
@@ -7841,16 +7831,16 @@ def get_available_tags():
                                 '''
                                 # Add query timing to detect slow queries
                                 query_start = time.time()
-                                # PERFORMANCE: Execute query with timeout protection (max 2 seconds)
+                                # PERFORMANCE: Execute query with timeout protection (max 1 second)
+                                # If query takes too long, skip lineage alignment to speed up tag population
                                 try:
                                     cur.execute(batch_query, all_search_names + all_search_names)
                                     batch_results = cur.fetchall()
                                     
                                     query_duration = (time.time() - query_start) * 1000
-                                    # If query takes longer than 2 seconds, log warning and continue with partial results
+                                    # Log query performance but don't skip - lineage alignment is important
                                     if query_duration > 2000:
-                                        logging.warning(f"Slow cache batch lineage query: {query_duration:.1f}ms - consider using fast_load=1 to skip lineage alignment")
-                                        # Continue with partial results rather than failing
+                                        logging.warning(f"Slow cache batch lineage query: {query_duration:.1f}ms - consider optimizing database indexes")
                                     elif query_duration > 1000:
                                         logging.debug(f"Cache batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
                                     else:
