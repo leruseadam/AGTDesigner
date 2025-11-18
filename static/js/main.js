@@ -7594,7 +7594,6 @@ const TagManager = {
                     clearTimeout(timeoutId); // Clear fetch timeout since we got data
                     
                     // FIXED: Ensure _waitForTagsToAppear is called after tags are updated
-                    // Use requestAnimationFrame to ensure DOM has updated
                     // Also set a backup timeout to ensure splash always hides
                     this._waitForTagsBackupTimeout = setTimeout(() => {
                         verboseLog('Backup timeout: Forcing splash to hide after tag update');
@@ -7604,27 +7603,26 @@ const TagManager = {
                         AppLoadingSplash.stopAutoAdvance();
                         AppLoadingSplash.complete();
                         this._waitForTagsBackupTimeout = null;
-                    }, 5000); // 5 second max wait for tags
+                    }, 3000); // 3 second max wait for tags (reduced from 5s)
                     
-                    requestAnimationFrame(() => {
-                        setTimeout(() => {
-                            if (this._waitForTagsToAppear) {
-                                this._waitForTagsToAppear();
-                            } else {
-                                // If _waitForTagsToAppear doesn't exist, use backup timeout
-                                if (this._waitForTagsBackupTimeout) {
-                                    clearTimeout(this._waitForTagsBackupTimeout);
-                                }
-                                setTimeout(() => {
-                                    if (this.hideActionSplash) {
-                                        this.hideActionSplash();
-                                    }
-                                    AppLoadingSplash.stopAutoAdvance();
-                                    AppLoadingSplash.complete();
-                                }, 2000);
+                    // FIXED: Call immediately without requestAnimationFrame delay for faster response
+                    setTimeout(() => {
+                        if (this._waitForTagsToAppear) {
+                            this._waitForTagsToAppear();
+                        } else {
+                            // If _waitForTagsToAppear doesn't exist, use backup timeout
+                            if (this._waitForTagsBackupTimeout) {
+                                clearTimeout(this._waitForTagsBackupTimeout);
                             }
-                        }, 100); // Small delay to ensure tags are rendered
-                    });
+                            setTimeout(() => {
+                                if (this.hideActionSplash) {
+                                    this.hideActionSplash();
+                                }
+                                AppLoadingSplash.stopAutoAdvance();
+                                AppLoadingSplash.complete();
+                            }, 1000); // Reduced from 2000ms
+                        }
+                    }, 50); // Reduced from 100ms to 50ms for faster response
                     
                     this.clearInitialDataRetry();
                     this._checkingExistingData = false;
