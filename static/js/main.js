@@ -7182,12 +7182,7 @@ const TagManager = {
                     if (!fileData.filename) {
                         console.log('✅ No Excel file uploaded - skipping tag load, showing empty state');
                         // No file exists, so we're already in empty state - no need to load tags
-                        this.initializeEmptyState();
                         this._checkingExistingData = false;
-                        // Show notification when no file is uploaded (force show since API confirmed no file)
-                        setTimeout(() => {
-                            this.showNoFileNotification(true); // Force show since API confirmed no file
-                        }, 300);
                         return;
                     } else {
                         console.log(`📁 Excel file found: ${fileData.filename} - proceeding with tag load`);
@@ -7210,20 +7205,8 @@ const TagManager = {
                 const availableContainer = document.getElementById('availableTags');
                 const tagItems = availableContainer ? availableContainer.querySelectorAll('.tag-item') : [];
                 if (tagItems.length === 0 && (!this.state.tags || this.state.tags.length === 0)) {
-                    // Check if a file actually exists before concluding "no file uploaded"
-                    fetch('/api/current-file?t=' + Date.now())
-                        .then(res => res.json())
-                        .then(fileData => {
-                            if (fileData.filename) {
-                                console.warn(`⚠️ No tags found but file exists (${fileData.filename}) - may still be processing`);
-                            } else {
-                                console.log('⚠️ No tags found after checkForExistingData - this is expected when no Excel file is uploaded');
-                                console.log('✅ Empty state should already be shown - no further fetch needed');
-                            }
-                        })
-                        .catch(() => {
-                            console.log('⚠️ No tags found after checkForExistingData - could not verify file status');
-                        });
+                    console.log('⚠️ No tags found after checkForExistingData - this is expected when no Excel file is uploaded');
+                    console.log('✅ Empty state should already be shown - no further fetch needed');
                 } else {
                     console.log(`✅ Tags already loaded: ${tagItems.length} items in DOM, ${this.state.tags?.length || 0} in state`);
                 }
@@ -8073,7 +8056,7 @@ const TagManager = {
                 }
                 
                 // If fallback also failed, check if there's actually a file uploaded
-                // If no file, show empty state. If file exists, show warning and retry.
+                // If no file, show empty state. If file exists, show warning.
                 console.log('🔍 Checking if file exists in session...');
                 try {
                     const fileCheckController = new AbortController();
@@ -8086,30 +8069,8 @@ const TagManager = {
                     if (fileCheckResponse.ok) {
                         const fileData = await fileCheckResponse.json();
                         if (fileData.filename) {
-                            console.warn(`⚠️ File exists (${fileData.filename}) but tags are not loading - server may be slow or still processing`);
-                            // File exists but tags aren't loading - likely still processing
-                            // Don't show empty state, instead show a message and retry after delay
-                            const availableTagsContainer = document.getElementById('availableTags');
-                            if (availableTagsContainer) {
-                                availableTagsContainer.innerHTML = `
-                                    <div class="text-center py-5">
-                                        <div class="upload-prompt">
-                                            <i class="fas fa-spinner fa-spin fa-3x text-muted mb-3"></i>
-                                            <h5 class="text-muted">Processing file...</h5>
-                                            <p class="text-muted">File "${fileData.filename}" is being processed. Tags will appear shortly.</p>
-                                            <p class="text-muted small">If tags don't appear, try refreshing the page.</p>
-                                        </div>
-                                    </div>
-                                `;
-                            }
-                            // Retry loading tags after a delay
-                            setTimeout(() => {
-                                console.log('🔄 Retrying tag load after timeout...');
-                                this.fetchAndUpdateAvailableTags().catch(err => {
-                                    console.warn('Retry also failed:', err);
-                                });
-                            }, 5000);
-                            return; // Don't show empty state if file exists
+                            console.warn(`⚠️ File exists (${fileData.filename}) but tags are not loading - server may be slow`);
+                            // Don't show toast here - it's too early, user might just need to wait
                         } else {
                             console.log('✅ No file uploaded - showing empty state is correct');
                         }
@@ -9802,9 +9763,8 @@ const TagManager = {
                 }
                 
                 // Force fetch with nocache to ensure fresh data
-                // CRITICAL: After upload, backend may need time to process - use longer timeout
                 const freshTagsController = new AbortController();
-                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 30000); // 30s timeout for post-upload processing
+                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 10000); // 10s timeout
                 const freshTagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=0`, {
                     signal: freshTagsController.signal
                 });
@@ -9836,27 +9796,18 @@ const TagManager = {
                             this._waitForTagsToAppear();
                         }
                         return; // Success - tags loaded, no need to reload page
-                    } else {
-                        console.warn('⚠️ Tag refresh returned empty tags - file may still be processing');
                     }
-                } else {
-                    console.warn('⚠️ Tag refresh request failed:', freshTagsResponse.status);
                 }
             } catch (refreshError) {
-                if (refreshError.name === 'AbortError') {
-                    console.warn('⚠️ Tag refresh timed out after upload - file may still be processing, will reload page');
-                } else {
-                    console.warn('⚠️ Failed to refresh tags after upload, will reload page:', refreshError);
-                }
+                console.warn('⚠️ Failed to refresh tags after upload, will reload page:', refreshError);
             }
             
             // Fallback: Refresh the page to show new data if direct tag refresh failed
-            // Wait a bit longer after upload to give backend time to process
             setTimeout(() => {
-                verboseLog('🔄 Refreshing page to show new data (fallback after upload)...');
+                verboseLog('🔄 Refreshing page to show new data (fallback)...');
                 // Add cache-busting parameter to ensure fresh load
                 window.location.href = window.location.pathname + '?t=' + Date.now();
-            }, 3000); // Increased to 3s to give backend more time
+            }, 2000);
             
             return; // Success!
         } catch (error) {
@@ -10796,46 +10747,22 @@ const TagManager = {
     },
 
     // Show notification when no Excel file is uploaded
-    showNoFileNotification(forceShow = false) {
-        // If forceShow is true, skip all checks and show immediately
-        if (forceShow) {
-            this._showNoFileNotificationElement();
+    showNoFileNotification() {
+        // Check if file is actually uploaded
+        const fileInfoText = document.getElementById('fileInfoText');
+        const hasFile = fileInfoText && fileInfoText.textContent && 
+                       fileInfoText.textContent.trim() !== 'No file uploaded' &&
+                       fileInfoText.textContent.trim() !== '';
+        
+        if (hasFile) {
+            // File is uploaded, don't show notification
             return;
         }
         
-        // Check if file is actually uploaded by checking both DOM and making a quick API call
-        const fileInfoText = document.getElementById('fileInfoText');
-        const hasFileInDOM = fileInfoText && fileInfoText.textContent && 
-                            fileInfoText.textContent.trim() !== 'No file uploaded' &&
-                            fileInfoText.textContent.trim() !== '';
-        
-        // If DOM suggests a file exists, still verify with API (but don't block on it)
-        if (hasFileInDOM) {
-            // Quick async check - if API says no file, show notification anyway
-            fetch('/api/current-file?t=' + Date.now())
-                .then(res => res.json())
-                .then(fileData => {
-                    if (!fileData.filename) {
-                        // API confirms no file - show notification
-                        this._showNoFileNotificationElement();
-                    }
-                })
-                .catch(() => {
-                    // If API check fails, trust DOM (don't show if DOM says file exists)
-                });
-            return; // Don't show if DOM suggests file exists
-        }
-        
-        // DOM indicates no file - show notification immediately
-        this._showNoFileNotificationElement();
-    },
-    
-    _showNoFileNotificationElement() {
         // Don't check for rate limiting - always show if no file is uploaded
         
-        // Find the filter bar container to place notification above it
-        const filterBarContainer = document.querySelector('[data-container-type="filter"]');
-        const filterBarRow = filterBarContainer ? filterBarContainer.closest('.row') : null;
+        // Find the available tags container (CURRENT INVENTORY section)
+        const availableTagsContainer = document.getElementById('availableTags');
         
         // Create or get notification element
         let notification = document.getElementById('noFileNotification');
@@ -10851,11 +10778,11 @@ const TagManager = {
                 border: 2px solid rgba(160, 132, 232, 0.6);
                 border-radius: 12px;
                 color: #ffffff;
-                padding: 12px 16px;
-                margin-bottom: 12px;
+                padding: 16px 20px;
+                margin: 16px;
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
                 backdrop-filter: blur(20px);
-                width: 100%;
+                width: calc(100% - 32px);
                 max-width: 100%;
                 box-sizing: border-box;
                 opacity: 1;
@@ -10863,38 +10790,38 @@ const TagManager = {
             `;
             notification.innerHTML = `
                 <div class="d-flex align-items-start">
-                    <i class="fas fa-info-circle me-2" style="font-size: 1.1rem; color: rgba(0, 212, 170, 0.9); margin-top: 2px;"></i>
+                    <i class="fas fa-info-circle me-3" style="font-size: 1.3rem; color: rgba(0, 212, 170, 0.9); margin-top: 2px;"></i>
                     <div class="flex-grow-1">
-                        <strong style="color: #ffffff; font-size: 0.95rem;">No Excel File Uploaded</strong>
-                        <p class="mb-2 mt-1" style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.8);">Please upload an Excel file to load product tags.</p>
-                        <button class="btn btn-sm" onclick="const notif = document.getElementById('noFileNotification'); if(notif && notif.closest('.col-3')) { notif.closest('.col-3').remove(); } document.getElementById('fileInput').click();" style="background: rgba(160, 132, 232, 0.8); border: 1px solid rgba(160, 132, 232, 1); color: #ffffff; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">
-                            <i class="fas fa-upload me-1"></i>Upload Excel File
+                        <strong style="color: #ffffff; font-size: 1.1rem; display: block; margin-bottom: 8px;">No Excel File Uploaded</strong>
+                        <p class="mb-3" style="font-size: 0.95rem; color: rgba(255, 255, 255, 0.9); line-height: 1.5;">Please upload an Excel file to load product tags and get started.</p>
+                        <button class="btn btn-sm" onclick="const notif = document.getElementById('noFileNotification'); if(notif) { notif.remove(); } document.getElementById('fileInput').click();" style="background: rgba(160, 132, 232, 0.9); border: 1px solid rgba(160, 132, 232, 1); color: #ffffff; padding: 8px 16px; border-radius: 8px; font-size: 0.9rem; font-weight: 600;">
+                            <i class="fas fa-upload me-2"></i>Upload Excel File
                         </button>
                     </div>
-                    <button type="button" class="btn-close btn-close-white ms-2" onclick="const notif = document.getElementById('noFileNotification'); if(notif && notif.closest('.col-3')) { notif.closest('.col-3').remove(); }" aria-label="Close" style="opacity: 0.8;"></button>
+                    <button type="button" class="btn-close btn-close-white ms-2" onclick="const notif = document.getElementById('noFileNotification'); if(notif) { notif.remove(); }" aria-label="Close" style="opacity: 0.8;"></button>
                 </div>
             `;
             
-            // Wrap notification in a Bootstrap column to match grid structure (1/4 width)
-            const notificationWrapper = document.createElement('div');
-            notificationWrapper.className = 'col-3 mb-3';
-            notificationWrapper.appendChild(notification);
-            
-            // Insert notification above the filter bar
-            if (filterBarContainer && filterBarRow) {
-                // Insert before the filter bar container within the row
-                filterBarRow.insertBefore(notificationWrapper, filterBarContainer);
-            } else if (filterBarContainer) {
-                // If no row found, insert before filter bar container
-                filterBarContainer.parentNode.insertBefore(notificationWrapper, filterBarContainer);
+            // Insert notification inside the available tags container
+            if (availableTagsContainer) {
+                // Clear any existing content first
+                const tagList = availableTagsContainer.querySelector('.tag-list');
+                if (tagList) {
+                    // Insert at the beginning of the tag list container
+                    tagList.insertBefore(notification, tagList.firstChild);
+                } else {
+                    // If no tag-list, insert directly into container
+                    availableTagsContainer.insertBefore(notification, availableTagsContainer.firstChild);
+                }
             } else {
                 // Fallback: try to find main content area
                 const mainContent = document.getElementById('mainContent');
                 if (mainContent) {
                     // Insert at the beginning of main content
-                    mainContent.insertBefore(notificationWrapper, mainContent.firstChild);
+                    mainContent.insertBefore(notification, mainContent.firstChild);
                 } else {
                     // Last resort: don't show notification if we can't find the right place
+                    console.warn('Could not find availableTags container to show notification');
                     return;
                 }
             }
@@ -10903,19 +10830,15 @@ const TagManager = {
         } else {
             // Notification already exists, just show it
             notification.classList.add('show');
+            notification.style.display = 'block';
         }
     },
     
     hideNoFileNotification() {
         // Remove the notification when a file is uploaded
         const notification = document.getElementById('noFileNotification');
-        if (notification) {
-            const notificationWrapper = notification.closest('.col-3');
-            if (notificationWrapper && notificationWrapper.parentNode) {
-                notificationWrapper.remove();
-            } else if (notification.parentNode) {
-                notification.remove();
-            }
+        if (notification && notification.parentNode) {
+            notification.remove();
         }
         // Clear the session storage flag
         sessionStorage.removeItem('noFileNotificationTime');
