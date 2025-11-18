@@ -6564,6 +6564,15 @@ const TagManager = {
     },
 
     async fetchAndUpdateAvailableTags() {
+        // Prevent concurrent fetches
+        if (this._fetchInProgress) {
+            verboseLog('Fetch already in progress, skipping duplicate call');
+            return false;
+        }
+        this._fetchInProgress = true;
+        
+        // Initialize savedScroll early so it's always available in catch block
+        let savedScroll = null;
         try {
             verboseLog('=== fetchAndUpdateAvailableTags START ===');
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
@@ -6588,7 +6597,7 @@ const TagManager = {
             }
             
             // Preserve current scroll/anchor so refreshes don't jump the list
-            const savedScroll = this._saveAvailableScrollPosition();
+            savedScroll = this._saveAvailableScrollPosition();
             
             // Rate limiting: prevent rapid successive calls
             // Reduced from 2000ms to 500ms to allow faster retries while still preventing abuse
@@ -6904,6 +6913,9 @@ const TagManager = {
             }
 
             return false;
+        } finally {
+            // Always clear the fetch in progress flag
+            this._fetchInProgress = false;
         }
     },
 
@@ -6936,6 +6948,10 @@ const TagManager = {
     
     async _fallbackToLiteAvailableTags(originalError, savedScrollPosition) {
         try {
+            // Ensure savedScrollPosition is defined
+            if (!savedScrollPosition) {
+                savedScrollPosition = this._saveAvailableScrollPosition();
+            }
             verboseLog('Attempting fallback to /api/available-tags-lite due to error:', originalError?.message || originalError);
             const response = await fetch(`/api/available-tags-lite?t=${Date.now()}`);
             if (!response.ok) {
@@ -6984,7 +7000,9 @@ const TagManager = {
             
             this.validateSelectedTags();
             this._updateAvailableTags(tags);
-            this._restoreAvailableScrollPosition(savedScrollPosition);
+            if (savedScrollPosition) {
+                this._restoreAvailableScrollPosition(savedScrollPosition);
+            }
             this.updateTagCount('available', tags.length);
             this.updateTagCount('selected', this.state.persistentSelectedTags.length);
             
@@ -10345,9 +10363,9 @@ const TagManager = {
         }
         sessionStorage.setItem('noFileNotificationTime', now.toString());
         
-        // Find the upload section to place notification above it
-        const leftSection = document.querySelector('.left-section');
-        const buttonsRow = document.querySelector('.buttons-row');
+        // Find the filter bar container to place notification above it
+        const filterBarContainer = document.querySelector('[data-container-type="filter"]');
+        const filterBarRow = filterBarContainer ? filterBarContainer.closest('.row') : null;
         
         // Create or get notification element
         let notification = document.getElementById('noFileNotification');
@@ -10370,7 +10388,6 @@ const TagManager = {
                 width: 100%;
                 max-width: 100%;
                 box-sizing: border-box;
-                flex-shrink: 0;
                 opacity: 1;
                 transition: none;
             `;
@@ -10380,52 +10397,47 @@ const TagManager = {
                     <div class="flex-grow-1">
                         <strong style="color: #ffffff; font-size: 0.95rem;">No Excel File Uploaded</strong>
                         <p class="mb-2 mt-1" style="font-size: 0.85rem; color: rgba(255, 255, 255, 0.8);">Please upload an Excel file to load product tags.</p>
-                        <button class="btn btn-sm" onclick="document.getElementById('fileInput').click(); this.closest('#noFileNotification').remove();" style="background: rgba(160, 132, 232, 0.8); border: 1px solid rgba(160, 132, 232, 1); color: #ffffff; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">
+                        <button class="btn btn-sm" onclick="const notif = document.getElementById('noFileNotification'); if(notif && notif.closest('.col-12')) { notif.closest('.col-12').remove(); } document.getElementById('fileInput').click();" style="background: rgba(160, 132, 232, 0.8); border: 1px solid rgba(160, 132, 232, 1); color: #ffffff; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem;">
                             <i class="fas fa-upload me-1"></i>Upload Excel File
                         </button>
                     </div>
-                    <button type="button" class="btn-close btn-close-white ms-2" onclick="this.closest('#noFileNotification').remove();" aria-label="Close" style="opacity: 0.8;"></button>
+                    <button type="button" class="btn-close btn-close-white ms-2" onclick="const notif = document.getElementById('noFileNotification'); if(notif && notif.closest('.col-12')) { notif.closest('.col-12').remove(); }" aria-label="Close" style="opacity: 0.8;"></button>
                 </div>
             `;
             
-            // Insert notification above the buttons row in the left section
-            // Make sure it doesn't break the flex layout
-            if (leftSection && buttonsRow) {
-                // Insert before buttons-row but after file-path-display if it exists
-                const filePathDisplay = leftSection.querySelector('.file-path-display');
-                if (filePathDisplay && filePathDisplay.nextSibling === buttonsRow) {
-                    // Insert after file-path-display
-                    leftSection.insertBefore(notification, buttonsRow);
-                } else {
-                    // Insert before buttons-row
-                    leftSection.insertBefore(notification, buttonsRow);
-                }
-            } else if (leftSection) {
-                // If buttonsRow not found, insert at the beginning of leftSection
-                leftSection.insertBefore(notification, leftSection.firstChild);
-            } else {
-                // Fallback: don't show notification if we can't find the right place
-                return;
-            }
+            // Wrap notification in a Bootstrap column to match grid structure
+            const notificationWrapper = document.createElement('div');
+            notificationWrapper.className = 'col-12 mb-3';
+            notificationWrapper.appendChild(notification);
             
-            // Ensure left-section doesn't overflow and notification fits properly
-            if (leftSection) {
-                leftSection.style.overflow = 'visible';
-                leftSection.style.minWidth = '0';
-                // Constrain notification to left-section width
-                notification.style.maxWidth = '100%';
-                notification.style.overflow = 'hidden';
+            // Insert notification above the filter bar
+            if (filterBarContainer && filterBarRow) {
+                // Insert before the filter bar container within the row
+                filterBarRow.insertBefore(notificationWrapper, filterBarContainer);
+            } else if (filterBarContainer) {
+                // If no row found, insert before filter bar container
+                filterBarContainer.parentNode.insertBefore(notificationWrapper, filterBarContainer);
+            } else {
+                // Fallback: try to find main content area
+                const mainContent = document.getElementById('mainContent');
+                if (mainContent) {
+                    // Insert at the beginning of main content
+                    mainContent.insertBefore(notificationWrapper, mainContent.firstChild);
+                } else {
+                    // Last resort: don't show notification if we can't find the right place
+                    return;
+                }
             }
             
             // Auto-dismiss after 10 seconds
             setTimeout(() => {
-                if (notification && notification.parentNode) {
+                if (notificationWrapper && notificationWrapper.parentNode) {
                     // Remove without animation to prevent layout shift
                     notification.style.opacity = '0';
                     notification.style.transition = 'opacity 0.2s';
                     setTimeout(() => {
-                        if (notification && notification.parentNode) {
-                            notification.remove();
+                        if (notificationWrapper && notificationWrapper.parentNode) {
+                            notificationWrapper.remove();
                         }
                     }, 200);
                 }
