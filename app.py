@@ -9368,6 +9368,15 @@ def update_lineage():
                     conn.commit()
                     commit_success = True
                     logging.info(f"✅ Transaction committed: {products_updated} products, strain_updated={strain_updated}")
+                    
+                    # CRITICAL FIX: Force WAL checkpoint on the SAME connection that did the commit
+                    # This ensures the changes are immediately visible to other connections and persisted to disk
+                    try:
+                        cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                        logging.info(f"✅ WAL checkpoint completed on commit connection - changes persisted to disk")
+                    except Exception as checkpoint_error:
+                        logging.warning(f"⚠️  WAL checkpoint failed (non-critical): {checkpoint_error}")
+                    
                     break
                 except sqlite3.OperationalError as commit_lock_error:
                     if "database is locked" in str(commit_lock_error).lower() and commit_attempt < 2:
@@ -9520,17 +9529,8 @@ def update_lineage():
             session.modified = True
             logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
             
-            # CRITICAL FIX: Force WAL checkpoint to ensure changes are persisted to disk
-            try:
-                # Use a new connection to force checkpoint
-                checkpoint_conn = product_db._get_connection()
-                checkpoint_cursor = checkpoint_conn.cursor()
-                # Force WAL checkpoint to ensure all changes are written to database file
-                checkpoint_cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                checkpoint_cursor.close()
-                logging.info(f"✅ LINEAGE UPDATE: Forced WAL checkpoint to ensure persistence")
-            except Exception as checkpoint_error:
-                logging.warning(f"WAL checkpoint failed (non-critical): {checkpoint_error}")
+            # NOTE: WAL checkpoint is now done on the same connection that committed (above)
+            # This ensures changes are immediately visible and persisted
             
             # Invalidate Excel processor caches (non-blocking)
             if excel_processor and hasattr(excel_processor, '_invalidate_caches'):
@@ -9908,6 +9908,12 @@ def batch_update_lineage():
                             ''', (new_lineage, vendor_val, tag_name, tag_name))
                         total_vendor_updates += cursor.rowcount
                 conn.commit()
+                # CRITICAL FIX: Force WAL checkpoint to ensure batch lineage changes persist
+                try:
+                    cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    logging.info(f"✅ WAL checkpoint completed for batch lineage updates")
+                except Exception as checkpoint_error:
+                    logging.warning(f"⚠️  WAL checkpoint failed for batch update (non-critical): {checkpoint_error}")
                 logging.info(f"✅ Batch vendor updates applied to {total_vendor_updates} rows")
         except Exception as vendor_batch_err:
             logging.warning(f"Vendor-wide batch lineage updates failed: {vendor_batch_err}")
