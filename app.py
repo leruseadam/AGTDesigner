@@ -7750,14 +7750,27 @@ def get_available_tags():
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         
         # If lineage was recently changed, force a full refresh even if fast_load requested
+        # CRITICAL FIX: Check lineage_update_timestamp and force database refresh if lineage was updated recently
         lineage_update_ts = session.get('lineage_update_timestamp')
         force_full_refresh = False
+        force_db_refresh = False
         if lineage_update_ts:
             try:
-                force_full_refresh = (time.time() - float(lineage_update_ts)) < 600  # 10 minutes
+                time_since_update = time.time() - float(lineage_update_ts)
+                force_full_refresh = time_since_update < 600  # 10 minutes
+                # Force database refresh if lineage was updated in the last 30 minutes
+                force_db_refresh = time_since_update < 1800  # 30 minutes
             except Exception:
                 force_full_refresh = False
-        if force_full_refresh:
+                force_db_refresh = False
+        
+        # If lineage was recently updated, bypass cache and force database query
+        if force_db_refresh:
+            logging.info(f"⚠️  Recent lineage updates detected ({(time.time() - float(lineage_update_ts)):.0f}s ago) – forcing database refresh and bypassing cache.")
+            cached_tags = None  # Force bypass of cache
+            prefer_db = True  # Force database query
+            nocache = True  # Force no cache
+        elif force_full_refresh:
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
         
         if cached_tags and not nocache:
@@ -9522,15 +9535,35 @@ def update_lineage():
         # CRITICAL FIX: Fast cache invalidation - don't block response
         cache_clear_start = time.time()
         try:
-            # Clear only essential caches - fast and non-blocking
-            cache_key = get_session_cache_key('available_tags')
-            cache.delete(cache_key)
+            # Clear all available_tags cache keys (including file-specific ones)
+            # This ensures lineage changes persist across page reloads
+            session_file_path = session.get('file_path', '')
+            cache_key_with_path = get_session_cache_key(f'available_tags_{session_file_path}')
+            cache_key_generic = get_session_cache_key('available_tags')
             # Also clear web cache
             web_cache_key = get_session_cache_key('web_available_tags')
+            
+            # Delete all related cache keys
+            cache.delete(cache_key_with_path)
+            cache.delete(cache_key_generic)
             cache.delete(web_cache_key)
+            
+            # Also clear any cached tags with different file paths (in case user switches files)
+            # Clear the persistent file-based cache as well
+            try:
+                store_name_for_cache = get_current_store_name()
+                if store_name_for_cache:
+                    cache_file_path = get_available_tags_cache_path(store_name_for_cache)
+                    if os.path.exists(cache_file_path):
+                        os.remove(cache_file_path)
+                        logging.info(f"✅ LINEAGE UPDATE: Cleared persistent cache file: {cache_file_path}")
+            except Exception as file_cache_error:
+                logging.warning(f"Could not clear persistent cache file: {file_cache_error}")
+            
+            # Set lineage update timestamp to force database refresh on next page load
             session['lineage_update_timestamp'] = time.time()
             session.modified = True
-            logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
+            logging.info(f"✅ LINEAGE UPDATE: Cleared all cache keys and updated timestamp")
             
             # CRITICAL FIX: Force WAL checkpoint to ensure changes are persisted to disk permanently
             try:

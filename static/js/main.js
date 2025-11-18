@@ -6621,11 +6621,14 @@ const TagManager = {
                     // Increased timeout from 10s to 20s to accommodate slower lineage alignment queries
                     const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-                    // Use cache if available - only bypass cache on explicit refresh or error recovery
+                    // OPTIMIZATION: Always use cache and fast_load for faster response
+                    // Skip slow lineage alignment on initial loads and after upload
                     const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Use fast_load on first attempt for initial loads
-                    const fastParam = (retryCount === 0 && isInitialLoad) ? fastLoadParam : '';
+                    // Use fast_load on first attempt for initial loads OR after upload
+                    // fast_load skips expensive lineage alignment queries
+                    const isAfterUpload = document.getElementById('excelLoadingSplash')?.style.display === 'flex';
+                    const fastParam = (retryCount === 0 && (isInitialLoad || isAfterUpload)) ? '&fast_load=1' : '';
                     response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}`, {
                         signal: controller.signal
                     });
@@ -7703,6 +7706,26 @@ const TagManager = {
                     filename: data.filename
                 });
                 verboseLog('Initial data response:', data);
+                // Check if data is actually loaded - if not, show notification
+                if (!data.data_loaded || !data.available_tags || !Array.isArray(data.available_tags) || data.available_tags.length === 0) {
+                    console.log('⚠️ Initial data indicates no file uploaded, showing notification');
+                    this.initializeEmptyState();
+                    this._checkingExistingData = false;
+                    initialDataFetchInProgress = false;
+                    clearTimeout(splashSafetyTimeout);
+                    clearTimeout(timeoutId);
+                    clearTimeout(showSplashTimeout);
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    setTimeout(() => {
+                        this.showNoFileNotification();
+                    }, 300);
+                    return;
+                }
+                
                 if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                     verboseLog(`Found ${data.available_tags.length} existing tags, loading data...`);
 
@@ -9730,11 +9753,61 @@ const TagManager = {
                 showToast('success', `File uploaded successfully! ${uploadData.rows || 0} rows processed.`);
             }
             
-            // Refresh the page to show new data
+            // CRITICAL: Force reload tags immediately after upload (bypass cache)
+            console.log('🔄 Forcing tag reload after upload (bypassing cache)...');
+            try {
+                // Clear any cached tags first
+                if (this.state) {
+                    this.state.tags = [];
+                    this.state.originalTags = [];
+                }
+                
+                // Force fetch with nocache to ensure fresh data
+                const freshTagsController = new AbortController();
+                const freshTagsTimeout = setTimeout(() => freshTagsController.abort(), 10000); // 10s timeout
+                const freshTagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=0`, {
+                    signal: freshTagsController.signal
+                });
+                clearTimeout(freshTagsTimeout);
+                
+                if (freshTagsResponse.ok) {
+                    const freshTagsData = await freshTagsResponse.json();
+                    if (freshTagsData.tags && freshTagsData.tags.length > 0) {
+                        console.log(`✅ Loaded ${freshTagsData.tags.length} fresh tags after upload`);
+                        this.state.tags = [...freshTagsData.tags];
+                        this.state.originalTags = [...freshTagsData.tags];
+                        this._updateAvailableTags(freshTagsData.tags);
+                        
+                        // Update file info
+                        if (freshTagsData.filename || file.name) {
+                            const fileInfoText = document.getElementById('fileInfoText');
+                            if (fileInfoText) {
+                                fileInfoText.textContent = freshTagsData.filename || file.name;
+                            }
+                        }
+                        
+                        // Load filters in background
+                        this.fetchAndPopulateFilters().catch(err => {
+                            console.warn('Filter loading failed:', err);
+                        });
+                        
+                        // Wait for tags to appear, then complete
+                        if (this._waitForTagsToAppear) {
+                            this._waitForTagsToAppear();
+                        }
+                        return; // Success - tags loaded, no need to reload page
+                    }
+                }
+            } catch (refreshError) {
+                console.warn('⚠️ Failed to refresh tags after upload, will reload page:', refreshError);
+            }
+            
+            // Fallback: Refresh the page to show new data if direct tag refresh failed
             setTimeout(() => {
-                verboseLog('🔄 Refreshing page to show new data...');
-                window.location.reload();
-            }, 1500);
+                verboseLog('🔄 Refreshing page to show new data (fallback)...');
+                // Add cache-busting parameter to ensure fresh load
+                window.location.href = window.location.pathname + '?t=' + Date.now();
+            }, 2000);
             
             return; // Success!
         } catch (error) {
