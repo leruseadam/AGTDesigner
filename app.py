@@ -2812,17 +2812,23 @@ def upload_file():
             upload_time = time.time() - start_time
             logging.info(f"=== UPLOAD COMPLETE (ready immediately, processing in background): {upload_time:.3f}s ===")
 
+            # CRITICAL FIX: Return response immediately to prevent 504 timeout
             response_data = {
                 'success': True,
                 'message': 'File uploaded and ready',
                 'filename': file.filename,
-                'processing': False  # CHANGED: Marked as not processing so frontend loads immediately
+                'processing': False,  # CHANGED: Marked as not processing so frontend loads immediately
+                'rows': 0  # Will be updated by background thread
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
                 response_data['detected_store'] = detected_store
                 response_data['selected_store'] = selected_store
-            return jsonify(response_data)
+            
+            # Return response immediately - don't wait for background processing
+            response = make_response(jsonify(response_data))
+            response.headers['X-Upload-Time'] = f"{upload_time:.3f}s"
+            return response
             
         else:
             # Local development: FAST UPLOAD - just save file, don't process
