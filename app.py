@@ -2791,20 +2791,39 @@ def upload_file():
 
                         logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
 
-                        # CRITICAL: Clear ALL caches to force complete refresh
+                        # CRITICAL: HARD REFRESH - Clear ALL caches aggressively to force complete refresh
                         try:
                             # Clear file-specific cache (uses file path in key)
                             # Note: In background thread, we can't access session directly, use file_path from closure
                             cache_keys_to_clear = [
                                 f'available_tags_{file_path}',
+                                'available_tags',  # General cache
                                 'selected_tags',
                                 'vendor_tags',
-                                'initial_data'
+                                'initial_data',
+                                'filtered_tags',
+                                'tag_list'
                             ]
                             for key_base in cache_keys_to_clear:
                                 cache_key = get_session_cache_key(key_base)
                                 cache.delete(cache_key)
                                 logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
+                            
+                            # Also clear JSON matched cache if it exists
+                            try:
+                                json_matched_cache_key = f'json_matched_{file_path}'
+                                cache.delete(json_matched_cache_key)
+                                logging.info(f"[BACKGROUND] ✅ Cleared JSON matched cache")
+                            except:
+                                pass
+                            
+                            # Clear full Excel cache
+                            try:
+                                full_excel_cache_key = f'full_excel_{file_path}'
+                                cache.delete(full_excel_cache_key)
+                                logging.info(f"[BACKGROUND] ✅ Cleared full Excel cache")
+                            except:
+                                pass
                         except Exception as cache_err:
                             logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
@@ -2832,7 +2851,8 @@ def upload_file():
                 'success': True,
                 'message': 'File uploaded and ready',
                 'filename': file.filename,
-                'processing': False  # CHANGED: Marked as not processing so frontend loads immediately
+                'processing': False,  # CHANGED: Marked as not processing so frontend loads immediately
+                'hard_refresh': True  # CRITICAL: Flag to force hard refresh on frontend
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
@@ -2849,15 +2869,18 @@ def upload_file():
             _excel_processor = None
             logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
             
-            # CRITICAL: Clear ALL caches to force complete refresh
+            # CRITICAL: HARD REFRESH - Clear ALL caches aggressively to force complete refresh
             try:
                 # Clear file-specific cache (uses file path in key)
                 session_file_path = session.get('file_path', '')
                 cache_keys_to_clear = [
                     f'available_tags_{session_file_path}',
+                    'available_tags',  # General cache
                     'selected_tags', 
                     'vendor_tags', 
-                    'initial_data'
+                    'initial_data',
+                    'filtered_tags',
+                    'tag_list'
                 ]
                 
                 # Also clear any old available_tags caches (from previous uploads)
@@ -2873,6 +2896,31 @@ def upload_file():
                     cache_key = get_session_cache_key(key_base)
                     cache.delete(cache_key)
                     logging.info(f"✅ Cleared cache: {key_base}")
+                
+                # Clear JSON matched cache
+                try:
+                    json_matched_cache_key = session.get('json_matched_cache_key')
+                    if json_matched_cache_key:
+                        cache.delete(json_matched_cache_key)
+                        logging.info(f"✅ Cleared JSON matched cache")
+                    session.pop('json_matched_cache_key', None)
+                except:
+                    pass
+                
+                # Clear full Excel cache
+                try:
+                    full_excel_cache_key = session.get('full_excel_cache_key')
+                    if full_excel_cache_key:
+                        cache.delete(full_excel_cache_key)
+                        logging.info(f"✅ Cleared full Excel cache")
+                    session.pop('full_excel_cache_key', None)
+                except:
+                    pass
+                
+                # Set hard refresh timestamp to force fresh load
+                session['hard_refresh_timestamp'] = time.time()
+                session.modified = True
+                logging.info(f"✅ Set hard refresh timestamp: {session['hard_refresh_timestamp']}")
             except Exception as cache_err:
                 logging.warning(f"Failed to clear cache: {cache_err}")
             
@@ -2889,7 +2937,8 @@ def upload_file():
                 'success': True,
                 'message': 'File uploaded successfully',
                 'filename': file.filename,
-                'rows': 0  # Unknown until page reload processes it
+                'rows': 0,  # Unknown until page reload processes it
+                'hard_refresh': True  # CRITICAL: Flag to force hard refresh on frontend
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return

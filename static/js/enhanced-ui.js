@@ -228,10 +228,12 @@ async function handleFiles(files) {
           try {
             TagManager.clearUIStateForNewFile(true); // keep filters
             // Kick off refresh without awaiting to prevent UI stall
+            // CRITICAL: Use hard refresh if server indicates it (hard_refresh flag)
+            const hardRefresh = data.hard_refresh === true;
             setTimeout(() => {
               if (TagManager.refreshTagLists) {
                 console.time('post-upload-refresh-async');
-                TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                TagManager.refreshTagLists({ preserveFilters: true, force: true, hardRefresh: hardRefresh })
                   .finally(() => console.timeEnd('post-upload-refresh-async'))
                   .catch(err => {
                     console.error('Async refreshTagLists failed', err);
@@ -464,7 +466,8 @@ function pollUploadStatus(filename) {
         // Fetch all updated data in parallel to avoid serial bottlenecks
         console.time('post-ready-data-fetch');
         if (typeof TagManager !== 'undefined' && TagManager.refreshTagLists) {
-          await TagManager.refreshTagLists({ preserveFilters: true, force: true });
+          // CRITICAL: Use hard refresh after upload to force fresh data
+          await TagManager.refreshTagLists({ preserveFilters: true, force: true, hardRefresh: true });
         } else {
           await Promise.all([
             // Available tags
@@ -502,7 +505,9 @@ function pollUploadStatus(filename) {
             TagManager.clearUIStateForNewFile?.(true);
             setTimeout(() => {
               if (TagManager.refreshTagLists) {
-                TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                // CRITICAL: Use hard refresh if server indicates it (hard_refresh flag)
+                const hardRefresh = data.hard_refresh === true;
+                TagManager.refreshTagLists({ preserveFilters: true, force: true, hardRefresh: hardRefresh })
                   .catch(err => {
                     console.error('refreshTagLists failed after poll-ready', err);
                     window.location.reload();

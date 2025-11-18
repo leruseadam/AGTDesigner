@@ -6708,8 +6708,9 @@ const TagManager = {
                     // PERFORMANCE FIX: Reduced timeout to 8s - fast_load should make this fast enough
                     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-                    // Use cache if available - only bypass cache on explicit refresh or error recovery
-                    const useCache = retryCount === 0; // Use cache on first attempt
+                    // CRITICAL: Use nocache=1 for hard refresh (after upload) to force fresh data
+                    // Use cache if available - only bypass cache on explicit refresh, error recovery, or hard refresh
+                    const useCache = retryCount === 0 && !this._hardRefresh; // Use cache on first attempt unless hard refresh
                     const cacheParam = useCache ? '' : '&nocache=1';
                     // PERFORMANCE FIX: Always use fast_load=1 for faster tag population
                     // Lineage alignment can be done later if needed
@@ -7119,8 +7120,8 @@ const TagManager = {
      *   - force (default true): temporarily bypass fetch rate limiting
      */
     async refreshTagLists(options = {}) {
-        const { preserveFilters = true, force = true } = options;
-        verboseLog('=== refreshTagLists START ===', { preserveFilters, force });
+        const { preserveFilters = true, force = true, hardRefresh = false } = options;
+        verboseLog('=== refreshTagLists START ===', { preserveFilters, force, hardRefresh });
 
         // Optionally preserve filters by skipping reset
         if (!preserveFilters) {
@@ -7134,7 +7135,9 @@ const TagManager = {
         }
 
         // Set flag to enable fast_load for post-upload tag loading
+        // If hardRefresh is true, also set flag to use nocache=1
         this._isPostUploadLoad = true;
+        this._hardRefresh = hardRefresh;  // CRITICAL: Flag for hard refresh (nocache=1)
 
         try {
             const results = await Promise.all([
@@ -7154,8 +7157,9 @@ const TagManager = {
             console.error('refreshTagLists error:', error);
             throw error;
         } finally {
-            // Clear post-upload flag
+            // Clear post-upload flag and hard refresh flag
             this._isPostUploadLoad = false;
+            this._hardRefresh = false;  // Clear hard refresh flag
             if (force) {
                 this._lastFetchTime = previousFetchTime;
             }
