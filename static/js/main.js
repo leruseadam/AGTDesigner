@@ -7575,10 +7575,13 @@ const TagManager = {
         };
 
         try {
+            console.log('📡 Fetching /api/initial-data...');
             // Use AbortController to make fetch actually cancelable
             const response = await fetch('/api/initial-data', {
                 signal: abortController.signal
             });
+            
+            console.log(`📡 /api/initial-data response status: ${response.status}, ok: ${response.ok}`);
             
             // Mark fetch as complete
             initialDataFetchInProgress = false;
@@ -7587,7 +7590,15 @@ const TagManager = {
             clearTimeout(timeoutId);
 
             if (response.ok) {
+                console.log('📦 Parsing initial-data response...');
                 const data = await response.json();
+                console.log('📦 Initial data response:', {
+                    success: data.success,
+                    hasAvailableTags: !!data.available_tags,
+                    availableTagsCount: data.available_tags ? data.available_tags.length : 0,
+                    dataLoaded: data.data_loaded,
+                    filename: data.filename
+                });
                 verboseLog('Initial data response:', data);
                 if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                     verboseLog(`Found ${data.available_tags.length} existing tags, loading data...`);
@@ -7687,15 +7698,25 @@ const TagManager = {
                     verboseLog('Initial data loaded successfully');
                     return;
                 } else {
+                    console.log('⚠️ No initial data available:', data.message || 'No data found');
                     verboseLog('No initial data available:', data.message || 'No data found');
                     
                     // CRITICAL FIX: Try loading tags directly from /api/available-tags as fallback
                     // This handles cases where initial-data returns empty but a file exists in session
+                    console.log('🔄 Attempting fallback: loading tags directly from /api/available-tags...');
                     verboseLog('Attempting fallback: loading tags directly from /api/available-tags...');
                     try {
-                        const tagsResponse = await fetch('/api/available-tags?t=' + Date.now());
+                        const fallbackUrl = '/api/available-tags?t=' + Date.now();
+                        console.log(`📡 Fetching fallback: ${fallbackUrl}`);
+                        const tagsResponse = await fetch(fallbackUrl);
+                        console.log(`📡 Fallback response status: ${tagsResponse.status}, ok: ${tagsResponse.ok}`);
                         if (tagsResponse.ok) {
                             const tagsData = await tagsResponse.json();
+                            console.log('📦 Fallback tags data:', {
+                                hasTags: !!tagsData.tags,
+                                tagsCount: tagsData.tags ? tagsData.tags.length : 0,
+                                source: tagsData.source
+                            });
                             if (tagsData.tags && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
                                 verboseLog(`✅ Fallback successful: loaded ${tagsData.tags.length} tags from /api/available-tags`);
                                 // Update tags directly
@@ -7763,6 +7784,7 @@ const TagManager = {
                     return;
                 }
             } else {
+                console.error(`❌ Initial data endpoint returned error: ${response.status}`);
                 verboseLog('Initial data endpoint returned error:', response.status);
                 // Complete splash loading on error
                 AppLoadingSplash.stopAutoAdvance();
@@ -7790,6 +7812,12 @@ const TagManager = {
             clearTimeout(timeoutId);
             clearTimeout(showSplashTimeout);
             
+            console.error('❌ Error loading initial data:', error);
+            console.error('❌ Error details:', {
+                name: error.name,
+                message: error.message,
+                stack: error.stack
+            });
             verboseLog('Error loading initial data:', error.message);
             
             // Handle abort/timeout specifically
