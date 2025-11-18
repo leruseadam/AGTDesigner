@@ -4830,6 +4830,10 @@ class JSONMatcher:
             new_product_count = 0
             new_database_entries_count = 0
             
+            # PERFORMANCE: Add in-memory cache for database lookups during this batch
+            _db_match_cache = {}  # Cache key -> match result
+            _ai_matcher_initialized = False
+            
             # Helper function to clean product names
             def clean_product_name(name):
                 if not name:
@@ -4853,7 +4857,9 @@ class JSONMatcher:
                     # Enhanced product information extraction using new database columns
                     original_product_name = str(item.get("product_name", "")).strip()
                     product_name = original_product_name  # Will be replaced with matched database name if found
-                    logging.debug(f"Processing product: {product_name}")
+                    # PERFORMANCE: Only log debug for first few items or when verbose mode enabled
+                    if i < 3 or logging.getLogger().isEnabledFor(logging.DEBUG):
+                        logging.debug(f"Processing product: {product_name}")
                     # CRITICAL FIX: Don't skip items with missing product names - create fallback names
                     if not product_name:
                         # Try to create a fallback product name from other available fields
@@ -4891,9 +4897,22 @@ class JSONMatcher:
                     # PRIORITY 1: For SKU-like products, try database search first
                     db_info = None
                     if '_' in product_name and product_db:
-                        print(f"🔍 DEBUG: SKU detected '{product_name}', trying database search first")
+                        # PERFORMANCE: Only log for first few SKUs
+                        if i < 3:
+                            logging.debug(f"🔍 SKU detected '{product_name}', trying database search first")
                         # Try SKU-based database search first for SKU products
                         try:
+                            # PERFORMANCE: Check cache first
+                            cache_key = f"sku_{product_name}_{vendor}"
+                            if cache_key in _db_match_cache:
+                                db_info = _db_match_cache[cache_key]
+                                if db_info and self._is_valid_product(db_info):
+                                    tag = self._create_tag_from_database_info(db_info, vendor, item)
+                                    all_tags.append(tag)
+                                    matched_count += 1
+                                    continue
+                                db_info = None
+                            
                             # Parse SKU to create search terms
                             parts = product_name.split('_')
                             search_terms = []
@@ -4915,14 +4934,15 @@ class JSONMatcher:
                                     search_terms.append('indica')
                                 
                                 # Flavor/descriptors
-                                for i in range(2, len(parts)):
-                                    part = parts[i].lower()
+                                for j in range(2, len(parts)):
+                                    part = parts[j].lower()
                                     if not part.endswith('pk') and part not in ['single']:
                                         search_terms.append(part)
                             
                             # Search database using SQL LIKE for better performance
                             if search_terms and hasattr(product_db, '_get_connection'):
-                                logging.info(f"🔍 Generated search terms: {search_terms}")
+                                if i < 3:
+                                    logging.debug(f"🔍 Generated search terms: {search_terms[:3]}")
                                 conn = product_db._get_connection()
                                 cursor = conn.cursor()
                                 
@@ -4939,9 +4959,6 @@ class JSONMatcher:
                                 # Add brand filter if we know it's Ceres
                                 where_sql += ' AND "Product Brand" = ?'
                                 params.append('Ceres')
-                                
-                                logging.info(f"🔍 SQL WHERE clause: {where_sql}")
-                                logging.info(f"🔍 SQL params: {params}")
                                 
                                 sql = f'''
                                     SELECT "Product Name*", "Description", "Product Brand", "Lineage",
@@ -4972,79 +4989,96 @@ class JSONMatcher:
                                         'Product Strain': result[9]
                                     }
                                     
+                                    # PERFORMANCE: Cache the result
+                                    _db_match_cache[cache_key] = db_info
+                                    
                                     # Validate the database match
                                     if self._is_valid_product(db_info):
-                                        logging.info(f"✅ SKU search found valid database match: '{product_name}' → '{result[1]}'")
+                                        if i < 5:
+                                            logging.debug(f"✅ SKU search found match: '{product_name}' → '{result[1]}'")
                                         
                                         # Create tag from database info
                                         tag = self._create_tag_from_database_info(db_info, vendor, item)
                                         all_tags.append(tag)
                                         matched_count += 1
-                                        print(f"🔍 DEBUG: Added valid database tag for SKU '{product_name}'")
                                         continue  # Skip Excel matching for this SKU
                                     else:
-                                        logging.info(f"🚫 SKU search found invalid database match (void/sample): '{product_name}' → '{result[1]}'")
+                                        if i < 3:
+                                            logging.debug(f"🚫 SKU search found invalid match (void/sample): '{product_name}'")
                                 else:
-                                    logging.info(f"⚠️  No database match found for SKU '{product_name}' with search terms: {search_terms[:3]}")
+                                    # Cache miss to avoid retrying
+                                    _db_match_cache[cache_key] = None
                                     
                         except Exception as search_error:
-                            logging.warning(f"SKU database search failed: {search_error}")
+                            if i < 3:
+                                logging.warning(f"SKU database search failed: {search_error}")
                     
                     # PRIORITY 2: Use comprehensive matching logic (Excel) if no SKU database match
                     try:
                         if product_db:
-                            db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db)
+                            # PERFORMANCE: Check cache first
+                            cache_key = f"db_{product_name}_{vendor}_{weight}"
+                            if cache_key in _db_match_cache:
+                                db_direct_match = _db_match_cache[cache_key]
+                            else:
+                                db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db)
+                                _db_match_cache[cache_key] = db_direct_match
+                            
                             if db_direct_match:
                                 tag = self._create_tag_from_database_info(db_direct_match, vendor, item)
                                 all_tags.append(tag)
                                 matched_count += 1
-                                logging.info(f"✅ Direct database match found for '{product_name}' (similarity: {db_direct_match.get('_similarity_score')})")
+                                if i < 5:
+                                    logging.debug(f"✅ Direct database match found for '{product_name}' (similarity: {db_direct_match.get('_similarity_score')})")
                                 continue
 
                         # Use the same comprehensive matching logic that was working in the debug output
-                        print(f"🔍 DEBUG: Trying comprehensive matching for '{product_name}' (type: {product_type})")
                         matched_products = self._process_item_with_main_matching(item, product_name, vendor, product_type, strain, global_vendor)
-                        print(f"🔍 DEBUG: Comprehensive matching returned {len(matched_products)} products")
                         if matched_products:
                             valid_products = [p for p in matched_products if self._is_valid_product(p)]
-                            if len(valid_products) != len(matched_products):
-                                print(f"🔍 DEBUG: Filtered out {len(matched_products) - len(valid_products)} invalid products (void/sample)")
                             
                             for product in valid_products:
                                 tag = self._create_tag_from_product(product, item, global_vendor)
                                 all_tags.append(tag)
                                 matched_count += 1
-                            print(f"🔍 DEBUG: Added {len(valid_products)} valid tags from comprehensive matching")
+                            if i < 5:
+                                logging.debug(f"✅ Comprehensive matching found {len(valid_products)} valid products for '{product_name}'")
                             continue  # Skip the educated guess and JSON processing below
-                        else:
-                            print(f"🔍 DEBUG: No products found by comprehensive matching, falling back to AI-powered database lookup")
                     except Exception as main_match_error:
-                        logging.warning(f"Error in comprehensive matching logic: {main_match_error}")
-                        print(f"🔍 DEBUG: Comprehensive matching error: {main_match_error}")
+                        if i < 3:
+                            logging.warning(f"Error in comprehensive matching logic: {main_match_error}")
                     
                     # PRIORITY 2: Fallback to AI-Powered Product Database lookup if comprehensive matching fails
+                    # PERFORMANCE: Skip expensive AI matching for large batches unless clearly needed
                     db_info = None
-                    if product_db:
+                    skip_ai_matching = len(items) > 20 and i > len(items) * 0.8  # Skip AI for last 20% of large batches
+                    if product_db and not skip_ai_matching:
                         try:
-                            logging.debug(f"Attempting AI-Powered Product Database lookup for: {product_name}")
+                            # PERFORMANCE: Check cache first
+                            cache_key_ai = f"ai_{product_name}_{vendor}"
+                            if cache_key_ai in _db_match_cache:
+                                db_info = _db_match_cache[cache_key_ai]
+                                if db_info:
+                                    tag = self._create_tag_from_database_info(db_info, vendor, item)
+                                    all_tags.append(tag)
+                                    matched_count += 1
+                                    continue
                             
-                            # Initialize AI matcher if not already done
-                            if not hasattr(self, 'ai_matcher'):
-                                self.ai_matcher = AIProductMatcher(product_db)
-                                logging.info("✅ AI Product Matcher initialized")
+                            # Initialize AI matcher if not already done (only once)
+                            if not _ai_matcher_initialized:
+                                if not hasattr(self, 'ai_matcher'):
+                                    self.ai_matcher = AIProductMatcher(product_db)
+                                _ai_matcher_initialized = True
                             
                             # First try to find the product directly
                             db_info = product_db.get_product_info(product_name, vendor)
                             
                             # Validate db_info if found
                             if db_info and not self._is_valid_product(db_info):
-                                logging.info(f"🚫 Direct database lookup found invalid product (void/sample): '{product_name}'")
                                 db_info = None  # Reset to None to try AI matching
                             
-                            if not db_info:
+                            if not db_info and hasattr(self, 'ai_matcher'):
                                 # Use AI-powered matching to find the best strain match
-                                logging.debug(f"Using AI matcher to find best strain match for: {product_name}")
-                                
                                 # Extract product features for AI matching
                                 product_features = self.ai_matcher.extract_product_features(item)
                                 
@@ -5053,8 +5087,8 @@ class JSONMatcher:
                                 
                                 if matches:
                                     best_match = matches[0]
-                                    logging.info(f"🤖 AI Matcher found {len(matches)} potential matches")
-                                    logging.info(f"   Best match: {best_match.strain_name} (confidence: {best_match.confidence}, score: {best_match.total_score:.3f})")
+                                    if i < 5:
+                                        logging.debug(f"🤖 AI Matcher found {len(matches)} matches for '{product_name}'")
                                     
                                     # Get strain info for the best match
                                     strain_info = product_db.get_strain_info(best_match.strain_name)
@@ -5064,7 +5098,6 @@ class JSONMatcher:
                                         extracted_weight = weight_match.group(1) if weight_match else "1"
                                         
                                         # Create description in the format: "Strain Name Core Flower - Weight"
-                                        # This follows the user's requirement for "Golden Pineapple Core Flower - 14g"
                                         formatted_description = f"{best_match.strain_name} Core Flower - {extracted_weight}g"
                                         
                                         db_info = {
@@ -5076,79 +5109,80 @@ class JSONMatcher:
                                             'price': '25',  # Default price
                                             'weight': extracted_weight,
                                             'units': 'g',
-                                            'description': formatted_description,  # Use proper tag format
+                                            'description': formatted_description,
                                             'ai_match_score': best_match.total_score,
                                             'ai_confidence': best_match.confidence,
                                             'ai_match_type': best_match.match_type,
                                         }
                                         
-                                        # Log AI matching details
-                                        match_summary = self.ai_matcher.get_match_summary(matches)
-                                        logging.info(f"🤖 AI Match Summary for '{product_name}':")
-                                        logging.info(f"   Strain: {best_match.strain_name}")
-                                        logging.info(f"   Confidence: {best_match.confidence}")
-                                        logging.info(f"   Score: {best_match.total_score:.3f}")
-                                        logging.info(f"   Match Type: {best_match.match_type}")
-                                        logging.info(f"   Score Breakdown: {match_summary['score_breakdown']}")
+                                        # PERFORMANCE: Cache the result
+                                        _db_match_cache[cache_key_ai] = db_info
                                         
-                                        logging.info(f"✅ AI-Powered Strain Database match found for: {best_match.strain_name} -> {strain_info.get('canonical_lineage', 'HYBRID')}")
+                                        if db_info:
+                                            tag = self._create_tag_from_database_info(db_info, vendor, item)
+                                            all_tags.append(tag)
+                                            matched_count += 1
+                                            continue
                         except Exception as ai_error:
-                            logging.warning(f"AI matching error for '{product_name}': {ai_error}")
+                            if i < 3:
+                                logging.warning(f"AI matching error for '{product_name}': {ai_error}")
                             
                     
                     # PRIORITY 3: Try educated guessing if no database match
+                    # PERFORMANCE: Skip expensive educated guesses for large batches unless needed
                     educated_guess = None
-                    if product_db:
+                    skip_educated_guess = len(items) > 30 and i > len(items) * 0.9  # Skip for last 10% of very large batches
+                    if product_db and not skip_educated_guess:
                         try:
-                            logging.info(f"🔍 Attempting educated guess for: {product_name}")
-                            logging.info(f"   Vendor: {vendor}")
-                            logging.info(f"   Brand: {brand}")
-                            educated_guess = product_db.make_educated_guess(product_name, vendor, brand)
+                            # PERFORMANCE: Check cache first
+                            cache_key_guess = f"guess_{product_name}_{vendor}_{brand}"
+                            if cache_key_guess in _db_match_cache:
+                                educated_guess = _db_match_cache[cache_key_guess]
+                            else:
+                                educated_guess = product_db.make_educated_guess(product_name, vendor, brand)
+                                _db_match_cache[cache_key_guess] = educated_guess
+                            
                             if educated_guess:
-                                logging.info(f"✅ Made educated guess for '{product_name}': {educated_guess}")
+                                if i < 5:
+                                    logging.debug(f"✅ Made educated guess for '{product_name}'")
                                 # Use educated guess data
-                                product_name = educated_guess.get("product_name", product_name)
-                                vendor = educated_guess.get("vendor", vendor)
-                                brand = educated_guess.get("brand", brand or "")
-                                product_type = educated_guess.get("product_type", "")
-                                strain = educated_guess.get("strain_name", "")
-                                lineage = educated_guess.get("lineage", "")
-                                price = str(educated_guess.get("price", ""))
-                                weight = str(educated_guess.get("weight", ""))
-                                units = str(educated_guess.get("units", ""))
-                                description = educated_guess.get("description", "")
+                                product_name_guess = educated_guess.get("product_name", product_name)
+                                vendor_guess = educated_guess.get("vendor", vendor)
+                                brand_guess = educated_guess.get("brand", brand or "")
                                 
                                 # Create tag using educated guess information
-                                tag = self._create_tag_from_educated_guess(educated_guess, vendor)
+                                tag = self._create_tag_from_educated_guess(educated_guess, vendor_guess)
                                 all_tags.append(tag)
                                 
                                 # Add educated guess to database so it shows up in UI
-                                self._add_educated_guess_to_database(educated_guess, vendor)
+                                self._add_educated_guess_to_database(educated_guess, vendor_guess)
                                 
                                 educated_guess_count += 1
                                 matched_count += 1
                                 continue  # Skip JSON processing since we have educated guess
-                            else:
-                                logging.info(f"❌ No educated guess available for '{product_name}'")
                         except Exception as guess_error:
-                            logging.warning(f"Educated guess error for '{product_name}': {guess_error}")
+                            if i < 3:
+                                logging.warning(f"Educated guess error for '{product_name}': {guess_error}")
                     
                     # PRIORITY 4: If no match found, force creation of faux tag for novel product
                     new_product_count += 1
-                    logging.info(f"🎨 NO MATCH FOUND - Forcing faux tag creation for novel product: {product_name}")
+                    # PERFORMANCE: Only log for first few items
+                    if i < 5:
+                        logging.debug(f"🎨 Creating faux tag for novel product: {product_name}")
                     
                     # Create faux tag using the dedicated method
                     tag = self._create_faux_tag_for_novel_product(item, vendor, global_vendor)
                     all_tags.append(tag)
                     processed_count += 1
                     
-                    # Create new database entry for unmatched JSON tag
-                    if product_db:
+                    # Create new database entry for unmatched JSON tag (skip for very large batches to speed up)
+                    if product_db and not (len(items) > 50 and i > len(items) * 0.95):
                         try:
                             self._create_database_entry_for_unmatched_json(tag, product_db)
                             new_database_entries_count += 1
                         except Exception as db_entry_error:
-                            logging.warning(f"Failed to create database entry for '{product_name}': {db_entry_error}")
+                            if i < 3:
+                                logging.warning(f"Failed to create database entry for '{product_name}': {db_entry_error}")
                     
                     # Continue to next item - faux tag has been created
                     continue
