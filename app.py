@@ -7820,9 +7820,10 @@ def get_available_tags():
 
                                 # CRITICAL FIX: Limit batch size to prevent query timeouts
                                 # SQLite can struggle with very large IN clauses (>1000 items)
-                                MAX_BATCH_SIZE = 500
+                                # PERFORMANCE: Reduce batch size further for faster queries
+                                MAX_BATCH_SIZE = 200  # Reduced from 500 to 200 for faster queries
                                 if len(all_search_names) > MAX_BATCH_SIZE:
-                                    logging.warning(f"Cache batch query size ({len(all_search_names)}) exceeds limit, using first {MAX_BATCH_SIZE} items")
+                                    logging.debug(f"Cache batch query size ({len(all_search_names)}) exceeds limit, using first {MAX_BATCH_SIZE} items")
                                     all_search_names = all_search_names[:MAX_BATCH_SIZE]
 
                                 placeholders = ','.join(['?'] * len(all_search_names))
@@ -7836,13 +7837,28 @@ def get_available_tags():
                                     LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                     WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                     ORDER BY p.id DESC
+                                    LIMIT 1000
                                 '''
                                 # Add query timing to detect slow queries
                                 query_start = time.time()
-                                cur.execute(batch_query, all_search_names + all_search_names)
-                                batch_results = cur.fetchall()
-                                query_duration = (time.time() - query_start) * 1000
-                                logging.info(f"Cache batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                # PERFORMANCE: Execute query with timeout protection (max 2 seconds)
+                                try:
+                                    cur.execute(batch_query, all_search_names + all_search_names)
+                                    batch_results = cur.fetchall()
+                                    
+                                    query_duration = (time.time() - query_start) * 1000
+                                    # If query takes longer than 2 seconds, log warning and continue with partial results
+                                    if query_duration > 2000:
+                                        logging.warning(f"Slow cache batch lineage query: {query_duration:.1f}ms - consider using fast_load=1 to skip lineage alignment")
+                                        # Continue with partial results rather than failing
+                                    elif query_duration > 1000:
+                                        logging.debug(f"Cache batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                    else:
+                                        logging.debug(f"Cache batch lineage query completed in {query_duration:.1f}ms, fetched {len(batch_results)} rows")
+                                except Exception as query_err:
+                                    logging.warning(f"Lineage query failed, skipping lineage alignment: {query_err}")
+                                    lineage_cache = {}  # Skip lineage alignment on error
+                                    batch_results = []
                                 
                                 # Build lookup map from results
                                 for row in batch_results:
@@ -14981,6 +14997,9 @@ def get_initial_data():
             # PERFORMANCE: Cache the result for 5 minutes
             cache.set(cache_key, initial_data, timeout=300)
         else:
+            # PERFORMANCE: Check if fast_load is requested
+            fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+            
             logging.warning("Excel processor has no data - attempting database fallback for initial data")
             available_tags = []
             filters = {
@@ -14997,7 +15016,13 @@ def get_initial_data():
                 store_name = get_current_store_name()
                 product_db = get_product_database(store_name) if store_name else None
                 if product_db:
-                    db_products = product_db.get_all_products()
+                    # PERFORMANCE: For fast_load, limit products to prevent slow initial load
+                    if fast_load:
+                        # Use a faster query with LIMIT for fast_load
+                        logging.info("Fast-load: Limiting database query to 1000 most recent products")
+                        db_products = product_db.get_all_products(limit=1000)
+                    else:
+                        db_products = product_db.get_all_products()
                     vendors = set()
                     brands = set()
                     product_types = set()

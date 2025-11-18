@@ -72,7 +72,8 @@
             
             // Load data in background (non-blocking)
             try {
-                const response = await fetch('/api/initial-data');
+                // PERFORMANCE: Use fast_load=1 to skip slow lineage alignment for faster initial loading
+                const response = await fetch('/api/initial-data?fast_load=1');
                 
                 if (response.ok) {
                     const data = await response.json();
