@@ -6849,6 +6849,10 @@ const TagManager = {
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');
+                // CRITICAL: Wait for tags to appear after fast load
+                if (this._waitForTagsToAppear) {
+                    this._waitForTagsToAppear();
+                }
                 return true;
             }
             
@@ -6862,7 +6866,10 @@ const TagManager = {
             
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
-            // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
+            // CRITICAL: Wait for tags to appear after updating
+            if (this._waitForTagsToAppear) {
+                this._waitForTagsToAppear();
+            }
             return true;
         } catch (error) {
             console.error('Error fetching available tags:', error);
@@ -7488,37 +7495,61 @@ const TagManager = {
             const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
             if (tagItems.length === 0) {
                 console.warn('⏳ Safety timeout triggered - no tags found, attempting fallback load (non-blocking)');
-                // Show empty state immediately so UI is usable
-                if (availableTagsContainer) {
-                    availableTagsContainer.innerHTML = `
-                        <div class="text-center py-5">
-                            <div class="upload-prompt">
-                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                <h5 class="text-muted">No product data loaded</h5>
-                                <p class="text-muted">Upload an Excel file to get started</p>
-                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                    <i class="fas fa-upload me-2"></i>Upload Excel File
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                }
+                // Don't show empty state immediately - wait for fallback to complete
                 // Fire-and-forget fallback fetch so UI stays responsive
                 try {
                     this.fetchAndUpdateAvailableTags().then(() => {
                         verboseLog('Fallback tag loading succeeded');
+                        // CRITICAL: Wait for tags to appear after fallback load
+                        if (this._waitForTagsToAppear) {
+                            this._waitForTagsToAppear();
+                        }
                     }).catch(fallbackError => {
                         console.error('Fallback tag loading failed:', fallbackError);
-                        // UI is already showing empty state, so user can still interact
+                        // Only show empty state if fallback actually failed
+                        if (availableTagsContainer) {
+                            const stillNoTags = availableTagsContainer.querySelectorAll('.tag-item').length === 0;
+                            if (stillNoTags) {
+                                availableTagsContainer.innerHTML = `
+                                    <div class="text-center py-5">
+                                        <div class="upload-prompt">
+                                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                            <h5 class="text-muted">No product data loaded</h5>
+                                            <p class="text-muted">Upload an Excel file to get started</p>
+                                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                                <i class="fas fa-upload me-2"></i>Upload Excel File
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                        }
                     });
                 } catch (fallbackError) {
                     console.error('Fallback tag loading threw synchronously:', fallbackError);
-                    // UI is already showing empty state, so user can still interact
+                    // Show empty state only if we're sure there are no tags
+                    if (availableTagsContainer) {
+                        const stillNoTags = availableTagsContainer.querySelectorAll('.tag-item').length === 0;
+                        if (stillNoTags) {
+                            availableTagsContainer.innerHTML = `
+                                <div class="text-center py-5">
+                                    <div class="upload-prompt">
+                                        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                        <h5 class="text-muted">No product data loaded</h5>
+                                        <p class="text-muted">Upload an Excel file to get started</p>
+                                        <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                            <i class="fas fa-upload me-2"></i>Upload Excel File
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    }
                 }
             } else {
                 verboseLog(`⏳ Safety timeout triggered but ${tagItems.length} tags found - continuing normally`);
             }
-        }, 1000); // 1 second safety net - UI must be interactive within 1 second
+        }, 3000); // Increased to 3 seconds to give tags more time to load
 
         try {
             // Use AbortController to make fetch actually cancelable
@@ -10321,8 +10352,10 @@ const TagManager = {
         if (!notification) {
             notification = document.createElement('div');
             notification.id = 'noFileNotification';
-            notification.className = 'alert alert-dismissible fade show';
+            notification.className = 'alert alert-dismissible show'; // Removed 'fade' to prevent CSS transitions
             // Use standard color scheme: purple/teal theme
+            // Add data attribute to help unified font sizing skip this element
+            notification.setAttribute('data-skip-font-sizing', 'true');
             notification.style.cssText = `
                 background: rgba(45, 34, 58, 0.95);
                 border: 2px solid rgba(160, 132, 232, 0.6);
@@ -10333,6 +10366,8 @@ const TagManager = {
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
                 backdrop-filter: blur(20px);
                 width: 100%;
+                opacity: 1;
+                transition: none;
             `;
             notification.innerHTML = `
                 <div class="d-flex align-items-start">
@@ -10362,12 +10397,14 @@ const TagManager = {
             // Auto-dismiss after 10 seconds
             setTimeout(() => {
                 if (notification && notification.parentNode) {
-                    notification.classList.remove('show');
+                    // Remove without animation to prevent layout shift
+                    notification.style.opacity = '0';
+                    notification.style.transition = 'opacity 0.2s';
                     setTimeout(() => {
                         if (notification && notification.parentNode) {
                             notification.remove();
                         }
-                    }, 300);
+                    }, 200);
                 }
             }, 10000);
         } else {
