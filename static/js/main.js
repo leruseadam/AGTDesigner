@@ -7161,10 +7161,38 @@ const TagManager = {
         this.clearInitialDataRetry();
         this.initializeEmptyState();
         
-        // CRITICAL FIX: Always try to load tags, even if initial-data fails
-        // Check if there's already data loaded (e.g., from a previous session or default file)
-        // Run in background - don't block UI
-        setTimeout(() => {
+        // OPTIMIZATION: Check if file exists before trying to load tags
+        // This prevents unnecessary API calls when no Excel file is uploaded
+        setTimeout(async () => {
+            console.log('🔍 Checking if Excel file exists before loading tags...');
+            try {
+                // Quick check to see if there's a file in session
+                const fileCheckController = new AbortController();
+                const fileCheckTimeout = setTimeout(() => fileCheckController.abort(), 3000); // 3s timeout for quick check
+                const fileCheckResponse = await fetch('/api/current-file?t=' + Date.now(), {
+                    signal: fileCheckController.signal
+                });
+                clearTimeout(fileCheckTimeout);
+                
+                if (fileCheckResponse.ok) {
+                    const fileData = await fileCheckResponse.json();
+                    if (!fileData.filename) {
+                        console.log('✅ No Excel file uploaded - skipping tag load, showing empty state');
+                        // No file exists, so we're already in empty state - no need to load tags
+                        this._checkingExistingData = false;
+                        return;
+                    } else {
+                        console.log(`📁 Excel file found: ${fileData.filename} - proceeding with tag load`);
+                    }
+                } else {
+                    console.log('⚠️ Could not check file status, proceeding with tag load attempt');
+                }
+            } catch (fileCheckErr) {
+                // If file check fails, proceed with tag load attempt (might be network issue)
+                console.log('⚠️ File check failed, proceeding with tag load attempt:', fileCheckErr.name);
+            }
+            
+            // Only proceed with tag loading if we get here (file exists or check failed)
             console.log('🔄 Starting checkForExistingData...');
             this.checkForExistingData().then(() => {
                 console.log('✅ checkForExistingData completed');
