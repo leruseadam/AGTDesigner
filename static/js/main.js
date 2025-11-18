@@ -7987,7 +7987,35 @@ const TagManager = {
                         }
                     }
                 } catch (fallbackErr) {
-                    console.error('❌ Fallback also failed after timeout:', fallbackErr);
+                    if (fallbackErr.name === 'AbortError') {
+                        console.error('❌ Fallback also timed out after 15 seconds - server may be slow or unresponsive');
+                    } else {
+                        console.error('❌ Fallback also failed after timeout:', fallbackErr);
+                    }
+                }
+                
+                // If fallback also failed, check if there's actually a file uploaded
+                // If no file, show empty state. If file exists, show warning.
+                console.log('🔍 Checking if file exists in session...');
+                try {
+                    const fileCheckController = new AbortController();
+                    const fileCheckTimeout = setTimeout(() => fileCheckController.abort(), 5000);
+                    const fileCheckResponse = await fetch('/api/current-file?t=' + Date.now(), {
+                        signal: fileCheckController.signal
+                    });
+                    clearTimeout(fileCheckTimeout);
+                    
+                    if (fileCheckResponse.ok) {
+                        const fileData = await fileCheckResponse.json();
+                        if (fileData.filename) {
+                            console.warn(`⚠️ File exists (${fileData.filename}) but tags are not loading - server may be slow`);
+                            // Don't show toast here - it's too early, user might just need to wait
+                        } else {
+                            console.log('✅ No file uploaded - showing empty state is correct');
+                        }
+                    }
+                } catch (fileCheckErr) {
+                    console.warn('⚠️ Could not check file status:', fileCheckErr.name);
                 }
                 
                 // If fallback also failed, proceed with empty state
