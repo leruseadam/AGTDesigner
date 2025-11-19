@@ -7820,13 +7820,13 @@ def get_available_tags():
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
         
         if cached_tags and not nocache:
-            # PERFORMANCE: Skip lineage alignment when fast_load is requested to speed up tag loading
-            # Lineage alignment can be done later if needed, but shouldn't block initial tag display
-            lineage_alignment_needed = not fast_load  # Skip alignment on fast_load
+            # CRITICAL FIX: Always do lineage alignment - lineage changes MUST persist even in fast_load mode
+            # Use optimized batch query that's fast enough for fast_load scenarios
+            lineage_alignment_needed = True  # Always align lineage - it's critical for persistence
             
             # Perform lineage alignment to assign/update lineage from database
             # Use optimized version that's faster but still completes
-            if lineage_alignment_needed and not fast_load:
+            if lineage_alignment_needed:
                 # Quick lineage alignment with timeout to prevent blocking
                 try:
                     store_name = get_current_store_name()
@@ -7885,8 +7885,8 @@ def get_available_tags():
 
                                 # CRITICAL FIX: Limit batch size to prevent query timeouts
                                 # SQLite can struggle with very large IN clauses (>1000 items)
-                                # PERFORMANCE: Use moderate batch size for balance between speed and completeness
-                                MAX_BATCH_SIZE = 150  # Balanced size for faster queries while still processing most tags
+                                # PERFORMANCE: Use smaller batch size in fast_load mode, moderate size otherwise
+                                MAX_BATCH_SIZE = 200 if fast_load else 150  # Larger batch in fast_load for better lineage coverage
                                 if len(all_search_names) > MAX_BATCH_SIZE:
                                     logging.debug(f"Cache batch query size ({len(all_search_names)}) exceeds limit, processing in batches of {MAX_BATCH_SIZE}")
                                     # Process in chunks instead of just taking first N
