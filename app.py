@@ -9611,12 +9611,22 @@ def update_lineage():
         # CRITICAL FIX: Fast cache invalidation - don't block response
         cache_clear_start = time.time()
         try:
-            # Clear only essential caches - fast and non-blocking
+            # Clear all available_tags caches - including file-specific caches
+            session_file_path = session.get('uploaded_file_path')
+            
+            # Clear base cache
             cache_key = get_session_cache_key('available_tags')
             cache.delete(cache_key)
+            
+            # Clear file-specific cache (critical - this is what's actually being used)
+            if session_file_path:
+                file_cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                cache.delete(file_cache_key)
+            
             # Also clear web cache
             web_cache_key = get_session_cache_key('web_available_tags')
             cache.delete(web_cache_key)
+            
             session['lineage_update_timestamp'] = time.time()
             session.modified = True
             logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
