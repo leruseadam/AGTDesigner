@@ -55,23 +55,29 @@
             console.log('⚡ Optimized checkForExistingData called');
             
             // CRITICAL: Try cache FIRST for instant load
+            console.log('🔍 Checking for cached tags...');
             const cachedTags = this.loadAvailableTagsFromCache ? this.loadAvailableTagsFromCache() : null;
+            
             if (cachedTags && cachedTags.length > 0) {
                 console.log(`⚡ INSTANT CACHE HIT: ${cachedTags.length} tags available`);
                 // Render cached tags IMMEDIATELY
                 this.state.tags = [...cachedTags];
                 this.state.originalTags = [...cachedTags];
+                this.state.hydratedFromCache = true;
                 
                 // Use requestAnimationFrame for instant render
                 requestAnimationFrame(() => {
-                    this._updateAvailableTags(cachedTags, null);
+                    console.log('🎨 Rendering cached tags...');
+                    if (this._updateAvailableTags) {
+                        this._updateAvailableTags(cachedTags, null);
+                    }
                     console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
                     
                     // Hide splash immediately
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
-                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
                         AppLoadingSplash.stopAutoAdvance();
                         AppLoadingSplash.complete();
                     }
@@ -85,27 +91,22 @@
                 ]).then(() => {
                     console.log('✅ Background: Selected tags and filters loaded');
                 }).catch(err => {
-                    console.warn('Background load error (non-critical):', err);
+                    console.warn('⚠️ Background load error (non-critical):', err);
                 });
                 
                 return; // Exit early - we have cached data
             }
             
             // No cache available - show loading UI
-            console.log('⏳ No cache available - loading from server');
-            AppLoadingSplash.updateProgress(50, 'Loading tags...');
+            console.log('⏳ No cache found - loading from server...');
+            if (typeof AppLoadingSplash !== 'undefined') {
+                AppLoadingSplash.updateProgress(50, 'Loading tags...');
+            }
             
-            // Hide splash after 500ms max for responsive UI
-            setTimeout(() => {
-                if (AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                    console.log('⚡ Splash hidden - UI is interactive');
-                }
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-            }, 500);
+            // Show loading splash while fetching
+            if (this.showActionSplash) {
+                this.showActionSplash('Loading tags from server...');
+            }
             
             // Load data from server
             try {
