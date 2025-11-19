@@ -1119,6 +1119,16 @@ def get_excel_processor():
                     from flask import session
                     try:
                         session_file_path = session.get('file_path')
+                        session_file_server_id = session.get('file_path_server_id')
+                        
+                        # CRITICAL FIX: Check if file_path belongs to current server instance
+                        # If server restarted, SERVER_INSTANCE_ID changed, so clear old file_path
+                        if session_file_path and session_file_server_id != SERVER_INSTANCE_ID:
+                            logging.info(f"🔄 Server restarted - clearing old session file_path: {session_file_path}")
+                            session.pop('file_path', None)
+                            session.pop('file_path_server_id', None)
+                            session_file_path = None
+                        
                         logging.info(f"🔍 DEBUG: Session file_path = {session_file_path}")
                         logging.info(f"🔍 DEBUG: Session keys = {list(session.keys())}")
                     except RuntimeError:
@@ -2718,6 +2728,7 @@ def upload_file():
         # Update session with permanent flag for persistence
         session.permanent = True
         session['file_path'] = file_path
+        session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
         session['uploaded_filename'] = file.filename
         session['upload_timestamp'] = timestamp
         session.modified = True
@@ -3315,6 +3326,7 @@ def upload_file_simple_pythonanywhere():
             
             # Update session
             session['file_path'] = temp_path
+            session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
             session['selected_tags'] = []
             
             # Clean up temp file
@@ -3416,6 +3428,7 @@ def upload_file_simple():
         
         # Store uploaded file path in session
         session['file_path'] = file_path
+        session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
         session['selected_tags'] = []
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
@@ -4340,6 +4353,7 @@ def get_current_file():
                                     file_exists = True
                                     # Restore session data
                                     session['file_path'] = file_path
+                                    session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
                                     session['uploaded_filename'] = uploaded_filename
                                     session['upload_timestamp'] = int(os.path.getmtime(recovered_file))
                                     session.modified = True
@@ -16783,6 +16797,7 @@ def upload_file_optimized():
         # Only clear the absolute minimum required for new file
         if 'file_path' in session:
             del session['file_path']
+            session.pop('file_path_server_id', None)  # Also clear server ID
             logging.info(f"[ULTRA-FAST] Cleared session key: file_path")
         
         # Clear global Excel processor to force complete replacement
@@ -16814,6 +16829,7 @@ def upload_file_optimized():
         
         # Store uploaded file path in session
         session['file_path'] = temp_path
+        session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
         
         # Clear selected tags in session to ensure fresh start
         session['selected_tags'] = []
@@ -16901,6 +16917,7 @@ def upload_file_fast():
         
         # Store file path in session
         session['file_path'] = str(file_path)
+        session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
         session['selected_tags'] = []
         
         # Clear cached initial data so fresh upload is visible immediately
