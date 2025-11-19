@@ -1,12 +1,13 @@
 /**
- * Ultra-fast page load optimization
+ * Ultra-fast page load optimization v2.1.0
  * Makes initial data loading non-blocking and shows UI immediately
+ * UPDATED: 2025-11-19 - Added cache checking and splash screen fixes
  */
 
 (function() {
     'use strict';
     
-    console.log('⚡ Fast page load optimization enabled');
+    console.log('⚡ Fast page load optimization v2.1.0 enabled');
     
     // Store original checkForExistingData function
     let originalCheckForExistingData = null;

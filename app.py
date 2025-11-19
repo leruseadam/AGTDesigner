@@ -2478,9 +2478,10 @@ def index():
             logging.info(f"User has valid store selection: {current_store}")
         
         # --- LIGHTWEIGHT PAGE LOAD (minimal work) ---
-        # PERFORMANCE FIX: Use static version for cache busting instead of timestamp
-        # This allows browser caching while still being able to force cache clear when needed
-        cache_bust = "v2.0.3"  # Only increment when files actually change
+        # AUTOMATIC CACHE BUSTING: Use timestamp to force browser reload of updated files
+        # This ensures users always get the latest JavaScript without manual cache clearing
+        import time
+        cache_bust = f"v2.1.{int(time.time())}"  # Timestamp ensures automatic cache invalidation
         
         # CRITICAL FIX: Don't clear uploaded file from session on page refresh
         # This was causing uploads to disappear when users refreshed the page
@@ -2560,7 +2561,8 @@ def index():
         logging.error(f"Index route traceback: {traceback.format_exc()}")
         # Ensure cache_bust and store variables are always available
         try:
-            cache_bust = "v2.0.3"  # Use static version for caching
+            import time
+            cache_bust = f"v2.1.{int(time.time())}"  # Use timestamp for automatic cache busting
             user_has_store = False
             current_store = None
             uploaded_filename = ''
@@ -15277,7 +15279,8 @@ def get_lineage_suggestions():
 @app.route('/library')
 def library_browser():
     """Library browser page for viewing and editing master strain data."""
-    cache_bust = "v2.0.1"  # Use static version for caching
+    import time
+    cache_bust = f"v2.1.{int(time.time())}"  # Use timestamp for automatic cache busting
     return render_template('library_browser.html', cache_bust=cache_bust)
 
 @app.route('/api/library/products', methods=['GET'])

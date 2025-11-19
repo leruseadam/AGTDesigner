@@ -979,6 +979,18 @@ const TagManager = {
                 return null;
             }
             console.log(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
+            
+            // Verify cached tags have database lineage
+            const sampleTag = payload.tags[0];
+            if (sampleTag) {
+                console.log('🔍 Sample cached tag lineage:', {
+                    name: sampleTag['Product Name*'],
+                    canonical_lineage: sampleTag.canonical_lineage,
+                    currentLineage: sampleTag.currentLineage,
+                    Lineage: sampleTag.Lineage
+                });
+            }
+            
             return payload.tags;
         } catch (error) {
             console.warn('❌ Failed to load cache:', error);
@@ -997,6 +1009,18 @@ const TagManager = {
                 tags
             };
             const cacheKey = this.getAvailableTagsCacheKey();
+            
+            // Verify tags have database lineage before caching
+            const sampleTag = tags[0];
+            if (sampleTag) {
+                console.log('💾 Saving to cache - sample tag lineage:', {
+                    name: sampleTag['Product Name*'],
+                    canonical_lineage: sampleTag.canonical_lineage,
+                    currentLineage: sampleTag.currentLineage,
+                    Lineage: sampleTag.Lineage
+                });
+            }
+            
             sessionStorage.setItem(cacheKey, JSON.stringify(payload));
             console.log(`💾 Cached ${tags.length} tags with key: ${cacheKey}`);
         } catch (error) {
@@ -4116,9 +4140,14 @@ const TagManager = {
         // Set data-lineage attribute for CSS coloring on both row and tagElement
         // CRITICAL FIX: For JSON matched tags, prioritize the Lineage field from the matched database data
         let lineage;
-        // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
-        // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
+        // CRITICAL: Use same pipeline as backend - canonical_lineage (from DB) is ALWAYS source of truth
+        // This ensures UI lineages match database and persist correctly after reload
         lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
+        
+        // Validate lineage from database is present
+        if (!tag.canonical_lineage && lineage !== 'MIXED') {
+            console.warn(`⚠️ Tag missing canonical_lineage from database: ${displayName}`);
+        }
         
         // DEBUG: Log lineage resolution for selected tags
         if (isForSelectedTags) {
@@ -6851,10 +6880,10 @@ const TagManager = {
             // CRITICAL: Prefer canonical_lineage/currentLineage (from DB) over Lineage to ensure UI matches database
             tags = tags.map(tag => this._normalizeLineageFields(tag));
             
-            // Debug: Check lineage data for first few tags
-            verboseLog('Sample lineage data:');
+            // Debug: Verify database lineage is being used
+            console.log('🔄 Normalized lineage data (database is source of truth):');
             tags.slice(0, 5).forEach(tag => {
-                verboseLog(`  ${tag['Product Name*']}: currentLineage=${tag.currentLineage}, canonical_lineage=${tag.canonical_lineage}, Lineage=${tag.Lineage}, lineage=${tag.lineage}`);
+                console.log(`  ✓ ${tag['Product Name*']}: canonical_lineage=${tag.canonical_lineage}`);
             });
             
             // Clear existing state and set new data
@@ -7008,14 +7037,22 @@ const TagManager = {
     
     _normalizeLineageFields(tag) {
         try {
+            // CRITICAL: Always prioritize canonical_lineage (from database) as source of truth
+            // This ensures UI lineage matches database and persists correctly
             const lin = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
             if (lin) {
                 const normalized = lin.toUpperCase();
+                // Set ALL lineage fields to the database value for consistency
                 tag.canonical_lineage = normalized;
                 tag.currentLineage = normalized;
                 tag.Lineage = normalized;
+                tag.lineage = normalized;
+                // Also set Lineage* for any legacy references
+                tag['Lineage*'] = normalized;
             }
-        } catch (e) { /* noop */ }
+        } catch (e) {
+            console.warn('Failed to normalize lineage for tag:', tag, e);
+        }
         return tag;
     },
     
