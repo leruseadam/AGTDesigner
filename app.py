@@ -8025,10 +8025,11 @@ def get_available_tags():
             excel_processor = get_session_excel_processor()
             
             # PERFORMANCE: Enable fast_load mode to skip expensive enrichment for large files
+            # CRITICAL: Always enrich lineage even in fast_load mode - lineage changes MUST persist
             if fast_load and excel_processor is not None:
                 excel_processor._fast_load_mode = True
-                excel_processor._skip_enrichment = True  # Skip enrichment entirely for fast loading
-                logging.info("⚡ Fast load mode enabled - skipping database enrichment")
+                excel_processor._skip_enrichment = True  # Skip non-lineage enrichment for fast loading
+                logging.info("⚡ Fast load mode enabled - skipping non-lineage enrichment (lineage will still be enriched)")
             
             # CRITICAL FIX: If processor exists but DataFrame is empty, force reload from session file
             if excel_processor is not None:

@@ -3539,14 +3539,25 @@ class ExcelProcessor:
         logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
         logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
         
-        # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
-        # PERFORMANCE: Only enrich if we have a reasonable number of tags (avoid slow enrichment on huge lists)
-        # For fast loading, use a much lower threshold or skip entirely
-        fast_load_threshold = 1000 if getattr(self, '_fast_load_mode', False) else 10000
-        if len(sorted_tags) <= fast_load_threshold and not getattr(self, '_skip_enrichment', False):
-            sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
+        # CRITICAL FIX: Always enrich lineage even in fast_load mode - lineage changes MUST persist
+        # Skip other enrichment (prices, DOH, etc.) in fast_load mode for performance
+        skip_enrichment = getattr(self, '_skip_enrichment', False)
+        fast_load_mode = getattr(self, '_fast_load_mode', False)
+        
+        if skip_enrichment and fast_load_mode:
+            # Fast mode: Only enrich lineage (critical for persistence)
+            sorted_tags = self._enrich_lineage_only(sorted_tags)
+        elif not skip_enrichment:
+            # Normal mode: Enrich all fields, but only if below threshold
+            fast_load_threshold = 1000 if fast_load_mode else 10000
+            if len(sorted_tags) <= fast_load_threshold:
+                sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
+            else:
+                logger.info(f"⚠️  Skipping full enrichment for {len(sorted_tags)} tags (threshold: {fast_load_threshold}) - doing lineage-only enrichment")
+                sorted_tags = self._enrich_lineage_only(sorted_tags)
         else:
-            logger.info(f"⚠️  Skipping database enrichment for {len(sorted_tags)} tags (threshold: {fast_load_threshold}, skip_enrichment: {getattr(self, '_skip_enrichment', False)})")
+            # Skip all enrichment (shouldn't happen, but fallback)
+            logger.info(f"⚠️  Skipping all enrichment for {len(sorted_tags)} tags")
         
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)
@@ -3574,6 +3585,120 @@ class ExcelProcessor:
         self.selected_tags = deduplicated_tags
         
         logger.debug(f"Selected tags after selection: {self.selected_tags}")
+    
+    def _enrich_lineage_only(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Fast lineage-only enrichment - only updates lineage values from database.
+        This is critical for ensuring lineage changes persist after reload."""
+        try:
+            # Try to get the product database using lazy import
+            product_db = None
+            store_name = None
+            
+            try:
+                import sys
+                if 'app' in sys.modules:
+                    app_module = sys.modules['app']
+                    if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                        store_name = app_module.get_current_store_name()
+                        product_db = app_module.get_product_database(store_name) if store_name else None
+            except (ImportError, AttributeError, Exception) as e:
+                logger.debug(f"Could not get product database for lineage enrichment: {e}")
+                return tags
+            
+            if not product_db:
+                logger.debug("No product database available for lineage enrichment")
+                return tags
+            
+            # Use batch query for lineage only - much faster than full enrichment
+            product_names = [tag.get('Product Name*', tag.get('ProductName', '')) for tag in tags if tag.get('Product Name*') or tag.get('ProductName')]
+            if not product_names:
+                return tags
+            
+            # Batch query lineage values - limit to first 1000 for performance
+            lineage_lookup = {}
+            try:
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                
+                # Use batch query with LIMIT to avoid timeout on large datasets
+                batch_size = min(1000, len(product_names))
+                batch_names = product_names[:batch_size]
+                
+                placeholders = ','.join(['?'] * len(batch_names))
+                query = f'''
+                    SELECT "Product Name*", "Lineage"
+                    FROM products
+                    WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders})
+                    LIMIT {batch_size * 2}
+                '''
+                
+                # Prepare normalized names for query
+                normalized_names = []
+                for name in batch_names:
+                    try:
+                        normalized = product_db._normalize_product_name(name)
+                    except:
+                        normalized = name.strip().lower()
+                    normalized_names.append(normalized)
+                
+                cursor.execute(query, batch_names + normalized_names)
+                results = cursor.fetchall()
+                
+                # Build lookup map
+                for row in results:
+                    product_name = row[0]
+                    lineage = row[1] if len(row) > 1 else None
+                    if product_name and lineage:
+                        # Match by both exact name and normalized name
+                        lineage_lookup[product_name] = str(lineage).strip().upper()
+                        try:
+                            normalized = product_db._normalize_product_name(product_name)
+                            lineage_lookup[normalized] = str(lineage).strip().upper()
+                        except:
+                            pass
+                            
+            except Exception as query_error:
+                logger.warning(f"Lineage batch query failed: {query_error}")
+                # Fallback to individual queries for first 100 tags
+                try:
+                    for tag in tags[:100]:
+                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                        if product_name:
+                            lineage = product_db.get_product_lineage(product_name)
+                            if lineage:
+                                lineage_lookup[product_name] = str(lineage).strip().upper()
+                except Exception as fallback_error:
+                    logger.warning(f"Lineage fallback query failed: {fallback_error}")
+            
+            # Apply lineage to tags
+            enriched_tags = []
+            for tag in tags:
+                product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                if product_name:
+                    # Try exact match first
+                    db_lineage = lineage_lookup.get(product_name)
+                    if not db_lineage:
+                        # Try normalized match
+                        try:
+                            normalized = product_db._normalize_product_name(product_name)
+                            db_lineage = lineage_lookup.get(normalized)
+                        except:
+                            pass
+                    
+                    if db_lineage:
+                        tag['Lineage'] = db_lineage
+                        tag['lineage'] = db_lineage
+                        tag['canonical_lineage'] = db_lineage
+                        tag['currentLineage'] = db_lineage
+                
+                enriched_tags.append(tag)
+            
+            logger.debug(f"Lineage-only enrichment: Updated {len([t for t in enriched_tags if t.get('Lineage')])} tags")
+            return enriched_tags
+            
+        except Exception as e:
+            logger.warning(f"Error in lineage-only enrichment: {e}")
+            return tags
     
     def _enrich_tags_with_database_values(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Enrich tags with current database values (lineage, DOH, etc.) to reflect latest updates."""
@@ -7399,12 +7524,20 @@ class ExcelProcessor:
         cache_key = self._build_cache_key('available_tags', filters or {})
         cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
         if cached_tags is not None:
-            # PERFORMANCE: Skip enrichment when fast_load is enabled or skip_enrichment is set
-            if getattr(self, '_skip_enrichment', False) or (getattr(self, '_fast_load_mode', False) and len(cached_tags) > 1000):
-                logger.debug(f"⏩ Skipping enrichment for {len(cached_tags)} cached tags (fast_load mode)")
-                return self._clone_tag_results(cached_tags)
-            # CRITICAL FIX: Always enrich cached tags with fresh database values (only if not skipping)
-            enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
+            # CRITICAL FIX: Always enrich lineage even from cache - lineage changes MUST persist
+            skip_enrichment = getattr(self, '_skip_enrichment', False)
+            fast_load_mode = getattr(self, '_fast_load_mode', False)
+            
+            if skip_enrichment and fast_load_mode:
+                # Fast mode: Only enrich lineage (critical for persistence)
+                enriched_cached_tags = self._enrich_lineage_only(cached_tags)
+            elif not skip_enrichment:
+                # Normal mode: Full enrichment
+                enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
+            else:
+                # Fallback: At least do lineage enrichment
+                enriched_cached_tags = self._enrich_lineage_only(cached_tags)
+            
             return self._clone_tag_results(enriched_cached_tags)
 
         def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
