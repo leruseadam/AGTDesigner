@@ -2725,28 +2725,6 @@ def upload_file():
             file_size = os.path.getsize(file_path)
             logging.info(f"✅ File verified: {file_path} ({file_size} bytes)")
         
-        # CRITICAL: Clear caches for OLD file path BEFORE setting new one
-        # This prevents old uploads from persisting in cache
-        old_file_path = session.get('file_path', '')
-        if old_file_path and old_file_path != file_path:
-            try:
-                logging.info(f"🧹 Clearing caches for old file path: {old_file_path}")
-                # Clear all cache keys that might reference the old file path
-                old_cache_keys = [
-                    f'available_tags_{old_file_path}',
-                    f'json_matched_{old_file_path}',
-                    f'full_excel_{old_file_path}'
-                ]
-                for old_key in old_cache_keys:
-                    try:
-                        old_cache_key = get_session_cache_key(old_key)
-                        cache.delete(old_cache_key)
-                        logging.info(f"✅ Cleared old cache: {old_key}")
-                    except:
-                        pass
-            except Exception as old_cache_err:
-                logging.warning(f"Failed to clear old file path caches: {old_cache_err}")
-        
         # Update session with permanent flag for persistence
         session.permanent = True
         session['file_path'] = file_path
@@ -2787,7 +2765,6 @@ def upload_file():
 
             # Capture variables from request context for background thread
             original_filename = file.filename
-            old_file_path_for_background = old_file_path  # Capture old file path for background cleanup
             # Store context removed - using single database
 
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
@@ -2827,22 +2804,6 @@ def upload_file():
 
                         # CRITICAL: HARD REFRESH - Clear ALL caches aggressively to force complete refresh
                         try:
-                            # First, clear old file path caches if they exist
-                            if old_file_path_for_background and old_file_path_for_background != file_path:
-                                logging.info(f"[BACKGROUND] 🧹 Clearing old file path caches: {old_file_path_for_background}")
-                                old_cache_keys = [
-                                    f'available_tags_{old_file_path_for_background}',
-                                    f'json_matched_{old_file_path_for_background}',
-                                    f'full_excel_{old_file_path_for_background}'
-                                ]
-                                for old_key in old_cache_keys:
-                                    try:
-                                        old_cache_key = get_session_cache_key(old_key)
-                                        cache.delete(old_cache_key)
-                                        logging.info(f"[BACKGROUND] ✅ Cleared old cache: {old_key}")
-                                    except:
-                                        pass
-                            
                             # Clear file-specific cache (uses file path in key)
                             # Note: In background thread, we can't access session directly, use file_path from closure
                             cache_keys_to_clear = [
@@ -6612,79 +6573,30 @@ def generate_labels():
                 logging.warning(f"⚠️ REMOVED {len(invalid_selected_tags)} INVALID TAGS: {invalid_selected_tags}")
                 logging.warning(f"✅ KEPT {len(valid_selected_tags)} VALID TAGS")
                 
-                # CRITICAL FIX: For JSON matched sessions, accept ALL tags from cache as valid
-                # JSON matched tags should always be included even if not in database/Excel
+                # CRITICAL FIX: If we're in a JSON matched session and have invalid tags, try to restore from cache
                 if is_json_matched_session and invalid_selected_tags:
-                    logging.info(f"CRITICAL FIX: JSON matched session with invalid tags, restoring ALL from cache")
+                    logging.info(f"CRITICAL FIX: JSON matched session with invalid tags, attempting to restore from cache")
                     json_matched_cache_key = session.get('json_matched_cache_key')
                     if json_matched_cache_key:
                         json_matched_tags = cache.get(json_matched_cache_key)
                         if json_matched_tags:
-                            # Extract ALL product names from JSON matched tags cache
+                            # Extract product names from JSON matched tags
                             cache_product_names = []
-                            cache_product_map = {}  # Map product names to full tag objects
                             for tag in json_matched_tags:
                                 if isinstance(tag, dict):
-                                    product_name = (tag.get('Product Name*') or 
-                                                   tag.get('ProductName') or 
-                                                   tag.get('displayName') or '')
+                                    product_name = tag.get('Product Name*', tag.get('ProductName', ''))
                                     if product_name:
                                         cache_product_names.append(product_name)
-                                        cache_product_map[product_name] = tag
                             
-                            # For JSON matched sessions, ALL tags from cache should be valid
-                            # Add ALL invalid tags that exist in cache back to valid list
-                            restored_count = 0
+                            # Add any missing tags from cache
                             for invalid_tag in invalid_selected_tags:
-                                # Try exact match first
                                 if invalid_tag in cache_product_names:
                                     valid_selected_tags.append(invalid_tag)
-                                    restored_count += 1
-                                    logging.info(f"CRITICAL FIX: Restored invalid tag '{invalid_tag}' from JSON matched cache (exact match)")
-                                else:
-                                    # Try case-insensitive and weight-stripped matching
-                                    invalid_tag_lower = invalid_tag.lower().strip()
-                                    # Remove weight suffix for matching (e.g., "Product - 1g" -> "Product")
-                                    import re
-                                    invalid_tag_base = re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', invalid_tag_lower).strip()
-                                    
-                                    for cache_name in cache_product_names:
-                                        cache_name_lower = cache_name.lower().strip()
-                                        cache_name_base = re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', cache_name_lower).strip()
-                                        
-                                        # Match if base names are the same
-                                        if invalid_tag_base == cache_name_base or invalid_tag_lower == cache_name_lower:
-                                            if cache_name not in valid_selected_tags:
-                                                valid_selected_tags.append(cache_name)
-                                                restored_count += 1
-                                                logging.info(f"CRITICAL FIX: Restored invalid tag '{invalid_tag}' -> '{cache_name}' from JSON matched cache (fuzzy match)")
-                                                break
+                                    logging.info(f"CRITICAL FIX: Restored invalid tag '{invalid_tag}' from JSON matched cache")
                             
-                            # Remove restored tags from invalid list
-                            invalid_selected_tags = [tag for tag in invalid_selected_tags 
-                                                   if tag not in valid_selected_tags and 
-                                                   not any(cache_name.lower() == tag.lower() or 
-                                                          re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', cache_name.lower()) == 
-                                                          re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', tag.lower())
-                                                          for cache_name in valid_selected_tags)]
-                            
-                            logging.info(f"CRITICAL FIX: After cache restoration: {restored_count} tags restored, {len(valid_selected_tags)} total valid, {len(invalid_selected_tags)} still invalid")
-                            
-                            # CRITICAL: For JSON matched sessions, if we still have invalid tags, 
-                            # they might be from the original normalized_tags that weren't in cache
-                            # Add ALL original normalized tags that match cache products
-                            if invalid_selected_tags:
-                                for original_tag in normalized_tags:
-                                    if original_tag not in valid_selected_tags:
-                                        # Check if it matches any cache product (fuzzy)
-                                        for cache_name in cache_product_names:
-                                            if original_tag.lower() == cache_name.lower() or \
-                                               re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', original_tag.lower()) == \
-                                               re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', cache_name.lower()):
-                                                if cache_name not in valid_selected_tags:
-                                                    valid_selected_tags.append(cache_name)
-                                                    logging.info(f"CRITICAL FIX: Restored original tag '{original_tag}' -> '{cache_name}' from cache")
-                                                    break
+                            # Remove from invalid list
+                            invalid_selected_tags = [tag for tag in invalid_selected_tags if tag not in valid_selected_tags]
+                            logging.info(f"CRITICAL FIX: After cache restoration: {len(valid_selected_tags)} valid, {len(invalid_selected_tags)} invalid")
                 
                 if not valid_selected_tags:
                     logging.error(f"❌ NO VALID TAGS: All {len(normalized_tags)} tags were filtered out")
@@ -6857,41 +6769,24 @@ def generate_labels():
                                 records.append(record)
                         logging.info(f"✅ Generated {len(records)} records from database")
                         
-                        # PERFORMANCE OPTIMIZATION: Batch lineage override queries instead of individual lookups
+                        # CRITICAL FIX: Override lineage from database if it has been updated
                         logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database...")
                         store_name = get_current_store_name()
                         product_db = get_product_database(store_name)
                         # Log which database path is being used for override
                         override_db_path = getattr(product_db, 'db_path', 'Unknown')
                         logging.info(f"🔄 LINEAGE OVERRIDE: Using database at {override_db_path} for store {store_name}")
-                        
-                        # Batch query all lineages at once instead of N queries
-                        if product_db and records:
-                            try:
-                                product_names = [r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')]
-                                product_names = [n for n in product_names if n]
-                                
-                                if product_names:
-                                    # Batch query lineages
-                                    conn = product_db._get_connection()
-                                    cursor = conn.cursor()
-                                    placeholders = ','.join(['?'] * len(product_names))
-                                    batch_lineage_query = f'''
-                                        SELECT "Product Name*", "Lineage"
-                                        FROM products
-                                        WHERE "Product Name*" IN ({placeholders})
-                                        AND "Lineage" IS NOT NULL
-                                        AND "Lineage" != ""
-                                    '''
-                                    cursor.execute(batch_lineage_query, product_names)
-                                    lineage_map = {row[0]: str(row[1]).strip().upper() for row in cursor.fetchall()}
-                                    
-                                    # Update records with batched lineage data
-                                    for record in records:
-                                        product_name = record.get('Product Name*', record.get('ProductName', ''))
-                                        if product_name and product_name in lineage_map:
-                                            db_lineage_clean = lineage_map[product_name]
+                        for record in records:
+                            product_name = record.get('Product Name*', record.get('ProductName', ''))
+                            if product_name:
+                                try:
+                                    # Get the most up-to-date lineage from the database
+                                    if product_db:
+                                        # Try to get lineage by product name first
+                                        db_lineage = product_db.get_product_lineage(product_name)
+                                        if db_lineage:
                                             original_lineage = record.get('Lineage', '')
+                                            db_lineage_clean = str(db_lineage).strip().upper()
                                             original_lineage_clean = str(original_lineage).strip().upper()
                                             
                                             # Always update to ensure database value is used
@@ -6902,23 +6797,21 @@ def generate_labels():
                                                 logging.debug(f"LINEAGE SKIP: '{product_name}' - Already matches database: '{original_lineage_clean}'")
                                                 # Still update to ensure consistency
                                                 record['Lineage'] = db_lineage_clean
-                                    
-                                    logging.info(f"⚡ PERFORMANCE: Batch lineage override completed for {len(records)} records (saved ~{len(records)*0.01:.2f}s)")
-                            except Exception as lineage_batch_error:
-                                logging.warning(f"Batch lineage override failed, falling back to individual queries: {lineage_batch_error}")
-                                # Fallback to individual queries if batch fails
-                                for record in records:
-                                    product_name = record.get('Product Name*', record.get('ProductName', ''))
-                                    if product_name:
-                                        try:
-                                            db_lineage = product_db.get_product_lineage(product_name)
-                                            if db_lineage:
-                                                original_lineage = record.get('Lineage', '')
-                                                db_lineage_clean = str(db_lineage).strip().upper()
-                                                original_lineage_clean = str(original_lineage).strip().upper()
-                                                record['Lineage'] = db_lineage_clean
-                                        except Exception:
-                                            pass
+                                        else:
+                                            # Try to get lineage by strain name
+                                            product_strain = record.get('Product Strain', '')
+                                            if product_strain:
+                                                strain_info = product_db.get_strain_info(product_strain)
+                                                if strain_info and strain_info.get('canonical_lineage'):
+                                                    db_lineage = strain_info['canonical_lineage']
+                                                    original_lineage = record.get('Lineage', '')
+                                                    if str(db_lineage).strip() != str(original_lineage).strip():
+                                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                        record['Lineage'] = str(db_lineage).strip()
+                                                    else:
+                                                        logging.debug(f"LINEAGE SKIP: '{product_name}' - Strain lineage already matches: '{original_lineage}'")
+                                except Exception as e:
+                                    logging.warning(f"Error checking lineage override for '{product_name}': {e}")
                         
                         # NOTE: Removed Excel processor override - database lineage takes precedence
                         # The old logic would incorrectly revert manual lineage changes back to the original Excel values.
@@ -7015,74 +6908,6 @@ def generate_labels():
                 except Exception as e:
                     logging.warning(f"Error during lineage override check: {e}")
                     logging.warning(traceback.format_exc())
-            
-            # CRITICAL FIX: Ensure ALL JSON matched tags appear in output
-            # Check if any selected tags are missing from records and add them from JSON cache
-            if is_json_matched_session and valid_selected_tags and records:
-                # Get product names that are in records
-                records_product_names = {r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')}
-                
-                # Find missing tags
-                missing_tags = [tag for tag in valid_selected_tags if tag not in records_product_names]
-                
-                if missing_tags:
-                    logging.info(f"CRITICAL FIX: {len(missing_tags)} JSON matched tags missing from records, adding from cache: {missing_tags}")
-                    json_matched_cache_key = session.get('json_matched_cache_key')
-                    if json_matched_cache_key:
-                        json_matched_tags = cache.get(json_matched_cache_key)
-                        if json_matched_tags:
-                            # Create records for missing tags from cache
-                            for missing_tag in missing_tags:
-                                # Find the matching tag in cache
-                                matching_tag = None
-                                for cache_tag in json_matched_tags:
-                                    if isinstance(cache_tag, dict):
-                                        cache_name = (cache_tag.get('Product Name*') or 
-                                                     cache_tag.get('ProductName') or 
-                                                     cache_tag.get('displayName') or '')
-                                        # Match exact or fuzzy (weight-stripped)
-                                        import re
-                                        if missing_tag == cache_name or \
-                                           missing_tag.lower() == cache_name.lower() or \
-                                           re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', missing_tag.lower()) == \
-                                           re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', cache_name.lower()):
-                                            matching_tag = cache_tag
-                                            break
-                                
-                                if matching_tag:
-                                    # Create record from JSON matched tag
-                                    product_name = (matching_tag.get('Product Name*') or 
-                                                   matching_tag.get('ProductName') or 
-                                                   matching_tag.get('displayName') or missing_tag)
-                                    record = {
-                                        'ProductName': product_name,
-                                        'Product Name*': product_name,
-                                        'Description': matching_tag.get('DescAndWeight', matching_tag.get('Description', product_name)),
-                                        'DescAndWeight': matching_tag.get('DescAndWeight', matching_tag.get('Description', product_name)),
-                                        'Product Type*': matching_tag.get('Product Type*', 'flower'),
-                                        'Product Brand': matching_tag.get('Product Brand', ''),
-                                        'Product Strain': matching_tag.get('Product Strain', ''),
-                                        'Lineage': matching_tag.get('Lineage', 'HYBRID'),
-                                        'Vendor': matching_tag.get('Vendor/Supplier*', matching_tag.get('Vendor', '')),
-                                        'Price': matching_tag.get('Price', ''),
-                                        'DOH': matching_tag.get('DOH', ''),
-                                        'Ratio': matching_tag.get('Ratio', ''),
-                                        'Weight*': matching_tag.get('Weight*', ''),
-                                        'Units': matching_tag.get('Units', 'g'),
-                                        'CombinedWeight': matching_tag.get('CombinedWeight', ''),
-                                        'Quantity*': matching_tag.get('Quantity*', '1'),
-                                        'THC test result': matching_tag.get('THC test result', ''),
-                                        'CBD test result': matching_tag.get('CBD test result', ''),
-                                        'Test result unit (% or mg)': matching_tag.get('Test result unit (% or mg)', '%'),
-                                        'Source': 'JSON Match'
-                                    }
-                                    records.append(record)
-                                    logging.info(f"CRITICAL FIX: Added missing JSON matched product '{product_name}' to records")
-                                else:
-                                    logging.warning(f"CRITICAL FIX: Could not find matching tag in cache for '{missing_tag}'")
-                    
-                    if missing_tags:
-                        logging.info(f"CRITICAL FIX: Added {len([r for r in records if r.get('Source') == 'JSON Match' and r.get('Product Name*') in missing_tags])} missing JSON matched products to records")
             
             # CRITICAL FIX: If we have JSON matched products but no records, try to include them directly
             if not records and excel_processor.df is not None and 'Source' in excel_processor.df.columns:
@@ -8084,16 +7909,9 @@ def get_available_tags():
                                     # Note: Remaining chunks could be processed in background if needed
 
                                 placeholders = ','.join(['?'] * len(all_search_names))
-                                # CRITICAL FIX: Always prefer products.Lineage (user-editable) over strains.canonical_lineage
-                                # This ensures lineage changes made in UI are always read correctly
-                                # Use CASE to prefer products.Lineage when it exists, otherwise fall back to strain lineage
                                 batch_query = f'''
                                     SELECT DISTINCT
-                                        CASE 
-                                            WHEN p."Lineage" IS NOT NULL AND p."Lineage" != '' 
-                                            THEN p."Lineage"
-                                            ELSE s.canonical_lineage
-                                        END AS current_lineage,
+                                        COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
                                         COALESCE(s.strain_name, p."Product Strain") AS current_strain,
                                         p."Product Name*" AS product_name,
                                         p.normalized_name AS normalized_name
@@ -8168,24 +7986,14 @@ def get_available_tags():
                                 
                                 db_lin, db_strain = lineage_cache.get(name, (None, None))
                                 
-                                # CRITICAL: Always set database lineage fields to ensure UI matches database
-                                # If database has lineage, use it; otherwise keep existing Excel lineage
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
                                     # Always expose DB lineage on stable fields the UI can prefer
                                     tag['currentLineage'] = db_lin_clean
                                     tag['canonical_lineage'] = db_lin_clean
-                                    # Always update Lineage field to match database (database is source of truth)
                                     if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
                                         tag['Lineage'] = db_lin_clean
                                         updated += 1
-                                else:
-                                    # Database has no lineage - mark that we checked the database
-                                    # This ensures UI knows database was checked even if no lineage found
-                                    # Keep Excel lineage as fallback, but mark that DB was checked
-                                    if 'currentLineage' not in tag:
-                                        # Only set if not already set (preserves user edits during session)
-                                        pass
                                 clean_strain = str(db_strain).strip() if db_strain else ''
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
@@ -8437,24 +8245,14 @@ def get_available_tags():
                                 
                                 db_lin, db_strain = lineage_cache.get(name, (None, None))
                                 
-                                # CRITICAL: Always set database lineage fields to ensure UI matches database
-                                # If database has lineage, use it; otherwise keep existing Excel lineage
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
                                     # Always expose DB lineage on stable fields the UI can prefer
                                     tag['currentLineage'] = db_lin_clean
                                     tag['canonical_lineage'] = db_lin_clean
-                                    # Always update Lineage field to match database (database is source of truth)
                                     if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
                                         tag['Lineage'] = db_lin_clean
                                         updated += 1
-                                else:
-                                    # Database has no lineage - mark that we checked the database
-                                    # This ensures UI knows database was checked even if no lineage found
-                                    # Keep Excel lineage as fallback, but mark that DB was checked
-                                    if 'currentLineage' not in tag:
-                                        # Only set if not already set (preserves user edits during session)
-                                        pass
                                 clean_strain = str(db_strain).strip() if db_strain else ''
                                 if db_lin:
                                     if db_lin_clean in ('CBD', 'CBD_BLEND'):
@@ -9856,37 +9654,15 @@ def update_lineage():
         # CRITICAL FIX: Fast cache invalidation - don't block response
         cache_clear_start = time.time()
         try:
-            # CRITICAL: Clear ALL caches aggressively to ensure lineage changes persist after reload
-            # Clear general cache
+            # Clear only essential caches - fast and non-blocking
             cache_key = get_session_cache_key('available_tags')
             cache.delete(cache_key)
             # Also clear web cache
             web_cache_key = get_session_cache_key('web_available_tags')
             cache.delete(web_cache_key)
-            # CRITICAL: Also clear file-specific cache to ensure fresh data on reload
-            session_file_path = session.get('file_path', '')
-            if session_file_path:
-                file_specific_cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                cache.delete(file_specific_cache_key)
-                logging.info(f"✅ LINEAGE UPDATE: Cleared file-specific cache: available_tags_{session_file_path}")
-            # Also clear JSON matched and full Excel caches
-            try:
-                json_matched_cache_key = session.get('json_matched_cache_key')
-                if json_matched_cache_key:
-                    cache.delete(json_matched_cache_key)
-                    logging.info(f"✅ LINEAGE UPDATE: Cleared JSON matched cache")
-            except:
-                pass
-            try:
-                full_excel_cache_key = session.get('full_excel_cache_key')
-                if full_excel_cache_key:
-                    cache.delete(full_excel_cache_key)
-                    logging.info(f"✅ LINEAGE UPDATE: Cleared full Excel cache")
-            except:
-                pass
             session['lineage_update_timestamp'] = time.time()
             session.modified = True
-            logging.info(f"✅ LINEAGE UPDATE: Cleared ALL caches and updated timestamp - lineage changes will persist on reload")
+            logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
             
             # NOTE: WAL checkpoint is now done on the same connection that committed (above)
             # This ensures changes are immediately visible and persisted
@@ -13833,17 +13609,16 @@ def json_match():
         
         logging.info("JSON matcher created successfully")
         
-        # PERFORMANCE: Use simplified matching by default for much faster processing
-        # Simplified matching uses sheet cache instead of per-item database queries
-        # If database is available, it will still be used for enrichment after matching
-        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
-        logging.info(f"JSON matching (simplified) returned {len(matched_products) if matched_products else 0} products")
-        
-        # If simplified matching failed, try database-first as fallback (slower but more accurate)
+        # Perform JSON matching with Product Database integration
+        # Start with full database-aware matching so we reuse prices/brands whenever possible.
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
+        logging.info(f"JSON matching (database-first) returned {len(matched_products) if matched_products else 0} products")
+
+        # If nothing matched (e.g., database unavailable), fall back to the legacy simplified flow.
         if not matched_products:
-            logging.warning("Simplified matching returned no products – falling back to database-first matcher")
-            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
-            logging.info(f"JSON matching (database-first fallback) returned {len(matched_products) if matched_products else 0} products")
+            logging.warning("Primary database matching returned no products – falling back to simplified matcher")
+            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
+            logging.info(f"JSON matching (simplified fallback) returned {len(matched_products) if matched_products else 0} products")
         
         # Sort matched products alphabetically by product name
         if matched_products:
@@ -13917,55 +13692,6 @@ def json_match():
             return products
         
         matched_products = _normalize_json_product_names(matched_products)
-        
-        # CRITICAL FIX: Ensure JSON matched products have weight in displayName and Description
-        # Process each product to include weight in display fields
-        for product in matched_products:
-            if not isinstance(product, dict):
-                continue
-            
-            # Get weight information
-            weight = product.get('Weight*', '') or product.get('Weight', '')
-            units = product.get('Units', 'g')
-            combined_weight = product.get('CombinedWeight', '')
-            
-            # Format weight with units if we have weight data
-            if combined_weight:
-                weight_display = combined_weight
-            elif weight:
-                # Format weight with units (e.g., "1g", "3.5g")
-                if units and units != 'g':
-                    weight_display = f"{weight}{units}"
-                else:
-                    weight_display = f"{weight}g"
-            else:
-                weight_display = None
-            
-            # Get base product name (without weight if already included)
-            product_name = product.get('Product Name*', '') or product.get('ProductName', '')
-            
-            # Create DescAndWeight with weight included
-            if weight_display and product_name:
-                # Remove weight from product name if it's already there
-                import re
-                base_name = re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', str(product_name)).strip()
-                desc_and_weight = f"{base_name} - {weight_display}"
-                
-                # Update display fields to include weight
-                product['DescAndWeight'] = desc_and_weight
-                product['Description'] = desc_and_weight
-                
-                # Update displayName to include weight for UI display
-                if not product.get('displayName') or product.get('displayName') == product_name:
-                    product['displayName'] = desc_and_weight
-                
-                logging.debug(f"✅ JSON MATCH: Added weight to display for '{product_name}': '{desc_and_weight}'")
-            elif product_name:
-                # No weight available, just use product name
-                product['DescAndWeight'] = product_name
-                product['Description'] = product_name
-                if not product.get('displayName'):
-                    product['displayName'] = product_name
         
         # CRITICAL FIX: Add JSON matched products directly to Excel DataFrame
         # This makes them work exactly like regular tags - no special handling needed
@@ -14090,18 +13816,14 @@ def json_match():
         logging.info(f"🔍 Preparing to return {len(matched_products)} matched products as available tags")
 
         # Ensure each matched product has the display fields needed by frontend
-        # Note: Weight should already be included from the processing above
         for i, product in enumerate(matched_products):
-            # Only set displayName if it's missing - don't overwrite if we already set it with weight
-            if 'displayName' not in product or not product.get('displayName'):
-                display_name = (product.get('DescAndWeight', '') or
-                               product.get('Description', '') or
+            if 'displayName' not in product:
+                display_name = (product.get('Description', '') or
                                product.get('Product Name*', '') or
                                product.get('ProductName', ''))
-                if display_name:
-                    product['displayName'] = display_name
-                    if i < 3:  # Log first 3
-                        logging.info(f"🔍 Set displayName for product {i}: '{display_name}'")
+                product['displayName'] = display_name
+                if i < 3:  # Log first 3
+                    logging.info(f"🔍 Set displayName for product {i}: '{display_name}'")
 
         if matched_products:
             logging.info(f"🔍 Sample matched product (first one):")
