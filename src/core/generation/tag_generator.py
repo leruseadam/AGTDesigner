@@ -917,11 +917,8 @@ def process_chunk(args):
     try:
         from app import get_product_database, get_current_store_name
         store_name = get_current_store_name()
-        logger.info(f"🔍 DATABASE CHECK: Attempting to load product database for store '{store_name}'")
         product_db = get_product_database(store_name)
-        if not product_db:
-            logger.error(f"❌ DATABASE ERROR: get_product_database returned None for store '{store_name}'")
-        elif product_db:
+        if product_db:
             # Collect all product names and strain names from chunk
             product_names = []
             strain_names = set()
@@ -936,7 +933,6 @@ def process_chunk(args):
             # Batch query for product lineage
             if product_names:
                 try:
-                    logger.info(f"🔍 BATCH QUERY: Loading lineage for {len(product_names)} products")
                     conn = product_db._get_connection()
                     cur = conn.cursor()
                     placeholders = ','.join(['?'] * len(product_names))
@@ -947,15 +943,12 @@ def process_chunk(args):
                         ORDER BY id DESC
                     '''
                     cur.execute(batch_lineage_query, product_names)
-                    results = cur.fetchall()
-                    logger.info(f"✅ BATCH QUERY: Retrieved {len(results)} lineage records from database")
-                    for row_result in results:
+                    for row_result in cur.fetchall():
                         pname, lineage = row_result
                         if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
                             product_lineage_cache[pname] = str(lineage).strip().upper()
-                            logger.debug(f"  Cached lineage: '{pname}' -> '{product_lineage_cache[pname]}'")
                 except Exception as batch_err:
-                    logger.error(f"❌ BATCH QUERY FAILED: Batch product lineage query failed: {batch_err}")
+                    logger.warning(f"Batch product lineage query failed: {batch_err}")
             
             # Batch query for strain info
             if strain_names:
@@ -1269,9 +1262,6 @@ def process_chunk(args):
                 
             # No extra space before Lineage in the output
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
-            
-            # CRITICAL DEBUG: Log final lineage value being set
-            logger.info(f"📝 FINAL LINEAGE VALUE: '{product_name}' -> Lineage='{lineage_val}' (type: {product_type}, is_classic: {is_classic_type})")
             
             # For classic types, set ProductBrand and ProductBrand_Center to lineage
             if is_classic_type:

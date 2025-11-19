@@ -7098,7 +7098,6 @@ def generate_labels():
             logging.error(f"DOH override error details: {traceback.format_exc()}")
 
         # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
-        logging.info(f"🔍 LINEAGE ENRICHMENT: Enriching {len(records)} records with database lineage...")
         try:
             store_name = session.get('current_store')
             if store_name:
@@ -7110,27 +7109,28 @@ def generate_labels():
                         if product_name:
                             # Get lineage from database (product-level first, then strain-level)
                             db_lineage = product_db.get_product_lineage(product_name)
+                            
+                            # Try strain-level if no product-level lineage
+                            if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
+                                product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+                                if product_strain:
+                                    strain_info = product_db.get_strain_info(product_strain)
+                                    if strain_info:
+                                        db_lineage = (
+                                            strain_info.get('display_lineage') or
+                                            strain_info.get('sovereign_lineage') or
+                                            strain_info.get('canonical_lineage')
+                                        )
+                            
                             if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                                old_lineage = record.get('Lineage', '')
                                 record['Lineage'] = str(db_lineage).strip().upper()
                                 record['lineage'] = str(db_lineage).strip().upper()
                                 enriched_count += 1
-                                if old_lineage != record['Lineage']:
-                                    logging.debug(f"  Enriched: '{product_name}' lineage '{old_lineage}' → '{record['Lineage']}'")
-                    logging.info(f"✅ LINEAGE ENRICHMENT: Enriched {enriched_count}/{len(records)} records with database lineage")
-                else:
-                    logging.warning(f"⚠️  LINEAGE ENRICHMENT: No database available for store '{store_name}'")
-            else:
-                logging.warning(f"⚠️  LINEAGE ENRICHMENT: No store name in session")
+                    
+                    if enriched_count > 0:
+                        logging.info(f"✅ Enriched {enriched_count}/{len(records)} records with lineage")
         except Exception as enrich_err:
-            logging.error(f"❌ LINEAGE ENRICHMENT FAILED: {enrich_err}")
-        
-        # CRITICAL DEBUG: Log lineage values in records right before processing
-        logging.info(f"🔍 LINEAGE PRE-PROCESS CHECK: Verifying lineage values in all {len(records)} records before TemplateProcessor:")
-        for i, record in enumerate(records[:10]):  # Log first 10
-            product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
-            lineage = record.get('Lineage', 'NOT_FOUND')
-            logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
+            logging.error(f"Lineage enrichment failed: {enrich_err}")
         
         # Fast generation with caching
         fast_engine = FastGenerationEngine(processor)
@@ -7596,19 +7596,15 @@ def process_database_product_for_api(db_product):
             joint_ratio = str(processed_product.get('JointRatio', '')).strip()
             if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 combined_weight = joint_ratio  # Use JointRatio directly (e.g., "0.5g x 2 Pack")
-                print(f"DEBUG: Using JointRatio for pre-roll: {product_name} -> {joint_ratio}")
             else:
                 # Calculate JointRatio from product name or use default
                 calculated_joint_ratio = _calculate_joint_ratio_for_record(processed_product)
                 if calculated_joint_ratio:
                     combined_weight = calculated_joint_ratio
-                    print(f"DEBUG: Calculated JointRatio for pre-roll: {product_name} -> {calculated_joint_ratio}")
                 else:
                     combined_weight = "0.5g x 2 Pack"  # Default for pre-rolls
-                    print(f"DEBUG: Using default JointRatio for pre-roll: {product_name} -> {combined_weight}")
         # Special override for Moonshot products - force to 2.5oz
         elif 'moonshot' in product_name.lower() and weight_value and units and units.lower() in ['g', 'grams', 'gram']:
-            print(f"DEBUG: FORCING Moonshot database conversion: {product_name} {weight_value}{units} -> 2.5oz")
             combined_weight = "2.5oz"
         elif weight_value and units and str(units) != 'None' and str(units) != '':
             # Check if this is a nonclassic product that needs weight conversion
@@ -7619,12 +7615,10 @@ def process_database_product_for_api(db_product):
                 # Find the most common ounce weight for this product type
                 most_likely_oz_weight = _find_most_likely_ounce_weight_for_database(product_name, product_type)
                 if most_likely_oz_weight:
-                    print(f"DEBUG: Database weight conversion for {product_name}: {weight_value}{units} -> {most_likely_oz_weight}")
                     combined_weight = most_likely_oz_weight
                 else:
                     # Fallback: force conversion for Moonshot products
                     if 'moonshot' in product_name.lower():
-                        print(f"DEBUG: Fallback Moonshot conversion for {product_name}: 2.5oz")
                         combined_weight = "2.5oz"
                     else:
                         # Use original logic
