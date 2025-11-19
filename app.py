@@ -1070,35 +1070,6 @@ def get_excel_processor():
             if _excel_processor is None:
                 # Create processor with store-aware configuration so lineage updates persist per store
                 _excel_processor = ExcelProcessor(store_name=processor_store)
-                
-                # CRITICAL FIX: Load session file immediately when creating new processor
-                try:
-                    from flask import session
-                    try:
-                        session_file_path = session.get('file_path')
-                        if session_file_path and os.path.exists(session_file_path):
-                            logging.info(f"✅ CRITICAL FIX: Loading session file on new processor: {session_file_path}")
-                            success = _excel_processor.load_file(session_file_path)
-                            if success:
-                                _excel_processor._last_loaded_file = session_file_path
-                                row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
-                                logging.info(f"✅ CRITICAL FIX: Loaded {row_count} rows from session file on new processor")
-                                # Populate dropdown cache
-                                if hasattr(_excel_processor, '_cache_dropdown_values'):
-                                    try:
-                                        _excel_processor._cache_dropdown_values()
-                                        logging.info(f"✅ Populated dropdown cache after loading session file")
-                                    except Exception as e:
-                                        logging.error(f"Failed to populate dropdown cache: {e}")
-                            else:
-                                logging.error(f"❌ CRITICAL FIX: Failed to load session file on new processor: {session_file_path}")
-                        elif session_file_path:
-                            logging.warning(f"⚠️ Session file_path exists but file not found: {session_file_path}")
-                    except RuntimeError:
-                        # No active request context
-                        pass
-                except Exception as session_error:
-                    logging.warning(f"Error checking session for uploaded file on new processor: {session_error}")
             else:
                 # If the active store changed, update the processor's store context
                 current_processor_store = getattr(_excel_processor, '_store_name', None)
@@ -1119,16 +1090,6 @@ def get_excel_processor():
                     from flask import session
                     try:
                         session_file_path = session.get('file_path')
-                        session_file_server_id = session.get('file_path_server_id')
-                        
-                        # CRITICAL FIX: Check if file_path belongs to current server instance
-                        # If server restarted, SERVER_INSTANCE_ID changed, so clear old file_path
-                        if session_file_path and session_file_server_id != SERVER_INSTANCE_ID:
-                            logging.info(f"🔄 Server restarted - clearing old session file_path: {session_file_path}")
-                            session.pop('file_path', None)
-                            session.pop('file_path_server_id', None)
-                            session_file_path = None
-                        
                         logging.info(f"🔍 DEBUG: Session file_path = {session_file_path}")
                         logging.info(f"🔍 DEBUG: Session keys = {list(session.keys())}")
                     except RuntimeError:
@@ -2728,7 +2689,6 @@ def upload_file():
         # Update session with permanent flag for persistence
         session.permanent = True
         session['file_path'] = file_path
-        session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
         session['uploaded_filename'] = file.filename
         session['upload_timestamp'] = timestamp
         session.modified = True
@@ -2802,39 +2762,20 @@ def upload_file():
 
                         logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
 
-                        # CRITICAL: HARD REFRESH - Clear ALL caches aggressively to force complete refresh
+                        # CRITICAL: Clear ALL caches to force complete refresh
                         try:
                             # Clear file-specific cache (uses file path in key)
                             # Note: In background thread, we can't access session directly, use file_path from closure
                             cache_keys_to_clear = [
                                 f'available_tags_{file_path}',
-                                'available_tags',  # General cache
                                 'selected_tags',
                                 'vendor_tags',
-                                'initial_data',
-                                'filtered_tags',
-                                'tag_list'
+                                'initial_data'
                             ]
                             for key_base in cache_keys_to_clear:
                                 cache_key = get_session_cache_key(key_base)
                                 cache.delete(cache_key)
                                 logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
-                            
-                            # Also clear JSON matched cache if it exists
-                            try:
-                                json_matched_cache_key = f'json_matched_{file_path}'
-                                cache.delete(json_matched_cache_key)
-                                logging.info(f"[BACKGROUND] ✅ Cleared JSON matched cache")
-                            except:
-                                pass
-                            
-                            # Clear full Excel cache
-                            try:
-                                full_excel_cache_key = f'full_excel_{file_path}'
-                                cache.delete(full_excel_cache_key)
-                                logging.info(f"[BACKGROUND] ✅ Cleared full Excel cache")
-                            except:
-                                pass
                         except Exception as cache_err:
                             logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
@@ -2862,8 +2803,7 @@ def upload_file():
                 'success': True,
                 'message': 'File uploaded and ready',
                 'filename': file.filename,
-                'processing': False,  # CHANGED: Marked as not processing so frontend loads immediately
-                'hard_refresh': True  # CRITICAL: Flag to force hard refresh on frontend
+                'processing': False  # CHANGED: Marked as not processing so frontend loads immediately
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
@@ -2880,18 +2820,15 @@ def upload_file():
             _excel_processor = None
             logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
             
-            # CRITICAL: HARD REFRESH - Clear ALL caches aggressively to force complete refresh
+            # CRITICAL: Clear ALL caches to force complete refresh
             try:
                 # Clear file-specific cache (uses file path in key)
                 session_file_path = session.get('file_path', '')
                 cache_keys_to_clear = [
                     f'available_tags_{session_file_path}',
-                    'available_tags',  # General cache
                     'selected_tags', 
                     'vendor_tags', 
-                    'initial_data',
-                    'filtered_tags',
-                    'tag_list'
+                    'initial_data'
                 ]
                 
                 # Also clear any old available_tags caches (from previous uploads)
@@ -2907,31 +2844,6 @@ def upload_file():
                     cache_key = get_session_cache_key(key_base)
                     cache.delete(cache_key)
                     logging.info(f"✅ Cleared cache: {key_base}")
-                
-                # Clear JSON matched cache
-                try:
-                    json_matched_cache_key = session.get('json_matched_cache_key')
-                    if json_matched_cache_key:
-                        cache.delete(json_matched_cache_key)
-                        logging.info(f"✅ Cleared JSON matched cache")
-                    session.pop('json_matched_cache_key', None)
-                except:
-                    pass
-                
-                # Clear full Excel cache
-                try:
-                    full_excel_cache_key = session.get('full_excel_cache_key')
-                    if full_excel_cache_key:
-                        cache.delete(full_excel_cache_key)
-                        logging.info(f"✅ Cleared full Excel cache")
-                    session.pop('full_excel_cache_key', None)
-                except:
-                    pass
-                
-                # Set hard refresh timestamp to force fresh load
-                session['hard_refresh_timestamp'] = time.time()
-                session.modified = True
-                logging.info(f"✅ Set hard refresh timestamp: {session['hard_refresh_timestamp']}")
             except Exception as cache_err:
                 logging.warning(f"Failed to clear cache: {cache_err}")
             
@@ -2948,8 +2860,7 @@ def upload_file():
                 'success': True,
                 'message': 'File uploaded successfully',
                 'filename': file.filename,
-                'rows': 0,  # Unknown until page reload processes it
-                'hard_refresh': True  # CRITICAL: Flag to force hard refresh on frontend
+                'rows': 0  # Unknown until page reload processes it
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
@@ -3326,7 +3237,6 @@ def upload_file_simple_pythonanywhere():
             
             # Update session
             session['file_path'] = temp_path
-            session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
             session['selected_tags'] = []
             
             # Clean up temp file
@@ -3428,7 +3338,6 @@ def upload_file_simple():
         
         # Store uploaded file path in session
         session['file_path'] = file_path
-        session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
         session['selected_tags'] = []
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
@@ -4353,7 +4262,6 @@ def get_current_file():
                                     file_exists = True
                                     # Restore session data
                                     session['file_path'] = file_path
-                                    session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
                                     session['uploaded_filename'] = uploaded_filename
                                     session['upload_timestamp'] = int(os.path.getmtime(recovered_file))
                                     session.modified = True
@@ -7834,9 +7742,9 @@ def get_available_tags():
             logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache for this request.")
         
         if cached_tags and not nocache:
-            # CRITICAL FIX: Always do lineage alignment - lineage changes MUST persist even in fast_load mode
-            # Use optimized batch query that's fast enough for fast_load scenarios
-            lineage_alignment_needed = True  # Always align lineage - it's critical for persistence
+            # Always do lineage alignment to ensure database lineage is applied
+            # Even with fast_load, we still need lineage alignment for correct display
+            lineage_alignment_needed = True
             
             # Perform lineage alignment to assign/update lineage from database
             # Use optimized version that's faster but still completes
@@ -7899,8 +7807,8 @@ def get_available_tags():
 
                                 # CRITICAL FIX: Limit batch size to prevent query timeouts
                                 # SQLite can struggle with very large IN clauses (>1000 items)
-                                # PERFORMANCE: Use smaller batch size in fast_load mode, moderate size otherwise
-                                MAX_BATCH_SIZE = 200 if fast_load else 150  # Larger batch in fast_load for better lineage coverage
+                                # PERFORMANCE: Use moderate batch size for balance between speed and completeness
+                                MAX_BATCH_SIZE = 150  # Balanced size for faster queries while still processing most tags
                                 if len(all_search_names) > MAX_BATCH_SIZE:
                                     logging.debug(f"Cache batch query size ({len(all_search_names)}) exceeds limit, processing in batches of {MAX_BATCH_SIZE}")
                                     # Process in chunks instead of just taking first N
@@ -8037,33 +7945,6 @@ def get_available_tags():
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
             excel_processor = get_session_excel_processor()
-            
-            # PERFORMANCE: Enable fast_load mode to skip expensive enrichment for large files
-            # CRITICAL: Always enrich lineage even in fast_load mode - lineage changes MUST persist
-            if fast_load and excel_processor is not None:
-                excel_processor._fast_load_mode = True
-                excel_processor._skip_enrichment = True  # Skip non-lineage enrichment for fast loading
-                logging.info("⚡ Fast load mode enabled - skipping non-lineage enrichment (lineage will still be enriched)")
-            
-            # CRITICAL FIX: If processor exists but DataFrame is empty, force reload from session file
-            if excel_processor is not None:
-                if excel_processor.df is None or excel_processor.df.empty:
-                    session_file_path = session.get('file_path')
-                    if session_file_path and os.path.exists(session_file_path):
-                        logging.info(f"🔄 CRITICAL FIX: Processor exists but DataFrame is empty, reloading from session: {session_file_path}")
-                        success = excel_processor.load_file(session_file_path)
-                        if success:
-                            excel_processor._last_loaded_file = session_file_path
-                            row_count = len(excel_processor.df) if excel_processor.df is not None else 0
-                            logging.info(f"✅ CRITICAL FIX: Reloaded {row_count} rows from session file")
-                            # Populate dropdown cache
-                            if hasattr(excel_processor, '_cache_dropdown_values'):
-                                try:
-                                    excel_processor._cache_dropdown_values()
-                                    logging.info(f"✅ Populated dropdown cache after reload")
-                                except Exception as e:
-                                    logging.error(f"Failed to populate dropdown cache after reload: {e}")
-            
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 try:
                     excel_tags = excel_processor.get_available_tags()
@@ -8071,12 +7952,6 @@ def get_available_tags():
                     logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
                 except Exception as e:
                     logging.warning(f"Excel processor error: {e}")
-                finally:
-                    # Clean up fast_load flags after use
-                    if hasattr(excel_processor, '_fast_load_mode'):
-                        excel_processor._fast_load_mode = False
-                    if hasattr(excel_processor, '_skip_enrichment'):
-                        excel_processor._skip_enrichment = False
             
             # CRITICAL FIX: If no Excel data and prefer_db not set, fall back to database instead of returning empty
             if not all_tags:
@@ -8086,8 +7961,7 @@ def get_available_tags():
                 logging.info(f"✅ Set prefer_db=True to force database query")
         
         # If we have tags from Excel, prefer them but align lineage with database values
-        # PERFORMANCE: Skip expensive lineage alignment when fast_load is requested
-        if all_tags and not prefer_db and not fast_load:
+        if all_tags and not prefer_db:
             try:
                 store_name = get_current_store_name()
                 if not store_name:
@@ -8281,10 +8155,8 @@ def get_available_tags():
 
             safe_excel_tags = make_json_safe(all_tags)
             # Cache the results for faster subsequent requests (unless nocache requested)
-            # PERFORMANCE: Always cache results to speed up subsequent requests
             if not nocache:
                 cache.set(cache_key, safe_excel_tags, timeout=300)  # Cache for 5 minutes
-                logging.info(f"✅ Cached {len(safe_excel_tags)} tags for faster subsequent loads")
             try:
                 current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
                 save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
@@ -8373,14 +8245,12 @@ def get_available_tags():
                                     # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
                                     # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                                     quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
-                                    # PERFORMANCE: Use smaller limit when fast_load is enabled
-                                    limit = 1000 if fast_load else 20000
                                     query = f'''
                                         SELECT {quoted_columns}, COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
                                         FROM products p
                                         LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                         ORDER BY p.id DESC
-                                        LIMIT {limit}
+                                        LIMIT 20000
                                     '''
                                     try:
                                         main_cursor.execute(query)
@@ -8389,9 +8259,7 @@ def get_available_tags():
                                         logging.info(f"Main database query with strain join returned {len(rows)} rows")
                                     except Exception as join_err:
                                         logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
-                                        # PERFORMANCE: Use smaller limit when fast_load is enabled
-                                        limit = 1000 if fast_load else 20000
-                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT {limit}'
+                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
                                         main_cursor.execute(query)
                                         rows = main_cursor.fetchall()
                                         columns = columns_to_query + ['preferred_lineage']
@@ -8439,8 +8307,6 @@ def get_available_tags():
                             # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                             
-                            # PERFORMANCE: Use smaller limit when fast_load is enabled
-                            limit = 1000 if fast_load else 10000
                             # Try to join with strains table, but prefer products.Lineage over strains.canonical_lineage
                             lineage_query_join_by_name = f'''
                                 SELECT {quoted_columns}, 
@@ -8448,7 +8314,7 @@ def get_available_tags():
                                 FROM products p
                                 LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
                                 ORDER BY p.id DESC
-                                LIMIT {limit}
+                                LIMIT 10000
                             '''
                             
                             # Fallback query if strains table/join fails
@@ -8457,7 +8323,7 @@ def get_available_tags():
                                        p."Lineage" AS preferred_lineage
                                 FROM products p
                                 ORDER BY p.id DESC
-                                LIMIT {limit}
+                                LIMIT 10000
                             '''
                             
                             logging.info("Executing query with strain join (same pipeline as Excel alignment)...")
@@ -16797,7 +16663,6 @@ def upload_file_optimized():
         # Only clear the absolute minimum required for new file
         if 'file_path' in session:
             del session['file_path']
-            session.pop('file_path_server_id', None)  # Also clear server ID
             logging.info(f"[ULTRA-FAST] Cleared session key: file_path")
         
         # Clear global Excel processor to force complete replacement
@@ -16829,7 +16694,6 @@ def upload_file_optimized():
         
         # Store uploaded file path in session
         session['file_path'] = temp_path
-        session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
         
         # Clear selected tags in session to ensure fresh start
         session['selected_tags'] = []
@@ -16917,7 +16781,6 @@ def upload_file_fast():
         
         # Store file path in session
         session['file_path'] = str(file_path)
-        session['file_path_server_id'] = SERVER_INSTANCE_ID  # Track server instance
         session['selected_tags'] = []
         
         # Clear cached initial data so fresh upload is visible immediately

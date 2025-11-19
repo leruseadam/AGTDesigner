@@ -1060,43 +1060,19 @@ class TemplateProcessor:
         chunk_start_time = time.time()
         
         try:
-            # PERFORMANCE OPTIMIZATION: Cache template buffers to avoid re-expansion
+            # CRITICAL FIX: Re-expand template with correct number of products to prevent blank labels
             num_products = len(chunk)
             
-            # Check if we already have a cached buffer for this size
-            cache_key = f"{self.template_type}_{num_products}"
-            if not hasattr(self, '_template_buffer_cache'):
-                self._template_buffer_cache = {}
-            
-            # Only re-expand if we don't have a cached buffer for this size
-            if cache_key not in self._template_buffer_cache or self._template_buffer_cache[cache_key] is None:
-                # For all templates, re-expand with correct number of products
-                if self.template_type in ['horizontal', 'vertical']:
-                    self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
-                    self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
-                elif self.template_type == 'double':
-                    self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
-                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                elif self.template_type == 'mini':
-                    self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
-                    self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
-                
-                # Cache the buffer for reuse
-                if hasattr(self._expanded_template_buffer, 'getvalue'):
-                    # For BytesIO, save the bytes for caching
-                    self._template_buffer_cache[cache_key] = self._expanded_template_buffer.getvalue()
-                else:
-                    self._template_buffer_cache[cache_key] = self._expanded_template_buffer
-                self.logger.info(f"⚡ PERFORMANCE: Cached template buffer for {self.template_type} with {num_products} products")
-            else:
-                # Use cached buffer
-                from io import BytesIO
-                cached_buffer = self._template_buffer_cache[cache_key]
-                if isinstance(cached_buffer, bytes):
-                    self._expanded_template_buffer = BytesIO(cached_buffer)
-                else:
-                    self._expanded_template_buffer = cached_buffer
-                self.logger.info(f"⚡ PERFORMANCE: Using cached template buffer for {self.template_type} with {num_products} products")
+            # For all templates, re-expand with correct number of products
+            if self.template_type in ['horizontal', 'vertical']:
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
+            elif self.template_type == 'double':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
+            elif self.template_type == 'mini':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
             
             if hasattr(self._expanded_template_buffer, 'seek'):
                 self._expanded_template_buffer.seek(0)

@@ -1218,77 +1218,6 @@ class EnhancedJSONMatcher:
         # Continue with database priority mode - use database product with JSON matching info
         db_priority_product = product_dict.copy()
         
-        # CRITICAL: Ensure Product Type* is set from database
-        if not db_priority_product.get('Product Type*'):
-            # Try alternative field names
-            db_priority_product['Product Type*'] = (
-                product_dict.get('Product Type*') or
-                product_dict.get('ProductType') or
-                product_dict.get('product_type') or
-                product_dict.get('Type') or
-                ''
-            )
-        
-        # CRITICAL: Apply classic/nonclassic defaults if Product Type* is missing
-        from src.core.constants import CLASSIC_TYPES
-        product_type = str(db_priority_product.get('Product Type*', '')).strip().lower()
-        filled_defaults = []
-        
-        if not product_type:
-            # If Product Type* is still missing, we can't determine classic/nonclassic, so skip default
-            logging.warning(f"⚠️ Product Type* is missing for '{product_name}', cannot apply classic/nonclassic defaults")
-        else:
-            # Check if it's a classic type
-            is_classic = product_type in CLASSIC_TYPES
-            
-            # Ensure Lineage has default if missing (classic -> 'hybrid', nonclassic -> 'Mixed')
-            if not db_priority_product.get('Lineage'):
-                if is_classic:
-                    db_priority_product['Lineage'] = 'hybrid'
-                    filled_defaults.append('Lineage=hybrid (classic default)')
-                    logging.info(f"✅ Applied classic default: Lineage='hybrid' for '{product_name}'")
-                else:
-                    db_priority_product['Lineage'] = 'Mixed'
-                    filled_defaults.append('Lineage=Mixed (nonclassic default)')
-                    logging.info(f"✅ Applied nonclassic default: Lineage='Mixed' for '{product_name}'")
-        
-        # CRITICAL: Ensure weight is properly extracted from database
-        if not db_priority_product.get('Weight*'):
-            # Try alternative field names
-            db_priority_product['Weight*'] = (
-                product_dict.get('Weight*') or
-                product_dict.get('Weight') or
-                product_dict.get('weight') or
-                ''
-            )
-            if db_priority_product.get('Weight*'):
-                filled_defaults.append('Weight* (from DB)')
-        
-        # CRITICAL: Ensure price is properly extracted from database
-        if not db_priority_product.get('Price'):
-            # Try alternative field names
-            db_priority_product['Price'] = (
-                product_dict.get('Price') or
-                product_dict.get('Price*') or
-                product_dict.get('price') or
-                product_dict.get('Price* (Tier Name for Bulk)') or
-                product_dict.get('Med Price') or
-                ''
-            )
-            if db_priority_product.get('Price'):
-                filled_defaults.append('Price (from DB)')
-        
-        # CRITICAL: Ensure Units is set if Weight* exists
-        if db_priority_product.get('Weight*') and not db_priority_product.get('Units'):
-            db_priority_product['Units'] = (
-                product_dict.get('Units') or
-                product_dict.get('Weight Unit* (grams/gm or ounces/oz)') or
-                product_dict.get('weight_units') or
-                'g'  # Default to grams
-            )
-            if db_priority_product.get('Units'):
-                filled_defaults.append('Units (from DB)')
-        
         # CRITICAL: Add metadata about the database priority approach
         db_priority_product['Source'] = 'Database Priority (100% DB)'
         db_priority_product['JSON_Source'] = 'Matching Only'
@@ -1313,9 +1242,9 @@ class EnhancedJSONMatcher:
         json_item_name = json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN'
         db_priority_product['JSON_Item_Name'] = json_item_name
         db_priority_product['JSON_Fields_Used'] = 0  # No JSON fields used for data
-        db_priority_product['Default_Fields_Applied'] = ', '.join(filled_defaults) if filled_defaults else 'None'
+        db_priority_product['Default_Fields_Applied'] = filled_defaults
             
-        logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f}, defaults applied: {', '.join(filled_defaults) if filled_defaults else 'None'})")
+        logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f}, defaults applied: {filled_defaults})")
         return db_priority_product
 
     def _select_db_price(self, product: dict) -> str:
@@ -2205,42 +2134,30 @@ class EnhancedJSONMatcher:
                     logging.info(f"🔍 DEBUG: Weight data for '{hybrid_product.get('Product Name*', 'Unknown')}': Weight*={hybrid_product.get('Weight*', 'None')}, Units={hybrid_product.get('Units', 'None')}")
                     logging.info(f"🔍 DEBUG: Processing JSON product: '{hybrid_product.get('Product Name*', 'Unknown')}' -> Database match: '{hybrid_product.get('Product Name*', 'N/A')}'")
                     
-                    # CRITICAL FIX: DATABASE-PRIORITY - Use database price first, JSON as fallback
-                    if not hybrid_product.get('Price'):
-                        # Try database price first
+                    # Final price and weight handling with JSON priority
+                    json_price = self._extract_json_price(json_data, hybrid_product)
+                    if json_price:
+                        hybrid_product['Price'] = self._format_price(json_price)
+                    elif not hybrid_product.get('Price'):
                         db_price_raw = self._select_db_price(hybrid_product)
-                        if db_price_raw and str(db_price_raw).strip() and str(db_price_raw).lower() not in ('none', '0', '0.0', '0.00'):
-                            hybrid_product['Price'] = self._format_price(db_price_raw)
-                            logging.info(f"✅ DEBUG: Using database price: {hybrid_product['Price']}")
-                        else:
-                            # Fallback to JSON price if database price not available
-                            json_price = self._extract_json_price(json_data, hybrid_product)
-                            if json_price:
-                                hybrid_product['Price'] = self._format_price(json_price)
-                                logging.info(f"✅ DEBUG: Using JSON price (fallback): {hybrid_product['Price']}")
-                    else:
-                        # Price already set from merge, just format it
-                        hybrid_product['Price'] = self._format_price(hybrid_product.get('Price', ''))
+                        hybrid_product['Price'] = self._format_price(db_price_raw)
                     
-                    # CRITICAL FIX: DATABASE-PRIORITY - Use database weight first, JSON as fallback
-                    if hybrid_product.get('Weight*'):
-                        # Database weight is available, use it and format WeightUnits
-                        weight_value = str(hybrid_product.get('Weight*', '')).strip()
-                        units_value = str(hybrid_product.get('Units', 'g')).strip() or 'g'
-                        hybrid_product['WeightUnits'] = f"{weight_value}{units_value}"
-                        hybrid_product['WeightWithUnits'] = hybrid_product['WeightUnits']
-                        logging.info(f"✅ DEBUG: Using database weight: {hybrid_product['WeightUnits']}")
+                    # CRITICAL FIX: Always preserve database weight data, even if JSON weight is found
+                    json_weight = self._extract_json_weight(json_data, hybrid_product)
+                    if json_weight:
+                        hybrid_product['Weight*'] = json_weight
+                        hybrid_product['WeightUnits'] = json_weight
+                        hybrid_product['WeightWithUnits'] = json_weight
+                        logging.info(f"✅ DEBUG: Using JSON weight: {json_weight}")
                     else:
-                        # No database weight, try JSON weight as fallback
-                        json_weight = self._extract_json_weight(json_data, hybrid_product)
-                        if json_weight:
-                            hybrid_product['Weight*'] = json_weight
-                            hybrid_product['WeightUnits'] = json_weight
-                            hybrid_product['WeightWithUnits'] = json_weight
-                            logging.info(f"✅ DEBUG: Using JSON weight (fallback): {json_weight}")
+                        # If no JSON weight, ensure database weight data is preserved
+                        if hybrid_product.get('Weight*'):
+                            hybrid_product['WeightUnits'] = f"{hybrid_product.get('Weight*', '')}{hybrid_product.get('Units', 'g')}"
+                            hybrid_product['WeightWithUnits'] = hybrid_product['WeightUnits']
+                            logging.info(f"✅ DEBUG: Using database weight: {hybrid_product['Weight*']}{hybrid_product.get('Units', 'g')}")
                         else:
-                            # No weight data at all, try to extract from product name
-                            logging.info(f"⚠️ DEBUG: No database or JSON weight found for '{hybrid_product.get('Product Name*', 'Unknown')}'")
+                            logging.info(f"⚠️ DEBUG: No database weight found for '{hybrid_product.get('Product Name*', 'Unknown')}'")
+                            # CRITICAL FIX: If no weight data at all, try to extract from product name
                             product_name = hybrid_product.get('Product Name*', '') or hybrid_product.get('ProductName', '')
                             if product_name:
                                 import re

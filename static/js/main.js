@@ -116,8 +116,9 @@ window.addEventListener('error', function(event) {
     if (event.error && event.error.message) {
         const errorMsg = event.error.message.toLowerCase();
         // Skip "Unexpected end of input" errors which are often false positives from caching
-        if (errorMsg.includes('unexpected end of input') && event.filename && event.filename.includes('?t=')) {
-            // Likely a caching issue, don't log as error
+        if (errorMsg.includes('unexpected end of input')) {
+            console.warn('⚠️ Syntax error detected (likely browser cache issue) - ignoring:', errorMsg);
+            event.preventDefault();
             return false;
         }
     }
@@ -1002,11 +1003,27 @@ const TagManager = {
         }
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
-            verboseLog(`Hydrating ${cachedTags.length} tags from cache for instant display`);
+            console.log(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
             this.state.simplifiedAvailableTagsActive = false;
-            this._updateAvailableTags(cachedTags, null);
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            
+            // CRITICAL FIX: Use requestAnimationFrame to ensure immediate render
+            requestAnimationFrame(() => {
+                this._updateAvailableTags(cachedTags, null);
+                console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+                
+                // Hide splash immediately when rendering from cache
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+            });
             return true;
         }
         return false;
@@ -2451,16 +2468,6 @@ const TagManager = {
             console.error('Available tags container not found');
             return;
         }
-        
-        // Show loading splash when tags are being added to UI (if not already showing)
-        if (tags && tags.length > 0) {
-            const splash = document.getElementById('actionSplash');
-            const isSplashVisible = splash && splash.style.display === 'flex';
-            if (!isSplashVisible && this.showActionSplash) {
-                this.showActionSplash('Loading tags...');
-            }
-        }
-        
         // Preserve scroll position during re-render
         const savedScroll = this._saveAvailableScrollPosition();
 
@@ -3008,15 +3015,6 @@ const TagManager = {
         const savedScroll = this._saveAvailableScrollPosition();
 
         const tags = filteredTags || originalTags;
-        
-        // Show loading splash when tags are being added to UI (if not already showing)
-        if (tags && tags.length > 0) {
-            const splash = document.getElementById('actionSplash');
-            const isSplashVisible = splash && splash.style.display === 'flex';
-            if (!isSplashVisible && this.showActionSplash) {
-                this.showActionSplash('Loading tags...');
-            }
-        }
         
         if (!tags || tags.length === 0) {
             verboseLog('No tags provided, showing empty state');
@@ -3793,15 +3791,6 @@ const TagManager = {
             return;
         }
 
-        // Show loading splash when tags are being added to UI (if not already showing)
-        if (tags && tags.length > 0) {
-            const splash = document.getElementById('actionSplash');
-            const isSplashVisible = splash && splash.style.display === 'flex';
-            if (!isSplashVisible && this.showActionSplash) {
-                this.showActionSplash('Loading tags...');
-            }
-        }
-
         const chunkSize = 200;
         let index = 0;
 
@@ -3891,8 +3880,7 @@ const TagManager = {
         
         // Immediate check - if tags are already visible, hide splash right away
         const immediateCheck = () => {
-            // Check for both .tag-item and .tag-entry (simplified view uses different class)
-            const tagItems = availableTagsContainer.querySelectorAll('.tag-item, .tag-entry');
+            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
             if (tagItems.length > 0) {
                 const visibleTags = Array.from(tagItems).filter(item => {
                     const rect = item.getBoundingClientRect();
@@ -3918,9 +3906,9 @@ const TagManager = {
             return;
         }
         
-        // Increased timeout: hide splash after 5 seconds max to prevent indefinite loading
+        // Ultra-aggressive timeout: hide splash after 500ms max for instant feel
         const forceHideTimeout = setTimeout(() => {
-            verboseLog('Force hiding splash after 5 second timeout');
+            console.log('⚡ Force hiding splash after 500ms timeout for instant UX');
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
@@ -3928,22 +3916,17 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
             }
-        }, 5000);
+        }, 500);
         
         let attempts = 0;
-        const maxAttempts = 50; // 5 seconds max (50 * 100ms) - increased for large tag sets
+        const maxAttempts = 10; // 500ms max (10 * 50ms) - ultra-fast response
         let lastTagCount = 0;
         let stableCount = 0; // Count how many times tag count has been stable
         
         const checkForTags = () => {
             attempts++;
-            // Check for both .tag-item and .tag-entry (simplified view uses different class)
-            const tagItems = availableTagsContainer.querySelectorAll('.tag-item, .tag-entry');
+            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
             const currentTagCount = tagItems.length;
-            
-            // Also check if container has any content (not just loading spinner)
-            const hasLoadingSpinner = availableTagsContainer.querySelector('.spinner-border');
-            const hasContent = currentTagCount > 0 || (!hasLoadingSpinner && availableTagsContainer.innerHTML.trim().length > 0);
             
             // Check if tags are actually visible (not just in DOM but rendered)
             const visibleTags = Array.from(tagItems).filter(item => {
@@ -3960,16 +3943,13 @@ const TagManager = {
             lastTagCount = currentTagCount;
             
             // Tags are fully loaded if:
-            // 1. We have tags in the DOM (or content without loading spinner)
-            // 2. Tags are visible (rendered) OR we have content without spinner
-            // 3. Tag count has been stable for at least 2 checks (200ms) - ensures rendering is complete
-            const tagsReady = (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 2) || 
-                             (hasContent && !hasLoadingSpinner && stableCount >= 2);
-            
-            if (tagsReady) {
+            // 1. We have tags in the DOM
+            // 2. Tags are visible (rendered)
+            // 3. Tag count has been stable for at least 1 check (50ms) - instant response
+            if (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 1) {
                 // Tags are fully rendered, hide splash
                 clearTimeout(forceHideTimeout);
-                verboseLog(`Tags fully loaded and rendered (${currentTagCount} items, ${visibleTags.length} visible), hiding splash`);
+                console.log(`✅ Tags ready: ${currentTagCount} items (${visibleTags.length} visible) - hiding splash`);
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
@@ -3982,9 +3962,9 @@ const TagManager = {
                 // Timeout reached, hide splash anyway (but log warning)
                 clearTimeout(forceHideTimeout);
                 if (currentTagCount > 0) {
-                    verboseLog(`Timeout waiting for tags to stabilize, but found ${currentTagCount} tags - hiding splash`);
+                    console.log(`⚡ Fast timeout: ${currentTagCount} tags found - hiding splash`);
                 } else {
-                    verboseLog('Timeout waiting for tags, no tags found - hiding splash');
+                    console.log('⚡ Fast timeout: no tags yet - hiding splash anyway for UX');
                 }
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
@@ -3994,16 +3974,16 @@ const TagManager = {
                     AppLoadingSplash.complete();
                 }
             } else {
-                // Tags not yet fully rendered, check again
+                // Tags not yet fully rendered, check again at 50ms intervals
                 if (currentTagCount > 0) {
-                    verboseLog(`Waiting for tags to stabilize: ${currentTagCount} tags found, stable for ${stableCount} checks`);
+                    verboseLog(`Waiting for tags: ${currentTagCount} found, stable ${stableCount}x`);
                 }
-                setTimeout(checkForTags, 100);
+                setTimeout(checkForTags, 50);
             }
         };
         
-        // Start checking after a brief delay to allow DOM to update
-        setTimeout(checkForTags, 50);
+        // Start checking immediately for instant response
+        setTimeout(checkForTags, 25);
     },
 
     createTagElement(tag, isForSelectedTags = false) {
@@ -6651,14 +6631,17 @@ const TagManager = {
 
     async fetchAndUpdateAvailableTags() {
         try {
-            verboseLog('=== fetchAndUpdateAvailableTags START ===');
+            console.log('=== fetchAndUpdateAvailableTags START ===');
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
-            if (!hydratedFromCache) {
-                // Show loading splash when fetching tags
-                this.showActionSplash('Loading tags...');
-            } else {
-                verboseLog('Tags rendered instantly from cache; fetching fresh data in background...');
+            if (hydratedFromCache) {
+                console.log('✅ Tags rendered instantly from cache - skipping loader');
+                // Cache hydration already handled rendering, skip loader
+                return true;
             }
+            
+            // Only show loading if we don't have cached tags
+            console.log('⏳ No cache available - showing loader');
+            this.showActionSplash('Loading tags...');
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen
             const availableTagsContainer = document.getElementById('availableTags');
@@ -6723,12 +6706,6 @@ const TagManager = {
             }
             
             verboseLog('Fetching available tags...');
-            
-            // CRITICAL: Show loading splash immediately when tags start loading
-            if (this.showActionSplash) {
-                this.showActionSplash('Loading tags...');
-            }
-            
             const timestamp = Date.now();
             
             // OPTIMIZATION: Use fast_load parameter for initial load OR post-upload to skip slow lineage alignment
@@ -6751,9 +6728,8 @@ const TagManager = {
                     // PERFORMANCE FIX: Reduced timeout to 8s - fast_load should make this fast enough
                     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-                    // CRITICAL: Use nocache=1 for hard refresh (after upload) to force fresh data
-                    // Use cache if available - only bypass cache on explicit refresh, error recovery, or hard refresh
-                    const useCache = retryCount === 0 && !this._hardRefresh; // Use cache on first attempt unless hard refresh
+                    // Use cache if available - only bypass cache on explicit refresh or error recovery
+                    const useCache = retryCount === 0; // Use cache on first attempt
                     const cacheParam = useCache ? '' : '&nocache=1';
                     // PERFORMANCE FIX: Always use fast_load=1 for faster tag population
                     // Lineage alignment can be done later if needed
@@ -6949,10 +6925,6 @@ const TagManager = {
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');
-                
-                // CRITICAL: Wait for tags to actually appear in DOM before hiding splash
-                // This ensures the loading splash stays visible until tags are rendered
-                this._waitForTagsToAppear();
                 return true;
             }
             
@@ -6966,10 +6938,7 @@ const TagManager = {
             
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
-            
-            // CRITICAL: Wait for tags to actually appear in DOM before hiding splash
-            // This ensures the loading splash stays visible until tags are rendered
-            this._waitForTagsToAppear();
+            // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
             return true;
         } catch (error) {
             console.error('Error fetching available tags:', error);
@@ -7170,8 +7139,8 @@ const TagManager = {
      *   - force (default true): temporarily bypass fetch rate limiting
      */
     async refreshTagLists(options = {}) {
-        const { preserveFilters = true, force = true, hardRefresh = false } = options;
-        verboseLog('=== refreshTagLists START ===', { preserveFilters, force, hardRefresh });
+        const { preserveFilters = true, force = true } = options;
+        verboseLog('=== refreshTagLists START ===', { preserveFilters, force });
 
         // Optionally preserve filters by skipping reset
         if (!preserveFilters) {
@@ -7185,9 +7154,7 @@ const TagManager = {
         }
 
         // Set flag to enable fast_load for post-upload tag loading
-        // If hardRefresh is true, also set flag to use nocache=1
         this._isPostUploadLoad = true;
-        this._hardRefresh = hardRefresh;  // CRITICAL: Flag for hard refresh (nocache=1)
 
         try {
             const results = await Promise.all([
@@ -7207,9 +7174,8 @@ const TagManager = {
             console.error('refreshTagLists error:', error);
             throw error;
         } finally {
-            // Clear post-upload flag and hard refresh flag
+            // Clear post-upload flag
             this._isPostUploadLoad = false;
-            this._hardRefresh = false;  // Clear hard refresh flag
             if (force) {
                 this._lastFetchTime = previousFetchTime;
             }
@@ -7266,14 +7232,12 @@ const TagManager = {
 
     // Initialize the tag manager
     init() {
-        verboseLog('=== TAGMANAGER INIT FUNCTION CALLED ===');
-        verboseLog('TagManager initializing...');
-        verboseLog('TagManager initialized');
-        verboseLog('DOM ready, checking for available tags container...');
+        console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
+        console.log('⚡ TagManager initializing...');
         const availableTagsContainer = document.getElementById('availableTags');
-        verboseLog('Available tags container found:', !!availableTagsContainer);
+        console.log('📦 Available tags container found:', !!availableTagsContainer);
         if (availableTagsContainer) {
-            verboseLog('Container innerHTML:', availableTagsContainer.innerHTML);
+            console.log('📝 Container ready for tags');
         }
         
         // Skip platform detection for Mac-like speed
@@ -7563,31 +7527,35 @@ const TagManager = {
         // PERFORMANCE FIX: Try cache first for instant load
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length > 0) {
-            verboseLog(`⚡ FAST PATH: Loaded ${cachedTags.length} tags from cache instantly`);
-            // Render cached tags immediately for instant display
+            console.log(`⚡ INSTANT CACHE LOAD: ${cachedTags.length} tags available`);
+            // Render cached tags IMMEDIATELY for instant display
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
-            this._updateAvailableTags(cachedTags);
             
-            // Hide splash immediately since we have cached tags
-            if (this._waitForTagsToAppear) {
-                this._waitForTagsToAppear();
-            } else if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
+            // CRITICAL: Render immediately using requestAnimationFrame for instant UI update
+            requestAnimationFrame(() => {
+                this._updateAvailableTags(cachedTags);
+                console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
+                
+                // Hide splash IMMEDIATELY since we have cached tags
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+            });
 
-            // Continue loading fresh data in background (non-blocking) - skip if we have cached tags
-            // This allows tags to appear immediately while fresh data loads in background
-            verboseLog('Cache rendered, tags visible immediately - skipping background refresh to prevent delay');
-            // Don't fetch fresh data immediately - let user interact with cached tags
-            // Fresh data will load on next user interaction or manual refresh
-            
-            // Also fetch selected tags and filters in background (non-blocking)
+            // Continue loading fresh data in background (non-blocking)
+            console.log('📡 Background: Fetching selected tags and filters');
             Promise.allSettled([
                 this.fetchAndUpdateSelectedTags(),
                 this.fetchAndPopulateFilters()
             ]).then(() => {
-                verboseLog('Background: Selected tags and filters loaded');
+                console.log('✅ Background: Selected tags and filters loaded');
+            }).catch(err => {
+                console.warn('Background load error (non-critical):', err);
             });
             
             clearTimeout(splashSafetyTimeout);

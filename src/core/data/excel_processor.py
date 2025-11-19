@@ -3284,15 +3284,12 @@ class ExcelProcessor:
         
         tags = []
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
-        seen_secondary_keys = set()  # Track secondary keys separately for faster lookup
-        seen_tertiary_keys = set()  # Track tertiary keys separately for faster lookup
         
-        # PERFORMANCE FIX: Use itertuples() which is 10-50x faster than iterrows() or to_dict('records')
-        # itertuples() returns namedtuples which are much faster to access
-        # Convert to dict for compatibility with existing code
-        for row_tuple in filtered_df.itertuples(index=False, name=None):
-            # Convert tuple to dict using column names
-            row = dict(zip(filtered_df.columns, row_tuple))
+        # PERFORMANCE FIX: Use to_dict('records') which is much faster than iterrows()
+        # This converts the DataFrame to a list of dicts, which is 5-10x faster
+        rows_dict = filtered_df.to_dict('records')
+        
+        for row in rows_dict:
             # Get quantity from various possible column names
             quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
             
@@ -3342,43 +3339,46 @@ class ExcelProcessor:
             # Tertiary key: name + vendor (catches same product from same vendor)
             tertiary_key = f"{product_name}|{vendor_value}"
             
-            # OPTIMIZED: Check for duplicates using separate sets for faster lookup
+            # Check for duplicates using multiple strategies
             is_duplicate = False
             duplicate_reason = ""
             
             if primary_key in seen_product_keys:
                 is_duplicate = True
                 duplicate_reason = "exact match (name+vendor+brand+weight)"
-            elif secondary_key in seen_secondary_keys:
+            elif secondary_key in seen_product_keys:
                 is_duplicate = True
                 duplicate_reason = "same product with different weight"
-            elif tertiary_key in seen_tertiary_keys:
-                # For tertiary keys, we need to check weight similarity
-                # Store weight with tertiary key for comparison
-                if weight_value:
+            elif tertiary_key in seen_product_keys:
+                # Only flag as duplicate if the weight difference is small (likely same product)
+                existing_weight = None
+                for key in seen_product_keys:
+                    if key.startswith(f"{product_name}|{vendor_value}|"):
+                        try:
+                            existing_weight = float(key.split('|')[-1])
+                            break
+                        except:
+                            continue
+                
+                if existing_weight and weight_value:
                     try:
                         current_weight = float(weight_value)
-                        # Check if we've seen a similar weight for this product+vendor combination
-                        # Use a simple heuristic: if we've seen this tertiary key, it's likely a duplicate
-                        # (More sophisticated weight comparison would require storing weights separately)
-                        is_duplicate = True
-                        duplicate_reason = "same product from same vendor"
+                        weight_diff = abs(existing_weight - current_weight)
+                        # If weight difference is less than 10%, consider it a duplicate
+                        if weight_diff < max(existing_weight, current_weight) * 0.1:
+                            is_duplicate = True
+                            duplicate_reason = f"same product with similar weight ({existing_weight} vs {current_weight})"
                     except:
-                        # If weight can't be parsed, still consider it a duplicate
-                        is_duplicate = True
-                        duplicate_reason = "same product from same vendor"
-                else:
-                    is_duplicate = True
-                    duplicate_reason = "same product from same vendor"
+                        pass
             
             if is_duplicate:
                 logger.info(f"🔄 ENHANCED DEDUPLICATION: Skipping duplicate product '{product_name}' - {duplicate_reason}")
                 continue
             
-            # Add all keys to seen sets for future duplicate detection (separate sets for faster lookup)
+            # Add all keys to seen set for future duplicate detection
             seen_product_keys.add(primary_key)
-            seen_secondary_keys.add(secondary_key)
-            seen_tertiary_keys.add(tertiary_key)
+            seen_product_keys.add(secondary_key)
+            seen_product_keys.add(tertiary_key)
             
             # Get vendor from multiple possible column names
             vendor_value = (
@@ -3502,16 +3502,13 @@ class ExcelProcessor:
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
-            # PERFORMANCE: Early filtering - skip invalid products before expensive operations
+            # Filter out samples and invalid products
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
-            
-            # Quick checks first (most common exclusions)
-            if weight == '-1g' or 'sample' in product_name_lower or 'trade sample' in product_type_lower:
-                continue  # Skip this tag
-            
-            # More expensive checks only if quick checks passed
             if (
+                weight == '-1g' or  # Invalid weight
+                'trade sample' in product_type_lower or  # Filter any trade sample product types
+                'sample' in product_name_lower or  # Filter products with "Sample" in name
                 'trade sample' in product_name_lower or  # Filter products with "Trade Sample" in name
                 any(pattern.lower() in product_name_lower for pattern in EXCLUDED_PRODUCT_PATTERNS) or  # Filter based on excluded patterns
                 any(pattern.lower() in product_type_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)  # Filter product types based on excluded patterns
@@ -3539,25 +3536,8 @@ class ExcelProcessor:
         logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
         logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
         
-        # CRITICAL FIX: Always enrich lineage even in fast_load mode - lineage changes MUST persist
-        # Skip other enrichment (prices, DOH, etc.) in fast_load mode for performance
-        skip_enrichment = getattr(self, '_skip_enrichment', False)
-        fast_load_mode = getattr(self, '_fast_load_mode', False)
-        
-        if skip_enrichment and fast_load_mode:
-            # Fast mode: Only enrich lineage (critical for persistence)
-            sorted_tags = self._enrich_lineage_only(sorted_tags)
-        elif not skip_enrichment:
-            # Normal mode: Enrich all fields, but only if below threshold
-            fast_load_threshold = 1000 if fast_load_mode else 10000
-            if len(sorted_tags) <= fast_load_threshold:
-                sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
-            else:
-                logger.info(f"⚠️  Skipping full enrichment for {len(sorted_tags)} tags (threshold: {fast_load_threshold}) - doing lineage-only enrichment")
-                sorted_tags = self._enrich_lineage_only(sorted_tags)
-        else:
-            # Skip all enrichment (shouldn't happen, but fallback)
-            logger.info(f"⚠️  Skipping all enrichment for {len(sorted_tags)} tags")
+        # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
+        sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
         
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)
@@ -3585,120 +3565,6 @@ class ExcelProcessor:
         self.selected_tags = deduplicated_tags
         
         logger.debug(f"Selected tags after selection: {self.selected_tags}")
-    
-    def _enrich_lineage_only(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Fast lineage-only enrichment - only updates lineage values from database.
-        This is critical for ensuring lineage changes persist after reload."""
-        try:
-            # Try to get the product database using lazy import
-            product_db = None
-            store_name = None
-            
-            try:
-                import sys
-                if 'app' in sys.modules:
-                    app_module = sys.modules['app']
-                    if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
-                        store_name = app_module.get_current_store_name()
-                        product_db = app_module.get_product_database(store_name) if store_name else None
-            except (ImportError, AttributeError, Exception) as e:
-                logger.debug(f"Could not get product database for lineage enrichment: {e}")
-                return tags
-            
-            if not product_db:
-                logger.debug("No product database available for lineage enrichment")
-                return tags
-            
-            # Use batch query for lineage only - much faster than full enrichment
-            product_names = [tag.get('Product Name*', tag.get('ProductName', '')) for tag in tags if tag.get('Product Name*') or tag.get('ProductName')]
-            if not product_names:
-                return tags
-            
-            # Batch query lineage values - limit to first 1000 for performance
-            lineage_lookup = {}
-            try:
-                conn = product_db._get_connection()
-                cursor = conn.cursor()
-                
-                # Use batch query with LIMIT to avoid timeout on large datasets
-                batch_size = min(1000, len(product_names))
-                batch_names = product_names[:batch_size]
-                
-                placeholders = ','.join(['?'] * len(batch_names))
-                query = f'''
-                    SELECT "Product Name*", "Lineage"
-                    FROM products
-                    WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders})
-                    LIMIT {batch_size * 2}
-                '''
-                
-                # Prepare normalized names for query
-                normalized_names = []
-                for name in batch_names:
-                    try:
-                        normalized = product_db._normalize_product_name(name)
-                    except:
-                        normalized = name.strip().lower()
-                    normalized_names.append(normalized)
-                
-                cursor.execute(query, batch_names + normalized_names)
-                results = cursor.fetchall()
-                
-                # Build lookup map
-                for row in results:
-                    product_name = row[0]
-                    lineage = row[1] if len(row) > 1 else None
-                    if product_name and lineage:
-                        # Match by both exact name and normalized name
-                        lineage_lookup[product_name] = str(lineage).strip().upper()
-                        try:
-                            normalized = product_db._normalize_product_name(product_name)
-                            lineage_lookup[normalized] = str(lineage).strip().upper()
-                        except:
-                            pass
-                            
-            except Exception as query_error:
-                logger.warning(f"Lineage batch query failed: {query_error}")
-                # Fallback to individual queries for first 100 tags
-                try:
-                    for tag in tags[:100]:
-                        product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                        if product_name:
-                            lineage = product_db.get_product_lineage(product_name)
-                            if lineage:
-                                lineage_lookup[product_name] = str(lineage).strip().upper()
-                except Exception as fallback_error:
-                    logger.warning(f"Lineage fallback query failed: {fallback_error}")
-            
-            # Apply lineage to tags
-            enriched_tags = []
-            for tag in tags:
-                product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                if product_name:
-                    # Try exact match first
-                    db_lineage = lineage_lookup.get(product_name)
-                    if not db_lineage:
-                        # Try normalized match
-                        try:
-                            normalized = product_db._normalize_product_name(product_name)
-                            db_lineage = lineage_lookup.get(normalized)
-                        except:
-                            pass
-                    
-                    if db_lineage:
-                        tag['Lineage'] = db_lineage
-                        tag['lineage'] = db_lineage
-                        tag['canonical_lineage'] = db_lineage
-                        tag['currentLineage'] = db_lineage
-                
-                enriched_tags.append(tag)
-            
-            logger.debug(f"Lineage-only enrichment: Updated {len([t for t in enriched_tags if t.get('Lineage')])} tags")
-            return enriched_tags
-            
-        except Exception as e:
-            logger.warning(f"Error in lineage-only enrichment: {e}")
-            return tags
     
     def _enrich_tags_with_database_values(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Enrich tags with current database values (lineage, DOH, etc.) to reflect latest updates."""
@@ -7524,20 +7390,8 @@ class ExcelProcessor:
         cache_key = self._build_cache_key('available_tags', filters or {})
         cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
         if cached_tags is not None:
-            # CRITICAL FIX: Always enrich lineage even from cache - lineage changes MUST persist
-            skip_enrichment = getattr(self, '_skip_enrichment', False)
-            fast_load_mode = getattr(self, '_fast_load_mode', False)
-            
-            if skip_enrichment and fast_load_mode:
-                # Fast mode: Only enrich lineage (critical for persistence)
-                enriched_cached_tags = self._enrich_lineage_only(cached_tags)
-            elif not skip_enrichment:
-                # Normal mode: Full enrichment
-                enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
-            else:
-                # Fallback: At least do lineage enrichment
-                enriched_cached_tags = self._enrich_lineage_only(cached_tags)
-            
+            # CRITICAL FIX: Always enrich cached tags with fresh database values
+            enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
             return self._clone_tag_results(enriched_cached_tags)
 
         def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -7831,16 +7685,13 @@ class ExcelProcessor:
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
-            # PERFORMANCE: Early filtering - skip invalid products before expensive operations
+            # Filter out samples and invalid products
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
-            
-            # Quick checks first (most common exclusions)
-            if weight == '-1g' or 'sample' in product_name_lower or 'trade sample' in product_type_lower:
-                continue  # Skip this tag
-            
-            # More expensive checks only if quick checks passed
             if (
+                weight == '-1g' or  # Invalid weight
+                'trade sample' in product_type_lower or  # Filter any trade sample product types
+                'sample' in product_name_lower or  # Filter products with "Sample" in name
                 'trade sample' in product_name_lower or  # Filter products with "Trade Sample" in name
                 any(pattern.lower() in product_name_lower for pattern in EXCLUDED_PRODUCT_PATTERNS) or  # Filter based on excluded patterns
                 any(pattern.lower() in product_type_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)  # Filter product types based on excluded patterns
