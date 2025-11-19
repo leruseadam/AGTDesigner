@@ -54,25 +54,61 @@
         TagManager.checkForExistingData = async function() {
             console.log('⚡ Optimized checkForExistingData called');
             
-            // Show UI immediately - don't block on data loading
-            AppLoadingSplash.updateProgress(50, 'UI Ready - Loading data in background...');
+            // CRITICAL: Try cache FIRST for instant load
+            const cachedTags = this.loadAvailableTagsFromCache ? this.loadAvailableTagsFromCache() : null;
+            if (cachedTags && cachedTags.length > 0) {
+                console.log(`⚡ INSTANT CACHE HIT: ${cachedTags.length} tags available`);
+                // Render cached tags IMMEDIATELY
+                this.state.tags = [...cachedTags];
+                this.state.originalTags = [...cachedTags];
+                
+                // Use requestAnimationFrame for instant render
+                requestAnimationFrame(() => {
+                    this._updateAvailableTags(cachedTags, null);
+                    console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
+                    
+                    // Hide splash immediately
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                });
+                
+                // Load selected tags and filters in background (non-blocking)
+                console.log('📡 Background: Fetching selected tags and filters');
+                Promise.allSettled([
+                    this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
+                    this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
+                ]).then(() => {
+                    console.log('✅ Background: Selected tags and filters loaded');
+                }).catch(err => {
+                    console.warn('Background load error (non-critical):', err);
+                });
+                
+                return; // Exit early - we have cached data
+            }
             
-            // Hide splash after 500ms, even if data isn't loaded yet (faster UI)
+            // No cache available - show loading UI
+            console.log('⏳ No cache available - loading from server');
+            AppLoadingSplash.updateProgress(50, 'Loading tags...');
+            
+            // Hide splash after 500ms max for responsive UI
             setTimeout(() => {
                 if (AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
                     console.log('⚡ Splash hidden - UI is interactive');
                 }
-                // Also hide action splash if it's showing
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
             }, 500);
             
-            // Load data in background (non-blocking)
+            // Load data from server
             try {
-                // PERFORMANCE: Use fast_load=1 to skip slow lineage alignment for faster initial loading
                 const response = await fetch('/api/initial-data?fast_load=1');
                 
                 if (response.ok) {
@@ -80,7 +116,13 @@
                     console.log('⚡ Initial data response:', data);
                     
                     if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
-                        console.log(`⚡ Loaded ${data.available_tags.length} tags in background`);
+                        console.log(`⚡ Loaded ${data.available_tags.length} tags from server`);
+                        
+                        // Save to cache for next instant load
+                        if (this.saveAvailableTagsToCache) {
+                            this.saveAvailableTagsToCache(data.available_tags);
+                            console.log(`💾 Cached ${data.available_tags.length} tags for next load`);
+                        }
                         
                         // Update state immediately
                         this.state.tags = [...data.available_tags];

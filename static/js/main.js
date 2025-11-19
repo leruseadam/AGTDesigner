@@ -943,7 +943,9 @@ const TagManager = {
                 window.currentStore || 'default';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
-            return `agt_available_tags_${store}_${file}`;
+            const cacheKey = `agt_available_tags_${store}_${file}`;
+            console.log('🔑 Cache key generated:', cacheKey, '{ store:', store, 'file:', file, '}');
+            return cacheKey;
         } catch (error) {
             console.warn('Failed to build available-tags cache key:', error);
             return 'agt_available_tags_default';
@@ -952,20 +954,34 @@ const TagManager = {
 
     loadAvailableTagsFromCache() {
         try {
-            if (!window.sessionStorage) return null;
-            const raw = sessionStorage.getItem(this.getAvailableTagsCacheKey());
-            if (!raw) return null;
+            console.log('💾 Attempting to load tags from cache...');
+            if (!window.sessionStorage) {
+                console.log('❌ No sessionStorage available');
+                return null;
+            }
+            const cacheKey = this.getAvailableTagsCacheKey();
+            const raw = sessionStorage.getItem(cacheKey);
+            if (!raw) {
+                console.log('❌ No cached data found for key:', cacheKey);
+                return null;
+            }
+            console.log('✅ Found cached data, parsing...');
             const payload = JSON.parse(raw);
             if (!payload || !Array.isArray(payload.tags) || payload.tags.length === 0) {
+                console.log('❌ Invalid cache payload:', payload);
                 return null;
             }
-            if (payload.timestamp && (Date.now() - payload.timestamp) > this.CACHE_TTL_MS) {
-                verboseLog('Available-tags cache expired, ignoring cached data');
+            const age = Date.now() - payload.timestamp;
+            const ageMinutes = (age / 60000).toFixed(1);
+            console.log(`📅 Cache age: ${ageMinutes} minutes (max: ${this.CACHE_TTL_MS / 60000} minutes)`);
+            if (payload.timestamp && age > this.CACHE_TTL_MS) {
+                console.log('⏰ Cache expired, ignoring');
                 return null;
             }
+            console.log(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
             return payload.tags;
         } catch (error) {
-            console.warn('Failed to load available-tags cache:', error);
+            console.warn('❌ Failed to load cache:', error);
             return null;
         }
     },
@@ -973,16 +989,18 @@ const TagManager = {
     saveAvailableTagsToCache(tags) {
         try {
             if (!window.sessionStorage || !Array.isArray(tags) || tags.length === 0) {
+                console.log('⚠️ Cannot save cache:', !window.sessionStorage ? 'no sessionStorage' : 'invalid tags');
                 return;
             }
             const payload = {
                 timestamp: Date.now(),
                 tags
             };
-            sessionStorage.setItem(this.getAvailableTagsCacheKey(), JSON.stringify(payload));
-            verboseLog(`Cached ${tags.length} available tags locally for instant reloads`);
+            const cacheKey = this.getAvailableTagsCacheKey();
+            sessionStorage.setItem(cacheKey, JSON.stringify(payload));
+            console.log(`💾 Cached ${tags.length} tags with key: ${cacheKey}`);
         } catch (error) {
-            console.warn('Failed to save available-tags cache:', error);
+            console.warn('❌ Failed to save cache:', error);
         }
     },
 
