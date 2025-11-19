@@ -3541,10 +3541,12 @@ class ExcelProcessor:
         
         # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
         # PERFORMANCE: Only enrich if we have a reasonable number of tags (avoid slow enrichment on huge lists)
-        if len(sorted_tags) <= 10000:  # Only enrich if we have less than 10k tags (prevents timeout on huge files)
+        # For fast loading, use a much lower threshold or skip entirely
+        fast_load_threshold = 1000 if getattr(self, '_fast_load_mode', False) else 10000
+        if len(sorted_tags) <= fast_load_threshold and not getattr(self, '_skip_enrichment', False):
             sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
         else:
-            logger.info(f"⚠️  Skipping database enrichment for {len(sorted_tags)} tags (too many, would be slow)")
+            logger.info(f"⚠️  Skipping database enrichment for {len(sorted_tags)} tags (threshold: {fast_load_threshold}, skip_enrichment: {getattr(self, '_skip_enrichment', False)})")
         
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)
@@ -7397,7 +7399,11 @@ class ExcelProcessor:
         cache_key = self._build_cache_key('available_tags', filters or {})
         cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
         if cached_tags is not None:
-            # CRITICAL FIX: Always enrich cached tags with fresh database values
+            # PERFORMANCE: Skip enrichment when fast_load is enabled or skip_enrichment is set
+            if getattr(self, '_skip_enrichment', False) or (getattr(self, '_fast_load_mode', False) and len(cached_tags) > 1000):
+                logger.debug(f"⏩ Skipping enrichment for {len(cached_tags)} cached tags (fast_load mode)")
+                return self._clone_tag_results(cached_tags)
+            # CRITICAL FIX: Always enrich cached tags with fresh database values (only if not skipping)
             enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
             return self._clone_tag_results(enriched_cached_tags)
 

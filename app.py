@@ -8024,6 +8024,12 @@ def get_available_tags():
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
             excel_processor = get_session_excel_processor()
             
+            # PERFORMANCE: Enable fast_load mode to skip expensive enrichment for large files
+            if fast_load and excel_processor is not None:
+                excel_processor._fast_load_mode = True
+                excel_processor._skip_enrichment = True  # Skip enrichment entirely for fast loading
+                logging.info("⚡ Fast load mode enabled - skipping database enrichment")
+            
             # CRITICAL FIX: If processor exists but DataFrame is empty, force reload from session file
             if excel_processor is not None:
                 if excel_processor.df is None or excel_processor.df.empty:
@@ -8050,6 +8056,12 @@ def get_available_tags():
                     logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
                 except Exception as e:
                     logging.warning(f"Excel processor error: {e}")
+                finally:
+                    # Clean up fast_load flags after use
+                    if hasattr(excel_processor, '_fast_load_mode'):
+                        excel_processor._fast_load_mode = False
+                    if hasattr(excel_processor, '_skip_enrichment'):
+                        excel_processor._skip_enrichment = False
             
             # CRITICAL FIX: If no Excel data and prefer_db not set, fall back to database instead of returning empty
             if not all_tags:
@@ -8254,8 +8266,10 @@ def get_available_tags():
 
             safe_excel_tags = make_json_safe(all_tags)
             # Cache the results for faster subsequent requests (unless nocache requested)
+            # PERFORMANCE: Always cache results to speed up subsequent requests
             if not nocache:
                 cache.set(cache_key, safe_excel_tags, timeout=300)  # Cache for 5 minutes
+                logging.info(f"✅ Cached {len(safe_excel_tags)} tags for faster subsequent loads")
             try:
                 current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
                 save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
