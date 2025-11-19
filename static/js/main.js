@@ -3863,7 +3863,8 @@ const TagManager = {
         
         // Immediate check - if tags are already visible, hide splash right away
         const immediateCheck = () => {
-            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
+            // Check for both .tag-item and .tag-entry (simplified view uses different class)
+            const tagItems = availableTagsContainer.querySelectorAll('.tag-item, .tag-entry');
             if (tagItems.length > 0) {
                 const visibleTags = Array.from(tagItems).filter(item => {
                     const rect = item.getBoundingClientRect();
@@ -3889,9 +3890,9 @@ const TagManager = {
             return;
         }
         
-        // Aggressive timeout: hide splash after 2 seconds max, regardless of tag count
+        // Increased timeout: hide splash after 5 seconds max to prevent indefinite loading
         const forceHideTimeout = setTimeout(() => {
-            verboseLog('Force hiding splash after 2 second timeout');
+            verboseLog('Force hiding splash after 5 second timeout');
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
@@ -3899,17 +3900,22 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
             }
-        }, 2000);
+        }, 5000);
         
         let attempts = 0;
-        const maxAttempts = 20; // 2 seconds max (20 * 100ms) - reduced for faster response
+        const maxAttempts = 50; // 5 seconds max (50 * 100ms) - increased for large tag sets
         let lastTagCount = 0;
         let stableCount = 0; // Count how many times tag count has been stable
         
         const checkForTags = () => {
             attempts++;
-            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
+            // Check for both .tag-item and .tag-entry (simplified view uses different class)
+            const tagItems = availableTagsContainer.querySelectorAll('.tag-item, .tag-entry');
             const currentTagCount = tagItems.length;
+            
+            // Also check if container has any content (not just loading spinner)
+            const hasLoadingSpinner = availableTagsContainer.querySelector('.spinner-border');
+            const hasContent = currentTagCount > 0 || (!hasLoadingSpinner && availableTagsContainer.innerHTML.trim().length > 0);
             
             // Check if tags are actually visible (not just in DOM but rendered)
             const visibleTags = Array.from(tagItems).filter(item => {
@@ -3926,10 +3932,13 @@ const TagManager = {
             lastTagCount = currentTagCount;
             
             // Tags are fully loaded if:
-            // 1. We have tags in the DOM
-            // 2. Tags are visible (rendered)
-            // 3. Tag count has been stable for at least 1 check (100ms) - faster response
-            if (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 1) {
+            // 1. We have tags in the DOM (or content without loading spinner)
+            // 2. Tags are visible (rendered) OR we have content without spinner
+            // 3. Tag count has been stable for at least 2 checks (200ms) - ensures rendering is complete
+            const tagsReady = (currentTagCount > 0 && visibleTags.length > 0 && stableCount >= 2) || 
+                             (hasContent && !hasLoadingSpinner && stableCount >= 2);
+            
+            if (tagsReady) {
                 // Tags are fully rendered, hide splash
                 clearTimeout(forceHideTimeout);
                 verboseLog(`Tags fully loaded and rendered (${currentTagCount} items, ${visibleTags.length} visible), hiding splash`);
@@ -6686,6 +6695,12 @@ const TagManager = {
             }
             
             verboseLog('Fetching available tags...');
+            
+            // CRITICAL: Show loading splash immediately when tags start loading
+            if (this.showActionSplash) {
+                this.showActionSplash('Loading tags...');
+            }
+            
             const timestamp = Date.now();
             
             // OPTIMIZATION: Use fast_load parameter for initial load OR post-upload to skip slow lineage alignment
@@ -6906,6 +6921,10 @@ const TagManager = {
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');
+                
+                // CRITICAL: Wait for tags to actually appear in DOM before hiding splash
+                // This ensures the loading splash stays visible until tags are rendered
+                this._waitForTagsToAppear();
                 return true;
             }
             
@@ -6919,7 +6938,10 @@ const TagManager = {
             
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
-            // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
+            
+            // CRITICAL: Wait for tags to actually appear in DOM before hiding splash
+            // This ensures the loading splash stays visible until tags are rendered
+            this._waitForTagsToAppear();
             return true;
         } catch (error) {
             console.error('Error fetching available tags:', error);

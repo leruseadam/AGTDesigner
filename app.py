@@ -7967,9 +7967,16 @@ def get_available_tags():
                                     # Note: Remaining chunks could be processed in background if needed
 
                                 placeholders = ','.join(['?'] * len(all_search_names))
+                                # CRITICAL FIX: Always prefer products.Lineage (user-editable) over strains.canonical_lineage
+                                # This ensures lineage changes made in UI are always read correctly
+                                # Use CASE to prefer products.Lineage when it exists, otherwise fall back to strain lineage
                                 batch_query = f'''
                                     SELECT DISTINCT
-                                        COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                        CASE 
+                                            WHEN p."Lineage" IS NOT NULL AND p."Lineage" != '' 
+                                            THEN p."Lineage"
+                                            ELSE s.canonical_lineage
+                                        END AS current_lineage,
                                         COALESCE(s.strain_name, p."Product Strain") AS current_strain,
                                         p."Product Name*" AS product_name,
                                         p.normalized_name AS normalized_name
@@ -9712,15 +9719,37 @@ def update_lineage():
         # CRITICAL FIX: Fast cache invalidation - don't block response
         cache_clear_start = time.time()
         try:
-            # Clear only essential caches - fast and non-blocking
+            # CRITICAL: Clear ALL caches aggressively to ensure lineage changes persist after reload
+            # Clear general cache
             cache_key = get_session_cache_key('available_tags')
             cache.delete(cache_key)
             # Also clear web cache
             web_cache_key = get_session_cache_key('web_available_tags')
             cache.delete(web_cache_key)
+            # CRITICAL: Also clear file-specific cache to ensure fresh data on reload
+            session_file_path = session.get('file_path', '')
+            if session_file_path:
+                file_specific_cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                cache.delete(file_specific_cache_key)
+                logging.info(f"✅ LINEAGE UPDATE: Cleared file-specific cache: available_tags_{session_file_path}")
+            # Also clear JSON matched and full Excel caches
+            try:
+                json_matched_cache_key = session.get('json_matched_cache_key')
+                if json_matched_cache_key:
+                    cache.delete(json_matched_cache_key)
+                    logging.info(f"✅ LINEAGE UPDATE: Cleared JSON matched cache")
+            except:
+                pass
+            try:
+                full_excel_cache_key = session.get('full_excel_cache_key')
+                if full_excel_cache_key:
+                    cache.delete(full_excel_cache_key)
+                    logging.info(f"✅ LINEAGE UPDATE: Cleared full Excel cache")
+            except:
+                pass
             session['lineage_update_timestamp'] = time.time()
             session.modified = True
-            logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
+            logging.info(f"✅ LINEAGE UPDATE: Cleared ALL caches and updated timestamp - lineage changes will persist on reload")
             
             # NOTE: WAL checkpoint is now done on the same connection that committed (above)
             # This ensures changes are immediately visible and persisted
@@ -13751,6 +13780,55 @@ def json_match():
         
         matched_products = _normalize_json_product_names(matched_products)
         
+        # CRITICAL FIX: Ensure JSON matched products have weight in displayName and Description
+        # Process each product to include weight in display fields
+        for product in matched_products:
+            if not isinstance(product, dict):
+                continue
+            
+            # Get weight information
+            weight = product.get('Weight*', '') or product.get('Weight', '')
+            units = product.get('Units', 'g')
+            combined_weight = product.get('CombinedWeight', '')
+            
+            # Format weight with units if we have weight data
+            if combined_weight:
+                weight_display = combined_weight
+            elif weight:
+                # Format weight with units (e.g., "1g", "3.5g")
+                if units and units != 'g':
+                    weight_display = f"{weight}{units}"
+                else:
+                    weight_display = f"{weight}g"
+            else:
+                weight_display = None
+            
+            # Get base product name (without weight if already included)
+            product_name = product.get('Product Name*', '') or product.get('ProductName', '')
+            
+            # Create DescAndWeight with weight included
+            if weight_display and product_name:
+                # Remove weight from product name if it's already there
+                import re
+                base_name = re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', str(product_name)).strip()
+                desc_and_weight = f"{base_name} - {weight_display}"
+                
+                # Update display fields to include weight
+                product['DescAndWeight'] = desc_and_weight
+                product['Description'] = desc_and_weight
+                
+                # Update displayName to include weight for UI display
+                if not product.get('displayName') or product.get('displayName') == product_name:
+                    product['displayName'] = desc_and_weight
+                
+                logging.debug(f"✅ JSON MATCH: Added weight to display for '{product_name}': '{desc_and_weight}'")
+            elif product_name:
+                # No weight available, just use product name
+                product['DescAndWeight'] = product_name
+                product['Description'] = product_name
+                if not product.get('displayName'):
+                    product['displayName'] = product_name
+        
         # CRITICAL FIX: Add JSON matched products directly to Excel DataFrame
         # This makes them work exactly like regular tags - no special handling needed
         try:
@@ -13874,14 +13952,18 @@ def json_match():
         logging.info(f"🔍 Preparing to return {len(matched_products)} matched products as available tags")
 
         # Ensure each matched product has the display fields needed by frontend
+        # Note: Weight should already be included from the processing above
         for i, product in enumerate(matched_products):
-            if 'displayName' not in product:
-                display_name = (product.get('Description', '') or
+            # Only set displayName if it's missing - don't overwrite if we already set it with weight
+            if 'displayName' not in product or not product.get('displayName'):
+                display_name = (product.get('DescAndWeight', '') or
+                               product.get('Description', '') or
                                product.get('Product Name*', '') or
                                product.get('ProductName', ''))
-                product['displayName'] = display_name
-                if i < 3:  # Log first 3
-                    logging.info(f"🔍 Set displayName for product {i}: '{display_name}'")
+                if display_name:
+                    product['displayName'] = display_name
+                    if i < 3:  # Log first 3
+                        logging.info(f"🔍 Set displayName for product {i}: '{display_name}'")
 
         if matched_products:
             logging.info(f"🔍 Sample matched product (first one):")
