@@ -1869,8 +1869,10 @@ class TemplateProcessor:
                 # For vertical and double templates, don't wrap with markers since they use simple placeholders
                 if self.template_type in ['vertical', 'double']:
                     label_context['Lineage'] = cleaned_lineage_val
+                    self.logger.info(f"✅ LINEAGE SET (no markers): '{cleaned_lineage_val}' for classic type '{product_type}' in {self.template_type} template")
                 else:
                     label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
+                    self.logger.info(f"✅ LINEAGE SET (with markers): 'LINEAGE_START{cleaned_lineage_val}LINEAGE_END' for classic type '{product_type}'")
                 self.logger.debug(f"Set Lineage to strain lineage: '{cleaned_lineage_val}' for classic type '{product_type}'")
             else:
                 label_context['Lineage'] = ""
@@ -3311,8 +3313,10 @@ class TemplateProcessor:
                 lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE)
                 if lineage_match:
                     lineage_content = lineage_match.group(1)
+                    self.logger.info(f"🔍 LINEAGE EXTRACTION: Found lineage markers with content: '{lineage_content}'")
                     # Replace the full lineage marker pattern with just the content
                     cleaned = re.sub(r'LINEAGE_START(.+?)LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE)
+                    self.logger.info(f"✅ LINEAGE PRESERVED: After marker removal: '{cleaned}'")
                 
                 # CRITICAL FIX: Handle product brand markers specially to preserve content
                 # Extract product brand content before removing markers (handle both PRODUCTBRAND and PRODUCTBRAND_CENTER)

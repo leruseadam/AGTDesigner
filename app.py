@@ -7097,6 +7097,34 @@ def generate_labels():
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
             logging.error(f"DOH override error details: {traceback.format_exc()}")
 
+        # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
+        logging.info(f"🔍 LINEAGE ENRICHMENT: Enriching {len(records)} records with database lineage...")
+        try:
+            store_name = session.get('current_store')
+            if store_name:
+                product_db = get_product_database(store_name)
+                if product_db:
+                    enriched_count = 0
+                    for record in records:
+                        product_name = record.get('ProductName') or record.get('Product Name*', '')
+                        if product_name:
+                            # Get lineage from database (product-level first, then strain-level)
+                            db_lineage = product_db.get_product_lineage(product_name)
+                            if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                old_lineage = record.get('Lineage', '')
+                                record['Lineage'] = str(db_lineage).strip().upper()
+                                record['lineage'] = str(db_lineage).strip().upper()
+                                enriched_count += 1
+                                if old_lineage != record['Lineage']:
+                                    logging.debug(f"  Enriched: '{product_name}' lineage '{old_lineage}' → '{record['Lineage']}'")
+                    logging.info(f"✅ LINEAGE ENRICHMENT: Enriched {enriched_count}/{len(records)} records with database lineage")
+                else:
+                    logging.warning(f"⚠️  LINEAGE ENRICHMENT: No database available for store '{store_name}'")
+            else:
+                logging.warning(f"⚠️  LINEAGE ENRICHMENT: No store name in session")
+        except Exception as enrich_err:
+            logging.error(f"❌ LINEAGE ENRICHMENT FAILED: {enrich_err}")
+        
         # CRITICAL DEBUG: Log lineage values in records right before processing
         logging.info(f"🔍 LINEAGE PRE-PROCESS CHECK: Verifying lineage values in all {len(records)} records before TemplateProcessor:")
         for i, record in enumerate(records[:10]):  # Log first 10
