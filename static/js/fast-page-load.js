@@ -9,6 +9,24 @@
     
     console.log('⚡ Fast page load optimization v2.1.0 enabled');
     
+    // CRITICAL: Clear cache if no file uploaded
+    // Prevents showing stale cached data from previous sessions
+    const fileInfoText = document.getElementById('fileInfoText');
+    const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded');
+    if (!hasUploadedFile && window.sessionStorage) {
+        console.log('🗑️ No uploaded file detected - clearing stale cache');
+        // Clear all tag-related cache entries
+        const keysToRemove = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key && key.includes('agt_available_tags')) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => sessionStorage.removeItem(key));
+        console.log(`✅ Cleared ${keysToRemove.length} stale cache entries`);
+    }
+    
     // Store original checkForExistingData function
     let originalCheckForExistingData = null;
     

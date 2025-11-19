@@ -1038,7 +1038,14 @@ def get_excel_processor():
     """Lazy load ExcelProcessor to avoid startup delay. Optimize DataFrame after loading."""
     global _excel_processor, _excel_processor_reset_flag
     
+    # CRITICAL: Recursion protection - use thread-local flag
+    if hasattr(g, '_in_get_excel_processor'):
+        logging.error("⚠️ RECURSION DETECTED in get_excel_processor - returning None")
+        return None
+    
     try:
+        g._in_get_excel_processor = True  # Set recursion guard
+        
         # Use thread lock to prevent race conditions
         with excel_processor_lock:
             # CRITICAL: Always check if session has a newer file than what's loaded
@@ -1218,11 +1225,20 @@ def get_excel_processor():
             if not hasattr(_excel_processor, 'selected_tags'):
                 _excel_processor.selected_tags = []
             
+            # Clear recursion guard before returning
+            if hasattr(g, '_in_get_excel_processor'):
+                delattr(g, '_in_get_excel_processor')
+            
             return _excel_processor
         
     except Exception as e:
         logging.error(f"Error in get_excel_processor: {str(e)}")
         logging.error(traceback.format_exc())
+        
+        # Clear recursion guard on error
+        if hasattr(g, '_in_get_excel_processor'):
+            delattr(g, '_in_get_excel_processor')
+        
         # Return a safe fallback ExcelProcessor
         try:
             fallback_processor = ExcelProcessor()
@@ -2064,7 +2080,23 @@ class LabelMakerApp:
 def get_session_excel_processor():
     """Get ExcelProcessor instance for the current session with proper error handling."""
     session_file_path = None  # Initialize to prevent variable scoping errors
+    
+    # CRITICAL: Recursion protection - prevent infinite loop
+    if hasattr(g, '_getting_excel_processor'):
+        logging.error("⚠️ RECURSION DETECTED in get_session_excel_processor - returning fallback")
+        try:
+            from src.core.data.excel_processor import ExcelProcessor
+            import pandas as pd
+            fallback = ExcelProcessor()
+            fallback.df = pd.DataFrame()
+            fallback.selected_tags = []
+            return fallback
+        except:
+            return None
+    
     try:
+        g._getting_excel_processor = True  # Set recursion guard
+        
         if 'excel_processor' not in g:
             # Use the global Excel processor instead of creating a new one
             # This ensures we always have the most up-to-date data
@@ -2214,11 +2246,20 @@ def get_session_excel_processor():
         # Store context removed - using single database
         # Store context removed - using single database
         
+        # Clear recursion guard before returning
+        if hasattr(g, '_getting_excel_processor'):
+            delattr(g, '_getting_excel_processor')
+        
         return g.excel_processor
         
     except Exception as e:
         logging.error(f"Error in get_session_excel_processor: {str(e)}")
         logging.error(traceback.format_exc())
+        
+        # Clear recursion guard on error
+        if hasattr(g, '_getting_excel_processor'):
+            delattr(g, '_getting_excel_processor')
+        
         # Return a safe fallback ExcelProcessor
         try:
             from src.core.data.excel_processor import ExcelProcessor
@@ -7726,8 +7767,23 @@ def get_available_tags():
         # Skip cache entirely if prefer_db is set (we want fresh DB data)
         # CRITICAL FIX: Include file path in cache key to prevent stale data from previous uploads
         session_file_path = session.get('file_path', '')
-        cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-        cached_tags = cache.get(cache_key) if not prefer_db else None
+        
+        # CRITICAL FIX: If no file uploaded, don't use cache - force fresh fetch
+        # This prevents showing old cached data when user hasn't uploaded anything
+        file_exists = False
+        if session_file_path:
+            try:
+                file_exists = os.path.exists(session_file_path)
+            except Exception as path_err:
+                logging.warning(f"Error checking file path: {path_err}")
+                file_exists = False
+        
+        if not session_file_path or not file_exists:
+            logging.info("⚠️ No uploaded file in session - skipping cache, will fetch fresh data")
+            cached_tags = None
+        else:
+            cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+            cached_tags = cache.get(cache_key) if not prefer_db else None
         
         # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
