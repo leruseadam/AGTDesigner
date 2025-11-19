@@ -3045,7 +3045,8 @@ const TagManager = {
         verboseLog('_updateAvailableTags called with:', {
             originalTagsLength: originalTags ? originalTags.length : 0,
             filteredTagsLength: filteredTags ? filteredTags.length : 0,
-            tags: filteredTags || originalTags
+            tags: filteredTags || originalTags,
+            hydratedFromCache: this.state.hydratedFromCache
         });
         
         const availableTagsContainer = document.getElementById('availableTags');
@@ -3068,13 +3069,15 @@ const TagManager = {
             return;
         }
         
-        // Show loading indicator immediately if container is empty or only has loading indicator
+        // PERFORMANCE: Skip loading spinner for instant cache loads
+        // Only show spinner if not hydrated from cache (i.e., fetching from server)
         const currentContent = availableTagsContainer.innerHTML.trim();
         const hasLoadingIndicator = currentContent.includes('spinner-border') || currentContent.includes('Loading');
         const isEmpty = !currentContent || currentContent === '' || currentContent === '<div class="tag-entry">No tags available</div>';
         
-        if (isEmpty || hasLoadingIndicator) {
-            // Keep showing loading indicator until tags are rendered
+        // Only show loading indicator if NOT loaded from cache and container is empty
+        if (!this.state.hydratedFromCache && (isEmpty || hasLoadingIndicator)) {
+            // Show loading indicator for server fetch
             availableTagsContainer.innerHTML = `
                 <div class="text-center py-4">
                     <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
@@ -3124,11 +3127,10 @@ const TagManager = {
         verboseLog('After update - this.state.tags length:', this.state.tags.length);
         verboseLog('After update - this.state.originalTags length:', this.state.originalTags.length);
         
-        // Keep loading indicator visible while building tags - don't clear yet
-        // We'll replace it with actual tags once they're built
-        // Only clear if there's no loading indicator (reuse currentContent from above)
-        if (!hasLoadingIndicator) {
-            // Show loading indicator if not already showing
+        // PERFORMANCE: Skip redundant loading indicator for cache loads
+        // Only show if not from cache and not already showing
+        if (!this.state.hydratedFromCache && !hasLoadingIndicator) {
+            // Show loading indicator for slow server fetch
             availableTagsContainer.innerHTML = `
                 <div class="text-center py-4">
                     <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
