@@ -4834,6 +4834,101 @@ class JSONMatcher:
             _db_match_cache = {}  # Cache key -> match result
             _ai_matcher_initialized = False
             
+            # PERFORMANCE: Pre-build batch lookup map for faster database queries
+            # Collect all product names and vendors first, then do batched lookups
+            _batch_lookup_map = {}  # product_name -> db_match
+            if product_db and len(items) > 5:  # Only batch for larger batches
+                try:
+                    logging.info(f"⚡ PERFORMANCE: Pre-building batch lookup map for {len(items)} items...")
+                    product_names = []
+                    vendors = set()
+                    for item in items:
+                        if isinstance(item, dict):
+                            pn = str(item.get("product_name", "")).strip()
+                            if pn:
+                                product_names.append(pn)
+                            v = str(item.get("vendor", "")).strip()
+                            if v:
+                                vendors.add(v.lower())
+                    
+                    # Batch query: Get all products matching any of the product names or vendors
+                    if product_names or vendors:
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        
+                        # Build batched query using IN clause (much faster than per-item queries)
+                        placeholders = []
+                        params = []
+                        
+                        # Add product name searches (limit to 100 most common to avoid query complexity)
+                        unique_names = list(set(product_names))[:100]
+                        for name in unique_names:
+                            placeholders.append('?')
+                            params.append(f'%{name}%')
+                        
+                        # Build SQL with LIKE conditions for fuzzy matching
+                        if placeholders:
+                            name_conditions = ' OR '.join(['LOWER("Product Name*") LIKE ?' for _ in placeholders])
+                            vendor_conditions = ''
+                            if vendors:
+                                vendor_list = list(vendors)[:20]  # Limit vendors too
+                                vendor_placeholders = []
+                                vendor_params = []
+                                for v in vendor_list:
+                                    vendor_placeholders.append('?')
+                                    vendor_params.append(f'%{v}%')
+                                vendor_conditions = ' OR ' + ' OR '.join(['LOWER("Vendor/Supplier*") LIKE ?' for _ in vendor_placeholders])
+                                params.extend(vendor_params)
+                            
+                            sql = f'''
+                                SELECT "Product Name*", "Description", "Product Brand", "Lineage",
+                                       "Product Type*", "Weight*", "Units", "Price", "Vendor/Supplier*",
+                                       "Product Strain"
+                                FROM products
+                                WHERE ({name_conditions}{vendor_conditions})
+                                AND ("Product Name*" NOT LIKE '%*VOID*%' AND "Description" NOT LIKE '%*VOID*%')
+                                AND ("Product Name*" NOT LIKE '%trade sample%' AND "Description" NOT LIKE '%trade sample%')
+                                LIMIT 500
+                            '''
+                            
+                            cursor.execute(sql, params)
+                            batch_results = cursor.fetchall()
+                            
+                            # Build lookup map by normalized name for fast access
+                            for row in batch_results:
+                                db_product_name = row[0] if row[0] else ''
+                                normalized_db_name = self._normalize(db_product_name) if hasattr(self, '_normalize') else db_product_name.lower().strip()
+                                
+                                # Match against all product names from items
+                                for json_name in product_names:
+                                    normalized_json_name = self._normalize(json_name) if hasattr(self, '_normalize') else json_name.lower().strip()
+                                    
+                                    # Store if normalized names match or JSON name is in DB name (fuzzy matching)
+                                    if (normalized_json_name == normalized_db_name or 
+                                        normalized_json_name in normalized_db_name or
+                                        normalized_db_name in normalized_json_name or
+                                        json_name.lower() in db_product_name.lower() or
+                                        db_product_name.lower() in json_name.lower()):
+                                        if json_name not in _batch_lookup_map:
+                                            _batch_lookup_map[json_name] = {
+                                                'Product Name*': row[0],
+                                                'Description': row[1],
+                                                'Product Brand': row[2],
+                                                'Lineage': row[3],
+                                                'Product Type*': row[4],
+                                                'Weight*': row[5],
+                                                'Units': row[6],
+                                                'Price': row[7],
+                                                'Vendor/Supplier*': row[8],
+                                                'Product Strain': row[9]
+                                            }
+                            
+                            logging.info(f"⚡ PERFORMANCE: Batch lookup map built with {len(_batch_lookup_map)} pre-matched products")
+                            
+                except Exception as batch_error:
+                    logging.warning(f"Batch lookup optimization failed: {batch_error}")
+                    _batch_lookup_map = {}  # Fall back to per-item lookups
+            
             # Helper function to clean product names
             def clean_product_name(name):
                 if not name:
@@ -5016,13 +5111,18 @@ class JSONMatcher:
                     # PRIORITY 2: Use comprehensive matching logic (Excel) if no SKU database match
                     try:
                         if product_db:
-                            # PERFORMANCE: Check cache first
-                            cache_key = f"db_{product_name}_{vendor}_{weight}"
-                            if cache_key in _db_match_cache:
-                                db_direct_match = _db_match_cache[cache_key]
-                            else:
-                                db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db)
-                                _db_match_cache[cache_key] = db_direct_match
+                            # PERFORMANCE: Check batch lookup map first (fastest)
+                            db_direct_match = _batch_lookup_map.get(product_name)
+                            
+                            if not db_direct_match:
+                                # PERFORMANCE: Check cache second
+                                cache_key = f"db_{product_name}_{vendor}_{weight}"
+                                if cache_key in _db_match_cache:
+                                    db_direct_match = _db_match_cache[cache_key]
+                                else:
+                                    # Fall back to individual query only if not in batch map
+                                    db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db)
+                                    _db_match_cache[cache_key] = db_direct_match
                             
                             if db_direct_match:
                                 tag = self._create_tag_from_database_info(db_direct_match, vendor, item)

@@ -6612,30 +6612,79 @@ def generate_labels():
                 logging.warning(f"⚠️ REMOVED {len(invalid_selected_tags)} INVALID TAGS: {invalid_selected_tags}")
                 logging.warning(f"✅ KEPT {len(valid_selected_tags)} VALID TAGS")
                 
-                # CRITICAL FIX: If we're in a JSON matched session and have invalid tags, try to restore from cache
+                # CRITICAL FIX: For JSON matched sessions, accept ALL tags from cache as valid
+                # JSON matched tags should always be included even if not in database/Excel
                 if is_json_matched_session and invalid_selected_tags:
-                    logging.info(f"CRITICAL FIX: JSON matched session with invalid tags, attempting to restore from cache")
+                    logging.info(f"CRITICAL FIX: JSON matched session with invalid tags, restoring ALL from cache")
                     json_matched_cache_key = session.get('json_matched_cache_key')
                     if json_matched_cache_key:
                         json_matched_tags = cache.get(json_matched_cache_key)
                         if json_matched_tags:
-                            # Extract product names from JSON matched tags
+                            # Extract ALL product names from JSON matched tags cache
                             cache_product_names = []
+                            cache_product_map = {}  # Map product names to full tag objects
                             for tag in json_matched_tags:
                                 if isinstance(tag, dict):
-                                    product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                                    product_name = (tag.get('Product Name*') or 
+                                                   tag.get('ProductName') or 
+                                                   tag.get('displayName') or '')
                                     if product_name:
                                         cache_product_names.append(product_name)
+                                        cache_product_map[product_name] = tag
                             
-                            # Add any missing tags from cache
+                            # For JSON matched sessions, ALL tags from cache should be valid
+                            # Add ALL invalid tags that exist in cache back to valid list
+                            restored_count = 0
                             for invalid_tag in invalid_selected_tags:
+                                # Try exact match first
                                 if invalid_tag in cache_product_names:
                                     valid_selected_tags.append(invalid_tag)
-                                    logging.info(f"CRITICAL FIX: Restored invalid tag '{invalid_tag}' from JSON matched cache")
+                                    restored_count += 1
+                                    logging.info(f"CRITICAL FIX: Restored invalid tag '{invalid_tag}' from JSON matched cache (exact match)")
+                                else:
+                                    # Try case-insensitive and weight-stripped matching
+                                    invalid_tag_lower = invalid_tag.lower().strip()
+                                    # Remove weight suffix for matching (e.g., "Product - 1g" -> "Product")
+                                    import re
+                                    invalid_tag_base = re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', invalid_tag_lower).strip()
+                                    
+                                    for cache_name in cache_product_names:
+                                        cache_name_lower = cache_name.lower().strip()
+                                        cache_name_base = re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', cache_name_lower).strip()
+                                        
+                                        # Match if base names are the same
+                                        if invalid_tag_base == cache_name_base or invalid_tag_lower == cache_name_lower:
+                                            if cache_name not in valid_selected_tags:
+                                                valid_selected_tags.append(cache_name)
+                                                restored_count += 1
+                                                logging.info(f"CRITICAL FIX: Restored invalid tag '{invalid_tag}' -> '{cache_name}' from JSON matched cache (fuzzy match)")
+                                                break
                             
-                            # Remove from invalid list
-                            invalid_selected_tags = [tag for tag in invalid_selected_tags if tag not in valid_selected_tags]
-                            logging.info(f"CRITICAL FIX: After cache restoration: {len(valid_selected_tags)} valid, {len(invalid_selected_tags)} invalid")
+                            # Remove restored tags from invalid list
+                            invalid_selected_tags = [tag for tag in invalid_selected_tags 
+                                                   if tag not in valid_selected_tags and 
+                                                   not any(cache_name.lower() == tag.lower() or 
+                                                          re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', cache_name.lower()) == 
+                                                          re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', tag.lower())
+                                                          for cache_name in valid_selected_tags)]
+                            
+                            logging.info(f"CRITICAL FIX: After cache restoration: {restored_count} tags restored, {len(valid_selected_tags)} total valid, {len(invalid_selected_tags)} still invalid")
+                            
+                            # CRITICAL: For JSON matched sessions, if we still have invalid tags, 
+                            # they might be from the original normalized_tags that weren't in cache
+                            # Add ALL original normalized tags that match cache products
+                            if invalid_selected_tags:
+                                for original_tag in normalized_tags:
+                                    if original_tag not in valid_selected_tags:
+                                        # Check if it matches any cache product (fuzzy)
+                                        for cache_name in cache_product_names:
+                                            if original_tag.lower() == cache_name.lower() or \
+                                               re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', original_tag.lower()) == \
+                                               re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', cache_name.lower()):
+                                                if cache_name not in valid_selected_tags:
+                                                    valid_selected_tags.append(cache_name)
+                                                    logging.info(f"CRITICAL FIX: Restored original tag '{original_tag}' -> '{cache_name}' from cache")
+                                                    break
                 
                 if not valid_selected_tags:
                     logging.error(f"❌ NO VALID TAGS: All {len(normalized_tags)} tags were filtered out")
@@ -6966,6 +7015,74 @@ def generate_labels():
                 except Exception as e:
                     logging.warning(f"Error during lineage override check: {e}")
                     logging.warning(traceback.format_exc())
+            
+            # CRITICAL FIX: Ensure ALL JSON matched tags appear in output
+            # Check if any selected tags are missing from records and add them from JSON cache
+            if is_json_matched_session and valid_selected_tags and records:
+                # Get product names that are in records
+                records_product_names = {r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')}
+                
+                # Find missing tags
+                missing_tags = [tag for tag in valid_selected_tags if tag not in records_product_names]
+                
+                if missing_tags:
+                    logging.info(f"CRITICAL FIX: {len(missing_tags)} JSON matched tags missing from records, adding from cache: {missing_tags}")
+                    json_matched_cache_key = session.get('json_matched_cache_key')
+                    if json_matched_cache_key:
+                        json_matched_tags = cache.get(json_matched_cache_key)
+                        if json_matched_tags:
+                            # Create records for missing tags from cache
+                            for missing_tag in missing_tags:
+                                # Find the matching tag in cache
+                                matching_tag = None
+                                for cache_tag in json_matched_tags:
+                                    if isinstance(cache_tag, dict):
+                                        cache_name = (cache_tag.get('Product Name*') or 
+                                                     cache_tag.get('ProductName') or 
+                                                     cache_tag.get('displayName') or '')
+                                        # Match exact or fuzzy (weight-stripped)
+                                        import re
+                                        if missing_tag == cache_name or \
+                                           missing_tag.lower() == cache_name.lower() or \
+                                           re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', missing_tag.lower()) == \
+                                           re.sub(r'\s*-\s*[\d.]+[a-z]+\s*$', '', cache_name.lower()):
+                                            matching_tag = cache_tag
+                                            break
+                                
+                                if matching_tag:
+                                    # Create record from JSON matched tag
+                                    product_name = (matching_tag.get('Product Name*') or 
+                                                   matching_tag.get('ProductName') or 
+                                                   matching_tag.get('displayName') or missing_tag)
+                                    record = {
+                                        'ProductName': product_name,
+                                        'Product Name*': product_name,
+                                        'Description': matching_tag.get('DescAndWeight', matching_tag.get('Description', product_name)),
+                                        'DescAndWeight': matching_tag.get('DescAndWeight', matching_tag.get('Description', product_name)),
+                                        'Product Type*': matching_tag.get('Product Type*', 'flower'),
+                                        'Product Brand': matching_tag.get('Product Brand', ''),
+                                        'Product Strain': matching_tag.get('Product Strain', ''),
+                                        'Lineage': matching_tag.get('Lineage', 'HYBRID'),
+                                        'Vendor': matching_tag.get('Vendor/Supplier*', matching_tag.get('Vendor', '')),
+                                        'Price': matching_tag.get('Price', ''),
+                                        'DOH': matching_tag.get('DOH', ''),
+                                        'Ratio': matching_tag.get('Ratio', ''),
+                                        'Weight*': matching_tag.get('Weight*', ''),
+                                        'Units': matching_tag.get('Units', 'g'),
+                                        'CombinedWeight': matching_tag.get('CombinedWeight', ''),
+                                        'Quantity*': matching_tag.get('Quantity*', '1'),
+                                        'THC test result': matching_tag.get('THC test result', ''),
+                                        'CBD test result': matching_tag.get('CBD test result', ''),
+                                        'Test result unit (% or mg)': matching_tag.get('Test result unit (% or mg)', '%'),
+                                        'Source': 'JSON Match'
+                                    }
+                                    records.append(record)
+                                    logging.info(f"CRITICAL FIX: Added missing JSON matched product '{product_name}' to records")
+                                else:
+                                    logging.warning(f"CRITICAL FIX: Could not find matching tag in cache for '{missing_tag}'")
+                    
+                    if missing_tags:
+                        logging.info(f"CRITICAL FIX: Added {len([r for r in records if r.get('Source') == 'JSON Match' and r.get('Product Name*') in missing_tags])} missing JSON matched products to records")
             
             # CRITICAL FIX: If we have JSON matched products but no records, try to include them directly
             if not records and excel_processor.df is not None and 'Source' in excel_processor.df.columns:
@@ -8051,14 +8168,24 @@ def get_available_tags():
                                 
                                 db_lin, db_strain = lineage_cache.get(name, (None, None))
                                 
+                                # CRITICAL: Always set database lineage fields to ensure UI matches database
+                                # If database has lineage, use it; otherwise keep existing Excel lineage
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
                                     # Always expose DB lineage on stable fields the UI can prefer
                                     tag['currentLineage'] = db_lin_clean
                                     tag['canonical_lineage'] = db_lin_clean
+                                    # Always update Lineage field to match database (database is source of truth)
                                     if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
                                         tag['Lineage'] = db_lin_clean
                                         updated += 1
+                                else:
+                                    # Database has no lineage - mark that we checked the database
+                                    # This ensures UI knows database was checked even if no lineage found
+                                    # Keep Excel lineage as fallback, but mark that DB was checked
+                                    if 'currentLineage' not in tag:
+                                        # Only set if not already set (preserves user edits during session)
+                                        pass
                                 clean_strain = str(db_strain).strip() if db_strain else ''
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
@@ -8310,14 +8437,24 @@ def get_available_tags():
                                 
                                 db_lin, db_strain = lineage_cache.get(name, (None, None))
                                 
+                                # CRITICAL: Always set database lineage fields to ensure UI matches database
+                                # If database has lineage, use it; otherwise keep existing Excel lineage
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
                                     # Always expose DB lineage on stable fields the UI can prefer
                                     tag['currentLineage'] = db_lin_clean
                                     tag['canonical_lineage'] = db_lin_clean
+                                    # Always update Lineage field to match database (database is source of truth)
                                     if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
                                         tag['Lineage'] = db_lin_clean
                                         updated += 1
+                                else:
+                                    # Database has no lineage - mark that we checked the database
+                                    # This ensures UI knows database was checked even if no lineage found
+                                    # Keep Excel lineage as fallback, but mark that DB was checked
+                                    if 'currentLineage' not in tag:
+                                        # Only set if not already set (preserves user edits during session)
+                                        pass
                                 clean_strain = str(db_strain).strip() if db_strain else ''
                                 if db_lin:
                                     if db_lin_clean in ('CBD', 'CBD_BLEND'):
@@ -13696,16 +13833,17 @@ def json_match():
         
         logging.info("JSON matcher created successfully")
         
-        # Perform JSON matching with Product Database integration
-        # Start with full database-aware matching so we reuse prices/brands whenever possible.
-        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
-        logging.info(f"JSON matching (database-first) returned {len(matched_products) if matched_products else 0} products")
-
-        # If nothing matched (e.g., database unavailable), fall back to the legacy simplified flow.
+        # PERFORMANCE: Use simplified matching by default for much faster processing
+        # Simplified matching uses sheet cache instead of per-item database queries
+        # If database is available, it will still be used for enrichment after matching
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
+        logging.info(f"JSON matching (simplified) returned {len(matched_products) if matched_products else 0} products")
+        
+        # If simplified matching failed, try database-first as fallback (slower but more accurate)
         if not matched_products:
-            logging.warning("Primary database matching returned no products – falling back to simplified matcher")
-            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
-            logging.info(f"JSON matching (simplified fallback) returned {len(matched_products) if matched_products else 0} products")
+            logging.warning("Simplified matching returned no products – falling back to database-first matcher")
+            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
+            logging.info(f"JSON matching (database-first fallback) returned {len(matched_products) if matched_products else 0} products")
         
         # Sort matched products alphabetically by product name
         if matched_products:

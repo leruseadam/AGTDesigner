@@ -34,8 +34,9 @@ const getUniqueLineages = () => {
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
-  // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
+  // CRITICAL: Always prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
+  // Database lineage (products.Lineage) is the source of truth - UI must match database unless user is editing
+  // Priority: database fields (canonical_lineage/currentLineage) > Excel Lineage > default MIXED
   const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
@@ -121,8 +122,9 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
-  // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
+  // CRITICAL: Always prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
+  // Database lineage (products.Lineage) is the source of truth - UI must match database unless user is editing
+  // Priority: database fields (canonical_lineage/currentLineage) > Excel Lineage > default MIXED
   const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
@@ -387,17 +389,40 @@ class TagsTable {
 
       // Show success message
       const result = await response.json();
-      console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${newLineage})`);
+      const verifiedLineage = result.verified_lineage || result.new_lineage || newLineage;
+      console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${verifiedLineage})`);
+
+      // CRITICAL: Update tag object in TagManager.state to ensure database lineage is reflected
+      // This ensures UI matches database lineage on subsequent renders
+      if (typeof TagManager !== 'undefined' && TagManager.state) {
+        const tag = TagManager.state.tags?.find(t => t['Product Name*'] === tagName);
+        if (tag) {
+          tag.Lineage = verifiedLineage;
+          tag.lineage = verifiedLineage;
+          tag.currentLineage = verifiedLineage;
+          tag.canonical_lineage = verifiedLineage;
+          console.log(`📝 Updated tag lineage in TagManager.state.tags to: ${verifiedLineage}`);
+        }
+        
+        const originalTag = TagManager.state.originalTags?.find(t => t['Product Name*'] === tagName);
+        if (originalTag) {
+          originalTag.Lineage = verifiedLineage;
+          originalTag.lineage = verifiedLineage;
+          originalTag.currentLineage = verifiedLineage;
+          originalTag.canonical_lineage = verifiedLineage;
+          console.log(`📝 Updated tag lineage in TagManager.state.originalTags to: ${verifiedLineage}`);
+        }
+      }
 
       // Update UI elements directly without full refresh (prevents hanging)
       if (typeof TagManager !== 'undefined' && typeof TagManager.updateTagLineageInUI === 'function') {
-        TagManager.updateTagLineageInUI(tagName, newLineage);
+        TagManager.updateTagLineageInUI(tagName, verifiedLineage);
         console.log(`🎨 Updated lineage UI for ${tagName}`);
       }
       
       // Update similar products in the background (non-blocking)
       if (typeof TagManager !== 'undefined' && typeof TagManager.updateSimilarLineages === 'function') {
-        TagManager.updateSimilarLineages(tagName, newLineage);
+        TagManager.updateSimilarLineages(tagName, verifiedLineage);
         console.log(`🎨 Updated similar lineages for ${tagName}`);
       }
 
@@ -486,14 +511,33 @@ class TagsTable {
 
           if (!response.ok) throw new Error('Failed to update lineage');
 
-          // Update UI
-          document.querySelectorAll(`[data-tag-name="${tagName}"]`).forEach(tagItem => {
-              tagItem.dataset.lineage = newLineage;
-              const lineageText = tagItem.querySelector('small');
-              if (lineageText) {
-                  lineageText.textContent = `Lineage: ${newLineage}`;
-              }
-          });
+      // CRITICAL: Update tag object in TagManager.state to ensure database lineage is reflected
+      if (typeof TagManager !== 'undefined' && TagManager.state) {
+        const tag = TagManager.state.tags?.find(t => t['Product Name*'] === tagName);
+        if (tag) {
+          tag.Lineage = newLineage;
+          tag.lineage = newLineage;
+          tag.currentLineage = newLineage;
+          tag.canonical_lineage = newLineage;
+        }
+        
+        const originalTag = TagManager.state.originalTags?.find(t => t['Product Name*'] === tagName);
+        if (originalTag) {
+          originalTag.Lineage = newLineage;
+          originalTag.lineage = newLineage;
+          originalTag.currentLineage = newLineage;
+          originalTag.canonical_lineage = newLineage;
+        }
+      }
+
+      // Update UI
+      document.querySelectorAll(`[data-tag-name="${tagName}"]`).forEach(tagItem => {
+          tagItem.dataset.lineage = newLineage;
+          const lineageText = tagItem.querySelector('small');
+          if (lineageText) {
+              lineageText.textContent = `Lineage: ${newLineage}`;
+          }
+      });
 
           // Close modal
           bootstrap.Modal.getInstance(document.getElementById('lineageEditorModal')).hide();

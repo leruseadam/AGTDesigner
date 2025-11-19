@@ -2451,6 +2451,16 @@ const TagManager = {
             console.error('Available tags container not found');
             return;
         }
+        
+        // Show loading splash when tags are being added to UI (if not already showing)
+        if (tags && tags.length > 0) {
+            const splash = document.getElementById('actionSplash');
+            const isSplashVisible = splash && splash.style.display === 'flex';
+            if (!isSplashVisible && this.showActionSplash) {
+                this.showActionSplash('Loading tags...');
+            }
+        }
+        
         // Preserve scroll position during re-render
         const savedScroll = this._saveAvailableScrollPosition();
 
@@ -2998,6 +3008,15 @@ const TagManager = {
         const savedScroll = this._saveAvailableScrollPosition();
 
         const tags = filteredTags || originalTags;
+        
+        // Show loading splash when tags are being added to UI (if not already showing)
+        if (tags && tags.length > 0) {
+            const splash = document.getElementById('actionSplash');
+            const isSplashVisible = splash && splash.style.display === 'flex';
+            if (!isSplashVisible && this.showActionSplash) {
+                this.showActionSplash('Loading tags...');
+            }
+        }
         
         if (!tags || tags.length === 0) {
             verboseLog('No tags provided, showing empty state');
@@ -3772,6 +3791,15 @@ const TagManager = {
         if (!availableTagsContainer) {
             console.error('Available tags container not found for simplified render');
             return;
+        }
+
+        // Show loading splash when tags are being added to UI (if not already showing)
+        if (tags && tags.length > 0) {
+            const splash = document.getElementById('actionSplash');
+            const isSplashVisible = splash && splash.style.display === 'flex';
+            if (!isSplashVisible && this.showActionSplash) {
+                this.showActionSplash('Loading tags...');
+            }
         }
 
         const chunkSize = 200;

@@ -221,47 +221,19 @@ async function handleFiles(files) {
           }
         }
         
-        // Hide splash immediately and refresh data asynchronously (non-blocking)
-        const splashEl = document.getElementById('excelLoadingSplash');
-        if (splashEl) splashEl.style.display = 'none';
-        if (typeof TagManager !== 'undefined') {
-          try {
-            TagManager.clearUIStateForNewFile(true); // keep filters
-            // Kick off refresh without awaiting to prevent UI stall
-            // CRITICAL: Use hard refresh if server indicates it (hard_refresh flag)
-            const hardRefresh = data.hard_refresh === true;
-            setTimeout(() => {
-              if (TagManager.refreshTagLists) {
-                console.time('post-upload-refresh-async');
-                TagManager.refreshTagLists({ preserveFilters: true, force: true, hardRefresh: hardRefresh })
-                  .finally(() => console.timeEnd('post-upload-refresh-async'))
-                  .catch(err => {
-                    console.error('Async refreshTagLists failed', err);
-                    // Last resort fallback
-                    window.location.reload();
-                  });
-              } else {
-                // Fallback individual fetches without await
-                TagManager.fetchAndUpdateAvailableTags?.();
-                TagManager.fetchAndUpdateSelectedTags?.();
-                TagManager.fetchAndPopulateFilters?.();
-              }
-            }, 0);
-          } catch (e) {
-            console.error('Post-upload async refresh setup failed, reloading', e);
-            window.location.reload();
-          }
-        } else {
-          window.location.reload();
+        // CRITICAL: Refresh page after upload completes to ensure fresh data
+        // Show success message briefly, then reload
+        if (statusElement) {
+          statusElement.textContent = `✅ Upload complete! Refreshing page...`;
         }
         
-        // Add animation class to file path container
-        if (filePathContainer) {
-          filePathContainer.classList.add('file-loaded');
-          setTimeout(() => {
-            filePathContainer.classList.remove('file-loaded');
-          }, 600);
-        }
+        // Reload page after short delay to show success message
+        setTimeout(() => {
+          console.log('🔄 Refreshing page after Excel upload completion');
+          window.location.reload();
+        }, 1500);  // 1.5 second delay to show success message
+        
+        return;  // Exit early since we're reloading
         
         // Show success feedback
         if (fileDropZone) {
@@ -492,39 +464,19 @@ function pollUploadStatus(filename) {
         }
         console.timeEnd('post-ready-data-fetch');
         
-        // Hide splash and trigger async, non-blocking refresh
-        if (typeof TagManager !== 'undefined' && TagManager.hideExcelLoadingSplash) {
-          TagManager.hideExcelLoadingSplash();
-        } else {
-          const s = document.getElementById('excelLoadingSplash');
-          if (s) s.style.display = 'none';
+        // CRITICAL: Refresh page after upload processing completes
+        // Show success message briefly, then reload
+        const statusEl = document.getElementById('excelLoadingStatus');
+        if (statusEl) {
+          statusEl.textContent = `✅ Upload complete! Refreshing page...`;
         }
-        showToast('success', `File "${filename}" loaded successfully!`);
-        if (typeof TagManager !== 'undefined') {
-          try {
-            TagManager.clearUIStateForNewFile?.(true);
-            setTimeout(() => {
-              if (TagManager.refreshTagLists) {
-                // CRITICAL: Use hard refresh if server indicates it (hard_refresh flag)
-                const hardRefresh = data.hard_refresh === true;
-                TagManager.refreshTagLists({ preserveFilters: true, force: true, hardRefresh: hardRefresh })
-                  .catch(err => {
-                    console.error('refreshTagLists failed after poll-ready', err);
-                    window.location.reload();
-                  });
-              } else {
-                TagManager.fetchAndUpdateAvailableTags?.();
-                TagManager.fetchAndUpdateSelectedTags?.();
-                TagManager.fetchAndPopulateFilters?.();
-              }
-            }, 0);
-          } catch (e) {
-            console.error('Async refresh setup failed after poll-ready', e);
-            window.location.reload();
-          }
-        } else {
+        showToast('success', `File "${filename}" loaded successfully! Refreshing page...`);
+        
+        // Reload page after short delay to show success message
+        setTimeout(() => {
+          console.log('🔄 Refreshing page after Excel upload processing completes');
           window.location.reload();
-        }
+        }, 1500);  // 1.5 second delay to show success message
         
         return; // Stop polling
       } else if (data.status === 'error') {
