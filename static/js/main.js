@@ -9545,6 +9545,15 @@ const TagManager = {
                 fileInfoText.textContent = file.name;
             }
             
+            // CRITICAL FIX: Save filename to sessionStorage for cache key generation
+            if (window.sessionStorage) {
+                sessionStorage.setItem('uploaded_filename', file.name);
+                console.log('✅ Saved uploaded filename to sessionStorage:', file.name);
+            }
+            
+            // Clear old cache entries for previous files
+            this.clearAvailableTagsCache();
+            
             // Hide Excel loading splash and show success
             this.hideExcelLoadingSplash();
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
