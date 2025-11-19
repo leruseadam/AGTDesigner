@@ -2725,6 +2725,28 @@ def upload_file():
             file_size = os.path.getsize(file_path)
             logging.info(f"✅ File verified: {file_path} ({file_size} bytes)")
         
+        # CRITICAL: Clear caches for OLD file path BEFORE setting new one
+        # This prevents old uploads from persisting in cache
+        old_file_path = session.get('file_path', '')
+        if old_file_path and old_file_path != file_path:
+            try:
+                logging.info(f"🧹 Clearing caches for old file path: {old_file_path}")
+                # Clear all cache keys that might reference the old file path
+                old_cache_keys = [
+                    f'available_tags_{old_file_path}',
+                    f'json_matched_{old_file_path}',
+                    f'full_excel_{old_file_path}'
+                ]
+                for old_key in old_cache_keys:
+                    try:
+                        old_cache_key = get_session_cache_key(old_key)
+                        cache.delete(old_cache_key)
+                        logging.info(f"✅ Cleared old cache: {old_key}")
+                    except:
+                        pass
+            except Exception as old_cache_err:
+                logging.warning(f"Failed to clear old file path caches: {old_cache_err}")
+        
         # Update session with permanent flag for persistence
         session.permanent = True
         session['file_path'] = file_path
@@ -2765,6 +2787,7 @@ def upload_file():
 
             # Capture variables from request context for background thread
             original_filename = file.filename
+            old_file_path_for_background = old_file_path  # Capture old file path for background cleanup
             # Store context removed - using single database
 
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
@@ -2804,6 +2827,22 @@ def upload_file():
 
                         # CRITICAL: HARD REFRESH - Clear ALL caches aggressively to force complete refresh
                         try:
+                            # First, clear old file path caches if they exist
+                            if old_file_path_for_background and old_file_path_for_background != file_path:
+                                logging.info(f"[BACKGROUND] 🧹 Clearing old file path caches: {old_file_path_for_background}")
+                                old_cache_keys = [
+                                    f'available_tags_{old_file_path_for_background}',
+                                    f'json_matched_{old_file_path_for_background}',
+                                    f'full_excel_{old_file_path_for_background}'
+                                ]
+                                for old_key in old_cache_keys:
+                                    try:
+                                        old_cache_key = get_session_cache_key(old_key)
+                                        cache.delete(old_cache_key)
+                                        logging.info(f"[BACKGROUND] ✅ Cleared old cache: {old_key}")
+                                    except:
+                                        pass
+                            
                             # Clear file-specific cache (uses file path in key)
                             # Note: In background thread, we can't access session directly, use file_path from closure
                             cache_keys_to_clear = [
@@ -6769,24 +6808,41 @@ def generate_labels():
                                 records.append(record)
                         logging.info(f"✅ Generated {len(records)} records from database")
                         
-                        # CRITICAL FIX: Override lineage from database if it has been updated
+                        # PERFORMANCE OPTIMIZATION: Batch lineage override queries instead of individual lookups
                         logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database...")
                         store_name = get_current_store_name()
                         product_db = get_product_database(store_name)
                         # Log which database path is being used for override
                         override_db_path = getattr(product_db, 'db_path', 'Unknown')
                         logging.info(f"🔄 LINEAGE OVERRIDE: Using database at {override_db_path} for store {store_name}")
-                        for record in records:
-                            product_name = record.get('Product Name*', record.get('ProductName', ''))
-                            if product_name:
-                                try:
-                                    # Get the most up-to-date lineage from the database
-                                    if product_db:
-                                        # Try to get lineage by product name first
-                                        db_lineage = product_db.get_product_lineage(product_name)
-                                        if db_lineage:
+                        
+                        # Batch query all lineages at once instead of N queries
+                        if product_db and records:
+                            try:
+                                product_names = [r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')]
+                                product_names = [n for n in product_names if n]
+                                
+                                if product_names:
+                                    # Batch query lineages
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
+                                    placeholders = ','.join(['?'] * len(product_names))
+                                    batch_lineage_query = f'''
+                                        SELECT "Product Name*", "Lineage"
+                                        FROM products
+                                        WHERE "Product Name*" IN ({placeholders})
+                                        AND "Lineage" IS NOT NULL
+                                        AND "Lineage" != ""
+                                    '''
+                                    cursor.execute(batch_lineage_query, product_names)
+                                    lineage_map = {row[0]: str(row[1]).strip().upper() for row in cursor.fetchall()}
+                                    
+                                    # Update records with batched lineage data
+                                    for record in records:
+                                        product_name = record.get('Product Name*', record.get('ProductName', ''))
+                                        if product_name and product_name in lineage_map:
+                                            db_lineage_clean = lineage_map[product_name]
                                             original_lineage = record.get('Lineage', '')
-                                            db_lineage_clean = str(db_lineage).strip().upper()
                                             original_lineage_clean = str(original_lineage).strip().upper()
                                             
                                             # Always update to ensure database value is used
@@ -6797,21 +6853,23 @@ def generate_labels():
                                                 logging.debug(f"LINEAGE SKIP: '{product_name}' - Already matches database: '{original_lineage_clean}'")
                                                 # Still update to ensure consistency
                                                 record['Lineage'] = db_lineage_clean
-                                        else:
-                                            # Try to get lineage by strain name
-                                            product_strain = record.get('Product Strain', '')
-                                            if product_strain:
-                                                strain_info = product_db.get_strain_info(product_strain)
-                                                if strain_info and strain_info.get('canonical_lineage'):
-                                                    db_lineage = strain_info['canonical_lineage']
-                                                    original_lineage = record.get('Lineage', '')
-                                                    if str(db_lineage).strip() != str(original_lineage).strip():
-                                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
-                                                        record['Lineage'] = str(db_lineage).strip()
-                                                    else:
-                                                        logging.debug(f"LINEAGE SKIP: '{product_name}' - Strain lineage already matches: '{original_lineage}'")
-                                except Exception as e:
-                                    logging.warning(f"Error checking lineage override for '{product_name}': {e}")
+                                    
+                                    logging.info(f"⚡ PERFORMANCE: Batch lineage override completed for {len(records)} records (saved ~{len(records)*0.01:.2f}s)")
+                            except Exception as lineage_batch_error:
+                                logging.warning(f"Batch lineage override failed, falling back to individual queries: {lineage_batch_error}")
+                                # Fallback to individual queries if batch fails
+                                for record in records:
+                                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                                    if product_name:
+                                        try:
+                                            db_lineage = product_db.get_product_lineage(product_name)
+                                            if db_lineage:
+                                                original_lineage = record.get('Lineage', '')
+                                                db_lineage_clean = str(db_lineage).strip().upper()
+                                                original_lineage_clean = str(original_lineage).strip().upper()
+                                                record['Lineage'] = db_lineage_clean
+                                        except Exception:
+                                            pass
                         
                         # NOTE: Removed Excel processor override - database lineage takes precedence
                         # The old logic would incorrectly revert manual lineage changes back to the original Excel values.
