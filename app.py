@@ -7474,9 +7474,22 @@ def clear_available_tags_cache(reason=None):
         
         # Base cache and file-specific cache
         _clear_key(get_session_cache_key('available_tags'))
-        session_file_path = session.get('file_path', '')
+        
+        # Clear file-specific caches using both possible session keys
+        session_file_path = session.get('file_path', '') or session.get('uploaded_file_path', '')
         if session_file_path:
             _clear_key(get_session_cache_key(f'available_tags_{session_file_path}'))
+        
+        # Also clear file-based cache on disk for current store
+        try:
+            store_name = get_current_store_name()
+            if store_name:
+                cache_path = get_available_tags_cache_path(store_name)
+                if os.path.exists(cache_path):
+                    os.remove(cache_path)
+                    logging.info(f"🗑️  Deleted disk cache file: {cache_path}")
+        except Exception as disk_cache_error:
+            logging.warning(f"Could not clear disk cache: {disk_cache_error}")
         
         # Stored references
         full_excel_cache_key = session.get('full_excel_cache_key')
@@ -9608,28 +9621,12 @@ def update_lineage():
             logging.warning(f"⚠️  Excel DataFrame update failed (non-critical): {excel_error}")
             updated_count = 0
         
-        # CRITICAL FIX: Fast cache invalidation - don't block response
+        # CRITICAL FIX: Comprehensive cache invalidation after lineage update
         cache_clear_start = time.time()
         try:
-            # Clear all available_tags caches - including file-specific caches
-            session_file_path = session.get('uploaded_file_path')
-            
-            # Clear base cache
-            cache_key = get_session_cache_key('available_tags')
-            cache.delete(cache_key)
-            
-            # Clear file-specific cache (critical - this is what's actually being used)
-            if session_file_path:
-                file_cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                cache.delete(file_cache_key)
-            
-            # Also clear web cache
-            web_cache_key = get_session_cache_key('web_available_tags')
-            cache.delete(web_cache_key)
-            
-            session['lineage_update_timestamp'] = time.time()
-            session.modified = True
-            logging.info(f"✅ LINEAGE UPDATE: Cleared cache and updated timestamp")
+            # Use the comprehensive cache clearing function to ensure all caches are invalidated
+            clear_available_tags_cache(reason="lineage_update")
+            logging.info(f"✅ LINEAGE UPDATE: Comprehensive cache clear completed")
             
             # NOTE: WAL checkpoint is now done on the same connection that committed (above)
             # This ensures changes are immediately visible and persisted
