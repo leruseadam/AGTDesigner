@@ -4146,9 +4146,12 @@ const TagManager = {
         // This ensures UI lineages match database and persist correctly after reload
         lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
         
+        // Normalize lineage to uppercase for consistent matching
+        lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
+        
         // Validate lineage from database is present
-        if (!tag.canonical_lineage && lineage !== 'MIXED') {
-            console.warn(`⚠️ Tag missing canonical_lineage from database: ${displayName}`);
+        if (!tag.canonical_lineage && !tag.currentLineage && lineage !== 'MIXED') {
+            console.warn(`⚠️ Tag missing canonical_lineage/currentLineage from database: ${displayName}`);
         }
         
         // DEBUG: Log lineage resolution for selected tags
@@ -4165,7 +4168,9 @@ const TagManager = {
             });
         }
         
-        let displayLineage = lineage;
+        // CRITICAL FIX: Use database lineage FIRST for all product types
+        // Only fall back to Product Strain logic if database lineage is missing or invalid
+        let displayLineage = lineage; // Start with database lineage
         const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
         const nameStr = (tag['Product Name*'] || tag.ProductName || tag.productName || displayName || '').toString().toLowerCase();
         const descStr = (tag.Description || tag.description || '').toString().toLowerCase();
@@ -4186,44 +4191,51 @@ const TagManager = {
             return false;
         };
         
-        // Apply nonclassic product type logic to ensure correct lineage colors
+        // CRITICAL: Only apply fallback logic if database lineage is missing, invalid, or MIXED
+        // Valid database lineages: SATIVA, INDICA, HYBRID, HYBRID/SATIVA, HYBRID/INDICA, CBD, CBD_BLEND, MIXED, PARA, PARAPHERNALIA
+        const validDatabaseLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA', 'PARAPHERNALIA'];
+        const hasValidDatabaseLineage = validDatabaseLineages.includes(lineage);
+        
+        // Apply nonclassic product type logic ONLY if database lineage is missing or invalid
         const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
         
-        if (isNonclassic) {
-            // For ALL nonclassic products (JSON matched or not), use Product Strain logic
+        if (hasValidDatabaseLineage) {
+            // CRITICAL: Use database lineage directly - this is the source of truth
+            displayLineage = lineage;
+            verboseLog(`🎨 Using database lineage: "${displayName}" → ${displayLineage}`);
+        } else if (isNonclassic) {
+            // Only apply Product Strain fallback logic if database lineage is missing or invalid
             const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
             const strainStr = String(productStrain).toLowerCase();
             
-            // CRITICAL: For non-classic types, always check Product Strain first
+            // CRITICAL: For non-classic types without valid DB lineage, check Product Strain
             if (strainStr.includes('cbd blend') || strainStr.includes('cbd') || strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
                 // CBD family products display as CBD Blend lineage (yellow color)
                 displayLineage = 'CBD_BLEND';
-                verboseLog(`🎨 NON-CLASSIC CBD FAMILY: "${displayName}" → CBD_BLEND (yellow)`);
+                verboseLog(`🎨 NON-CLASSIC CBD FAMILY (fallback): "${displayName}" → CBD_BLEND (yellow)`);
             } else if (hasCbdIndicator()) {
                 displayLineage = 'CBD_BLEND';
-                verboseLog(`🎨 NON-CLASSIC CBD SIGNAL: "${displayName}" → CBD_BLEND (yellow)`);
+                verboseLog(`🎨 NON-CLASSIC CBD SIGNAL (fallback): "${displayName}" → CBD_BLEND (yellow)`);
             } else if (strainStr.includes('paraphernalia')) {
                 displayLineage = 'PARAPHERNALIA'; // Pink color
-                verboseLog(`🎨 NON-CLASSIC PARA: "${displayName}" → PARAPHERNALIA (pink)`);
+                verboseLog(`🎨 NON-CLASSIC PARA (fallback): "${displayName}" → PARAPHERNALIA (pink)`);
             } else if (strainStr.includes('mixed') || !productStrain) {
                 if (hasCbdIndicator()) {
                     displayLineage = 'CBD_BLEND';
-                    verboseLog(`🎨 NON-CLASSIC CBD SIGNAL (no strain): "${displayName}" → CBD_BLEND (yellow)`);
+                    verboseLog(`🎨 NON-CLASSIC CBD SIGNAL (no strain, fallback): "${displayName}" → CBD_BLEND (yellow)`);
                 } else {
                     displayLineage = 'MIXED'; // Blue color
-                    verboseLog(`🎨 NON-CLASSIC MIXED: "${displayName}" → MIXED (blue)`);
+                    verboseLog(`🎨 NON-CLASSIC MIXED (fallback): "${displayName}" → MIXED (blue)`);
                 }
             } else {
-                // Check lineage field as fallback
-                if (lineage && (lineage.toUpperCase() === 'CBD' || lineage.toUpperCase() === 'CBD_BLEND')) {
-                    displayLineage = 'CBD_BLEND';
-                    verboseLog(`🎨 NON-CLASSIC from Lineage: "${displayName}" → CBD_BLEND (yellow)`);
-                } else {
-                    displayLineage = 'MIXED'; // Blue color default
-                    verboseLog(`🎨 NON-CLASSIC default: "${displayName}" → MIXED (blue)`);
-                }
+                displayLineage = 'MIXED'; // Blue color default
+                verboseLog(`🎨 NON-CLASSIC default (fallback): "${displayName}" → MIXED (blue)`);
             }
+        } else {
+            // Classic types - use database lineage or default to MIXED
+            displayLineage = lineage || 'MIXED';
+            verboseLog(`🎨 Classic type using database lineage: "${displayName}" → ${displayLineage}`);
         }
         
         // Backend now handles lineage assignment correctly:
