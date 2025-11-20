@@ -2134,29 +2134,52 @@ class EnhancedJSONMatcher:
                     logging.info(f"🔍 DEBUG: Weight data for '{hybrid_product.get('Product Name*', 'Unknown')}': Weight*={hybrid_product.get('Weight*', 'None')}, Units={hybrid_product.get('Units', 'None')}")
                     logging.info(f"🔍 DEBUG: Processing JSON product: '{hybrid_product.get('Product Name*', 'Unknown')}' -> Database match: '{hybrid_product.get('Product Name*', 'N/A')}'")
                     
-                    # Final price and weight handling with JSON priority
-                    json_price = self._extract_json_price(json_data, hybrid_product)
-                    if json_price:
-                        hybrid_product['Price'] = self._format_price(json_price)
-                    elif not hybrid_product.get('Price'):
-                        db_price_raw = self._select_db_price(hybrid_product)
+                    # CRITICAL FIX: Prioritize database price, then JSON price, never use fallback
+                    # Database prices are more reliable than JSON prices
+                    db_price_raw = self._select_db_price(hybrid_product)
+                    if db_price_raw and str(db_price_raw).strip() not in ('0', '0.0', '0.00', ''):
                         hybrid_product['Price'] = self._format_price(db_price_raw)
-                    
-                    # CRITICAL FIX: Always preserve database weight data, even if JSON weight is found
-                    json_weight = self._extract_json_weight(json_data, hybrid_product)
-                    if json_weight:
-                        hybrid_product['Weight*'] = json_weight
-                        hybrid_product['WeightUnits'] = json_weight
-                        hybrid_product['WeightWithUnits'] = json_weight
-                        logging.info(f"✅ DEBUG: Using JSON weight: {json_weight}")
+                        hybrid_product['Price*'] = hybrid_product['Price']
                     else:
-                        # If no JSON weight, ensure database weight data is preserved
-                        if hybrid_product.get('Weight*'):
-                            hybrid_product['WeightUnits'] = f"{hybrid_product.get('Weight*', '')}{hybrid_product.get('Units', 'g')}"
-                            hybrid_product['WeightWithUnits'] = hybrid_product['WeightUnits']
-                            logging.info(f"✅ DEBUG: Using database weight: {hybrid_product['Weight*']}{hybrid_product.get('Units', 'g')}")
+                        # Only use JSON price if database price is missing
+                        json_price = self._extract_json_price(json_data, hybrid_product)
+                        if json_price:
+                            hybrid_product['Price'] = self._format_price(json_price)
+                            hybrid_product['Price*'] = hybrid_product['Price']
                         else:
-                            logging.info(f"⚠️ DEBUG: No database weight found for '{hybrid_product.get('Product Name*', 'Unknown')}'")
+                            # NO DEFAULT PRICE - leave empty if not found
+                            hybrid_product['Price'] = ''
+                            hybrid_product['Price*'] = ''
+                    
+                    # CRITICAL FIX: Prioritize database weight, then JSON weight, never use fallback
+                    # Database weights are more reliable than JSON weights
+                    db_weight = hybrid_product.get('Weight*') or hybrid_product.get('Weight') or ''
+                    db_units = hybrid_product.get('Units') or 'g'
+                    
+                    if db_weight and str(db_weight).strip() not in ('0', '0.0', '0.00', ''):
+                        hybrid_product['Weight*'] = db_weight
+                        hybrid_product['Weight'] = db_weight
+                        hybrid_product['Units'] = db_units
+                        hybrid_product['WeightUnits'] = f"{db_weight}{db_units}"
+                        hybrid_product['WeightWithUnits'] = hybrid_product['WeightUnits']
+                        logging.info(f"✅ DEBUG: Using database weight: {db_weight}{db_units}")
+                    else:
+                        # Only use JSON weight if database weight is missing
+                        json_weight = self._extract_json_weight(json_data, hybrid_product)
+                        if json_weight:
+                            hybrid_product['Weight*'] = json_weight
+                            hybrid_product['Weight'] = json_weight
+                            hybrid_product['WeightUnits'] = json_weight
+                            hybrid_product['WeightWithUnits'] = json_weight
+                            logging.info(f"✅ DEBUG: Using JSON weight: {json_weight}")
+                        else:
+                            # NO DEFAULT WEIGHT - leave empty if not found
+                            hybrid_product['Weight*'] = ''
+                            hybrid_product['Weight'] = ''
+                            hybrid_product['Units'] = ''
+                            hybrid_product['WeightUnits'] = ''
+                            hybrid_product['WeightWithUnits'] = ''
+                            logging.info(f"⚠️ DEBUG: No weight found for '{hybrid_product.get('Product Name*', 'Unknown')}' - leaving empty")
                             # CRITICAL FIX: If no weight data at all, try to extract from product name
                             product_name = hybrid_product.get('Product Name*', '') or hybrid_product.get('ProductName', '')
                             if product_name:

@@ -575,9 +575,13 @@ def extract_products_from_manifest(manifest_json):
             logging.info(f"🔍 DEBUG: Fallback brand: '{product['Product Brand']}'")
         
         if not product.get('Price') and not product.get('Price*'):
-            product['Price'] = item.get('price', '') or item.get('line_price', '') or '25.00'
+            # CRITICAL: No $25 fallback - only use actual prices from JSON or leave empty
+            product['Price'] = item.get('price', '') or item.get('line_price', '') or ''
             product['Price*'] = product['Price']
-            logging.info(f"🔍 DEBUG: Fallback price: '{product['Price']}'")
+            if product['Price']:
+                logging.info(f"🔍 DEBUG: Using JSON price: '{product['Price']}'")
+            else:
+                logging.info(f"🔍 DEBUG: No price found in JSON - leaving empty (no fallback)")
         
         if not product.get('Weight*') and not product.get('Weight'):
             product['Weight*'] = item.get('weight', '') or item.get('unit_weight', '') or '1'
@@ -3181,21 +3185,29 @@ class JSONMatcher:
             # Get brand with multiple fallbacks
             excel_brand = safe_row_get(excel_row, 'Product Brand') or safe_row_get(excel_row, 'ProductBrand') or vendor or 'CERES'
             
-            # Get price with JSON override and fallback
-            if json_item and json_item.get("line_price"):
-                excel_price = str(json_item.get("line_price", "")).strip()
-            elif json_item and json_item.get("price"):
-                excel_price = str(json_item.get("price", "")).strip()
-            else:
-                excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or ''  # NO DEFAULT PRICE
+            # CRITICAL FIX: Prioritize database price, then JSON price, never use fallback
+            # Database prices are more reliable than JSON prices
+            excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or ''
+            # Only use JSON price if database price is missing
+            if not excel_price or excel_price in ('0', '0.0', '0.00', ''):
+                if json_item and json_item.get("line_price"):
+                    excel_price = str(json_item.get("line_price", "")).strip()
+                elif json_item and json_item.get("price"):
+                    excel_price = str(json_item.get("price", "")).strip()
+                else:
+                    excel_price = ''  # NO DEFAULT PRICE - leave empty if not found
             
-            # Get weight with JSON override and fallback
-            if json_item and json_item.get("unit_weight"):
-                excel_weight = str(json_item.get("unit_weight", "")).strip()
-            elif json_item and json_item.get("weight"):
-                excel_weight = str(json_item.get("weight", "")).strip()
-            else:
-                excel_weight = safe_row_get(excel_row, 'Weight*') or safe_row_get(excel_row, 'Weight') or '1'
+            # CRITICAL FIX: Prioritize database weight, then JSON weight, never use fallback
+            # Database weights are more reliable than JSON weights
+            excel_weight = safe_row_get(excel_row, 'Weight*') or safe_row_get(excel_row, 'Weight') or ''
+            # Only use JSON weight if database weight is missing
+            if not excel_weight or excel_weight in ('0', '0.0', '0.00', ''):
+                if json_item and json_item.get("unit_weight"):
+                    excel_weight = str(json_item.get("unit_weight", "")).strip()
+                elif json_item and json_item.get("weight"):
+                    excel_weight = str(json_item.get("weight", "")).strip()
+                else:
+                    excel_weight = ''  # NO DEFAULT WEIGHT - leave empty if not found
             
             # Get units with JSON override and fallback
             if json_item and json_item.get("unit_weight_uom"):
@@ -4233,43 +4245,24 @@ class JSONMatcher:
             # Strategy 4: Use intelligent estimation based on product characteristics
             try:
                 estimated_price = self._estimate_price_by_type_and_weight(product_type, weight)
-                if estimated_price.is_integer():
-                    price = f"${int(estimated_price)}"
-                else:
-                    price = f"${estimated_price:.2f}"
-                logging.info(f"💰 Using estimated price '{price}' for '{product_name}'")
-                return price
+                if estimated_price and estimated_price > 0:
+                    if estimated_price.is_integer():
+                        price = f"${int(estimated_price)}"
+                    else:
+                        price = f"${estimated_price:.2f}"
+                    logging.info(f"💰 Using estimated price '{price}' for '{product_name}'")
+                    return price
             except Exception as e:
                 logging.warning(f"Error in price estimation: {e}")
             
-            # Strategy 5: Simple fallback based on product type only
-            fallback_prices = {
-                'flower': '$12.00',
-                'concentrate': '$30.00', 
-                'live resin': '$35.00',
-                'cartridge': '$40.00',
-                'disposable vape': '$45.00',
-                'edible': '$15.00',
-                'tincture': '$35',
-                'topical': '$20.00',
-                'pre-roll': '$15.00',
-                'vape cartridge': '$40.00'
-            }
-            
-            product_type_lower = str(product_type).lower()
-            for type_key, fallback_price in fallback_prices.items():
-                if type_key in product_type_lower:
-                    logging.info(f"💰 Using fallback price '{fallback_price}' for '{product_name}'")
-                    return fallback_price
-            
-            # Ultimate fallback
-            price = '$35'
-            logging.info(f"💰 Using ultimate fallback price '{price}' for '{product_name}'")
-            return price
+            # CRITICAL: No fallback prices - return empty string to indicate missing price
+            logging.warning(f"⚠️ No price found for '{product_name}' - leaving empty (no fallback)")
+            return ""
             
         except Exception as e:
             logging.warning(f"Error in intelligent price matching: {e}")
-            return "$35"  # Safe fallback
+            # CRITICAL: No fallback price - return empty to indicate missing price
+            return ""
     
     def _intelligently_match_cost(self, json_item, inferred_data, final_price, product_name):
         """
@@ -4626,7 +4619,8 @@ class JSONMatcher:
             
         except Exception as e:
             logging.warning(f"Error estimating price by type and weight: {e}")
-            return 25.0  # Default fallback price
+            # CRITICAL: No $25 fallback - return 0 or empty to indicate missing price
+            return 0.0  # Return 0 to indicate no price available
             
     def fetch_and_match_with_product_db(self, url: str, force_simplified: bool = False, deduplicate: bool = False) -> List[Dict]:
         """
