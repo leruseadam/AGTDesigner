@@ -8021,19 +8021,30 @@ def get_available_tags():
                         for tag in cached_tags:
                             try:
                                 name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                if not name or name not in name_to_tag:
+                                if not name:
                                     continue
                                 
                                 db_lin, db_strain = lineage_cache.get(name, (None, None))
                                 
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
-                                    # Always expose DB lineage on stable fields the UI can prefer
+                                    # CRITICAL: Always update ALL lineage fields, even if they match
+                                    # This ensures frontend gets fresh values even if cached had old lineage
+                                    old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
                                     tag['currentLineage'] = db_lin_clean
                                     tag['canonical_lineage'] = db_lin_clean
-                                    if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
-                                        tag['Lineage'] = db_lin_clean
+                                    tag['Lineage'] = db_lin_clean
+                                    tag['lineage'] = db_lin_clean  # Also set lowercase version
+                                    if old_lineage != db_lin_clean:
                                         updated += 1
+                                        logging.info(f"🔄 Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
+                                else:
+                                    # Even if no DB lineage found, ensure fields are consistent
+                                    existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                    if existing_lineage:
+                                        tag['currentLineage'] = existing_lineage
+                                        tag['canonical_lineage'] = existing_lineage
+                                        tag['lineage'] = existing_lineage
                                 clean_strain = str(db_strain).strip() if db_strain else ''
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
@@ -8266,12 +8277,16 @@ def get_available_tags():
                                     db_lin_clean = None
                                     if db_lin:
                                         db_lin_clean = str(db_lin).strip().upper()
-                                        # Always expose DB lineage on stable fields the UI can prefer
+                                        # CRITICAL: Always update ALL lineage fields, even if they match
+                                        # This ensures frontend gets fresh values even if cached had old lineage
+                                        old_lineage = str(tag.get('Lineage','')).strip().upper()
                                         tag['currentLineage'] = db_lin_clean
                                         tag['canonical_lineage'] = db_lin_clean
-                                        if str(tag.get('Lineage','')).strip().upper() != db_lin_clean:
-                                            tag['Lineage'] = db_lin_clean
+                                        tag['Lineage'] = db_lin_clean
+                                        tag['lineage'] = db_lin_clean  # Also set lowercase version
+                                        if old_lineage != db_lin_clean:
                                             updated += 1
+                                            logging.debug(f"Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
                                     clean_strain = str(db_strain).strip() if db_strain else ''
                                     if db_lin and db_lin_clean:
                                         if db_lin_clean in ('CBD', 'CBD_BLEND'):

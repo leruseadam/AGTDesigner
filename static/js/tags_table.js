@@ -410,18 +410,56 @@ class TagsTable {
           if (refreshResponse.ok) {
             const refreshData = await refreshResponse.json();
             if (refreshData.tags && typeof TagManager !== 'undefined' && TagManager.state) {
-              // Update only the changed tag's lineage in originalTags
-              const updatedTag = refreshData.tags.find(t => t['Product Name*'] === tagName);
-              if (updatedTag && TagManager.state.originalTags) {
-                const tagIndex = TagManager.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
+              let needsRerender = false;
+              
+              // Update all tags in originalTags with fresh lineage from database
+              refreshData.tags.forEach(updatedTag => {
+                const tagNameToUpdate = updatedTag['Product Name*'] || updatedTag.ProductName;
+                if (!tagNameToUpdate || !TagManager.state.originalTags) return;
+                
+                const tagIndex = TagManager.state.originalTags.findIndex(t => 
+                  (t['Product Name*'] === tagNameToUpdate) || (t.ProductName === tagNameToUpdate)
+                );
+                
                 if (tagIndex >= 0) {
-                  // Update lineage fields to match database
-                  TagManager.state.originalTags[tagIndex].Lineage = updatedTag.Lineage || newLineage;
-                  TagManager.state.originalTags[tagIndex].lineage = updatedTag.Lineage || newLineage;
-                  TagManager.state.originalTags[tagIndex].currentLineage = updatedTag.Lineage || newLineage;
-                  TagManager.state.originalTags[tagIndex].canonical_lineage = updatedTag.Lineage || newLineage;
-                  console.log(`✅ Updated lineage in originalTags from database: ${updatedTag.Lineage || newLineage}`);
+                  const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage;
+                  if (dbLineage) {
+                    const currentLineage = TagManager.state.originalTags[tagIndex].Lineage || 
+                                           TagManager.state.originalTags[tagIndex].currentLineage ||
+                                           TagManager.state.originalTags[tagIndex].canonical_lineage;
+                    
+                    // Update all lineage-related fields
+                    TagManager.state.originalTags[tagIndex].Lineage = dbLineage;
+                    TagManager.state.originalTags[tagIndex].lineage = dbLineage;
+                    TagManager.state.originalTags[tagIndex].currentLineage = dbLineage;
+                    TagManager.state.originalTags[tagIndex].canonical_lineage = dbLineage;
+                    
+                    // Also update in current tags list if present
+                    const currentTagIndex = TagManager.state.tags?.findIndex(t => 
+                      (t['Product Name*'] === tagNameToUpdate) || (t.ProductName === tagNameToUpdate)
+                    );
+                    if (currentTagIndex >= 0 && TagManager.state.tags) {
+                      TagManager.state.tags[currentTagIndex].Lineage = dbLineage;
+                      TagManager.state.tags[currentTagIndex].lineage = dbLineage;
+                      TagManager.state.tags[currentTagIndex].currentLineage = dbLineage;
+                      TagManager.state.tags[currentTagIndex].canonical_lineage = dbLineage;
+                    }
+                    
+                    if (currentLineage !== dbLineage) {
+                      needsRerender = true;
+                      console.log(`✅ Updated lineage for "${tagNameToUpdate}": ${currentLineage} → ${dbLineage}`);
+                    }
+                  }
                 }
+              });
+              
+              // CRITICAL: Re-render available tags to show updated lineage dropdowns
+              if (needsRerender && typeof TagManager._updateAvailableTags === 'function') {
+                console.log('🔄 Re-rendering available tags with updated lineage values...');
+                TagManager._updateAvailableTags(TagManager.state.originalTags, TagManager.state.tags);
+              } else if (needsRerender && typeof TagManager.efficientlyUpdateAvailableTagsDisplay === 'function') {
+                console.log('🔄 Updating available tags display with updated lineage values...');
+                TagManager.efficientlyUpdateAvailableTagsDisplay();
               }
             }
             console.log('✅ Backend cache refreshed with fresh lineage data');
