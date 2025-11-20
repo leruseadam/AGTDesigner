@@ -8018,6 +8018,8 @@ def get_available_tags():
                                             lineage_cache[name] = (None, None)
                         
                         # Now apply lineage data to tags (fast - just dictionary lookups)
+                        # CRITICAL FIX: Process ALL tags, not just those in the first batch
+                        # If batch was limited, do individual lookups for remaining tags
                         for tag in cached_tags:
                             try:
                                 name = tag.get('Product Name*') or tag.get('ProductName') or ''
@@ -8025,6 +8027,24 @@ def get_available_tags():
                                     continue
                                 
                                 db_lin, db_strain = lineage_cache.get(name, (None, None))
+                                
+                                # If not in cache (batch was limited), do individual lookup
+                                if not db_lin:
+                                    try:
+                                        normalized = product_db._normalize_product_name(name) if hasattr(product_db, '_normalize_product_name') else name.strip().lower()
+                                        try:
+                                            cur.execute(lineage_query_join_by_name, (name, normalized))
+                                            row = cur.fetchone()
+                                        except Exception:
+                                            cur.execute(lineage_query_fallback, (name, normalized))
+                                            row = cur.fetchone()
+                                        if row:
+                                            db_lin = row[0]
+                                            db_strain = row[1] if len(row) > 1 else None
+                                            # Cache it for potential future use
+                                            lineage_cache[name] = (db_lin, db_strain)
+                                    except Exception as lookup_err:
+                                        logging.debug(f"Individual lineage lookup failed for '{name}': {lookup_err}")
                                 
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()

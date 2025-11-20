@@ -166,7 +166,8 @@ select option {
 .glass-card,
 .filter-bar,
 .sticky-filter-bar,
-.horizontal-filter-bar {
+.horizontal-filter-bar,
+.enhanced-filter-bar {
     /* Remove expensive backdrop filters */
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
@@ -176,4 +177,26 @@ select option {
     
     /* Remove expensive shadows */
     box-shadow: none !important;
+}
+
+/* CRITICAL: Ensure upload button is always visible */
+#uploadTriggerBtn,
+.uploadTriggerBtn,
+.filter-action-button#uploadTriggerBtn {
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Ensure left-section and buttons-row are visible */
+.left-section,
+.buttons-row {
+    display: flex !important;
+    visibility: visible !important;
+}
+
+/* Ensure enhanced-filter-bar is visible */
+.enhanced-filter-bar {
+    display: flex !important;
+    visibility: visible !important;
 }

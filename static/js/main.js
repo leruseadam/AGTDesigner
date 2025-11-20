@@ -4445,13 +4445,28 @@ const TagManager = {
         });
         
         // Set the dropdown value - handle mappings for display
-        if (lineage === 'CBD_BLEND') {
+        // CRITICAL: Normalize lineage to uppercase for consistent matching
+        const normalizedLineage = (lineage || '').toString().toUpperCase().trim();
+        if (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD') {
             lineageSelect.value = 'CBD';
-        } else if (shouldMapToMixed(lineage)) {
+        } else if (shouldMapToMixed(normalizedLineage)) {
             lineageSelect.value = 'MIXED';
+        } else if (normalizedLineage && uniqueLineages.some(opt => opt.value === normalizedLineage)) {
+            lineageSelect.value = normalizedLineage;
         } else {
-            lineageSelect.value = lineage;
+            // Fallback to MIXED if lineage doesn't match any valid option
+            lineageSelect.value = 'MIXED';
+            console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for ${displayName}, defaulting to MIXED`);
         }
+        
+        // CRITICAL DEBUG: Log what lineage value was set in dropdown
+        verboseLog(`🎯 Set lineage dropdown for ${displayName}:`, {
+            'tag.canonical_lineage': tag.canonical_lineage,
+            'tag.currentLineage': tag.currentLineage,
+            'tag.Lineage': tag.Lineage,
+            'resolved lineage': normalizedLineage,
+            'dropdown value': lineageSelect.value
+        });
         if (tag.productType === 'Paraphernalia' || tag['Product Type*'] === 'Paraphernalia') {
             lineageSelect.disabled = true;
             lineageSelect.style.opacity = '0.7';
@@ -6886,15 +6901,36 @@ const TagManager = {
             
             // Debug: Verify database lineage is being used
             console.log('🔄 Normalized lineage data (database is source of truth):');
-            tags.slice(0, 5).forEach(tag => {
-                console.log(`  ✓ ${tag['Product Name*']}: canonical_lineage=${tag.canonical_lineage}`);
+            const lineageStats = { withCanonical: 0, withCurrent: 0, withLineage: 0, none: 0 };
+            tags.slice(0, 10).forEach(tag => {
+                const name = tag['Product Name*'] || tag.ProductName || 'Unknown';
+                const canonical = tag.canonical_lineage || 'NONE';
+                const current = tag.currentLineage || 'NONE';
+                const lineage = tag.Lineage || 'NONE';
+                if (tag.canonical_lineage) lineageStats.withCanonical++;
+                else if (tag.currentLineage) lineageStats.withCurrent++;
+                else if (tag.Lineage) lineageStats.withLineage++;
+                else lineageStats.none++;
+                console.log(`  ✓ ${name}: canonical=${canonical}, current=${current}, Lineage=${lineage}`);
             });
+            console.log(`📊 Lineage source stats (first 10): canonical=${lineageStats.withCanonical}, current=${lineageStats.withCurrent}, Lineage=${lineageStats.withLineage}, none=${lineageStats.none}`);
             
             // Clear existing state and set new data
             this.state.tags = [...tags];
             this.state.originalTags = [...tags]; // Store original tags for validation
             this.state.hydratedFromCache = false;
             this.saveAvailableTagsToCache(tags);
+            
+            // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
+            // This is especially important when lineage alignment happened on the backend
+            console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
+            this._updateAvailableTags(tags);
+            
+            // If lineage was aligned, log it for debugging
+            if (responseData && responseData.source && 
+                (responseData.source.includes('lineage') || responseData.source.includes('db-lineage'))) {
+                console.log(`✅ Lineage alignment detected (source: ${responseData.source}), UI updated with database lineage`);
+            }
             
             // PERFORMANCE: Clear filter cache when tags change
             this._cachedFilterOptions = null;
