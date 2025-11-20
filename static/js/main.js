@@ -6777,12 +6777,14 @@ const TagManager = {
                     // PERFORMANCE FIX: Reduced timeout to 8s - fast_load should make this fast enough
                     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-                    // CRITICAL FIX: Always bypass cache and use database for lineage accuracy
-                    // This ensures UI always reflects the actual database lineage values
-                    const cacheParam = '&nocache=1';
-                    const preferDbParam = '&prefer_db=1';
-                    // Disable fast_load to force lineage alignment from database
-                    const fastParam = '&fast_load=0';
+                    // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
+                    // Use nocache only on retries to avoid stale data
+                    const useCache = retryCount === 0; // Use cache on first attempt
+                    const cacheParam = useCache ? '' : '&nocache=1';
+                    const preferDbParam = '&prefer_db=1';  // Always use database for lineage accuracy
+                    // Use fast_load on first attempt for initial loads
+                    const fastLoadParam = '&fast_load=1';
+                    const fastParam = (retryCount === 0 && (isInitialLoad || isPostUpload)) ? fastLoadParam : fastLoadParam;
                     response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}${preferDbParam}`, {
                         signal: controller.signal
                     });
