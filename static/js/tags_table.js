@@ -401,12 +401,35 @@ class TagsTable {
         console.log(`🎨 Updated similar lineages for ${tagName}`);
       }
 
-      // Refresh backend cache in the background (non-blocking)
+      // CRITICAL FIX: Force refresh available tags with fresh lineage from database
+      // This ensures UI shows updated lineage values immediately
       setTimeout(async () => {
         try {
+          // Call /api/available-tags with prefer_db and nocache to force database lineage alignment
+          const refreshResponse = await fetch(`/api/available-tags?nocache=1&prefer_db=1&t=${Date.now()}`);
+          if (refreshResponse.ok) {
+            const refreshData = await refreshResponse.json();
+            if (refreshData.tags && typeof TagManager !== 'undefined' && TagManager.state) {
+              // Update only the changed tag's lineage in originalTags
+              const updatedTag = refreshData.tags.find(t => t['Product Name*'] === tagName);
+              if (updatedTag && TagManager.state.originalTags) {
+                const tagIndex = TagManager.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
+                if (tagIndex >= 0) {
+                  // Update lineage fields to match database
+                  TagManager.state.originalTags[tagIndex].Lineage = updatedTag.Lineage || newLineage;
+                  TagManager.state.originalTags[tagIndex].lineage = updatedTag.Lineage || newLineage;
+                  TagManager.state.originalTags[tagIndex].currentLineage = updatedTag.Lineage || newLineage;
+                  TagManager.state.originalTags[tagIndex].canonical_lineage = updatedTag.Lineage || newLineage;
+                  console.log(`✅ Updated lineage in originalTags from database: ${updatedTag.Lineage || newLineage}`);
+                }
+              }
+            }
+            console.log('✅ Backend cache refreshed with fresh lineage data');
+          }
+          
+          // Also call refreshBackendCache if available
           if (typeof TagManager !== 'undefined' && typeof TagManager.refreshBackendCache === 'function') {
             await TagManager.refreshBackendCache();
-            console.log('✅ Backend cache refreshed in background');
           }
         } catch (e) {
           console.warn('Background cache refresh failed:', e);
