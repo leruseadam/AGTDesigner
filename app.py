@@ -8032,17 +8032,27 @@ def get_available_tags():
                                 if not db_lin:
                                     try:
                                         normalized = product_db._normalize_product_name(name) if hasattr(product_db, '_normalize_product_name') else name.strip().lower()
+                                        # Try join query first (more comprehensive)
                                         try:
                                             cur.execute(lineage_query_join_by_name, (name, normalized))
                                             row = cur.fetchone()
-                                        except Exception:
-                                            cur.execute(lineage_query_fallback, (name, normalized))
-                                            row = cur.fetchone()
-                                        if row:
-                                            db_lin = row[0]
-                                            db_strain = row[1] if len(row) > 1 else None
-                                            # Cache it for potential future use
-                                            lineage_cache[name] = (db_lin, db_strain)
+                                            if row and row[0]:
+                                                db_lin = row[0]
+                                                db_strain = row[1] if len(row) > 1 else None
+                                                lineage_cache[name] = (db_lin, db_strain)
+                                                logging.debug(f"✅ Individual lineage lookup (join): '{name}' → '{db_lin}'")
+                                        except Exception as join_err:
+                                            # Fallback to simple query
+                                            try:
+                                                cur.execute(lineage_query_fallback, (name, normalized))
+                                                row = cur.fetchone()
+                                                if row and row[0]:
+                                                    db_lin = row[0]
+                                                    db_strain = row[1] if len(row) > 1 else None
+                                                    lineage_cache[name] = (db_lin, db_strain)
+                                                    logging.debug(f"✅ Individual lineage lookup (fallback): '{name}' → '{db_lin}'")
+                                            except Exception as fallback_err:
+                                                logging.debug(f"Both lineage queries failed for '{name}': join={join_err}, fallback={fallback_err}")
                                     except Exception as lookup_err:
                                         logging.debug(f"Individual lineage lookup failed for '{name}': {lookup_err}")
                                 
@@ -8055,9 +8065,12 @@ def get_available_tags():
                                     tag['canonical_lineage'] = db_lin_clean
                                     tag['Lineage'] = db_lin_clean
                                     tag['lineage'] = db_lin_clean  # Also set lowercase version
+                                    # Always count as updated to ensure frontend gets fresh data
+                                    updated += 1
                                     if old_lineage != db_lin_clean:
-                                        updated += 1
                                         logging.info(f"🔄 Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
+                                    else:
+                                        logging.debug(f"✅ Lineage confirmed: '{name}' = '{db_lin_clean}' (already correct)")
                                 else:
                                     # Even if no DB lineage found, ensure fields are consistent
                                     existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
@@ -8065,9 +8078,9 @@ def get_available_tags():
                                         tag['currentLineage'] = existing_lineage
                                         tag['canonical_lineage'] = existing_lineage
                                         tag['lineage'] = existing_lineage
+                                # Handle strain (only if we have db_lin)
                                 clean_strain = str(db_strain).strip() if db_strain else ''
-                                if db_lin:
-                                    db_lin_clean = str(db_lin).strip().upper()
+                                if db_lin and db_lin_clean:
                                     if db_lin_clean in ('CBD', 'CBD_BLEND'):
                                         clean_strain = 'CBD Blend'
                                 if not clean_strain:
@@ -8082,7 +8095,7 @@ def get_available_tags():
                         if updated:
                             # Refresh cache with aligned data
                             cache.set(cache_key, make_json_safe(cached_tags), timeout=300)
-                            logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides to cached tags")
+                            logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage updates to cached tags")
                         else:
                             logging.info(f"✅ Lineage alignment completed - all cached tags already match database lineage")
                 except Exception as e:
