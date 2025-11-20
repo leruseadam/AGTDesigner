@@ -8051,17 +8051,21 @@ def get_available_tags():
                             cache.set(cache_key, make_json_safe(cached_tags), timeout=300)
                             logging.info(f"🔄 UI LINEAGE ALIGNMENT (cache): Applied {updated} lineage overrides to cached tags")
                         else:
-                            logging.debug(f"✅ Lineage alignment completed - all tags already have database lineage")
+                            logging.info(f"✅ Lineage alignment completed - all cached tags already match database lineage")
                 except Exception as e:
                     logging.warning(f"UI lineage alignment (cache) skipped due to error: {e}")
+                    # Even on error, return cached tags (better than nothing)
+                    updated = 0
 
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms)")
+                logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms, {updated} tags updated from database)")
                 safe_cached_tags = make_json_safe(cached_tags)
                 response_payload = {
                     'tags': safe_cached_tags,  # Frontend expects 'tags', not 'available_tags'
                     'total_count': len(safe_cached_tags),
-                    'source': 'cache+db-lineage' if lineage_alignment_needed else 'cache'
+                    'source': 'cache+db-lineage' if lineage_alignment_needed else 'cache',
+                    'lineage_aligned': updated > 0,  # Indicate if lineage was aligned
+                    'lineage_updates': updated  # Number of tags with updated lineage
                 }
                 # CRITICAL FIX: Clear lineage_update_timestamp only after successful lineage alignment
                 # This ensures subsequent requests still get fresh lineage until cache is rebuilt
@@ -8286,10 +8290,13 @@ def get_available_tags():
                         except Exception as db_conn_err:
                             logging.warning(f"Database connection failed during lineage alignment: {db_conn_err}")
                             # Continue without lineage alignment - Excel tags are still valid
-            except Exception as e:
-                logging.warning(f"UI lineage alignment skipped due to error: {e}")
-                # CRITICAL: Don't fail the entire request - Excel tags are still valid
-                # Continue to return Excel tags even if lineage alignment fails
+                        except RuntimeError:
+                            # Skip alignment if products table doesn't exist
+                            pass
+                except Exception as e:
+                    logging.warning(f"UI lineage alignment skipped due to error: {e}")
+                    # CRITICAL: Don't fail the entire request - Excel tags are still valid
+                    # Continue to return Excel tags even if lineage alignment fails
 
             safe_excel_tags = make_json_safe(all_tags)
             # Cache the results for faster subsequent requests (unless nocache requested)
