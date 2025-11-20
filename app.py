@@ -7735,6 +7735,23 @@ def process_database_product_for_api(db_product):
             processed_product['ProductName'] = product_name_value
         if not processed_product.get('displayName'):
             processed_product['displayName'] = product_name_value
+    
+    # CRITICAL FIX: Ensure lineage from database is preserved and normalized for UI
+    # The UI reads from multiple fields: canonical_lineage, currentLineage, Lineage, lineage
+    db_lineage = (
+        processed_product.get('Lineage') or
+        processed_product.get('lineage') or
+        processed_product.get('canonical_lineage') or
+        processed_product.get('currentLineage') or
+        ''
+    )
+    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan', 'NULL']:
+        lineage_value = str(db_lineage).strip().upper()
+        # Set all lineage field variations for UI compatibility
+        processed_product['Lineage'] = lineage_value
+        processed_product['lineage'] = lineage_value
+        processed_product['canonical_lineage'] = lineage_value
+        processed_product['currentLineage'] = lineage_value
 
     return processed_product
 @app.route('/api/available-tags', methods=['GET'])
