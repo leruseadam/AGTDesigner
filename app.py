@@ -7833,6 +7833,8 @@ def get_available_tags():
         if not session_file_path or not file_exists:
             logging.info("⚠️ No uploaded file in session - skipping cache, will fetch fresh data")
             cached_tags = None
+            # Still define cache_key for later use
+            cache_key = get_session_cache_key('available_tags')
         else:
             cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
             cached_tags = cache.get(cache_key) if not prefer_db else None
@@ -8261,6 +8263,7 @@ def get_available_tags():
                                     
                                     db_lin, db_strain = lineage_cache.get(name, (None, None))
                                     
+                                    db_lin_clean = None
                                     if db_lin:
                                         db_lin_clean = str(db_lin).strip().upper()
                                         # Always expose DB lineage on stable fields the UI can prefer
@@ -8270,7 +8273,7 @@ def get_available_tags():
                                             tag['Lineage'] = db_lin_clean
                                             updated += 1
                                     clean_strain = str(db_strain).strip() if db_strain else ''
-                                    if db_lin:
+                                    if db_lin and db_lin_clean:
                                         if db_lin_clean in ('CBD', 'CBD_BLEND'):
                                             clean_strain = 'CBD Blend'
                                     if not clean_strain:
@@ -8301,6 +8304,13 @@ def get_available_tags():
             safe_excel_tags = make_json_safe(all_tags)
             # Cache the results for faster subsequent requests (unless nocache requested)
             if not nocache:
+                # CRITICAL FIX: Ensure cache_key is defined before using it
+                if 'cache_key' not in locals():
+                    session_file_path = session.get('file_path', '')
+                    if session_file_path:
+                        cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                    else:
+                        cache_key = get_session_cache_key('available_tags')
                 cache.set(cache_key, safe_excel_tags, timeout=300)  # Cache for 5 minutes
             try:
                 current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
@@ -8636,6 +8646,13 @@ def get_available_tags():
         safe_all_tags = make_json_safe(all_tags)
         # Cache the results for faster subsequent requests (unless nocache requested)
         if safe_all_tags and not nocache:
+            # CRITICAL FIX: Ensure cache_key is defined before using it (when prefer_db path is taken)
+            if 'cache_key' not in locals():
+                session_file_path = session.get('file_path', '')
+                if session_file_path:
+                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                else:
+                    cache_key = get_session_cache_key('available_tags')
             cache.set(cache_key, safe_all_tags, timeout=300)  # Cache for 5 minutes
             logging.info(f"✅ Cached {len(safe_all_tags)} tags for future requests")
         try:
