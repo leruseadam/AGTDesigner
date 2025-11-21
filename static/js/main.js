@@ -5617,11 +5617,18 @@ const TagManager = {
             return;
         }
         
+        // CRITICAL: Don't skip update - we need to update dropdowns to show database lineage
+        // Even if tag count/names match, lineage values might have changed from database alignment
+        // Always re-render to ensure dropdowns show correct database lineage
+        const forceUpdate = this._forceSelectedTagsUpdate || false;
+        this._forceSelectedTagsUpdate = false; // Reset flag
+        
         // Check if the current content matches what we're about to render
         const currentTagCount = container.querySelectorAll('.tag-item').length;
-        if (currentTagCount === tags.length && tags.length > 0) {
+        if (!forceUpdate && currentTagCount === tags.length && tags.length > 0) {
             // Quick check: if we have the same number of tags and they're not empty, 
             // we might not need to update (this is a heuristic to avoid unnecessary updates)
+            // BUT: Skip this check if we're forcing update for database lineage
             const currentTagNames = new Set(Array.from(container.querySelectorAll('.tag-item')).map(el => 
                 el.querySelector('.tag-checkbox')?.value || el.getAttribute('data-tag-name')
             ).filter(Boolean));
@@ -6969,14 +6976,39 @@ const TagManager = {
             // This ensures lineage dropdowns reflect the database values from the normalized tags
             this._updateAvailableTags(tags);
             
-            // If lineage was aligned, also update selected tags to ensure their lineage dropdowns match
-            if (lineageWasAligned && this.state.persistentSelectedTags.length > 0) {
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
+            // CRITICAL: ALWAYS update selected tags after loading tags to ensure they have database lineage
+            // This is essential because selected tags dropdowns need to show database lineage, not Excel lineage
+            if (this.state.persistentSelectedTags.length > 0) {
+                // Map selected tag names to updated tag objects with database lineage
+                const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
+                    const updatedTag = tags.find(t => t['Product Name*'] === name);
+                    if (updatedTag) {
+                        // CRITICAL: Ensure this tag has database lineage - prioritize canonical_lineage/currentLineage
+                        const dbLineage = updatedTag.canonical_lineage || updatedTag.currentLineage;
+                        if (dbLineage) {
+                            // Force all lineage fields to database value (this overwrites Excel Lineage)
+                            updatedTag.canonical_lineage = dbLineage;
+                            updatedTag.currentLineage = dbLineage;
+                            updatedTag.Lineage = dbLineage;  // Overwrite Excel Lineage with database value
+                            updatedTag.lineage = dbLineage;
+                            updatedTag['Lineage*'] = dbLineage;
+                            console.log(`🔄 Selected tag "${name}" updated with database lineage: ${dbLineage} (was: ${updatedTag.Lineage})`);
+                        } else {
+                            console.warn(`⚠️ Selected tag "${name}" has no database lineage (canonical_lineage or currentLineage)`);
+                        }
+                        return updatedTag;
+                    }
+                    console.warn(`⚠️ Selected tag "${name}" not found in updated available tags`);
+                    return null;
+                }).filter(Boolean);
+                
                 if (selectedTagObjects.length > 0) {
-                    console.log(`✅ Updating ${selectedTagObjects.length} selected tags with database lineage`);
+                    console.log(`✅ Updating ${selectedTagObjects.length} selected tags with database lineage from available tags`);
+                    // Force update to ensure dropdowns are re-rendered with database lineage
+                    this._forceSelectedTagsUpdate = true;
                     this.updateSelectedTags(selectedTagObjects);
+                } else {
+                    console.warn(`⚠️ No matching selected tags found in updated available tags`);
                 }
             }
             
@@ -9867,19 +9899,45 @@ const TagManager = {
                         verboseLog('[UPLOAD DEBUG] Verifying tags have database lineage...');
                         // Tags should already be updated by fetchAndUpdateAvailableTags, but ensure lineage is correct
                         // Re-render to ensure dropdowns show database lineage (not Excel lineage)
-                        const tagsWithDbLineage = this.state.tags.map(tag => this._normalizeLineageFields(tag));
+                        const tagsWithDbLineage = this.state.tags.map(tag => {
+                            const normalized = this._normalizeLineageFields(tag);
+                            // CRITICAL: Ensure database lineage is set on all tags
+                            const dbLineage = normalized.canonical_lineage || normalized.currentLineage;
+                            if (dbLineage) {
+                                // Force all lineage fields to database value
+                                normalized.canonical_lineage = dbLineage;
+                                normalized.currentLineage = dbLineage;
+                                normalized.Lineage = dbLineage;
+                                normalized.lineage = dbLineage;
+                            }
+                            return normalized;
+                        });
                         this.state.tags = tagsWithDbLineage;
                         this.state.originalTags = tagsWithDbLineage;
                         verboseLog('[UPLOAD DEBUG] Re-rendering tags with database lineage...');
                         this._updateAvailableTags(tagsWithDbLineage);
                         
-                        // Also update selected tags if any are selected
+                        // CRITICAL: Also update selected tags if any are selected - force update with database lineage
                         if (this.state.persistentSelectedTags.length > 0) {
-                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                tagsWithDbLineage.find(t => t['Product Name*'] === name)
-                            ).filter(Boolean);
+                            const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
+                                const tag = tagsWithDbLineage.find(t => t['Product Name*'] === name);
+                                if (tag) {
+                                    // Ensure database lineage is set
+                                    const dbLineage = tag.canonical_lineage || tag.currentLineage;
+                                    if (dbLineage) {
+                                        tag.canonical_lineage = dbLineage;
+                                        tag.currentLineage = dbLineage;
+                                        tag.Lineage = dbLineage;
+                                        tag.lineage = dbLineage;
+                                        verboseLog(`[UPLOAD DEBUG] Selected tag "${name}" has database lineage: ${dbLineage}`);
+                                    }
+                                }
+                                return tag;
+                            }).filter(Boolean);
                             if (selectedTagObjects.length > 0) {
                                 verboseLog(`[UPLOAD DEBUG] Updating ${selectedTagObjects.length} selected tags with database lineage`);
+                                // Force update to ensure dropdowns are re-rendered
+                                this._forceSelectedTagsUpdate = true;
                                 this.updateSelectedTags(selectedTagObjects);
                             }
                         }
