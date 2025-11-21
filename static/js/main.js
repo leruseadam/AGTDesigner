@@ -7917,7 +7917,40 @@ const TagManager = {
             if (response.ok) {
                 const data = await response.json();
                 verboseLog('Initial data response:', data);
-                if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
+                // CRITICAL: Check data_loaded flag first - if false, show upload prompt even if success
+                if (data.success && data.data_loaded === false) {
+                    verboseLog('No data loaded (data_loaded=false), showing upload prompt');
+                    // Complete splash loading when no data
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                    clearTimeout(splashSafetyTimeout);
+                    
+                    // Hide action splash when no data
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    
+                    // Show upload prompt in Current Inventory when no file/data
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    if (availableTagsContainer) {
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-5">
+                                <div class="upload-prompt">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <h5 class="text-muted">No product data loaded</h5>
+                                    <p class="text-muted">Upload an Excel file to get started</p>
+                                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                        <i class="fas fa-upload me-2"></i>Upload Excel File
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    this.initializeEmptyState();
+                    this._checkingExistingData = false;
+                    return;
+                } else if (data.success && data.available_tags && Array.isArray(data.available_tags) && data.available_tags.length > 0) {
                     verboseLog(`Found ${data.available_tags.length} existing tags, loading data...`);
 
                     // Update splash progress for data loading
