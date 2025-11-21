@@ -2824,40 +2824,40 @@ def upload_file():
                         success = processor.load_file(file_path)
 
                         if success:
-                        row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                        logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
+                            row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                            logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
 
-                        # Store in database
-                        try:
-                            # Use the selected_store from outer scope
-                            store_name = selected_store
-                            product_db = get_product_database(store_name)
+                            # Store in database
+                            try:
+                                # Use the selected_store from outer scope
+                                store_name = selected_store
+                                product_db = get_product_database(store_name)
 
-                            if product_db and hasattr(product_db, 'store_excel_data'):
-                                logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
-                                result = product_db.store_excel_data(processor.df, file_path)
-                                logging.info(f"[BACKGROUND] Database storage result: {result}")
-                        except Exception as db_error:
-                            logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
+                                if product_db and hasattr(product_db, 'store_excel_data'):
+                                    logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
+                                    result = product_db.store_excel_data(processor.df, file_path)
+                                    logging.info(f"[BACKGROUND] Database storage result: {result}")
+                            except Exception as db_error:
+                                logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
 
-                        logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
+                            logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
 
-                        # CRITICAL: Clear ALL caches to force complete refresh
-                        try:
-                            # Clear file-specific cache (uses file path in key)
-                            # Note: In background thread, we can't access session directly, use file_path from closure
-                            cache_keys_to_clear = [
-                                f'available_tags_{file_path}',
-                                'selected_tags',
-                                'vendor_tags',
-                                'initial_data'
-                            ]
-                            for key_base in cache_keys_to_clear:
-                                cache_key = get_session_cache_key(key_base)
-                                cache.delete(cache_key)
-                                logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
-                        except Exception as cache_err:
-                            logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
+                            # CRITICAL: Clear ALL caches to force complete refresh
+                            try:
+                                # Clear file-specific cache (uses file path in key)
+                                # Note: In background thread, we can't access session directly, use file_path from closure
+                                cache_keys_to_clear = [
+                                    f'available_tags_{file_path}',
+                                    'selected_tags',
+                                    'vendor_tags',
+                                    'initial_data'
+                                ]
+                                for key_base in cache_keys_to_clear:
+                                    cache_key = get_session_cache_key(key_base)
+                                    cache.delete(cache_key)
+                                    logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
+                            except Exception as cache_err:
+                                logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
                             # Already marked as ready above, so frontend doesn't wait
                             logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
