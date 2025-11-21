@@ -8380,9 +8380,9 @@ def get_available_tags():
                                     logging.debug(f"UI lineage alignment error for a tag: {_loop_err}")
                             if updated:
                                 logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags")
-                        except Exception as db_conn_err:
-                            logging.warning(f"Database connection failed during lineage alignment: {db_conn_err}")
-                            # Continue without lineage alignment - Excel tags are still valid
+                    except Exception as db_conn_err:
+                        logging.warning(f"Database connection failed during lineage alignment: {db_conn_err}")
+                        # Continue without lineage alignment - Excel tags are still valid
                     except RuntimeError:
                         # Skip alignment if products table doesn't exist
                         pass
