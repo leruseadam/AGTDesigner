@@ -8110,18 +8110,16 @@ def get_available_tags():
                                     # Always count as updated to ensure frontend gets fresh data
                                     updated += 1
                                     if old_lineage != db_lin_clean:
-                                        logging.info(f"🔄 APP.PY LINEAGE ALIGNMENT: '{name}' - Excel: '{old_lineage}' → DB: '{db_lin_clean}'")
+                                        logging.info(f"🔄 Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
                                     else:
-                                        logging.debug(f"✅ APP.PY LINEAGE ALIGNMENT: '{name}' = '{db_lin_clean}' (already correct)")
+                                        logging.debug(f"✅ Lineage confirmed: '{name}' = '{db_lin_clean}' (already correct)")
                                 else:
-                                    # Database has no lineage - keep Excel lineage but ensure fields are consistent
+                                    # Even if no DB lineage found, ensure fields are consistent
                                     existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
                                     if existing_lineage:
-                                        # Keep Excel lineage and ensure all fields are consistent
                                         tag['currentLineage'] = existing_lineage
                                         tag['canonical_lineage'] = existing_lineage
                                         tag['lineage'] = existing_lineage
-                                        logging.debug(f"⚠️ APP.PY LINEAGE ALIGNMENT: '{name}' - DB has no lineage, keeping Excel: '{existing_lineage}'")
                                 # Handle strain (only if we have db_lin)
                                 clean_strain = str(db_strain).strip() if db_strain else ''
                                 if db_lin and db_lin_clean:
@@ -8312,42 +8310,14 @@ def get_available_tags():
                                         
                                         # Match by product name first (exact match)
                                         if result_product_name and result_product_name in name_to_tag:
-                                            # CRITICAL: Always store database lineage, even if None (means DB has no lineage)
-                                            # Use a sentinel value to distinguish "not found" from "found but empty"
-                                            lineage_cache[result_product_name] = (db_lin, db_strain)
+                                            if result_product_name not in lineage_cache:
+                                                lineage_cache[result_product_name] = (db_lin, db_strain)
                                         # Also match by normalized name
                                         if result_normalized:
                                             for name, normalized in zip(product_names, normalized_names):
                                                 if normalized == result_normalized and name not in lineage_cache:
-                                                    # CRITICAL: Store database lineage for normalized match too
                                                     lineage_cache[name] = (db_lin, db_strain)
                                                     break
-                                    
-                                    # CRITICAL: For any tags not found in batch query, try individual lookup
-                                    # This ensures we get database lineage for ALL products, not just those in batch
-                                    missing_names = [name for name in product_names if name not in lineage_cache]
-                                    if missing_names:
-                                        logging.info(f"🔍 Individual lookup for {len(missing_names)} products not in batch results")
-                                        for name in missing_names[:50]:  # Limit to prevent timeout
-                                            try:
-                                                normalized = normalized_names[product_names.index(name)]
-                                                try:
-                                                    cur.execute(lineage_query_join_by_name, (name, normalized))
-                                                    row = cur.fetchone()
-                                                except Exception:
-                                                    cur.execute(lineage_query_fallback, (name, normalized))
-                                                    row = cur.fetchone()
-                                                if row:
-                                                    db_lin = row[0]
-                                                    db_strain = row[1] if len(row) > 1 else None
-                                                    lineage_cache[name] = (db_lin, db_strain)
-                                                    logging.debug(f"✅ Individual lookup found: '{name}' = '{db_lin}'")
-                                                else:
-                                                    # Product not in database - mark as not found
-                                                    lineage_cache[name] = (None, None)
-                                            except Exception as ind_err:
-                                                logging.debug(f"Individual lookup error for '{name}': {ind_err}")
-                                                lineage_cache[name] = (None, None)
                                     
                                 except Exception as batch_err:
                                     # If batch query fails, fall back to individual queries (but log the error)
@@ -8379,13 +8349,11 @@ def get_available_tags():
                                     
                                     db_lin, db_strain = lineage_cache.get(name, (None, None))
                                     
-                                    # CRITICAL: ALWAYS update lineage from database if database has a value
-                                    # Database lineage is the source of truth and MUST override Excel
-                                    # Only update if database has a non-empty lineage value
-                                    if db_lin is not None and str(db_lin).strip():
+                                    db_lin_clean = None
+                                    if db_lin:
                                         db_lin_clean = str(db_lin).strip().upper()
-                                        # CRITICAL: Always update ALL lineage fields to database value
-                                        # This ensures frontend gets fresh database values, not Excel values
+                                        # CRITICAL: Always update ALL lineage fields, even if they match
+                                        # This ensures frontend gets fresh values even if cached had old lineage
                                         old_lineage = str(tag.get('Lineage','')).strip().upper()
                                         tag['currentLineage'] = db_lin_clean
                                         tag['canonical_lineage'] = db_lin_clean
@@ -8393,19 +8361,7 @@ def get_available_tags():
                                         tag['lineage'] = db_lin_clean  # Also set lowercase version
                                         if old_lineage != db_lin_clean:
                                             updated += 1
-                                            logging.info(f"🔄 FORCED LINEAGE UPDATE: '{name}' - Excel: '{old_lineage}' → DB: '{db_lin_clean}'")
-                                        else:
-                                            # Still log that we're forcing database value (even if same)
-                                            logging.debug(f"✅ Database lineage confirmed: '{name}' = '{db_lin_clean}'")
-                                        
-                                        # CRITICAL DEBUG: Verify all lineage fields are set correctly
-                                        logging.debug(f"🔍 LINEAGE FIELDS SET: '{name}' - Lineage={tag.get('Lineage')}, lineage={tag.get('lineage')}, currentLineage={tag.get('currentLineage')}, canonical_lineage={tag.get('canonical_lineage')}")
-                                    elif db_lin is not None:
-                                        # Database has product but no lineage - log but don't override Excel
-                                        logging.debug(f"⚠️ Database has no lineage for '{name}', keeping Excel lineage")
-                                    else:
-                                        # Product not found in database - log for debugging
-                                        logging.debug(f"⚠️ Product '{name}' not found in database lineage cache")
+                                            logging.debug(f"Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
                                     clean_strain = str(db_strain).strip() if db_strain else ''
                                     if db_lin and db_lin_clean:
                                         if db_lin_clean in ('CBD', 'CBD_BLEND'):
@@ -8424,8 +8380,6 @@ def get_available_tags():
                                     logging.debug(f"UI lineage alignment error for a tag: {_loop_err}")
                             if updated:
                                 logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags")
-                            else:
-                                logging.warning(f"⚠️ UI LINEAGE ALIGNMENT: No lineage updates applied (checked {len(all_tags)} tags, found {len(lineage_cache)} in database)")
                     except Exception as db_conn_err:
                         logging.warning(f"Database connection failed during lineage alignment: {db_conn_err}")
                         # Continue without lineage alignment - Excel tags are still valid
@@ -8548,18 +8502,15 @@ def get_available_tags():
                                         pref_lin = product_dict.pop('preferred_lineage', None)
                                         if pref_lin:
                                             db_lin_clean = str(pref_lin).strip().upper()
-                                            # CRITICAL: Set ALL lineage fields to database value (frontend checks all of them)
                                             product_dict['currentLineage'] = db_lin_clean
                                             product_dict['canonical_lineage'] = db_lin_clean
                                             product_dict['Lineage'] = db_lin_clean
-                                            product_dict['lineage'] = db_lin_clean  # Also set lowercase version
                                         else:
                                             # Fallback to product's Lineage if no preferred_lineage
                                             lin = str(product_dict.get('Lineage', '')).strip().upper()
                                             if lin:
                                                 product_dict['currentLineage'] = lin
                                                 product_dict['canonical_lineage'] = lin
-                                                product_dict['lineage'] = lin  # Also set lowercase version
                                         # Convert to the format expected by the frontend
                                         database_tags.append(product_dict)
                                     
@@ -8652,18 +8603,16 @@ def get_available_tags():
                                     preferred_lin = product_dict.pop('preferred_lineage', None)
                                     if preferred_lin:
                                         db_lin_clean = str(preferred_lin).strip().upper()
-                                        # CRITICAL: Set ALL lineage fields to database value (frontend checks all of them)
+                                        # Set all lineage fields to the same DB value (consistent pipeline)
                                         product_dict['currentLineage'] = db_lin_clean
                                         product_dict['canonical_lineage'] = db_lin_clean
                                         product_dict['Lineage'] = db_lin_clean
-                                        product_dict['lineage'] = db_lin_clean  # Also set lowercase version
                                     else:
                                         # Fallback to product's Lineage if no preferred_lineage
                                         lin = str(product_dict.get('Lineage', '')).strip().upper()
                                         if lin:
                                             product_dict['currentLineage'] = lin
                                             product_dict['canonical_lineage'] = lin
-                                            product_dict['lineage'] = lin  # Also set lowercase version
                                     
                                     # Convert to the format expected by the frontend
                                     database_tags_prealloc[i] = product_dict
@@ -8728,10 +8677,23 @@ def get_available_tags():
                 try:
                     # Process database product to ensure it has proper weight formatting
                     processed_db_tag = process_database_product_for_api(db_tag)
+                    
+                    # CRITICAL FIX: Ensure database lineage fields are preserved after processing
+                    db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
+                    if db_lineage:
+                        db_lineage_clean = str(db_lineage).strip().upper()
+                        processed_db_tag['currentLineage'] = db_tag.get('currentLineage') or db_lineage_clean
+                        processed_db_tag['canonical_lineage'] = db_tag.get('canonical_lineage') or db_lineage_clean
+                        processed_db_tag['Lineage'] = db_lineage_clean
+                        processed_db_tag['lineage'] = db_lineage_clean.lower()
+                    
                     processed_tags[i] = processed_db_tag
                 except Exception as process_error:
                     logging.debug(f"Error processing database tag {db_tag.get('Product Name*', 'unknown')}: {process_error}")
-                    # Still add the tag even if processing fails
+                    # Still add the tag even if processing fails, but preserve lineage
+                    if db_tag.get('currentLineage') or db_tag.get('canonical_lineage'):
+                        db_tag['currentLineage'] = db_tag.get('currentLineage') or db_tag.get('Lineage', 'MIXED')
+                        db_tag['canonical_lineage'] = db_tag.get('canonical_lineage') or db_tag.get('Lineage', 'MIXED')
                     processed_tags[i] = db_tag
             
             # Filter and extend
@@ -8755,13 +8717,52 @@ def get_available_tags():
             logging.info(f"Current all_tags has {len(all_tags)} items before adding database products")
             
             # Add database products that aren't duplicates
+            # CRITICAL FIX: Also update Excel tags with database lineage when database product exists
             added_db_count = 0
             skipped_db_count = 0
+            updated_excel_count = 0
+            
+            # Create a lookup map of database products by name for lineage updates
+            db_lineage_lookup = {}
+            for db_tag in database_tags:
+                product_name = db_tag.get('Product Name*', '')
+                if product_name:
+                    # Store database lineage for this product
+                    db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
+                    if db_lineage:
+                        db_lineage_lookup[product_name] = {
+                            'currentLineage': db_tag.get('currentLineage'),
+                            'canonical_lineage': db_tag.get('canonical_lineage'),
+                            'Lineage': str(db_lineage).strip().upper()
+                        }
+            
+            # CRITICAL FIX: Update Excel tags with database lineage if database product exists
+            for excel_tag in all_tags:
+                product_name = excel_tag.get('Product Name*', '')
+                if product_name and product_name in db_lineage_lookup:
+                    db_lineage_data = db_lineage_lookup[product_name]
+                    # Update Excel tag with database lineage (database is source of truth)
+                    excel_tag['currentLineage'] = db_lineage_data.get('currentLineage') or db_lineage_data['Lineage']
+                    excel_tag['canonical_lineage'] = db_lineage_data.get('canonical_lineage') or db_lineage_data['Lineage']
+                    excel_tag['Lineage'] = db_lineage_data['Lineage']
+                    excel_tag['lineage'] = db_lineage_data['Lineage'].lower()
+                    updated_excel_count += 1
+                    logging.debug(f"Updated Excel tag '{product_name}' with database lineage: {db_lineage_data['Lineage']}")
+            
             for db_tag in database_tags:
                 product_name = db_tag.get('Product Name*', '')
                 if product_name and product_name not in existing_product_names:
                     # Process database product to ensure it has proper weight formatting
                     processed_db_tag = process_database_product_for_api(db_tag)
+                    
+                    # CRITICAL FIX: Ensure database lineage fields are preserved after processing
+                    db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
+                    if db_lineage:
+                        db_lineage_clean = str(db_lineage).strip().upper()
+                        processed_db_tag['currentLineage'] = db_tag.get('currentLineage') or db_lineage_clean
+                        processed_db_tag['canonical_lineage'] = db_tag.get('canonical_lineage') or db_lineage_clean
+                        processed_db_tag['Lineage'] = db_lineage_clean
+                        processed_db_tag['lineage'] = db_lineage_clean.lower()
                     
                     # CRITICAL FIX: Debug weight fields for concentrate products
                     if 'concentrate' in str(processed_db_tag.get('Product Type*', '')).lower() or 'wax' in str(processed_db_tag.get('Product Name*', '')).lower():
@@ -8773,6 +8774,9 @@ def get_available_tags():
                     existing_product_names.add(product_name)
                 else:
                     skipped_db_count += 1
+            
+            if updated_excel_count > 0:
+                logging.info(f"Updated {updated_excel_count} Excel tags with database lineage")
             
             logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
             logging.info(f"Combined total: {len(all_tags)} products ({excel_count} from Excel, {len(database_tags)} from database, {added_db_count} unique DB products added)")
@@ -8808,14 +8812,7 @@ def get_available_tags():
             ]
             logging.info(f"LINEAGE UI DEBUG (final): samples={dbg}")
             aligned_count = sum(1 for t in safe_all_tags if t.get('currentLineage'))
-            canonical_count = sum(1 for t in safe_all_tags if t.get('canonical_lineage'))
-            logging.info(f"LINEAGE UI DEBUG (final): aligned_count={aligned_count}/{len(safe_all_tags)}, canonical_count={canonical_count}/{len(safe_all_tags)}")
-            
-            # CRITICAL: Log a sample to verify fields are set
-            if safe_all_tags:
-                sample_final = safe_all_tags[0]
-                sample_name_final = sample_final.get('Product Name*', 'unknown')
-                logging.info(f"🔍 FINAL RESPONSE SAMPLE: '{sample_name_final}' - Lineage={sample_final.get('Lineage')}, currentLineage={sample_final.get('currentLineage')}, canonical_lineage={sample_final.get('canonical_lineage')}, lineage={sample_final.get('lineage')}")
+            logging.info(f"LINEAGE UI DEBUG (final): aligned_count={aligned_count}/{len(safe_all_tags)}")
         except Exception:
             pass
 

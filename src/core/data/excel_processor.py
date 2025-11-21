@@ -3611,8 +3611,6 @@ class ExcelProcessor:
             
             # Enrich each tag with database values
             enriched_tags = []
-            enriched_count = 0
-            lineage_override_count = 0
             for tag in tags:
                 product_name = tag.get('Product Name*', tag.get('ProductName', ''))
                 if not product_name:
@@ -3623,30 +3621,14 @@ class ExcelProcessor:
                 db_record = db_lookup.get(normalized_name)
                 
                 if db_record:
-                    enriched_count += 1
-                    # CRITICAL: Update lineage from database if database has a value
-                    # Database lineage is the source of truth, but keep Excel lineage if DB is empty
-                    db_lineage = db_record.get('Lineage') or db_record.get('currentLineage') or db_record.get('canonical_lineage') or ''
-                    excel_lineage = tag.get('Lineage') or tag.get('currentLineage') or tag.get('canonical_lineage') or ''
-                    
-                    # Only override if database has a non-empty lineage value
-                    if db_lineage and str(db_lineage).strip():
-                        db_lineage_clean = str(db_lineage).strip().upper()
-                        # Set all lineage fields to database value - database is source of truth
-                        tag['Lineage'] = db_lineage_clean
-                        tag['lineage'] = db_lineage_clean
-                        tag['canonical_lineage'] = db_lineage_clean
-                        tag['currentLineage'] = db_lineage_clean
-                        
-                        lineage_override_count += 1
-                        excel_lin_clean = str(excel_lineage).strip().upper() if excel_lineage else ''
-                        if excel_lin_clean != db_lineage_clean:
-                            logger.info(f"🔄 ENRICHMENT: '{product_name}' - Excel: '{excel_lin_clean}' → DB: '{db_lineage_clean}'")
-                        else:
-                            logger.debug(f"✅ ENRICHMENT: '{product_name}' = '{db_lineage_clean}' (already matches)")
-                    else:
-                        # Database has no lineage, keep Excel lineage
-                        logger.debug(f"📝 ENRICHMENT: '{product_name}' - DB has no lineage, keeping Excel: '{excel_lineage}'")
+                    # Update tag with database values (database takes precedence)
+                    # Only update fields that are commonly changed in database (lineage, DOH, etc.)
+                    if db_record.get('Lineage'):
+                        db_lineage = str(db_record.get('Lineage', '')).strip().upper()
+                        tag['Lineage'] = db_lineage
+                        tag['lineage'] = db_lineage
+                        tag['canonical_lineage'] = db_lineage
+                        tag['currentLineage'] = db_lineage
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
                         db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')
@@ -3667,7 +3649,7 @@ class ExcelProcessor:
                 
                 enriched_tags.append(tag)
             
-            logger.info(f"📊 ENRICHMENT SUMMARY: {enriched_count}/{len(tags)} tags matched in DB, {lineage_override_count} lineage overrides applied")
+            logger.debug(f"Enriched {len(enriched_tags)} tags with database values")
             return enriched_tags
             
         except Exception as e:
