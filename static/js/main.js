@@ -5901,6 +5901,40 @@ const TagManager = {
             this.state.selectedTags = new Set();
         }
         
+        // CRITICAL: Before rendering, normalize all tags to ensure they have database lineage
+        // This is essential because selected tags dropdowns must show database lineage, not Excel lineage
+        fullTags = fullTags.map(tag => {
+            // Normalize lineage fields to ensure database lineage is prioritized
+            const normalizedTag = this._normalizeLineageFields({...tag});
+            
+            // CRITICAL: If tag doesn't have database lineage, try to get it from available tags
+            if (!normalizedTag.canonical_lineage && !normalizedTag.currentLineage) {
+                const tagName = normalizedTag['Product Name*'];
+                const availableTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+                if (availableTag) {
+                    const dbLineage = availableTag.canonical_lineage || availableTag.currentLineage;
+                    if (dbLineage) {
+                        console.log(`🔄 Getting database lineage for selected tag "${tagName}" from available tags: ${dbLineage}`);
+                        normalizedTag.canonical_lineage = dbLineage;
+                        normalizedTag.currentLineage = dbLineage;
+                        normalizedTag.Lineage = dbLineage;  // Overwrite Excel Lineage with database value
+                        normalizedTag.lineage = dbLineage;
+                    }
+                }
+            }
+            
+            // Debug logging for selected tags with database lineage
+            if (normalizedTag.canonical_lineage || normalizedTag.currentLineage) {
+                const dbLineage = normalizedTag.canonical_lineage || normalizedTag.currentLineage;
+                const excelLineage = normalizedTag.Lineage;
+                if (excelLineage && excelLineage.toUpperCase() !== dbLineage.toUpperCase()) {
+                    console.log(`✅ Selected tag "${normalizedTag['Product Name*']}": database=${dbLineage}, excel=${excelLineage} → using database`);
+                }
+            }
+            
+            return normalizedTag;
+        });
+        
         // If no tags, just return
         if (!fullTags || fullTags.length === 0) {
             verboseLog('No tags to display in selected tags');
@@ -6375,6 +6409,30 @@ const TagManager = {
                             });
                             
                             orderedTags.forEach(tag => {
+                                // CRITICAL: Before creating tag element, ensure tag has database lineage
+                                // If database lineage is missing, try to get it from available tags
+                                if (!tag.canonical_lineage && !tag.currentLineage) {
+                                    const tagName = tag['Product Name*'];
+                                    const availableTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+                                    if (availableTag) {
+                                        const dbLineage = availableTag.canonical_lineage || availableTag.currentLineage;
+                                        if (dbLineage) {
+                                            console.log(`🔄 Selected tag "${tagName}" missing database lineage, using from available tags: ${dbLineage}`);
+                                            tag.canonical_lineage = dbLineage;
+                                            tag.currentLineage = dbLineage;
+                                            tag.Lineage = dbLineage;
+                                            tag.lineage = dbLineage;
+                                        }
+                                    }
+                                }
+                                
+                                // Debug: Log lineage values before rendering
+                                const dbLineage = tag.canonical_lineage || tag.currentLineage;
+                                const excelLineage = tag.Lineage;
+                                if (dbLineage && excelLineage && dbLineage.toUpperCase() !== excelLineage.toUpperCase()) {
+                                    console.log(`🎯 Rendering selected tag "${tag['Product Name*']}": db=${dbLineage}, excel=${excelLineage} → dropdown should show ${dbLineage}`);
+                                }
+                                
                                 const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
                                 const checkbox = tagElement.querySelector('.tag-checkbox');
                                 const shouldBeChecked = this.state.persistentSelectedTags.includes(tag['Product Name*']);
