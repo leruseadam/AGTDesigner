@@ -4479,8 +4479,13 @@ const TagManager = {
         
         // CRITICAL FIX: ALWAYS get database lineage from available tags (originalTags) - don't trust tag object passed in
         // The tag object might be stale, but available tags have been aligned with database
+        // Safety check: ensure state and originalTags exist before accessing
         const tagName = tag['Product Name*'];
-        const availableTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+        let availableTag = null;
+        
+        if (this.state && this.state.originalTags && Array.isArray(this.state.originalTags)) {
+            availableTag = this.state.originalTags.find(t => t && t['Product Name*'] === tagName);
+        }
         
         if (availableTag) {
             // Use database lineage from available tag (which has been aligned with database)
@@ -4507,17 +4512,18 @@ const TagManager = {
                 }
             }
         } else {
-            // Tag not found in available tags - log warning
-            if (isForSelectedTags) {
-                console.warn(`⚠️ Tag "${tagName}" not found in available tags - cannot get database lineage, using: ${normalizedLineage}`);
-            }
-            
+            // Tag not found in available tags (or state not ready) - use fallback
             // Fallback: check tag object itself for database lineage
             if (tag.canonical_lineage || tag.currentLineage) {
                 const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
                 if (dbLineage) {
                     normalizedLineage = dbLineage;
                 }
+            }
+            
+            // Log warning only if state exists (to avoid spam during initialization)
+            if (isForSelectedTags && this.state && this.state.originalTags) {
+                console.warn(`⚠️ Tag "${tagName}" not found in available tags - cannot get database lineage, using: ${normalizedLineage}`);
             }
         }
         
