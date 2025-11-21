@@ -6449,28 +6449,41 @@ const TagManager = {
                             });
                             
                             orderedTags.forEach(tag => {
-                                // CRITICAL: Before creating tag element, ensure tag has database lineage
-                                // If database lineage is missing, try to get it from available tags
-                                if (!tag.canonical_lineage && !tag.currentLineage) {
-                                    const tagName = tag['Product Name*'];
-                                    const availableTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
-                                    if (availableTag) {
-                                        const dbLineage = availableTag.canonical_lineage || availableTag.currentLineage;
-                                        if (dbLineage) {
-                                            console.log(`🔄 Selected tag "${tagName}" missing database lineage, using from available tags: ${dbLineage}`);
-                                            tag.canonical_lineage = dbLineage;
-                                            tag.currentLineage = dbLineage;
-                                            tag.Lineage = dbLineage;
-                                            tag.lineage = dbLineage;
+                                // CRITICAL: Before creating tag element, ALWAYS get fresh database lineage from available tags
+                                // Selected tags might be using stale tag objects, so we MUST get lineage from available tags which have database lineage
+                                const tagName = tag['Product Name*'];
+                                const availableTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+                                
+                                if (availableTag) {
+                                    // CRITICAL: Use database lineage from available tag (which has been aligned with database)
+                                    const dbLineage = availableTag.canonical_lineage || availableTag.currentLineage;
+                                    const excelLineage = tag.Lineage;
+                                    
+                                    if (dbLineage) {
+                                        // FORCE all lineage fields to database value - this overwrites Excel lineage
+                                        tag.canonical_lineage = dbLineage;
+                                        tag.currentLineage = dbLineage;
+                                        tag.Lineage = dbLineage;  // Overwrite Excel Lineage with database value
+                                        tag.lineage = dbLineage;
+                                        tag['Lineage*'] = dbLineage;
+                                        
+                                        if (excelLineage && excelLineage.toUpperCase() !== dbLineage.toUpperCase()) {
+                                            console.log(`✅ FORCED database lineage for selected tag "${tagName}": excel=${excelLineage} → db=${dbLineage}`);
                                         }
+                                    } else {
+                                        console.warn(`⚠️ Available tag "${tagName}" also has no database lineage`);
                                     }
+                                } else {
+                                    console.warn(`⚠️ Selected tag "${tagName}" not found in available tags - cannot get database lineage`);
                                 }
                                 
                                 // Debug: Log lineage values before rendering
-                                const dbLineage = tag.canonical_lineage || tag.currentLineage;
-                                const excelLineage = tag.Lineage;
-                                if (dbLineage && excelLineage && dbLineage.toUpperCase() !== excelLineage.toUpperCase()) {
-                                    console.log(`🎯 Rendering selected tag "${tag['Product Name*']}": db=${dbLineage}, excel=${excelLineage} → dropdown should show ${dbLineage}`);
+                                const finalDbLineage = tag.canonical_lineage || tag.currentLineage;
+                                const finalExcelLineage = tag.Lineage;
+                                if (finalDbLineage) {
+                                    console.log(`🎯 Rendering selected tag "${tagName}": db=${finalDbLineage}, dropdown will show=${finalDbLineage}`);
+                                } else {
+                                    console.warn(`⚠️ Selected tag "${tagName}" has no database lineage, using=${finalExcelLineage || 'MIXED'}`);
                                 }
                                 
                                 const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
