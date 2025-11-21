@@ -1865,10 +1865,13 @@ def simple_initialize_excel_processor():
             excel_processor.df = pd.DataFrame()
             logging.info("Initialized with empty DataFrame")
         
-        # Disable product database integration for faster startup
+        # CRITICAL FIX: Keep ProductDB integration enabled for lineage support
+        # Even if disabled for performance, we still need database lineage queries to work
+        # The integration being disabled only affects background processing, not direct queries
         if hasattr(excel_processor, 'enable_product_db_integration'):
-            excel_processor.enable_product_db_integration(False)
-            logging.info("Product database integration disabled for startup performance")
+            # Keep enabled for lineage support - direct database queries still work
+            excel_processor.enable_product_db_integration(True)
+            logging.info("Product database integration enabled for lineage support")
         
         logging.info("Simple initialization completed successfully")
         return True
@@ -2102,9 +2105,11 @@ def get_session_excel_processor():
             # This ensures we always have the most up-to-date data
             g.excel_processor = get_excel_processor()
             
-            # Disable product database integration for better performance
+            # CRITICAL FIX: Keep ProductDB integration enabled for lineage support
+            # Direct database queries (get_product_lineage) still work even if integration is disabled
+            # But enabling it ensures lineage data is available when needed
             if hasattr(g.excel_processor, 'enable_product_db_integration'):
-                g.excel_processor.enable_product_db_integration(False)
+                g.excel_processor.enable_product_db_integration(True)
             
             # Ensure processor store context matches the active store selection
             try:
@@ -8386,35 +8391,12 @@ def get_available_tags():
                     # CRITICAL: Don't fail the entire request - Excel tags are still valid
                     # Continue to return Excel tags even if lineage alignment fails
 
-            safe_excel_tags = make_json_safe(all_tags)
-            # Cache the results for faster subsequent requests (unless nocache requested)
-            if not nocache:
-                # CRITICAL FIX: Ensure cache_key is defined before using it
-                if 'cache_key' not in locals():
-                    session_file_path = session.get('file_path', '')
-                    if session_file_path:
-                        cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                    else:
-                        cache_key = get_session_cache_key('available_tags')
-                cache.set(cache_key, safe_excel_tags, timeout=300)  # Cache for 5 minutes
-            try:
-                current_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
-                save_available_tags_cache(_normalize_store_key(current_store_for_cache), safe_excel_tags)
-            except Exception as cache_error:
-                logging.warning(f"Unable to persist Excel tag cache: {cache_error}")
-            elapsed = (time.time() - start_time) * 1000
-            logging.info(f"✅ Available tags (Excel-aligned-to-DB) completed ({elapsed:.1f}ms)")
-            
-            response_payload = {
-                'tags': safe_excel_tags,
-                'total_count': len(safe_excel_tags),
-                'source': 'excel+db-lineage'
-            }
-            if force_full_refresh:
-                session['lineage_update_timestamp'] = 0
-            return jsonify(response_payload)
+            # CRITICAL FIX: Don't return early - continue to merge database products even when Excel has tags
+            # This ensures web version shows all database products, not just Excel products
+            excel_tags = all_tags.copy()  # Save Excel tags for merging
+            logging.info(f"✅ Excel tags processed ({len(excel_tags)}), now merging database products...")
         
-        # Database path (either because prefer_db is set, or Excel had no data)
+        # Database path (either because prefer_db is set, or Excel had no data, or we want to merge DB products)
         logging.info(f"🔄 Building available tags from database... (prefer_db={prefer_db}, all_tags_count={len(all_tags)})")
         
         # Store validation removed - using single database for all stores
@@ -8700,19 +8682,25 @@ def get_available_tags():
         else:
             # Normal mode: Use Excel processor products as primary (they have processed fields)
             # Add database products that aren't already in Excel processor
-            excel_product_names = {tag.get('Product Name*', '') for tag in excel_tags}
-            logging.info(f"Excel product names set has {len(excel_product_names)} unique names")
+            # CRITICAL FIX: all_tags may already contain Excel tags (from earlier processing)
+            # Get product names from current all_tags for deduplication
+            existing_product_names = {tag.get('Product Name*', '') for tag in all_tags if tag.get('Product Name*')}
             
-            # Add Excel processor products first
-            all_tags.extend(excel_tags)
-            logging.info(f"Added {len(excel_tags)} Excel products to all_tags")
+            # If we have excel_tags variable, use it for count, otherwise use all_tags
+            if 'excel_tags' in locals() and excel_tags:
+                excel_count = len(excel_tags)
+            else:
+                excel_count = len(all_tags)
+            
+            logging.info(f"Existing product names set has {len(existing_product_names)} unique names")
+            logging.info(f"Current all_tags has {len(all_tags)} items before adding database products")
             
             # Add database products that aren't duplicates
             added_db_count = 0
             skipped_db_count = 0
             for db_tag in database_tags:
                 product_name = db_tag.get('Product Name*', '')
-                if product_name and product_name not in excel_product_names:
+                if product_name and product_name not in existing_product_names:
                     # Process database product to ensure it has proper weight formatting
                     processed_db_tag = process_database_product_for_api(db_tag)
                     
@@ -8722,11 +8710,13 @@ def get_available_tags():
                     
                     all_tags.append(processed_db_tag)
                     added_db_count += 1
+                    # Add to existing names to prevent duplicates within database tags
+                    existing_product_names.add(product_name)
                 else:
                     skipped_db_count += 1
             
             logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
-            logging.info(f"Combined total: {len(all_tags)} products ({len(excel_tags)} from Excel, {len(database_tags)} from database)")
+            logging.info(f"Combined total: {len(all_tags)} products ({excel_count} from Excel, {len(database_tags)} from database, {added_db_count} unique DB products added)")
         
         safe_all_tags = make_json_safe(all_tags)
         # Cache the results for faster subsequent requests (unless nocache requested)
@@ -8908,7 +8898,13 @@ def get_selected_tags():
         selected_tag_objects = []
         
         # CRITICAL FIX: Get database lineage for all products
-        product_db = get_product_database(get_current_store_name())
+        # Ensure ProductDB integration is enabled for lineage support
+        store_name = get_current_store_name()
+        if hasattr(excel_processor, 'enable_product_db_integration'):
+            excel_processor.enable_product_db_integration(True)
+            logging.debug("Enabled ProductDB integration for lineage queries in selected-tags")
+        
+        product_db = get_product_database(store_name)
         
         for tag in selected_tags:
             if isinstance(tag, dict):
