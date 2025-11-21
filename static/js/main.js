@@ -5943,36 +5943,44 @@ const TagManager = {
         
         // CRITICAL: Before rendering, normalize all tags to ensure they have database lineage
         // This is essential because selected tags dropdowns must show database lineage, not Excel lineage
+        // CRITICAL: Also refresh from available tags to ensure we have the latest database lineage
         fullTags = fullTags.map(tag => {
-            // Normalize lineage fields to ensure database lineage is prioritized
-            const normalizedTag = this._normalizeLineageFields({...tag});
+            const tagName = tag['Product Name*'];
             
-            // CRITICAL: If tag doesn't have database lineage, try to get it from available tags
-            if (!normalizedTag.canonical_lineage && !normalizedTag.currentLineage) {
-                const tagName = normalizedTag['Product Name*'];
-                const availableTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
-                if (availableTag) {
-                    const dbLineage = availableTag.canonical_lineage || availableTag.currentLineage;
-                    if (dbLineage) {
-                        console.log(`🔄 Getting database lineage for selected tag "${tagName}" from available tags: ${dbLineage}`);
-                        normalizedTag.canonical_lineage = dbLineage;
-                        normalizedTag.currentLineage = dbLineage;
-                        normalizedTag.Lineage = dbLineage;  // Overwrite Excel Lineage with database value
-                        normalizedTag.lineage = dbLineage;
+            // CRITICAL: ALWAYS get database lineage from available tags (which have been aligned with database)
+            // Don't rely on the tag object passed in - it might be stale
+            const availableTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+            
+            if (availableTag) {
+                // Use available tag which has database lineage aligned
+                const dbLineage = availableTag.canonical_lineage || availableTag.currentLineage;
+                
+                if (dbLineage) {
+                    // FORCE all lineage fields to database value from available tag
+                    tag.canonical_lineage = dbLineage;
+                    tag.currentLineage = dbLineage;
+                    tag.Lineage = dbLineage;  // Overwrite Excel Lineage with database value
+                    tag.lineage = dbLineage;
+                    tag['Lineage*'] = dbLineage;
+                    
+                    const excelLineage = tag.Lineage;
+                    if (excelLineage && excelLineage.toUpperCase() !== dbLineage.toUpperCase()) {
+                        console.log(`✅ FORCED database lineage for selected tag "${tagName}": excel=${excelLineage} → db=${dbLineage}`);
                     }
+                } else {
+                    console.warn(`⚠️ Available tag "${tagName}" has no database lineage (canonical_lineage/currentLineage)`);
+                    // Still normalize even without database lineage
+                    const normalizedTag = this._normalizeLineageFields({...tag});
+                    Object.assign(tag, normalizedTag);
                 }
+            } else {
+                console.warn(`⚠️ Selected tag "${tagName}" not found in available tags - normalizing existing tag`);
+                // Tag not in available tags - normalize what we have
+                const normalizedTag = this._normalizeLineageFields({...tag});
+                Object.assign(tag, normalizedTag);
             }
             
-            // Debug logging for selected tags with database lineage
-            if (normalizedTag.canonical_lineage || normalizedTag.currentLineage) {
-                const dbLineage = normalizedTag.canonical_lineage || normalizedTag.currentLineage;
-                const excelLineage = normalizedTag.Lineage;
-                if (excelLineage && excelLineage.toUpperCase() !== dbLineage.toUpperCase()) {
-                    console.log(`✅ Selected tag "${normalizedTag['Product Name*']}": database=${dbLineage}, excel=${excelLineage} → using database`);
-                }
-            }
-            
-            return normalizedTag;
+            return tag;
         });
         
         // If no tags, just return
