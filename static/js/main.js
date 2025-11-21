@@ -4477,21 +4477,47 @@ const TagManager = {
             });
         }
         
-        // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
-        if (tag.canonical_lineage || tag.currentLineage) {
-            // Database lineage exists - use it exclusively, ignore Excel Lineage completely
-            const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+        // CRITICAL FIX: ALWAYS get database lineage from available tags (originalTags) - don't trust tag object passed in
+        // The tag object might be stale, but available tags have been aligned with database
+        const tagName = tag['Product Name*'];
+        const availableTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+        
+        if (availableTag) {
+            // Use database lineage from available tag (which has been aligned with database)
+            const dbLineage = availableTag.canonical_lineage || availableTag.currentLineage;
+            
             if (dbLineage) {
-                if (dbLineage !== normalizedLineage) {
-                    console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
+                const dbLineageUpper = dbLineage.toString().toUpperCase().trim();
+                // FORCE database lineage from available tags - this overwrites Excel Lineage
+                normalizedLineage = dbLineageUpper;
+                
+                // Also update the tag object to have database lineage for consistency
+                tag.canonical_lineage = dbLineageUpper;
+                tag.currentLineage = dbLineageUpper;
+                tag.Lineage = dbLineageUpper;  // Overwrite Excel Lineage with database value
+                tag.lineage = dbLineageUpper;
+                
+                if (normalizedLineage !== (lineage || '').toString().toUpperCase().trim()) {
+                    console.log(`✅ FORCED database lineage for ${displayName} from available tags: ${normalizedLineage}`);
                 }
-                normalizedLineage = dbLineage;  // Force database lineage
+            } else {
+                // Available tag exists but no database lineage - log warning
+                if (isForSelectedTags) {
+                    console.warn(`⚠️ Available tag "${tagName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
+                }
             }
         } else {
-            // No database lineage - log warning for debugging
-            if (isForSelectedTags && lineage !== 'MIXED') {
-                console.warn(`⚠️ Selected tag "${displayName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
-                console.warn(`   Available fields:`, Object.keys(tag).filter(k => k.toLowerCase().includes('lineage')));
+            // Tag not found in available tags - log warning
+            if (isForSelectedTags) {
+                console.warn(`⚠️ Tag "${tagName}" not found in available tags - cannot get database lineage, using: ${normalizedLineage}`);
+            }
+            
+            // Fallback: check tag object itself for database lineage
+            if (tag.canonical_lineage || tag.currentLineage) {
+                const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+                if (dbLineage) {
+                    normalizedLineage = dbLineage;
+                }
             }
         }
         
