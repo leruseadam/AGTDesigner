@@ -5962,7 +5962,7 @@ canvas#lava-lamp-canvas {
     overflow: hidden !important;
     filter: none !important;
     margin: 1.75rem auto !important;
-    max-width: 800px !important;
+    max-width: 1200px !important;
     width: auto !important;
     height: auto !important;
     position: relative !important;
@@ -5983,7 +5983,7 @@ canvas#lava-lamp-canvas {
     overflow-y: auto !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch !important;
-    max-height: calc(100vh - 300px) !important;
+    max-height: calc(100vh - 200px) !important;
   }
   
   #jsonMatchModal .modal-header {
