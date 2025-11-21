@@ -4145,12 +4145,21 @@ const TagManager = {
         // CRITICAL: Use same pipeline as backend - canonical_lineage (from DB) is ALWAYS source of truth
         // This ensures UI lineages match database and persist correctly after reload
         // IMPORTANT: If database lineage exists (canonical_lineage or currentLineage), use it exclusively
-        // Don't fall back to Excel Lineage if database lineage is present
+        // NEVER use Excel Lineage (tag.Lineage) if database lineage is present
+        // CRITICAL FIX: Always check database lineage FIRST, never use Excel Lineage when DB lineage exists
         if (tag.canonical_lineage || tag.currentLineage) {
             // Database lineage exists - use it (this is the source of truth)
             lineage = tag.canonical_lineage || tag.currentLineage;
+            // CRITICAL: If Excel Lineage exists but differs, log a warning
+            if (tag.Lineage && tag.Lineage.toUpperCase() !== lineage.toUpperCase()) {
+                console.warn(`⚠️ UI LINEAGE: Tag "${displayName}" has database lineage (${lineage}) but Excel Lineage (${tag.Lineage}) differs - using database`);
+            }
         } else {
-            // Fallback to other lineage fields only if database lineage is missing
+            // CRITICAL: Only fallback to Excel Lineage if database lineage is completely missing
+            // This should rarely happen if backend lineage alignment is working correctly
+            if (tag.Lineage || tag.lineage || tag['Lineage*']) {
+                console.warn(`⚠️ UI LINEAGE: Tag "${displayName}" missing database lineage (canonical_lineage/currentLineage), falling back to Excel Lineage: ${tag.Lineage || tag.lineage || tag['Lineage*']}`);
+            }
             lineage = tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
         }
         
