@@ -4459,18 +4459,41 @@ const TagManager = {
             return !validLineages.includes((lineageValue || '').toUpperCase());
         };
         
+        // CRITICAL: Calculate normalized lineage BEFORE creating options, so option selection uses database lineage
+        // Set the dropdown value - handle mappings for display
+        // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
+        let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
+        
+        // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
+        if (tag.canonical_lineage || tag.currentLineage) {
+            // Database lineage exists - use it exclusively, ignore Excel Lineage completely
+            const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+            if (dbLineage) {
+                if (dbLineage !== normalizedLineage) {
+                    console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
+                }
+                normalizedLineage = dbLineage;  // Force database lineage
+            }
+        } else {
+            // No database lineage - log warning for debugging
+            if (isForSelectedTags && lineage !== 'MIXED') {
+                console.warn(`⚠️ Selected tag "${displayName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
+            }
+        }
+        
+        // NOW create options using normalizedLineage (database lineage) for selection
         uniqueLineages.forEach(option => {
             const optionElement = document.createElement('option');
             optionElement.value = option.value;
             optionElement.textContent = option.label;
             
-            // Enhanced selection logic to handle various mappings
+            // CRITICAL: Use normalizedLineage (database lineage) for option selection, not original lineage
             let shouldSelect = false;
-            if (lineage === option.value) {
+            if (normalizedLineage === option.value) {
                 shouldSelect = true;
-            } else if (option.value === 'CBD' && lineage === 'CBD_BLEND') {
+            } else if (option.value === 'CBD' && (normalizedLineage === 'CBD' || normalizedLineage === 'CBD_BLEND')) {
                 shouldSelect = true;
-            } else if (option.value === 'MIXED' && shouldMapToMixed(lineage)) {
+            } else if (option.value === 'MIXED' && shouldMapToMixed(normalizedLineage)) {
                 shouldSelect = true;
             }
             
@@ -4479,19 +4502,6 @@ const TagManager = {
             }
             lineageSelect.appendChild(optionElement);
         });
-        
-        // Set the dropdown value - handle mappings for display
-        // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
-        // Even if lineage variable was resolved from Excel Lineage, check database fields first
-        let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
-        if (tag.canonical_lineage || tag.currentLineage) {
-            // Database lineage exists - use it instead of potentially stale Excel lineage
-            const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
-            if (dbLineage && dbLineage !== normalizedLineage) {
-                verboseLog(`🔄 Using database lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
-                normalizedLineage = dbLineage;
-            }
-        }
         if (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD') {
             lineageSelect.value = 'CBD';
         } else if (shouldMapToMixed(normalizedLineage)) {
@@ -4505,6 +4515,22 @@ const TagManager = {
         }
         
         // CRITICAL DEBUG: Log what lineage value was set in dropdown
+        if (isForSelectedTags) {
+            console.log(`🎯 Set lineage dropdown for SELECTED TAG "${displayName}":`, {
+                'canonical_lineage': tag.canonical_lineage || 'NONE',
+                'currentLineage': tag.currentLineage || 'NONE',
+                'Excel Lineage': tag.Lineage || 'NONE',
+                'resolved lineage (used)': normalizedLineage,
+                'dropdown value set to': lineageSelect.value
+            });
+            if ((tag.canonical_lineage || tag.currentLineage) && tag.Lineage) {
+                const dbLin = ((tag.canonical_lineage || tag.currentLineage) || '').toString().toUpperCase();
+                const excelLin = (tag.Lineage || '').toString().toUpperCase();
+                if (dbLin !== excelLin) {
+                    console.warn(`⚠️ LINEAGE MISMATCH for "${displayName}": database=${dbLin}, excel=${excelLin}, dropdown should show=${dbLin}, actual=${lineageSelect.value}`);
+                }
+            }
+        }
         verboseLog(`🎯 Set lineage dropdown for ${displayName}:`, {
             'tag.canonical_lineage': tag.canonical_lineage,
             'tag.currentLineage': tag.currentLineage,
