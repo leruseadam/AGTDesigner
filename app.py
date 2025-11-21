@@ -8722,32 +8722,91 @@ def get_available_tags():
             skipped_db_count = 0
             updated_excel_count = 0
             
-            # Create a lookup map of database products by name for lineage updates
+            # CRITICAL FIX: Query database for ALL products to build complete lineage lookup
+            # This ensures Excel tags get database lineage even if they're not in the limited database_tags list
             db_lineage_lookup = {}
-            for db_tag in database_tags:
-                product_name = db_tag.get('Product Name*', '')
-                if product_name:
-                    # Store database lineage for this product
-                    db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
-                    if db_lineage:
-                        db_lineage_lookup[product_name] = {
-                            'currentLineage': db_tag.get('currentLineage'),
-                            'canonical_lineage': db_tag.get('canonical_lineage'),
-                            'Lineage': str(db_lineage).strip().upper()
-                        }
+            try:
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                if product_db:
+                    logging.info("🔍 Building complete database lineage lookup for Excel tag updates...")
+                    conn = product_db._get_connection()
+                    cur = conn.cursor()
+                    
+                    # Query ALL products for lineage (not just the limited 2000)
+                    try:
+                        # Try with strain join first
+                        lineage_query = '''
+                            SELECT 
+                                p."Product Name*" AS product_name,
+                                COALESCE(p."Lineage", s.canonical_lineage) AS lineage
+                            FROM products p
+                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                        '''
+                        cur.execute(lineage_query)
+                        rows = cur.fetchall()
+                        for row in rows:
+                            product_name = row[0]
+                            lineage = row[1]
+                            if product_name and lineage:
+                                lineage_clean = str(lineage).strip().upper()
+                                db_lineage_lookup[product_name] = {
+                                    'currentLineage': lineage_clean,
+                                    'canonical_lineage': lineage_clean,
+                                    'Lineage': lineage_clean
+                                }
+                        logging.info(f"✅ Built lineage lookup with {len(db_lineage_lookup)} products from database")
+                    except Exception as query_err:
+                        # Fallback: query without strain join
+                        logging.warning(f"Lineage query with strain join failed, using fallback: {query_err}")
+                        try:
+                            fallback_query = 'SELECT "Product Name*", "Lineage" FROM products WHERE "Lineage" IS NOT NULL AND "Lineage" != ""'
+                            cur.execute(fallback_query)
+                            rows = cur.fetchall()
+                            for row in rows:
+                                product_name = row[0]
+                                lineage = row[1]
+                                if product_name and lineage:
+                                    lineage_clean = str(lineage).strip().upper()
+                                    db_lineage_lookup[product_name] = {
+                                        'currentLineage': lineage_clean,
+                                        'canonical_lineage': lineage_clean,
+                                        'Lineage': lineage_clean
+                                    }
+                            logging.info(f"✅ Built lineage lookup (fallback) with {len(db_lineage_lookup)} products from database")
+                        except Exception as fallback_err:
+                            logging.error(f"Failed to build lineage lookup: {fallback_err}")
+            except Exception as lookup_err:
+                logging.warning(f"Could not build database lineage lookup: {lookup_err}")
+                # Fallback: use database_tags for lookup
+                for db_tag in database_tags:
+                    product_name = db_tag.get('Product Name*', '')
+                    if product_name:
+                        db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
+                        if db_lineage:
+                            db_lineage_lookup[product_name] = {
+                                'currentLineage': db_tag.get('currentLineage'),
+                                'canonical_lineage': db_tag.get('canonical_lineage'),
+                                'Lineage': str(db_lineage).strip().upper()
+                            }
             
-            # CRITICAL FIX: Update Excel tags with database lineage if database product exists
+            # CRITICAL FIX: Update ALL Excel tags with database lineage if database product exists
             for excel_tag in all_tags:
                 product_name = excel_tag.get('Product Name*', '')
                 if product_name and product_name in db_lineage_lookup:
                     db_lineage_data = db_lineage_lookup[product_name]
                     # Update Excel tag with database lineage (database is source of truth)
+                    old_lineage = excel_tag.get('Lineage', '')
                     excel_tag['currentLineage'] = db_lineage_data.get('currentLineage') or db_lineage_data['Lineage']
                     excel_tag['canonical_lineage'] = db_lineage_data.get('canonical_lineage') or db_lineage_data['Lineage']
                     excel_tag['Lineage'] = db_lineage_data['Lineage']
                     excel_tag['lineage'] = db_lineage_data['Lineage'].lower()
                     updated_excel_count += 1
-                    logging.debug(f"Updated Excel tag '{product_name}' with database lineage: {db_lineage_data['Lineage']}")
+                    if old_lineage != db_lineage_data['Lineage']:
+                        logging.debug(f"✅ Updated Excel tag '{product_name}' lineage: {old_lineage} → {db_lineage_data['Lineage']}")
+            
+            if updated_excel_count > 0:
+                logging.info(f"✅ Updated {updated_excel_count} Excel tags with database lineage from complete lookup")
             
             for db_tag in database_tags:
                 product_name = db_tag.get('Product Name*', '')
@@ -8780,6 +8839,35 @@ def get_available_tags():
             
             logging.info(f"Database products: {added_db_count} added, {skipped_db_count} skipped as duplicates")
             logging.info(f"Combined total: {len(all_tags)} products ({excel_count} from Excel, {len(database_tags)} from database, {added_db_count} unique DB products added)")
+        
+        # CRITICAL FIX: Verify all tags have database lineage fields before sending to frontend
+        tags_with_db_lineage = 0
+        tags_without_db_lineage = 0
+        sample_lineage_check = []
+        for tag in all_tags[:10]:  # Check first 10 tags
+            product_name = tag.get('Product Name*', '')
+            has_db_lineage = bool(tag.get('currentLineage') or tag.get('canonical_lineage'))
+            if has_db_lineage:
+                tags_with_db_lineage += 1
+            else:
+                tags_without_db_lineage += 1
+            sample_lineage_check.append({
+                'name': product_name,
+                'has_db_lineage': has_db_lineage,
+                'currentLineage': tag.get('currentLineage'),
+                'canonical_lineage': tag.get('canonical_lineage'),
+                'Lineage': tag.get('Lineage')
+            })
+        
+        # Count all tags
+        for tag in all_tags:
+            if tag.get('currentLineage') or tag.get('canonical_lineage'):
+                tags_with_db_lineage += 1
+            else:
+                tags_without_db_lineage += 1
+        
+        logging.info(f"📊 LINEAGE VERIFICATION: {tags_with_db_lineage} tags with DB lineage, {tags_without_db_lineage} without DB lineage")
+        logging.info(f"📊 LINEAGE SAMPLE: {sample_lineage_check}")
         
         safe_all_tags = make_json_safe(all_tags)
         # Cache the results for faster subsequent requests (unless nocache requested)
