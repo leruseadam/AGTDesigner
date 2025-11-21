@@ -1396,13 +1396,14 @@ class TemplateProcessor:
                 record['ProductStrain'] = cbd_blend_value
                 record['Product Strain'] = cbd_blend_value
         
-        # CRITICAL FIX: Double-check lineage from database to ensure it's up-to-date
-        # This is a safety net to catch any cases where the record lineage wasn't updated
+        # CRITICAL FIX: ALWAYS prioritize database lineage over Excel lineage for DOCX output
+        # Database lineage is the source of truth, not Excel lineage
+        # This ensures DOCX output uses database lineage values, not Excel lineage
         try:
             product_name = record.get('ProductName', record.get('Product Name*', ''))
-            current_record_lineage = label_context.get('Lineage', '')
+            excel_lineage = label_context.get('Lineage', '') or record.get('Lineage', '')
             
-            # Always check database for most up-to-date lineage (product-level first, then strain-level)
+            # CRITICAL: Always check database FIRST - database lineage always takes priority
             if product_name:
                 from app import get_product_database, get_current_store_name
                 store_name = get_current_store_name()
@@ -1424,20 +1425,23 @@ class TemplateProcessor:
                                     None
                                 )
                     
+                    # CRITICAL: Always use database lineage if available, even if Excel lineage exists
                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
                         db_lineage_upper = str(db_lineage).strip().upper()
-                        if db_lineage_upper != str(current_record_lineage).strip().upper():
-                            # Database has a different lineage - use it
-                            self.logger.info(f"✅ LINEAGE DB CHECK: '{product_name}' - Record: '{current_record_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
-                            label_context['Lineage'] = db_lineage_upper
-                        else:
-                            # Same lineage, but ensure it's uppercase for consistency
-                            label_context['Lineage'] = db_lineage_upper
-                    elif current_record_lineage:
-                        # No DB lineage, but record has one - keep it but ensure uppercase
-                        label_context['Lineage'] = str(current_record_lineage).strip().upper()
+                        # Always override Excel lineage with database lineage
+                        if excel_lineage and str(excel_lineage).strip().upper() != db_lineage_upper:
+                            # Database lineage differs from Excel - use database
+                            self.logger.info(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
+                        label_context['Lineage'] = db_lineage_upper
+                    elif excel_lineage:
+                        # No DB lineage, but Excel has one - use Excel but ensure uppercase
+                        self.logger.debug(f"⚠️ LINEAGE EXCEL FALLBACK (DOCX): '{product_name}' - Using Excel lineage: '{excel_lineage}' (no DB lineage)")
+                        label_context['Lineage'] = str(excel_lineage).strip().upper()
         except Exception as e:
-            self.logger.debug(f"Could not check database lineage: {e}")
+            self.logger.warning(f"Could not check database lineage for DOCX output: {e}")
+            # On error, still try to use Excel lineage if available
+            if excel_lineage:
+                label_context['Lineage'] = str(excel_lineage).strip().upper()
         
         # CRITICAL FIX: Force DOH to be read from the actual data source, not defaults
         # If DOH is 'YES' but we updated it to 'No', use 'No' instead
