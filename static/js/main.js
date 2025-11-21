@@ -6807,7 +6807,10 @@ const TagManager = {
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // Always use prefer_db=1 to force database lineage alignment, even on cached tags
                     // This ensures UI shows current database lineage values, including previously updated ones
-                    const useCache = retryCount === 0; // Use cache on first attempt
+                    // CRITICAL: After Excel upload, always use nocache to force database lineage
+                    // This ensures UI shows database lineage, not Excel lineage from cache
+                    const forceDbLineage = this._forceDatabaseLineage || false;
+                    const useCache = retryCount === 0 && !forceDbLineage; // Don't use cache after upload
                     const cacheParam = useCache ? '' : '&nocache=1';
                     const preferDbParam = '&prefer_db=1';  // CRITICAL: Always use database for lineage accuracy
                     // Note: prefer_db=1 forces lineage alignment even on cached tags, so lineage will be fresh
@@ -9787,18 +9790,32 @@ const TagManager = {
                     verboseLog(`[UPLOAD DEBUG] Starting finalization process...`);
                     this.showActionSplash('Loading tags...');
 
-                    // PERFORMANCE FIX: Clear cache in parallel with tag loading (non-blocking)
-                    // Don't wait for cache clear to complete before loading tags
-                    fetch('/api/clear-cache', { method: 'POST' })
-                        .then(() => verboseLog('Cleared backend cache after upload'))
+                    // CRITICAL: After Excel upload, clear cache FIRST to ensure database lineage is used
+                    // Excel upload may create cached tags with Excel lineage, we need database lineage
+                    verboseLog('[UPLOAD DEBUG] Clearing cache to ensure database lineage is used...');
+                    await fetch('/api/clear-cache', { method: 'POST' })
+                        .then(() => verboseLog('✅ Cleared backend cache after upload'))
                         .catch(err => console.warn('Failed to clear cache:', err));
+                    
+                    // Also clear frontend cache to force fresh load from database
+                    if (window.sessionStorage) {
+                        const cacheKey = this.getAvailableTagsCacheKey();
+                        sessionStorage.removeItem(cacheKey);
+                        verboseLog('✅ Cleared frontend cache after upload');
+                    }
 
+                    // CRITICAL: After Excel upload, force refresh from database (not cache) to get correct lineage
+                    // Set flag to force database lineage (nocache + prefer_db)
+                    verboseLog(`[UPLOAD DEBUG] Loading tags from database with lineage alignment...`);
+                    this._forceDatabaseLineage = true;
+                    
                     // PERFORMANCE FIX: Load tags, filters, and selected tags in parallel
-                    verboseLog(`[UPLOAD DEBUG] Loading data in parallel...`);
                     const [availableTagsLoaded, selectedTagsLoaded] = await Promise.all([
                         this.fetchAndUpdateAvailableTags(),
                         this.fetchAndUpdateSelectedTags()
                     ]);
+                    
+                    this._forceDatabaseLineage = false;
 
                     verboseLog(`[UPLOAD DEBUG] Available tags loaded: ${availableTagsLoaded}, Selected tags loaded: ${selectedTagsLoaded}`);
 
@@ -9807,10 +9824,28 @@ const TagManager = {
                     await this.fetchAndPopulateFilters();
                     verboseLog(`[UPLOAD DEBUG] Filter options loaded`);
 
-                    // Force refresh lineage colors by re-rendering tags if needed
+                    // CRITICAL: After loading tags with database lineage, ensure UI reflects database values
+                    // Check if lineage was aligned and force UI update
                     if (availableTagsLoaded && this.state.tags && this.state.tags.length > 0) {
-                        verboseLog('[UPLOAD DEBUG] Forcing lineage color refresh after upload...');
-                        this._updateAvailableTags(this.state.tags);
+                        verboseLog('[UPLOAD DEBUG] Verifying tags have database lineage...');
+                        // Tags should already be updated by fetchAndUpdateAvailableTags, but ensure lineage is correct
+                        // Re-render to ensure dropdowns show database lineage (not Excel lineage)
+                        const tagsWithDbLineage = this.state.tags.map(tag => this._normalizeLineageFields(tag));
+                        this.state.tags = tagsWithDbLineage;
+                        this.state.originalTags = tagsWithDbLineage;
+                        verboseLog('[UPLOAD DEBUG] Re-rendering tags with database lineage...');
+                        this._updateAvailableTags(tagsWithDbLineage);
+                        
+                        // Also update selected tags if any are selected
+                        if (this.state.persistentSelectedTags.length > 0) {
+                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                tagsWithDbLineage.find(t => t['Product Name*'] === name)
+                            ).filter(Boolean);
+                            if (selectedTagObjects.length > 0) {
+                                verboseLog(`[UPLOAD DEBUG] Updating ${selectedTagObjects.length} selected tags with database lineage`);
+                                this.updateSelectedTags(selectedTagObjects);
+                            }
+                        }
                     }
 
                     if (!availableTagsLoaded) {
