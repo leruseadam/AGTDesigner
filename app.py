@@ -8375,6 +8375,8 @@ def get_available_tags():
                                                 lineage_cache[name] = (None, None)
                             
                             # Now apply lineage data to tags (fast - just dictionary lookups)
+                            # CRITICAL FIX: Process ALL tags, not just those in the batch
+                            # If a tag wasn't in the batch query, do an individual lookup
                             for tag in all_tags:
                                 try:
                                     name = tag.get('Product Name*') or tag.get('ProductName') or ''
@@ -8383,19 +8385,38 @@ def get_available_tags():
                                     
                                     db_lin, db_strain = lineage_cache.get(name, (None, None))
                                     
+                                    # CRITICAL FIX: If tag wasn't in batch cache, do individual lookup
+                                    if not db_lin:
+                                        try:
+                                            normalized = product_db._normalize_product_name(name) if hasattr(product_db, '_normalize_product_name') else name.strip().lower()
+                                            try:
+                                                cur.execute(lineage_query_join_by_name, (name, normalized))
+                                                row = cur.fetchone()
+                                            except Exception:
+                                                cur.execute(lineage_query_fallback, (name, normalized))
+                                                row = cur.fetchone()
+                                            if row:
+                                                db_lin = row[0]
+                                                db_strain = row[1] if len(row) > 1 else None
+                                                # Cache it for future use
+                                                lineage_cache[name] = (db_lin, db_strain)
+                                        except Exception as individual_err:
+                                            logging.debug(f"Individual lineage lookup failed for '{name}': {individual_err}")
+                                    
                                     db_lin_clean = None
                                     if db_lin:
                                         db_lin_clean = str(db_lin).strip().upper()
                                         # CRITICAL: Always update ALL lineage fields, even if they match
                                         # This ensures frontend gets fresh values even if cached had old lineage
                                         old_lineage = str(tag.get('Lineage','')).strip().upper()
+                                        old_canonical = str(tag.get('canonical_lineage','')).strip().upper()
                                         tag['currentLineage'] = db_lin_clean
                                         tag['canonical_lineage'] = db_lin_clean
                                         tag['Lineage'] = db_lin_clean
                                         tag['lineage'] = db_lin_clean  # Also set lowercase version
-                                        if old_lineage != db_lin_clean:
+                                        if old_lineage != db_lin_clean or old_canonical != db_lin_clean:
                                             updated += 1
-                                            logging.debug(f"Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
+                                            logging.info(f"✅ Lineage alignment: '{name}' - old: '{old_lineage}' (canonical: '{old_canonical}') → new: '{db_lin_clean}'")
                                     clean_strain = str(db_strain).strip() if db_strain else ''
                                     if db_lin and db_lin_clean:
                                         if db_lin_clean in ('CBD', 'CBD_BLEND'):
