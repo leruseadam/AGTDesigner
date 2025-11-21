@@ -4508,7 +4508,7 @@ const TagManager = {
             } else {
                 // Available tag exists but no database lineage - log warning
                 if (isForSelectedTags) {
-                    console.warn(`⚠️ Available tag "${tagName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
+                    console.warn(`⚠️ Available tag "${tagProductName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
                 }
             }
         } else {
@@ -4523,7 +4523,7 @@ const TagManager = {
             
             // Log warning only if state exists (to avoid spam during initialization)
             if (isForSelectedTags && this.state && this.state.originalTags) {
-                console.warn(`⚠️ Tag "${tagName}" not found in available tags - cannot get database lineage, using: ${normalizedLineage}`);
+                console.warn(`⚠️ Tag "${tagProductName}" not found in available tags - cannot get database lineage, using: ${normalizedLineage}`);
             }
         }
         
