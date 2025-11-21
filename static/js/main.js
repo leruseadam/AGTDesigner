@@ -4251,8 +4251,24 @@ const TagManager = {
         // Mixed (everything else non-classic) = blue (MIXED lineage)
         // Paraphernalia = pink (PARAPHERNALIA lineage)
         
+        // CRITICAL FIX: Only update currentLineage if we're using database lineage
+        // Preserve canonical_lineage and currentLineage from database when present
+        if (hasValidDatabaseLineage && (tag.canonical_lineage || tag.currentLineage)) {
+            // We're using database lineage - preserve both fields
+            // Don't overwrite canonical_lineage or currentLineage with displayLineage
+            verboseLog(`🎨 Preserving database lineage for ${displayName}: canonical_lineage=${tag.canonical_lineage}, currentLineage=${tag.currentLineage}`);
+        } else if (displayLineage && !hasValidDatabaseLineage) {
+            // Using fallback lineage - only set display fields, don't overwrite database fields
+            // This prevents Excel lineage from overwriting database lineage
+            verboseLog(`🎨 Using fallback lineage for ${displayName}: ${displayLineage} (not overwriting database fields)`);
+        }
+        
         if (displayLineage) {
-          tag.currentLineage = displayLineage;
+          // CRITICAL: Only set currentLineage if database lineage is missing
+          // This ensures database lineage (canonical_lineage/currentLineage) is never overwritten
+          if (!tag.canonical_lineage && !tag.currentLineage) {
+              tag.currentLineage = displayLineage;
+          }
           tagElement.dataset.lineage = displayLineage.toUpperCase();
           row.dataset.lineage = displayLineage.toUpperCase();  // Add lineage to row element too
           verboseLog(`🎨 Set data-lineage for ${displayName}: ${displayLineage.toUpperCase()}`);

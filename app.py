@@ -2814,13 +2814,16 @@ def upload_file():
             logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
 
             def process_in_background():
-                try:
-                    logging.info(f"[BACKGROUND] Processing file: {file_path}")
+                # CRITICAL FIX: Use application context for background thread
+                # Flask's g object and session require application context
+                with app.app_context():
+                    try:
+                        logging.info(f"[BACKGROUND] Processing file: {file_path}")
 
-                    processor = get_excel_processor()
-                    success = processor.load_file(file_path)
+                        processor = get_excel_processor()
+                        success = processor.load_file(file_path)
 
-                    if success:
+                        if success:
                         row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                         logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
 
@@ -2856,16 +2859,16 @@ def upload_file():
                         except Exception as cache_err:
                             logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
-                        # Already marked as ready above, so frontend doesn't wait
-                        logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
-                    else:
-                        logging.error("[BACKGROUND] File load returned False")
-                        update_processing_status(original_filename, 'error: File load failed')
+                            # Already marked as ready above, so frontend doesn't wait
+                            logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
+                        else:
+                            logging.error("[BACKGROUND] File load returned False")
+                            update_processing_status(original_filename, 'error: File load failed')
 
-                except Exception as e:
-                    logging.error(f"[BACKGROUND] Processing error: {e}")
-                    logging.error(traceback.format_exc())
-                    update_processing_status(original_filename, f'error: {str(e)}')
+                    except Exception as e:
+                        logging.error(f"[BACKGROUND] Processing error: {e}")
+                        logging.error(traceback.format_exc())
+                        update_processing_status(original_filename, f'error: {str(e)}')
 
             # Start background thread
             import threading
