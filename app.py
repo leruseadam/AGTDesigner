@@ -8026,6 +8026,10 @@ def get_available_tags():
                                     result_product_name = row[2] if len(row) > 2 else None
                                     result_normalized = row[3] if len(row) > 3 else None
                                     
+                                    if db_lin:
+                                        # CRITICAL: Log when database lineage is found for debugging
+                                        logging.debug(f"✅ DB lineage found in batch: product='{result_product_name}', lineage='{db_lin}'")
+                                    
                                     if result_product_name and result_product_name in name_to_tag:
                                         if result_product_name not in lineage_cache:
                                             lineage_cache[result_product_name] = (db_lin, db_strain)
@@ -8069,29 +8073,61 @@ def get_available_tags():
                                 if not db_lin:
                                     try:
                                         normalized = product_db._normalize_product_name(name) if hasattr(product_db, '_normalize_product_name') else name.strip().lower()
-                                        # Try join query first (more comprehensive)
-                                        try:
-                                            cur.execute(lineage_query_join_by_name, (name, normalized))
-                                            row = cur.fetchone()
-                                            if row and row[0]:
-                                                db_lin = row[0]
-                                                db_strain = row[1] if len(row) > 1 else None
-                                                lineage_cache[name] = (db_lin, db_strain)
-                                                logging.debug(f"✅ Individual lineage lookup (join): '{name}' → '{db_lin}'")
-                                        except Exception as join_err:
-                                            # Fallback to simple query
+                                        
+                                        # CRITICAL: Try multiple variations of the product name for better matching
+                                        # Sometimes product names have slight variations (spaces, hyphens, etc.)
+                                        name_variations = [
+                                            name,  # Original name
+                                            name.strip(),  # Trimmed
+                                            normalized,  # Normalized
+                                            name.replace(' - ', ' '),  # Replace " - " with space
+                                            name.replace('-', ' '),  # Replace all hyphens with space
+                                            name.replace('  ', ' '),  # Replace double spaces
+                                        ]
+                                        name_variations = list(set(name_variations))  # Remove duplicates
+                                        
+                                        # Try join query first (more comprehensive) with all variations
+                                        found = False
+                                        for name_var in name_variations:
+                                            if found:
+                                                break
                                             try:
-                                                cur.execute(lineage_query_fallback, (name, normalized))
+                                                normalized_var = product_db._normalize_product_name(name_var) if hasattr(product_db, '_normalize_product_name') else name_var.strip().lower()
+                                                cur.execute(lineage_query_join_by_name, (name_var, normalized_var))
                                                 row = cur.fetchone()
                                                 if row and row[0]:
                                                     db_lin = row[0]
                                                     db_strain = row[1] if len(row) > 1 else None
                                                     lineage_cache[name] = (db_lin, db_strain)
-                                                    logging.debug(f"✅ Individual lineage lookup (fallback): '{name}' → '{db_lin}'")
-                                            except Exception as fallback_err:
-                                                logging.debug(f"Both lineage queries failed for '{name}': join={join_err}, fallback={fallback_err}")
+                                                    logging.info(f"✅ Individual lineage lookup (join, variation '{name_var}'): '{name}' → '{db_lin}'")
+                                                    found = True
+                                                    break
+                                            except Exception:
+                                                continue
+                                        
+                                        # If still not found, try fallback query with all variations
+                                        if not found:
+                                            for name_var in name_variations:
+                                                if found:
+                                                    break
+                                                try:
+                                                    normalized_var = product_db._normalize_product_name(name_var) if hasattr(product_db, '_normalize_product_name') else name_var.strip().lower()
+                                                    cur.execute(lineage_query_fallback, (name_var, normalized_var))
+                                                    row = cur.fetchone()
+                                                    if row and row[0]:
+                                                        db_lin = row[0]
+                                                        db_strain = row[1] if len(row) > 1 else None
+                                                        lineage_cache[name] = (db_lin, db_strain)
+                                                        logging.info(f"✅ Individual lineage lookup (fallback, variation '{name_var}'): '{name}' → '{db_lin}'")
+                                                        found = True
+                                                        break
+                                                except Exception:
+                                                    continue
+                                        
+                                        if not found:
+                                            logging.warning(f"⚠️ No lineage found in database for '{name}' (tried {len(name_variations)} variations)")
                                     except Exception as lookup_err:
-                                        logging.debug(f"Individual lineage lookup failed for '{name}': {lookup_err}")
+                                        logging.warning(f"Individual lineage lookup failed for '{name}': {lookup_err}")
                                 
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
@@ -8104,10 +8140,13 @@ def get_available_tags():
                                     tag['lineage'] = db_lin_clean  # Also set lowercase version
                                     # Always count as updated to ensure frontend gets fresh data
                                     updated += 1
+                                    # CRITICAL: Log ALL lineage updates to help debug UI issues
                                     if old_lineage != db_lin_clean:
                                         logging.info(f"🔄 Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
                                     else:
-                                        logging.debug(f"✅ Lineage confirmed: '{name}' = '{db_lin_clean}' (already correct)")
+                                        logging.info(f"✅ Lineage confirmed: '{name}' = '{db_lin_clean}' (setting canonical_lineage/currentLineage for UI)")
+                                    # Log that canonical_lineage/currentLineage are now set for frontend
+                                    logging.debug(f"   → Set canonical_lineage='{db_lin_clean}', currentLineage='{db_lin_clean}' for '{name}'")
                                 else:
                                     # Even if no DB lineage found, ensure fields are consistent
                                     existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
