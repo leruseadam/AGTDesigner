@@ -8026,10 +8026,6 @@ def get_available_tags():
                                     result_product_name = row[2] if len(row) > 2 else None
                                     result_normalized = row[3] if len(row) > 3 else None
                                     
-                                    if db_lin:
-                                        # CRITICAL: Log when database lineage is found for debugging
-                                        logging.debug(f"✅ DB lineage found in batch: product='{result_product_name}', lineage='{db_lin}'")
-                                    
                                     if result_product_name and result_product_name in name_to_tag:
                                         if result_product_name not in lineage_cache:
                                             lineage_cache[result_product_name] = (db_lin, db_strain)
@@ -8073,61 +8069,29 @@ def get_available_tags():
                                 if not db_lin:
                                     try:
                                         normalized = product_db._normalize_product_name(name) if hasattr(product_db, '_normalize_product_name') else name.strip().lower()
-                                        
-                                        # CRITICAL: Try multiple variations of the product name for better matching
-                                        # Sometimes product names have slight variations (spaces, hyphens, etc.)
-                                        name_variations = [
-                                            name,  # Original name
-                                            name.strip(),  # Trimmed
-                                            normalized,  # Normalized
-                                            name.replace(' - ', ' '),  # Replace " - " with space
-                                            name.replace('-', ' '),  # Replace all hyphens with space
-                                            name.replace('  ', ' '),  # Replace double spaces
-                                        ]
-                                        name_variations = list(set(name_variations))  # Remove duplicates
-                                        
-                                        # Try join query first (more comprehensive) with all variations
-                                        found = False
-                                        for name_var in name_variations:
-                                            if found:
-                                                break
+                                        # Try join query first (more comprehensive)
+                                        try:
+                                            cur.execute(lineage_query_join_by_name, (name, normalized))
+                                            row = cur.fetchone()
+                                            if row and row[0]:
+                                                db_lin = row[0]
+                                                db_strain = row[1] if len(row) > 1 else None
+                                                lineage_cache[name] = (db_lin, db_strain)
+                                                logging.debug(f"✅ Individual lineage lookup (join): '{name}' → '{db_lin}'")
+                                        except Exception as join_err:
+                                            # Fallback to simple query
                                             try:
-                                                normalized_var = product_db._normalize_product_name(name_var) if hasattr(product_db, '_normalize_product_name') else name_var.strip().lower()
-                                                cur.execute(lineage_query_join_by_name, (name_var, normalized_var))
+                                                cur.execute(lineage_query_fallback, (name, normalized))
                                                 row = cur.fetchone()
                                                 if row and row[0]:
                                                     db_lin = row[0]
                                                     db_strain = row[1] if len(row) > 1 else None
                                                     lineage_cache[name] = (db_lin, db_strain)
-                                                    logging.info(f"✅ Individual lineage lookup (join, variation '{name_var}'): '{name}' → '{db_lin}'")
-                                                    found = True
-                                                    break
-                                            except Exception:
-                                                continue
-                                        
-                                        # If still not found, try fallback query with all variations
-                                        if not found:
-                                            for name_var in name_variations:
-                                                if found:
-                                                    break
-                                                try:
-                                                    normalized_var = product_db._normalize_product_name(name_var) if hasattr(product_db, '_normalize_product_name') else name_var.strip().lower()
-                                                    cur.execute(lineage_query_fallback, (name_var, normalized_var))
-                                                    row = cur.fetchone()
-                                                    if row and row[0]:
-                                                        db_lin = row[0]
-                                                        db_strain = row[1] if len(row) > 1 else None
-                                                        lineage_cache[name] = (db_lin, db_strain)
-                                                        logging.info(f"✅ Individual lineage lookup (fallback, variation '{name_var}'): '{name}' → '{db_lin}'")
-                                                        found = True
-                                                        break
-                                                except Exception:
-                                                    continue
-                                        
-                                        if not found:
-                                            logging.warning(f"⚠️ No lineage found in database for '{name}' (tried {len(name_variations)} variations)")
+                                                    logging.debug(f"✅ Individual lineage lookup (fallback): '{name}' → '{db_lin}'")
+                                            except Exception as fallback_err:
+                                                logging.debug(f"Both lineage queries failed for '{name}': join={join_err}, fallback={fallback_err}")
                                     except Exception as lookup_err:
-                                        logging.warning(f"Individual lineage lookup failed for '{name}': {lookup_err}")
+                                        logging.debug(f"Individual lineage lookup failed for '{name}': {lookup_err}")
                                 
                                 if db_lin:
                                     db_lin_clean = str(db_lin).strip().upper()
@@ -8140,13 +8104,10 @@ def get_available_tags():
                                     tag['lineage'] = db_lin_clean  # Also set lowercase version
                                     # Always count as updated to ensure frontend gets fresh data
                                     updated += 1
-                                    # CRITICAL: Log ALL lineage updates to help debug UI issues
                                     if old_lineage != db_lin_clean:
                                         logging.info(f"🔄 Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
                                     else:
-                                        logging.info(f"✅ Lineage confirmed: '{name}' = '{db_lin_clean}' (setting canonical_lineage/currentLineage for UI)")
-                                    # Log that canonical_lineage/currentLineage are now set for frontend
-                                    logging.debug(f"   → Set canonical_lineage='{db_lin_clean}', currentLineage='{db_lin_clean}' for '{name}'")
+                                        logging.debug(f"✅ Lineage confirmed: '{name}' = '{db_lin_clean}' (already correct)")
                                 else:
                                     # Even if no DB lineage found, ensure fields are consistent
                                     existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
@@ -8375,8 +8336,6 @@ def get_available_tags():
                                                 lineage_cache[name] = (None, None)
                             
                             # Now apply lineage data to tags (fast - just dictionary lookups)
-                            # CRITICAL FIX: Process ALL tags, not just those in the batch
-                            # If a tag wasn't in the batch query, do an individual lookup
                             for tag in all_tags:
                                 try:
                                     name = tag.get('Product Name*') or tag.get('ProductName') or ''
@@ -8385,38 +8344,19 @@ def get_available_tags():
                                     
                                     db_lin, db_strain = lineage_cache.get(name, (None, None))
                                     
-                                    # CRITICAL FIX: If tag wasn't in batch cache, do individual lookup
-                                    if not db_lin:
-                                        try:
-                                            normalized = product_db._normalize_product_name(name) if hasattr(product_db, '_normalize_product_name') else name.strip().lower()
-                                            try:
-                                                cur.execute(lineage_query_join_by_name, (name, normalized))
-                                                row = cur.fetchone()
-                                            except Exception:
-                                                cur.execute(lineage_query_fallback, (name, normalized))
-                                                row = cur.fetchone()
-                                            if row:
-                                                db_lin = row[0]
-                                                db_strain = row[1] if len(row) > 1 else None
-                                                # Cache it for future use
-                                                lineage_cache[name] = (db_lin, db_strain)
-                                        except Exception as individual_err:
-                                            logging.debug(f"Individual lineage lookup failed for '{name}': {individual_err}")
-                                    
                                     db_lin_clean = None
                                     if db_lin:
                                         db_lin_clean = str(db_lin).strip().upper()
                                         # CRITICAL: Always update ALL lineage fields, even if they match
                                         # This ensures frontend gets fresh values even if cached had old lineage
                                         old_lineage = str(tag.get('Lineage','')).strip().upper()
-                                        old_canonical = str(tag.get('canonical_lineage','')).strip().upper()
                                         tag['currentLineage'] = db_lin_clean
                                         tag['canonical_lineage'] = db_lin_clean
                                         tag['Lineage'] = db_lin_clean
                                         tag['lineage'] = db_lin_clean  # Also set lowercase version
-                                        if old_lineage != db_lin_clean or old_canonical != db_lin_clean:
+                                        if old_lineage != db_lin_clean:
                                             updated += 1
-                                            logging.info(f"✅ Lineage alignment: '{name}' - old: '{old_lineage}' (canonical: '{old_canonical}') → new: '{db_lin_clean}'")
+                                            logging.debug(f"Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
                                     clean_strain = str(db_strain).strip() if db_strain else ''
                                     if db_lin and db_lin_clean:
                                         if db_lin_clean in ('CBD', 'CBD_BLEND'):
@@ -8967,17 +8907,34 @@ def get_selected_tags():
         selected_tags = excel_processor.selected_tags
         selected_tag_objects = []
         
+        # CRITICAL FIX: Get database lineage for all products
+        product_db = get_product_database(get_current_store_name())
+        
         for tag in selected_tags:
             if isinstance(tag, dict):
-                # For dict objects, ensure we have the latest lineage value
+                # For dict objects, ensure we have the latest lineage value from DATABASE
                 tag_name = tag.get('Product Name*', '')
                 if tag_name:
-                    # Get the current lineage value from the data
-                    current_lineage = excel_processor.get_current_lineage_for_product(tag_name)
-                    if current_lineage:
-                        tag['lineage'] = current_lineage
-                        tag['Lineage'] = current_lineage
-                        logging.debug(f"Updated lineage for selected tag '{tag_name}' to '{current_lineage}'")
+                    # CRITICAL FIX: Query database for current lineage (NOT Excel)
+                    db_lineage = None
+                    if product_db:
+                        try:
+                            db_lineage = product_db.get_product_lineage(tag_name)
+                        except Exception as db_err:
+                            logging.warning(f"Failed to get DB lineage for '{tag_name}': {db_err}")
+                    
+                    # Use database lineage if available, otherwise fall back to Excel
+                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                        tag['canonical_lineage'] = str(db_lineage).strip().upper()
+                        tag['currentLineage'] = str(db_lineage).strip().upper()
+                        logging.debug(f"✅ UI LINEAGE: Using database lineage '{db_lineage}' for '{tag_name}'")
+                    else:
+                        # Fallback to Excel lineage
+                        excel_lineage = excel_processor.get_current_lineage_for_product(tag_name)
+                        if excel_lineage:
+                            tag['canonical_lineage'] = excel_lineage
+                            tag['currentLineage'] = excel_lineage
+                            logging.debug(f"⚠️ UI LINEAGE: Using Excel lineage '{excel_lineage}' for '{tag_name}' (no DB lineage)")
                 # Return the full dictionary object
                 selected_tag_objects.append(tag)
             elif isinstance(tag, str):
@@ -8985,32 +8942,70 @@ def get_selected_tags():
                 available_tags = excel_processor.get_available_tags()
                 for available_tag in available_tags:
                     if isinstance(available_tag, dict) and available_tag.get('Product Name*', '') == tag:
-                        # Ensure we have the latest lineage value
-                        current_lineage = excel_processor.get_current_lineage_for_product(tag)
-                        if current_lineage:
-                            available_tag['lineage'] = current_lineage
-                            available_tag['Lineage'] = current_lineage
-                            logging.debug(f"Updated lineage for selected tag '{tag}' to '{current_lineage}'")
+                        # CRITICAL FIX: Query database for current lineage (NOT Excel)
+                        db_lineage = None
+                        if product_db:
+                            try:
+                                db_lineage = product_db.get_product_lineage(tag)
+                            except Exception as db_err:
+                                logging.warning(f"Failed to get DB lineage for '{tag}': {db_err}")
+                        
+                        # Use database lineage if available
+                        if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                            available_tag['canonical_lineage'] = str(db_lineage).strip().upper()
+                            available_tag['currentLineage'] = str(db_lineage).strip().upper()
+                            logging.debug(f"✅ UI LINEAGE: Using database lineage '{db_lineage}' for '{tag}'")
+                        else:
+                            # Fallback to Excel lineage
+                            excel_lineage = excel_processor.get_current_lineage_for_product(tag)
+                            if excel_lineage:
+                                available_tag['canonical_lineage'] = excel_lineage
+                                available_tag['currentLineage'] = excel_lineage
+                                logging.debug(f"⚠️ UI LINEAGE: Using Excel lineage '{excel_lineage}' for '{tag}' (no DB lineage)")
                         selected_tag_objects.append(available_tag)
                         break
                 else:
-                    # If not found, create a simple dict with just the name and current lineage
+                    # If not found, create a simple dict with database lineage
                     tag_dict = {'Product Name*': tag}
-                    current_lineage = excel_processor.get_current_lineage_for_product(tag)
-                    if current_lineage:
-                        tag_dict['lineage'] = current_lineage
-                        tag_dict['Lineage'] = current_lineage
-                        logging.debug(f"Created selected tag dict for '{tag}' with lineage '{current_lineage}'")
+                    db_lineage = None
+                    if product_db:
+                        try:
+                            db_lineage = product_db.get_product_lineage(tag)
+                        except Exception as db_err:
+                            logging.warning(f"Failed to get DB lineage for '{tag}': {db_err}")
+                    
+                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                        tag_dict['canonical_lineage'] = str(db_lineage).strip().upper()
+                        tag_dict['currentLineage'] = str(db_lineage).strip().upper()
+                        logging.debug(f"✅ UI LINEAGE: Using database lineage '{db_lineage}' for '{tag}'")
+                    else:
+                        excel_lineage = excel_processor.get_current_lineage_for_product(tag)
+                        if excel_lineage:
+                            tag_dict['canonical_lineage'] = excel_lineage
+                            tag_dict['currentLineage'] = excel_lineage
+                            logging.debug(f"⚠️ UI LINEAGE: Using Excel lineage '{excel_lineage}' for '{tag}' (no DB lineage)")
                     selected_tag_objects.append(tag_dict)
             else:
-                # Convert to string and create simple dict
+                # Convert to string and create simple dict with database lineage
                 tag_name = str(tag)
                 tag_dict = {'Product Name*': tag_name}
-                current_lineage = excel_processor.get_current_lineage_for_product(tag_name)
-                if current_lineage:
-                    tag_dict['lineage'] = current_lineage
-                    tag_dict['Lineage'] = current_lineage
-                    logging.debug(f"Created selected tag dict for '{tag_name}' with lineage '{current_lineage}'")
+                db_lineage = None
+                if product_db:
+                    try:
+                        db_lineage = product_db.get_product_lineage(tag_name)
+                    except Exception as db_err:
+                        logging.warning(f"Failed to get DB lineage for '{tag_name}': {db_err}")
+                
+                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                    tag_dict['canonical_lineage'] = str(db_lineage).strip().upper()
+                    tag_dict['currentLineage'] = str(db_lineage).strip().upper()
+                    logging.debug(f"✅ UI LINEAGE: Using database lineage '{db_lineage}' for '{tag_name}'")
+                else:
+                    excel_lineage = excel_processor.get_current_lineage_for_product(tag_name)
+                    if excel_lineage:
+                        tag_dict['canonical_lineage'] = excel_lineage
+                        tag_dict['currentLineage'] = excel_lineage
+                        logging.debug(f"⚠️ UI LINEAGE: Using Excel lineage '{excel_lineage}' for '{tag_name}' (no DB lineage)")
                 selected_tag_objects.append(tag_dict)
         
         logging.info(f"Returning {len(selected_tag_objects)} selected tag objects")
@@ -15370,30 +15365,105 @@ def get_initial_data():
             # PERFORMANCE: Cache the result for 5 minutes
             cache.set(cache_key, initial_data, timeout=300)
         else:
-            # No Excel data loaded - return empty data to show upload prompt
-            # Removed database fallback - user wants upload prompt to show when no Excel uploaded
-            logging.info("No Excel data loaded - returning empty data to show upload prompt")
+            # PERFORMANCE: Check if fast_load is requested
+            fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+            
+            logging.warning("Excel processor has no data - attempting database fallback for initial data")
+            available_tags = []
+            filters = {
+                'vendor': [],
+                'brand': [],
+                'productType': [],
+                'lineage': [],
+                'weight': [],
+                'strain': [],
+                'doh': [],
+                'highCbd': []
+            }
+            try:
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name) if store_name else None
+                if product_db:
+                    # PERFORMANCE: For fast_load, limit products to prevent slow initial load
+                    if fast_load:
+                        # Use a faster query with LIMIT for fast_load
+                        logging.info("Fast-load: Limiting database query to 1000 most recent products")
+                        db_products = product_db.get_all_products(limit=1000)
+                    else:
+                        db_products = product_db.get_all_products()
+                    vendors = set()
+                    brands = set()
+                    product_types = set()
+                    lineages = set()
+                    weights = set()
+                    strains = set()
+                    doh_values = set()
+                    high_cbd_values = set()
+                    
+                    for product in db_products:
+                        try:
+                            processed = process_database_product_for_api(product)
+                        except Exception as tag_error:
+                            logging.debug(f"INITIAL DATA: Skipping product due to processing error: {tag_error}")
+                            continue
+                        available_tags.append(processed)
+                        
+                        vendor_val = processed.get('Vendor') or processed.get('Vendor/Supplier*')
+                        if vendor_val:
+                            vendors.add(str(vendor_val).strip())
+                        brand_val = processed.get('Product Brand') or processed.get('Brand')
+                        if brand_val:
+                            brands.add(str(brand_val).strip())
+                        type_val = processed.get('Product Type*') or processed.get('ProductType')
+                        if type_val:
+                            product_types.add(str(type_val).strip())
+                        lineage_val = processed.get('Lineage') or processed.get('canonical_lineage') or processed.get('currentLineage')
+                        if lineage_val:
+                            lineages.add(str(lineage_val).strip())
+                        weight_val = processed.get('Weight*') or processed.get('CombinedWeight')
+                        if weight_val:
+                            weights.add(str(weight_val).strip())
+                        strain_val = processed.get('Product Strain') or processed.get('strain')
+                        if strain_val:
+                            strains.add(str(strain_val).strip())
+                        doh_val = processed.get('DOH') or processed.get('DOH Compliant (Yes/No)')
+                        if doh_val:
+                            doh_values.add(str(doh_val).strip())
+                        high_cbd_val = processed.get('High CBD') or processed.get('HighCBD')
+                        if high_cbd_val:
+                            high_cbd_values.add(str(high_cbd_val).strip())
+                    
+                    def sorted_list(values):
+                        return sorted(v for v in values if v and v != 'None')
+                    
+                    filters.update({
+                        'vendor': sorted_list(vendors),
+                        'brand': sorted_list(brands),
+                        'productType': sorted_list(product_types),
+                        'lineage': sorted_list(lineages),
+                        'weight': sorted_list(weights),
+                        'strain': sorted_list(strains),
+                        'doh': sorted_list(doh_values),
+                        'highCbd': sorted_list(high_cbd_values)
+                    })
+                    
+                    logging.info(f"INITIAL DATA: Database fallback produced {len(available_tags)} tags")
+                else:
+                    logging.warning("INITIAL DATA: No product database available for fallback")
+            except Exception as db_error:
+                logging.error(f"INITIAL DATA: Database fallback failed: {db_error}")
             
             initial_data = {
                 'success': True,
-                'data_loaded': False,
-                'filename': None,
-                'filepath': None,
+                'data_loaded': bool(available_tags),
+                'filename': 'database_fallback' if available_tags else 'no_data',
+                'filepath': 'database_fallback',
                 'columns': [],
-                'filters': {
-                    'vendor': [],
-                    'brand': [],
-                    'productType': [],
-                    'lineage': [],
-                    'weight': [],
-                    'strain': [],
-                    'doh': [],
-                    'highCbd': []
-                },
-                'available_tags': [],
+                'filters': filters,
+                'available_tags': available_tags,
                 'selected_tags': [],
-                'total_records': 0,
-                'source': 'empty'
+                'total_records': len(available_tags),
+                'source': 'database' if available_tags else 'empty'
             }
         
         # PERFORMANCE: Cache the response for 5 minutes only when we have real data
