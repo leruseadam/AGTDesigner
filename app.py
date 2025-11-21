@@ -8185,22 +8185,22 @@ def get_available_tags():
                 prefer_db = True  # Force database query when Excel is empty
                 logging.info(f"✅ Set prefer_db=True to force database query")
         
-        # If we have tags from Excel, prefer them but align lineage with database values
-        # PERFORMANCE: Skip lineage alignment when fast_load is enabled for instant loading
+        # CRITICAL FIX: If we have tags from Excel, ALWAYS align lineage with database values
+        # Database lineage is the source of truth, not Excel lineage
+        # Always run lineage alignment even during fast_load to ensure database lineage is used
         if all_tags and not prefer_db:
-            # Skip expensive lineage alignment if fast_load is enabled
-            if fast_load:
-                logging.info("⚡ FAST_LOAD: Skipping lineage alignment for instant tag loading")
-            else:
-                try:
-                    store_name = get_current_store_name()
-                    if not store_name:
-                        logging.warning("No store selected, skipping lineage alignment")
-                        raise ValueError("No store selected")
-                    product_db = get_product_database(store_name)
-                    if product_db:
-                        # CRITICAL: If database connection fails, still return Excel tags
-                        try:
+            # CRITICAL: Always apply database lineage, even during fast_load
+            # Database lineage must always override Excel lineage
+            logging.info("🔄 Applying database lineage to Excel tags (database lineage always takes priority)")
+            try:
+                store_name = get_current_store_name()
+                if not store_name:
+                    logging.warning("No store selected, skipping lineage alignment")
+                    raise ValueError("No store selected")
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # CRITICAL: If database connection fails, still return Excel tags
+                    try:
                             # Build a small cache to reduce duplicate lookups in this batch
                             lineage_cache = {}
                             updated = 0
@@ -8383,13 +8383,13 @@ def get_available_tags():
                         except Exception as db_conn_err:
                             logging.warning(f"Database connection failed during lineage alignment: {db_conn_err}")
                             # Continue without lineage alignment - Excel tags are still valid
-                        except RuntimeError:
-                            # Skip alignment if products table doesn't exist
-                            pass
-                except Exception as e:
-                    logging.warning(f"UI lineage alignment skipped due to error: {e}")
-                    # CRITICAL: Don't fail the entire request - Excel tags are still valid
-                    # Continue to return Excel tags even if lineage alignment fails
+                    except RuntimeError:
+                        # Skip alignment if products table doesn't exist
+                        pass
+            except Exception as e:
+                logging.warning(f"UI lineage alignment skipped due to error: {e}")
+                # CRITICAL: Don't fail the entire request - Excel tags are still valid
+                # Continue to return Excel tags even if lineage alignment fails
 
             # CRITICAL FIX: Don't return early - continue to merge database products even when Excel has tags
             # This ensures web version shows all database products, not just Excel products
