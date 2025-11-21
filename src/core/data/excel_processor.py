@@ -3621,14 +3621,18 @@ class ExcelProcessor:
                 db_record = db_lookup.get(normalized_name)
                 
                 if db_record:
-                    # Update tag with database values (database takes precedence)
-                    # Only update fields that are commonly changed in database (lineage, DOH, etc.)
-                    if db_record.get('Lineage'):
-                        db_lineage = str(db_record.get('Lineage', '')).strip().upper()
-                        tag['Lineage'] = db_lineage
-                        tag['lineage'] = db_lineage
-                        tag['canonical_lineage'] = db_lineage
-                        tag['currentLineage'] = db_lineage
+                    # CRITICAL: ALWAYS update lineage from database if database has a value
+                    # Database lineage is the source of truth and MUST override Excel
+                    db_lineage = db_record.get('Lineage') or db_record.get('currentLineage') or db_record.get('canonical_lineage') or ''
+                    # Only override if database has a non-empty lineage value
+                    if db_lineage and str(db_lineage).strip():
+                        db_lineage_clean = str(db_lineage).strip().upper()
+                        # ALWAYS set database lineage - database is source of truth
+                        tag['Lineage'] = db_lineage_clean
+                        tag['lineage'] = db_lineage_clean
+                        tag['canonical_lineage'] = db_lineage_clean
+                        tag['currentLineage'] = db_lineage_clean
+                        logger.debug(f"✅ Database lineage override: '{product_name}' = '{db_lineage_clean}'")
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
                         db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')

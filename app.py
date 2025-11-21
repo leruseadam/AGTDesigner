@@ -8310,14 +8310,42 @@ def get_available_tags():
                                         
                                         # Match by product name first (exact match)
                                         if result_product_name and result_product_name in name_to_tag:
-                                            if result_product_name not in lineage_cache:
-                                                lineage_cache[result_product_name] = (db_lin, db_strain)
+                                            # CRITICAL: Always store database lineage, even if None (means DB has no lineage)
+                                            # Use a sentinel value to distinguish "not found" from "found but empty"
+                                            lineage_cache[result_product_name] = (db_lin, db_strain)
                                         # Also match by normalized name
                                         if result_normalized:
                                             for name, normalized in zip(product_names, normalized_names):
                                                 if normalized == result_normalized and name not in lineage_cache:
+                                                    # CRITICAL: Store database lineage for normalized match too
                                                     lineage_cache[name] = (db_lin, db_strain)
                                                     break
+                                    
+                                    # CRITICAL: For any tags not found in batch query, try individual lookup
+                                    # This ensures we get database lineage for ALL products, not just those in batch
+                                    missing_names = [name for name in product_names if name not in lineage_cache]
+                                    if missing_names:
+                                        logging.info(f"🔍 Individual lookup for {len(missing_names)} products not in batch results")
+                                        for name in missing_names[:50]:  # Limit to prevent timeout
+                                            try:
+                                                normalized = normalized_names[product_names.index(name)]
+                                                try:
+                                                    cur.execute(lineage_query_join_by_name, (name, normalized))
+                                                    row = cur.fetchone()
+                                                except Exception:
+                                                    cur.execute(lineage_query_fallback, (name, normalized))
+                                                    row = cur.fetchone()
+                                                if row:
+                                                    db_lin = row[0]
+                                                    db_strain = row[1] if len(row) > 1 else None
+                                                    lineage_cache[name] = (db_lin, db_strain)
+                                                    logging.debug(f"✅ Individual lookup found: '{name}' = '{db_lin}'")
+                                                else:
+                                                    # Product not in database - mark as not found
+                                                    lineage_cache[name] = (None, None)
+                                            except Exception as ind_err:
+                                                logging.debug(f"Individual lookup error for '{name}': {ind_err}")
+                                                lineage_cache[name] = (None, None)
                                     
                                 except Exception as batch_err:
                                     # If batch query fails, fall back to individual queries (but log the error)
@@ -8349,11 +8377,13 @@ def get_available_tags():
                                     
                                     db_lin, db_strain = lineage_cache.get(name, (None, None))
                                     
-                                    db_lin_clean = None
-                                    if db_lin:
+                                    # CRITICAL: ALWAYS update lineage from database if database has a value
+                                    # Database lineage is the source of truth and MUST override Excel
+                                    # Only update if database has a non-empty lineage value
+                                    if db_lin is not None and str(db_lin).strip():
                                         db_lin_clean = str(db_lin).strip().upper()
-                                        # CRITICAL: Always update ALL lineage fields, even if they match
-                                        # This ensures frontend gets fresh values even if cached had old lineage
+                                        # CRITICAL: Always update ALL lineage fields to database value
+                                        # This ensures frontend gets fresh database values, not Excel values
                                         old_lineage = str(tag.get('Lineage','')).strip().upper()
                                         tag['currentLineage'] = db_lin_clean
                                         tag['canonical_lineage'] = db_lin_clean
@@ -8361,7 +8391,16 @@ def get_available_tags():
                                         tag['lineage'] = db_lin_clean  # Also set lowercase version
                                         if old_lineage != db_lin_clean:
                                             updated += 1
-                                            logging.debug(f"Lineage alignment: '{name}' - old: '{old_lineage}' → new: '{db_lin_clean}'")
+                                            logging.info(f"🔄 FORCED LINEAGE UPDATE: '{name}' - Excel: '{old_lineage}' → DB: '{db_lin_clean}'")
+                                        else:
+                                            # Still log that we're forcing database value (even if same)
+                                            logging.debug(f"✅ Database lineage confirmed: '{name}' = '{db_lin_clean}'")
+                                    elif db_lin is not None:
+                                        # Database has product but no lineage - log but don't override Excel
+                                        logging.debug(f"⚠️ Database has no lineage for '{name}', keeping Excel lineage")
+                                    else:
+                                        # Product not found in database - log for debugging
+                                        logging.debug(f"⚠️ Product '{name}' not found in database lineage cache")
                                     clean_strain = str(db_strain).strip() if db_strain else ''
                                     if db_lin and db_lin_clean:
                                         if db_lin_clean in ('CBD', 'CBD_BLEND'):
@@ -8380,6 +8419,8 @@ def get_available_tags():
                                     logging.debug(f"UI lineage alignment error for a tag: {_loop_err}")
                             if updated:
                                 logging.info(f"🔄 UI LINEAGE ALIGNMENT: Applied {updated} database lineage overrides to Excel tags")
+                            else:
+                                logging.warning(f"⚠️ UI LINEAGE ALIGNMENT: No lineage updates applied (checked {len(all_tags)} tags, found {len(lineage_cache)} in database)")
                     except Exception as db_conn_err:
                         logging.warning(f"Database connection failed during lineage alignment: {db_conn_err}")
                         # Continue without lineage alignment - Excel tags are still valid
