@@ -4464,6 +4464,19 @@ const TagManager = {
         // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
         let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
+        // CRITICAL DEBUG: Log ALL lineage fields for selected tags to see what we have
+        if (isForSelectedTags) {
+            console.log(`🔍 LINEAGE DEBUG for "${displayName}":`, {
+                'canonical_lineage': tag.canonical_lineage || 'MISSING',
+                'currentLineage': tag.currentLineage || 'MISSING',
+                'Lineage (excel?)': tag.Lineage || 'MISSING',
+                'lineage': tag.lineage || 'MISSING',
+                'Lineage*': tag['Lineage*'] || 'MISSING',
+                'resolved lineage variable': lineage,
+                'tag object keys': Object.keys(tag).filter(k => k.toLowerCase().includes('lineage'))
+            });
+        }
+        
         // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
         if (tag.canonical_lineage || tag.currentLineage) {
             // Database lineage exists - use it exclusively, ignore Excel Lineage completely
@@ -4478,6 +4491,7 @@ const TagManager = {
             // No database lineage - log warning for debugging
             if (isForSelectedTags && lineage !== 'MIXED') {
                 console.warn(`⚠️ Selected tag "${displayName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
+                console.warn(`   Available fields:`, Object.keys(tag).filter(k => k.toLowerCase().includes('lineage')));
             }
         }
         
