@@ -6936,12 +6936,28 @@ const TagManager = {
             // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
             // This is especially important when lineage alignment happened on the backend
             console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
+            
+            // CRITICAL: If lineage was aligned from database, ensure tags are fully re-rendered to show database lineage
+            const lineageWasAligned = responseData && responseData.source && 
+                (responseData.source.includes('lineage') || responseData.source.includes('db-lineage'));
+            
+            if (lineageWasAligned) {
+                console.log(`✅ Lineage alignment detected (source: ${responseData.source}), re-rendering UI with database lineage`);
+            }
+            
+            // Always update available tags - _updateAvailableTags clears container and re-renders everything
+            // This ensures lineage dropdowns reflect the database values from the normalized tags
             this._updateAvailableTags(tags);
             
-            // If lineage was aligned, log it for debugging
-            if (responseData && responseData.source && 
-                (responseData.source.includes('lineage') || responseData.source.includes('db-lineage'))) {
-                console.log(`✅ Lineage alignment detected (source: ${responseData.source}), UI updated with database lineage`);
+            // If lineage was aligned, also update selected tags to ensure their lineage dropdowns match
+            if (lineageWasAligned && this.state.persistentSelectedTags.length > 0) {
+                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                    tags.find(t => t['Product Name*'] === name)
+                ).filter(Boolean);
+                if (selectedTagObjects.length > 0) {
+                    console.log(`✅ Updating ${selectedTagObjects.length} selected tags with database lineage`);
+                    this.updateSelectedTags(selectedTagObjects);
+                }
             }
             
             // PERFORMANCE: Clear filter cache when tags change

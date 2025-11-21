@@ -36,7 +36,9 @@ const getUniqueLineages = () => {
 function createTagRow(tag) {
   // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
   // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
-  const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+  let lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+  // CRITICAL: Normalize lineage to uppercase for consistent dropdown matching
+  lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
