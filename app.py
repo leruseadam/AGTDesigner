@@ -8173,8 +8173,12 @@ def get_available_tags():
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 try:
                     excel_tags = excel_processor.get_available_tags()
+                    # CRITICAL FIX: Verify Excel tags have database lineage fields
+                    tags_with_db_lineage = sum(1 for tag in excel_tags if tag.get('currentLineage') or tag.get('canonical_lineage'))
+                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags ({tags_with_db_lineage} with DB lineage from enrichment)")
+                    if tags_with_db_lineage < len(excel_tags) * 0.5:  # Less than 50% have DB lineage
+                        logging.warning(f"⚠️ Only {tags_with_db_lineage}/{len(excel_tags)} Excel tags have database lineage - enrichment may have failed")
                     all_tags.extend(excel_tags)
-                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
                 except Exception as e:
                     logging.warning(f"Excel processor error: {e}")
             

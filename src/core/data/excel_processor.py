@@ -3611,6 +3611,7 @@ class ExcelProcessor:
             
             # Enrich each tag with database values
             enriched_tags = []
+            enriched_count = 0
             for tag in tags:
                 product_name = tag.get('Product Name*', tag.get('ProductName', ''))
                 if not product_name:
@@ -3623,12 +3624,27 @@ class ExcelProcessor:
                 if db_record:
                     # Update tag with database values (database takes precedence)
                     # Only update fields that are commonly changed in database (lineage, DOH, etc.)
-                    if db_record.get('Lineage'):
+                    # CRITICAL FIX: Use same lineage priority as main endpoint - prefer currentLineage/canonical_lineage, then Lineage
+                    db_lineage = None
+                    if db_record.get('currentLineage'):
+                        db_lineage = str(db_record.get('currentLineage', '')).strip().upper()
+                    elif db_record.get('canonical_lineage'):
+                        db_lineage = str(db_record.get('canonical_lineage', '')).strip().upper()
+                    elif db_record.get('Lineage'):
                         db_lineage = str(db_record.get('Lineage', '')).strip().upper()
+                    
+                    if db_lineage:
+                        # CRITICAL: Set ALL lineage fields to ensure frontend gets database lineage
+                        old_lineage = tag.get('Lineage', '')
                         tag['Lineage'] = db_lineage
-                        tag['lineage'] = db_lineage
+                        tag['lineage'] = db_lineage.lower()
                         tag['canonical_lineage'] = db_lineage
                         tag['currentLineage'] = db_lineage
+                        enriched_count += 1
+                        if old_lineage != db_lineage:
+                            logger.info(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage updated: {old_lineage} → {db_lineage}")
+                        else:
+                            logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' has database lineage: {db_lineage}")
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
                         db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')
@@ -3646,10 +3662,13 @@ class ExcelProcessor:
                     if db_record.get('CBD test result'):
                         tag['CBD test result'] = db_record.get('CBD test result')
                         tag['CBD'] = db_record.get('CBD test result')
+                else:
+                    # Tag not found in database - log warning
+                    logger.debug(f"⚠️ EXCEL ENRICHMENT: Tag '{product_name}' not found in database")
                 
                 enriched_tags.append(tag)
             
-            logger.debug(f"Enriched {len(enriched_tags)} tags with database values")
+            logger.info(f"✅ EXCEL ENRICHMENT: Enriched {enriched_count}/{len(tags)} tags with database lineage values")
             return enriched_tags
             
         except Exception as e:
