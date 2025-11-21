@@ -8442,7 +8442,7 @@ def get_available_tags():
                 logging.info("🔄 Using direct SQL query (skipping get_all_products() for performance)")
                 # Fall back to raw SQL query directly
                 import sqlite3
-                import os
+                # Note: os is already imported at top of file, don't re-import here
                 if os.path.exists(product_db.db_path):
                     logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
                     with sqlite3.connect(product_db.db_path) as conn:
