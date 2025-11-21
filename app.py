@@ -15349,105 +15349,30 @@ def get_initial_data():
             # PERFORMANCE: Cache the result for 5 minutes
             cache.set(cache_key, initial_data, timeout=300)
         else:
-            # PERFORMANCE: Check if fast_load is requested
-            fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
-            
-            logging.warning("Excel processor has no data - attempting database fallback for initial data")
-            available_tags = []
-            filters = {
-                'vendor': [],
-                'brand': [],
-                'productType': [],
-                'lineage': [],
-                'weight': [],
-                'strain': [],
-                'doh': [],
-                'highCbd': []
-            }
-            try:
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name) if store_name else None
-                if product_db:
-                    # PERFORMANCE: For fast_load, limit products to prevent slow initial load
-                    if fast_load:
-                        # Use a faster query with LIMIT for fast_load
-                        logging.info("Fast-load: Limiting database query to 1000 most recent products")
-                        db_products = product_db.get_all_products(limit=1000)
-                    else:
-                        db_products = product_db.get_all_products()
-                    vendors = set()
-                    brands = set()
-                    product_types = set()
-                    lineages = set()
-                    weights = set()
-                    strains = set()
-                    doh_values = set()
-                    high_cbd_values = set()
-                    
-                    for product in db_products:
-                        try:
-                            processed = process_database_product_for_api(product)
-                        except Exception as tag_error:
-                            logging.debug(f"INITIAL DATA: Skipping product due to processing error: {tag_error}")
-                            continue
-                        available_tags.append(processed)
-                        
-                        vendor_val = processed.get('Vendor') or processed.get('Vendor/Supplier*')
-                        if vendor_val:
-                            vendors.add(str(vendor_val).strip())
-                        brand_val = processed.get('Product Brand') or processed.get('Brand')
-                        if brand_val:
-                            brands.add(str(brand_val).strip())
-                        type_val = processed.get('Product Type*') or processed.get('ProductType')
-                        if type_val:
-                            product_types.add(str(type_val).strip())
-                        lineage_val = processed.get('Lineage') or processed.get('canonical_lineage') or processed.get('currentLineage')
-                        if lineage_val:
-                            lineages.add(str(lineage_val).strip())
-                        weight_val = processed.get('Weight*') or processed.get('CombinedWeight')
-                        if weight_val:
-                            weights.add(str(weight_val).strip())
-                        strain_val = processed.get('Product Strain') or processed.get('strain')
-                        if strain_val:
-                            strains.add(str(strain_val).strip())
-                        doh_val = processed.get('DOH') or processed.get('DOH Compliant (Yes/No)')
-                        if doh_val:
-                            doh_values.add(str(doh_val).strip())
-                        high_cbd_val = processed.get('High CBD') or processed.get('HighCBD')
-                        if high_cbd_val:
-                            high_cbd_values.add(str(high_cbd_val).strip())
-                    
-                    def sorted_list(values):
-                        return sorted(v for v in values if v and v != 'None')
-                    
-                    filters.update({
-                        'vendor': sorted_list(vendors),
-                        'brand': sorted_list(brands),
-                        'productType': sorted_list(product_types),
-                        'lineage': sorted_list(lineages),
-                        'weight': sorted_list(weights),
-                        'strain': sorted_list(strains),
-                        'doh': sorted_list(doh_values),
-                        'highCbd': sorted_list(high_cbd_values)
-                    })
-                    
-                    logging.info(f"INITIAL DATA: Database fallback produced {len(available_tags)} tags")
-                else:
-                    logging.warning("INITIAL DATA: No product database available for fallback")
-            except Exception as db_error:
-                logging.error(f"INITIAL DATA: Database fallback failed: {db_error}")
+            # No Excel data loaded - return empty data to show upload prompt
+            # Removed database fallback - user wants upload prompt to show when no Excel uploaded
+            logging.info("No Excel data loaded - returning empty data to show upload prompt")
             
             initial_data = {
                 'success': True,
-                'data_loaded': bool(available_tags),
-                'filename': 'database_fallback' if available_tags else 'no_data',
-                'filepath': 'database_fallback',
+                'data_loaded': False,
+                'filename': None,
+                'filepath': None,
                 'columns': [],
-                'filters': filters,
-                'available_tags': available_tags,
+                'filters': {
+                    'vendor': [],
+                    'brand': [],
+                    'productType': [],
+                    'lineage': [],
+                    'weight': [],
+                    'strain': [],
+                    'doh': [],
+                    'highCbd': []
+                },
+                'available_tags': [],
                 'selected_tags': [],
-                'total_records': len(available_tags),
-                'source': 'database' if available_tags else 'empty'
+                'total_records': 0,
+                'source': 'empty'
             }
         
         # PERFORMANCE: Cache the response for 5 minutes only when we have real data
