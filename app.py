@@ -2696,6 +2696,31 @@ def upload_file():
                 'detected_store': detected_store
             }), 400
         
+        # CRITICAL: Clear old Excel data from cache and session before processing new file
+        # This prevents old Excel data from persisting when new file is uploaded
+        logging.info("🧹 Clearing old Excel data from cache and session...")
+        try:
+            # Clear available_tags cache to remove old Excel data
+            cache_key = get_session_cache_key('available_tags')
+            cache.delete(cache_key)
+            logging.info(f"✅ Cleared available_tags cache: {cache_key}")
+            
+            # Clear Excel processor cache
+            reset_excel_processor()
+            logging.info("✅ Reset Excel processor")
+            
+            # Clear lineage update timestamp to force fresh lineage alignment
+            if 'lineage_update_timestamp' in session:
+                del session['lineage_update_timestamp']
+                logging.info("✅ Cleared lineage_update_timestamp from session")
+            
+            # Clear selected tags (they're for old file)
+            session['selected_tags'] = []
+            logging.info("✅ Cleared selected tags from session")
+            
+        except Exception as cache_error:
+            logging.warning(f"⚠️ Error clearing cache: {cache_error}")
+        
         # Initialize warning tracking variables
         warning_to_return = warning_msg if warning_msg else None
         
@@ -2771,8 +2796,17 @@ def upload_file():
             # Store context removed - using single database
 
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
+            # CRITICAL: Also clear cache to ensure old Excel data doesn't persist
             _excel_processor = None
             logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
+            
+            # CRITICAL: Clear cache again after marking as ready to ensure old data is gone
+            try:
+                cache_key = get_session_cache_key('available_tags')
+                cache.delete(cache_key)
+                logging.info(f"✅ Cleared available_tags cache after marking ready: {cache_key}")
+            except Exception as e:
+                logging.warning(f"⚠️ Error clearing cache after marking ready: {e}")
 
             # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
             # Background processing will handle database storage and cache clearing
