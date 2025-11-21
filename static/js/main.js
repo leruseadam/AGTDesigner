@@ -4144,7 +4144,15 @@ const TagManager = {
         let lineage;
         // CRITICAL: Use same pipeline as backend - canonical_lineage (from DB) is ALWAYS source of truth
         // This ensures UI lineages match database and persist correctly after reload
-        lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
+        // IMPORTANT: If database lineage exists (canonical_lineage or currentLineage), use it exclusively
+        // Don't fall back to Excel Lineage if database lineage is present
+        if (tag.canonical_lineage || tag.currentLineage) {
+            // Database lineage exists - use it (this is the source of truth)
+            lineage = tag.canonical_lineage || tag.currentLineage;
+        } else {
+            // Fallback to other lineage fields only if database lineage is missing
+            lineage = tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
+        }
         
         // Normalize lineage to uppercase for consistent matching
         lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
@@ -4457,8 +4465,17 @@ const TagManager = {
         });
         
         // Set the dropdown value - handle mappings for display
-        // CRITICAL: Normalize lineage to uppercase for consistent matching
-        const normalizedLineage = (lineage || '').toString().toUpperCase().trim();
+        // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
+        // Even if lineage variable was resolved from Excel Lineage, check database fields first
+        let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
+        if (tag.canonical_lineage || tag.currentLineage) {
+            // Database lineage exists - use it instead of potentially stale Excel lineage
+            const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+            if (dbLineage && dbLineage !== normalizedLineage) {
+                verboseLog(`🔄 Using database lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
+                normalizedLineage = dbLineage;
+            }
+        }
         if (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD') {
             lineageSelect.value = 'CBD';
         } else if (shouldMapToMixed(normalizedLineage)) {
@@ -7108,18 +7125,38 @@ const TagManager = {
     
     _normalizeLineageFields(tag) {
         try {
-            // CRITICAL: Always prioritize canonical_lineage (from database) as source of truth
-            // This ensures UI lineage matches database and persists correctly
-            const lin = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
+            // CRITICAL: Always prioritize canonical_lineage/currentLineage (from database) as source of truth
+            // If database lineage exists, use it exclusively - don't fall back to Excel Lineage
+            let lin;
+            let fromDatabase = false;
+            
+            if (tag.canonical_lineage || tag.currentLineage) {
+                // Database lineage exists - use it (this is the source of truth)
+                lin = (tag.canonical_lineage || tag.currentLineage || '').toString().trim();
+                fromDatabase = true;
+            } else {
+                // No database lineage - fall back to other fields only if database lineage is missing
+                lin = (tag.Lineage || tag.lineage || '').toString().trim();
+            }
+            
             if (lin) {
                 const normalized = lin.toUpperCase();
-                // Set ALL lineage fields to the database value for consistency
-                tag.canonical_lineage = normalized;
-                tag.currentLineage = normalized;
-                tag.Lineage = normalized;
-                tag.lineage = normalized;
-                // Also set Lineage* for any legacy references
-                tag['Lineage*'] = normalized;
+                // CRITICAL: If database lineage exists, set ALL fields to the database value for consistency
+                // This ensures UI always shows database lineage, not Excel lineage
+                if (fromDatabase) {
+                    // Database lineage is source of truth - set ALL fields to database value
+                    tag.canonical_lineage = normalized;
+                    tag.currentLineage = normalized;
+                    tag.Lineage = normalized;
+                    tag.lineage = normalized;
+                    tag['Lineage*'] = normalized;
+                } else {
+                    // No database lineage - normalize all fields to the same value
+                    // But don't set canonical_lineage/currentLineage (they should come from database)
+                    tag.Lineage = normalized;
+                    tag.lineage = normalized;
+                    tag['Lineage*'] = normalized;
+                }
             }
         } catch (e) {
             console.warn('Failed to normalize lineage for tag:', tag, e);
