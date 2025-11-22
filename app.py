@@ -7901,22 +7901,10 @@ def get_available_tags():
             fast_load = False  # Disable fast_load when lineage was recently updated
         
         if cached_tags and not nocache:
-            # CRITICAL FIX: Always align lineage from database when prefer_db is set, OR when lineage was recently updated
-            # This ensures UI shows current database lineage values, including tags updated in previous sessions
-            lineage_alignment_needed = force_full_refresh or prefer_db
-            
-            # PERFORMANCE FIX: Return cached tags immediately for instant loading UNLESS lineage alignment is needed
-            # If prefer_db is set or lineage was recently updated, we need to align from database to show fresh values
-            if not lineage_alignment_needed:
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"⚡ INSTANT: Returning {len(cached_tags)} cached tags ({elapsed:.1f}ms)")
-                safe_cached_tags = make_json_safe(cached_tags)
-                response_payload = {
-                    'tags': safe_cached_tags,
-                    'total_count': len(safe_cached_tags),
-                    'source': 'cache-instant'
-                }
-                return jsonify(response_payload)
+            # CRITICAL FIX: Always align lineage from database - database lineage is source of truth
+            # Even with fast_load, we need database lineage for correct colors and display
+            # Use optimized batch queries for fast lineage alignment
+            lineage_alignment_needed = True  # Always align lineage, even with fast_load
             
             # Lineage alignment needed - apply database lineage updates to cached tags
             # CRITICAL: This ensures existing database lineage values (from previous sessions/updates) are reflected in UI
@@ -7983,14 +7971,15 @@ def get_available_tags():
 
                                 # CRITICAL FIX: Limit batch size to prevent query timeouts
                                 # SQLite can struggle with very large IN clauses (>1000 items)
-                                # PERFORMANCE: Use small batch size for ultra-fast queries
-                                MAX_BATCH_SIZE = 50  # Small batch for instant loading (<100ms target)
+                                # PERFORMANCE: Use optimized batch size for fast loading with lineage alignment
+                                # Balance between speed (smaller batches) and completeness (larger batches)
+                                MAX_BATCH_SIZE = 200  # Optimized batch size for fast lineage alignment
                                 if len(all_search_names) > MAX_BATCH_SIZE:
-                                    logging.debug(f"Cache batch query size ({len(all_search_names)}) exceeds limit, processing in batches of {MAX_BATCH_SIZE}")
-                                    # Process in chunks instead of just taking first N
+                                    logging.debug(f"Cache batch query size ({len(all_search_names)}) exceeds limit, processing first {MAX_BATCH_SIZE} items immediately")
+                                    # Process first batch immediately for fast response
                                     all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
                                     all_search_names = all_search_names_chunks[0]  # Process first chunk immediately
-                                    # Note: Remaining chunks could be processed in background if needed
+                                    # Remaining chunks will be processed via individual lookups below if needed
 
                                 placeholders = ','.join(['?'] * len(all_search_names))
                                 batch_query = f'''
@@ -9489,6 +9478,7 @@ def update_lineage():
         # CRITICAL FIX: Simplified single-transaction update to prevent hangs and ensure persistence
         # Use direct SQL updates in a single transaction, then commit once at the end
         products_updated = 0
+        updated_count = 0  # Initialize Excel update count early
         strain_updated = False
         vendor = None
         strain_name = None
@@ -9666,6 +9656,7 @@ def update_lineage():
             
             # FIRST: Check if product exists before trying to update (for better error messages)
             existing_products = []
+            actual_product_names = []  # Store actual product names from database
             for candidate, normalized_candidate in variant_pairs:
                 logging.info(f"🔍 Searching for product: '{candidate}' (normalized: '{normalized_candidate}')")
                 cursor.execute('''
@@ -9679,6 +9670,8 @@ def update_lineage():
                     logging.info(f"✅ Found {len(existing_products)} exact match(es) for '{candidate}'")
                     tag_name_clean = candidate
                     normalized_name = normalized_candidate
+                    # Store actual product names from database
+                    actual_product_names = [p[0] or p[1] for p in existing_products if p[0] or p[1]]
                     break
             
             if not existing_products:
@@ -9697,6 +9690,8 @@ def update_lineage():
                         logging.info(f"✅ Found {len(existing_products)} case-insensitive match(es) for '{candidate}'")
                         tag_name_clean = candidate
                         normalized_name = normalized_candidate
+                        # Store actual product names from database
+                        actual_product_names = [p[0] or p[1] for p in existing_products if p[0] or p[1]]
                         break
             
             if not existing_products:
@@ -9713,6 +9708,8 @@ def update_lineage():
                         logging.warning(f"⚠️  Found {len(existing_products)} similar products for '{candidate}': {[p[0] or p[1] for p in existing_products[:3]]}")
                         tag_name_clean = candidate
                         normalized_name = product_db._normalize_product_name(candidate)
+                        # Store actual product names from database
+                        actual_product_names = [p[0] or p[1] for p in existing_products if p[0] or p[1]]
                         break
                 if not existing_products:
                     logging.error(f"❌ Product '{tag_name}' not found in database after all search strategies.")
@@ -9729,27 +9726,58 @@ def update_lineage():
                     else:
                         logging.warning(f"⚠️  Database appears to be empty or has no product names")
             
-            # FIRST: Update by exact product name (most specific)
-            # Try exact match first (including normalized_name)
-            cursor.execute('''
-                UPDATE products
-                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
-            ''', (new_lineage, tag_name_clean, tag_name_clean, normalized_name))
-            products_updated_by_name = cursor.rowcount
+            # CRITICAL FIX: Use actual product names from database for UPDATE
+            # This ensures we update the products that were actually found, not just the search term
+            if existing_products and actual_product_names:
+                # Update using the actual product names found in the database
+                placeholders = ','.join(['?'] * len(actual_product_names))
+                cursor.execute(f'''
+                    UPDATE products
+                    SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE "Product Name*" IN ({placeholders}) OR "ProductName" IN ({placeholders}) OR normalized_name = ?
+                ''', (new_lineage, *actual_product_names, *actual_product_names, normalized_name))
+                products_updated_by_name = cursor.rowcount
+                if products_updated_by_name > 0:
+                    logging.info(f"✅ Updated {products_updated_by_name} product(s) using actual database names: {actual_product_names[:3]}")
+            else:
+                # Fallback: Update by exact product name (most specific)
+                # Try exact match first (including normalized_name)
+                cursor.execute('''
+                    UPDATE products
+                    SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
+                ''', (new_lineage, tag_name_clean, tag_name_clean, normalized_name))
+                products_updated_by_name = cursor.rowcount
             
             # If exact match didn't work, try case-insensitive match with TRIM
+            # CRITICAL FIX: Also use actual product names if we found them but the first update didn't work
             if products_updated_by_name == 0:
                 try:
-                    tag_name_lower = tag_name_clean.lower()
-                    cursor.execute('''
-                        UPDATE products
-                        SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE LOWER(TRIM("Product Name*")) = ?
-                           OR LOWER(TRIM("ProductName")) = ?
-                           OR normalized_name = ?
-                    ''', (new_lineage, tag_name_lower, tag_name_lower, normalized_name))
-                    products_updated_by_name = cursor.rowcount
+                    if actual_product_names:
+                        # Use actual product names with case-insensitive matching
+                        placeholders = ','.join(['?'] * len(actual_product_names))
+                        actual_names_lower = [name.lower() for name in actual_product_names]
+                        cursor.execute(f'''
+                            UPDATE products
+                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE LOWER(TRIM("Product Name*")) IN ({placeholders})
+                               OR LOWER(TRIM("ProductName")) IN ({placeholders})
+                               OR normalized_name = ?
+                        ''', (new_lineage, *actual_names_lower, *actual_names_lower, normalized_name))
+                        products_updated_by_name = cursor.rowcount
+                        if products_updated_by_name > 0:
+                            logging.info(f"✅ Updated {products_updated_by_name} product(s) using case-insensitive match with actual names")
+                    else:
+                        # Fallback to original case-insensitive logic
+                        tag_name_lower = tag_name_clean.lower()
+                        cursor.execute('''
+                            UPDATE products
+                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE LOWER(TRIM("Product Name*")) = ?
+                               OR LOWER(TRIM("ProductName")) = ?
+                               OR normalized_name = ?
+                        ''', (new_lineage, tag_name_lower, tag_name_lower, normalized_name))
+                        products_updated_by_name = cursor.rowcount
                 except Exception as case_match_error:
                     logging.warning(f"⚠️  Case-insensitive match failed: {case_match_error}")
                     # Continue with next fallback
@@ -9965,7 +9993,7 @@ def update_lineage():
             products_updated = 0
         # CRITICAL FIX: Update Excel processor DataFrame AFTER database commit
         # Keep this fast and simple - database is the source of truth
-        updated_count = 0
+        # Note: updated_count is already initialized earlier, don't reset it here
         excel_update_start = time.time()
         try:
             if excel_processor and excel_processor.df is not None and products_updated > 0:
@@ -10108,25 +10136,98 @@ def update_lineage():
                 verify_cursor.close()
                 
                 if not product_found:
-                    error_msg = f'Product "{tag_name}" not found in database.'
-                    if similar_products:
-                        error_msg += f' Similar products found: {", ".join(similar_products[:3])}'
-                    else:
-                        error_msg += ' Please check the product name and ensure the product exists in the database.'
+                    # CRITICAL FIX: If product not found in database, try to create it from Excel data
+                    logging.warning(f"⚠️  Product '{tag_name}' not found in database, checking Excel data...")
+                    product_created = False
                     
-                    logging.error(f"❌ LINEAGE UPDATE FAILED: Product '{tag_name}' not found in database")
-                    if similar_products:
-                        logging.info(f"💡 Found similar products: {similar_products[:3]}")
+                    # Try to get product data from Excel
+                    if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
+                        try:
+                            # Search for product in Excel DataFrame
+                            product_name_col = 'Product Name*' if 'Product Name*' in excel_processor.df.columns else 'ProductName'
+                            if product_name_col in excel_processor.df.columns:
+                                # Try exact match first
+                                excel_row = excel_processor.df[excel_processor.df[product_name_col] == tag_name]
+                                if excel_row.empty:
+                                    # Try case-insensitive match
+                                    excel_row = excel_processor.df[excel_processor.df[product_name_col].str.strip().str.lower() == tag_name.strip().lower()]
+                                
+                                if not excel_row.empty:
+                                    # Found in Excel - create product in database
+                                    row_data = excel_row.iloc[0].to_dict()
+                                    
+                                    # Prepare product data for database
+                                    product_data = {
+                                        'Product Name*': tag_name,
+                                        'ProductName': tag_name,
+                                        'Lineage': new_lineage,  # Use the new lineage from request
+                                        'Product Type*': row_data.get('Product Type*', ''),
+                                        'Vendor/Supplier*': row_data.get('Vendor/Supplier*', ''),
+                                        'Product Brand': row_data.get('Product Brand', ''),
+                                        'Product Strain': row_data.get('Product Strain', ''),
+                                        'Weight*': row_data.get('Weight*', ''),
+                                        'Units': row_data.get('Units', ''),
+                                        'Price': row_data.get('Price*', row_data.get('Price', '')),
+                                        'Description': row_data.get('Description', tag_name),
+                                        'DOH': row_data.get('DOH', row_data.get('DOH Compliant (Yes/No)', '')),
+                                        'Quantity*': row_data.get('Quantity*', '1'),
+                                        'State': 'active',
+                                        'Is Sample? (yes/no)': 'no',
+                                        'Is MJ product?(yes/no)': 'yes',
+                                        'Discountable? (yes/no)': 'yes',
+                                        'Room*': 'Default'
+                                    }
+                                    
+                                    # Add product to database
+                                    try:
+                                        product_id = product_db.add_or_update_product(product_data)
+                                        if product_id:
+                                            products_updated = 1
+                                            product_created = True
+                                            logging.info(f"✅ Created product '{tag_name}' in database with lineage '{new_lineage}' from Excel data")
+                                            
+                                            # Also update Excel DataFrame if Lineage column exists
+                                            if 'Lineage' in excel_processor.df.columns:
+                                                excel_processor.df.loc[excel_processor.df[product_name_col] == tag_name, 'Lineage'] = new_lineage
+                                                updated_count = 1
+                                                logging.info(f"✅ Updated Excel DataFrame lineage for '{tag_name}' to '{new_lineage}'")
+                                            
+                                            # Verify the product was created
+                                            verify_cursor = product_db._get_connection().cursor()
+                                            verify_cursor.execute('SELECT "Lineage" FROM products WHERE "Product Name*" = ?', (tag_name,))
+                                            verify_result = verify_cursor.fetchone()
+                                            if verify_result and str(verify_result[0]).strip().upper() == new_lineage.strip().upper():
+                                                verification_passed = True
+                                                logging.info(f"✅ VERIFICATION: Created product has correct lineage '{new_lineage}'")
+                                            verify_cursor.close()
+                                    except Exception as create_error:
+                                        logging.error(f"❌ Failed to create product in database: {create_error}")
+                                        import traceback
+                                        logging.error(traceback.format_exc())
+                        except Exception as excel_error:
+                            logging.warning(f"⚠️  Error checking Excel data: {excel_error}")
                     
-                    return jsonify({
-                        'success': False,
-                        'error': error_msg,
-                        'products_updated': 0,
-                        'verification_passed': False,
-                        'tag_name': tag_name,
-                        'new_lineage': new_lineage,
-                        'similar_products': similar_products[:5] if similar_products else []
-                    }), 400
+                    if not product_created:
+                        # Product not found in database or Excel - return error
+                        error_msg = f'Product "{tag_name}" not found in database.'
+                        if similar_products:
+                            error_msg += f' Similar products found: {", ".join(similar_products[:3])}'
+                        else:
+                            error_msg += ' Please check the product name and ensure the product exists in the database or Excel file.'
+                        
+                        logging.error(f"❌ LINEAGE UPDATE FAILED: Product '{tag_name}' not found in database or Excel")
+                        if similar_products:
+                            logging.info(f"💡 Found similar products: {similar_products[:3]}")
+                        
+                        return jsonify({
+                            'success': False,
+                            'error': error_msg,
+                            'products_updated': 0,
+                            'verification_passed': False,
+                            'tag_name': tag_name,
+                            'new_lineage': new_lineage,
+                            'similar_products': similar_products[:5] if similar_products else []
+                        }), 400
                 else:
                     logging.warning(f"⚠️  Product exists but update returned 0 rows. This might be a database issue.")
                     # Don't fail - return success with warning
