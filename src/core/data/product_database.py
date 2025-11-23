@@ -4947,7 +4947,8 @@ class ProductDatabase:
                         'Lineage': result[6] or 'MIXED',  # lineage
                         'Product Strain': result[7],  # strain_name from Product Strain column
                         'strain_name': result[7],  # strain_name from Product Strain column
-                        'canonical_lineage': result[8],  # canonical_lineage from Lineage column
+                        'canonical_lineage': result[8] or result[6] or 'MIXED',  # canonical_lineage from Lineage column (fallback to Lineage)
+                        'currentLineage': result[8] or result[6] or 'MIXED',  # currentLineage - same as canonical_lineage (from products.Lineage)
                         'total_occurrences': result[9],
                         'first_seen_date': result[10],
                         'last_seen_date': result[11],

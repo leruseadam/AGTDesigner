@@ -3625,6 +3625,7 @@ class ExcelProcessor:
                     # Update tag with database values (database takes precedence)
                     # Only update fields that are commonly changed in database (lineage, DOH, etc.)
                     # CRITICAL FIX: Use same lineage priority as main endpoint - prefer currentLineage/canonical_lineage, then Lineage
+                    # Database lineage is ALWAYS the source of truth - override Excel lineage
                     db_lineage = None
                     if db_record.get('currentLineage'):
                         db_lineage = str(db_record.get('currentLineage', '')).strip().upper()
@@ -3633,18 +3634,23 @@ class ExcelProcessor:
                     elif db_record.get('Lineage'):
                         db_lineage = str(db_record.get('Lineage', '')).strip().upper()
                     
+                    # CRITICAL: Always update lineage from database, even if it appears to match
+                    # This ensures fresh database values are always used, even after refresh
                     if db_lineage:
+                        old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
                         # CRITICAL: Set ALL lineage fields to ensure frontend gets database lineage
-                        old_lineage = tag.get('Lineage', '')
                         tag['Lineage'] = db_lineage
                         tag['lineage'] = db_lineage.lower()
                         tag['canonical_lineage'] = db_lineage
                         tag['currentLineage'] = db_lineage
                         enriched_count += 1
                         if old_lineage != db_lineage:
-                            logger.info(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage updated: {old_lineage} → {db_lineage}")
+                            logger.info(f"🔄 EXCEL ENRICHMENT: Tag '{product_name}' lineage updated: '{old_lineage}' → '{db_lineage}'")
                         else:
-                            logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' has database lineage: {db_lineage}")
+                            logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage confirmed from DB: '{db_lineage}'")
+                    else:
+                        # No database lineage found - log warning
+                        logger.warning(f"⚠️ EXCEL ENRICHMENT: Tag '{product_name}' has no lineage in database")
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
                         db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')
@@ -7410,7 +7416,12 @@ class ExcelProcessor:
         cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
         if cached_tags is not None:
             # CRITICAL FIX: Always enrich cached tags with fresh database values
+            # This ensures lineage updates are reflected even when cache is used
+            # Database lineage ALWAYS overrides cached/Excel lineage values
             enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
+            # CRITICAL: Update cache with enriched values so next request gets database lineage
+            # This ensures database lineage persists in cache, not Excel lineage
+            self._store_cache_value(self._available_tags_cache, cache_key, enriched_cached_tags)
             return self._clone_tag_results(enriched_cached_tags)
 
         def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

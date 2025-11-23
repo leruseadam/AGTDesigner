@@ -10098,12 +10098,23 @@ def update_lineage():
             # NOTE: WAL checkpoint is now done on the same connection that committed (above)
             # This ensures changes are immediately visible and persisted
             
-            # Invalidate Excel processor caches (non-blocking)
+            # CRITICAL: Invalidate Excel processor caches to force fresh database enrichment
+            # This ensures cached tags are re-enriched with updated database lineage
             if excel_processor and hasattr(excel_processor, '_invalidate_caches'):
                 try:
                     excel_processor._invalidate_caches()
-                except:
-                    pass  # Don't fail if cache invalidation fails
+                    logging.info(f"✅ LINEAGE UPDATE: ExcelProcessor cache invalidated")
+                except Exception as excel_cache_err:
+                    logging.warning(f"Could not invalidate ExcelProcessor cache: {excel_cache_err}")
+            
+            # CRITICAL: Also invalidate any session Excel processor cache
+            try:
+                session_excel_processor = get_session_excel_processor()
+                if session_excel_processor and hasattr(session_excel_processor, '_invalidate_caches'):
+                    session_excel_processor._invalidate_caches()
+                    logging.info(f"✅ LINEAGE UPDATE: Session ExcelProcessor cache invalidated")
+            except Exception as session_excel_cache_err:
+                logging.warning(f"Could not invalidate session ExcelProcessor cache: {session_excel_cache_err}")
                     
         except Exception as cache_error:
             logging.warning(f"Cache clear failed (non-critical): {cache_error}")
