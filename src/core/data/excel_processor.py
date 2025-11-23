@@ -3566,6 +3566,79 @@ class ExcelProcessor:
         
         logger.debug(f"Selected tags after selection: {self.selected_tags}")
     
+    def _update_dataframe_lineage_from_database(self):
+        """Update Excel DataFrame Lineage column from database BEFORE building tags.
+        This ensures tags are built with database lineage, not Excel file lineage."""
+        if self.df is None or self.df.empty:
+            return
+        
+        if 'Lineage' not in self.df.columns or 'Product Name*' not in self.df.columns:
+            return
+        
+        try:
+            # Try to get product database
+            product_db = None
+            store_name = None
+            
+            try:
+                import sys
+                if 'app' in sys.modules:
+                    app_module = sys.modules['app']
+                    if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                        store_name = app_module.get_current_store_name()
+                        product_db = app_module.get_product_database(store_name) if store_name else None
+            except (ImportError, AttributeError, Exception) as e:
+                logger.debug(f"Could not get product database for DataFrame lineage update: {e}")
+                return
+            
+            if not product_db:
+                logger.debug("No product database available for DataFrame lineage update")
+                return
+            
+            # Get all product names from DataFrame
+            product_names = self.df['Product Name*'].dropna().unique().tolist()
+            if not product_names:
+                return
+            
+            # Batch query database for lineage
+            db_records = product_db.get_products_by_names(product_names)
+            if not db_records:
+                logger.debug("No database records found for DataFrame lineage update")
+                return
+            
+            # Create lookup map
+            lineage_map = {}
+            for db_record in db_records:
+                product_name = db_record.get('Product Name*', '')
+                if product_name:
+                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
+                    db_lineage = (
+                        db_record.get('currentLineage') or
+                        db_record.get('canonical_lineage') or
+                        db_record.get('Lineage')
+                    )
+                    if db_lineage:
+                        lineage_map[product_name] = str(db_lineage).strip().upper()
+            
+            # Update DataFrame Lineage column
+            updated_count = 0
+            for product_name, db_lineage in lineage_map.items():
+                mask = self.df['Product Name*'] == product_name
+                if mask.any():
+                    old_lineage = str(self.df.loc[mask, 'Lineage'].iloc[0] if mask.any() else '').strip().upper()
+                    if old_lineage != db_lineage:
+                        self.df.loc[mask, 'Lineage'] = db_lineage
+                        updated_count += 1
+                        logger.debug(f"✅ DataFrame lineage update: '{product_name}' - '{old_lineage}' → '{db_lineage}'")
+            
+            if updated_count > 0:
+                logger.info(f"✅ Updated {updated_count} products in DataFrame with database lineage")
+                # Invalidate cache since DataFrame changed
+                self._invalidate_caches()
+        except Exception as e:
+            logger.warning(f"Error updating DataFrame lineage from database: {e}")
+            # Don't fail - enrichment will handle it later
+    
     def _enrich_tags_with_database_values(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Enrich tags with current database values (lineage, DOH, etc.) to reflect latest updates."""
         try:
@@ -7423,9 +7496,20 @@ class ExcelProcessor:
             # This ensures database lineage persists in cache, not Excel lineage
             self._store_cache_value(self._available_tags_cache, cache_key, enriched_cached_tags)
             return self._clone_tag_results(enriched_cached_tags)
+        
+        # CRITICAL FIX: Update Excel DataFrame Lineage column from database BEFORE building tags
+        # This ensures tags are built with database lineage, not Excel file lineage
+        try:
+            self._update_dataframe_lineage_from_database()
+        except Exception as df_update_err:
+            logger.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
+            # Continue even if update fails - enrichment will handle it later
 
         def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            cached_copy = self._clone_tag_results(tag_list)
+            # CRITICAL: Enrich tags with database values BEFORE caching
+            # This ensures cached tags have database lineage, not Excel lineage
+            enriched_tags = self._enrich_tags_with_database_values(tag_list)
+            cached_copy = self._clone_tag_results(enriched_tags)
             self._store_cache_value(self._available_tags_cache, cache_key, cached_copy)
             return self._clone_tag_results(cached_copy)
 
