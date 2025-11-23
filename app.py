@@ -7912,15 +7912,15 @@ def get_available_tags():
             # CRITICAL: This ensures existing database lineage values (from previous sessions/updates) are reflected in UI
             # Perform lineage alignment to assign/update lineage from database
             # Use optimized version that's faster but still completes
-            updated = 0  # Initialize outside try block so it's accessible later
-            if lineage_alignment_needed:
-                logging.info(f"🔄 ALIGNING LINEAGE: prefer_db={prefer_db}, force_full_refresh={force_full_refresh} - aligning cached tags with database")
-                # Quick lineage alignment with timeout to prevent blocking
-                try:
-                    store_name = get_current_store_name()
-                    product_db = get_product_database(store_name)
-                    if product_db:
-                        lineage_cache = {}
+                        updated = 0  # Initialize outside try block so it's accessible later
+                        lineage_cache = {}  # Initialize outside try block so it's accessible for forced update
+                        if lineage_alignment_needed:
+                            logging.info(f"🔄 ALIGNING LINEAGE: prefer_db={prefer_db}, force_full_refresh={force_full_refresh} - aligning cached tags with database")
+                            # Quick lineage alignment with timeout to prevent blocking
+                            try:
+                                store_name = get_current_store_name()
+                                product_db = get_product_database(store_name)
+                                if product_db:
                         # Prepare connection once
                         conn = product_db._get_connection()
                         cur = conn.cursor()
