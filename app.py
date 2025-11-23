@@ -7912,15 +7912,16 @@ def get_available_tags():
             # CRITICAL: This ensures existing database lineage values (from previous sessions/updates) are reflected in UI
             # Perform lineage alignment to assign/update lineage from database
             # Use optimized version that's faster but still completes
-                        updated = 0  # Initialize outside try block so it's accessible later
-                        lineage_cache = {}  # Initialize outside try block so it's accessible for forced update
-                        if lineage_alignment_needed:
-                            logging.info(f"🔄 ALIGNING LINEAGE: prefer_db={prefer_db}, force_full_refresh={force_full_refresh} - aligning cached tags with database")
-                            # Quick lineage alignment with timeout to prevent blocking
-                            try:
-                                store_name = get_current_store_name()
-                                product_db = get_product_database(store_name)
-                                if product_db:
+            updated = 0  # Initialize outside try block so it's accessible later
+            lineage_cache = {}  # Initialize outside try block so it's accessible for forced update
+            if lineage_alignment_needed:
+                logging.info(f"🔄 ALIGNING LINEAGE: prefer_db={prefer_db}, force_full_refresh={force_full_refresh} - aligning cached tags with database")
+                # Quick lineage alignment with timeout to prevent blocking
+                try:
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        # lineage_cache is already initialized above
                         # Prepare connection once
                         conn = product_db._get_connection()
                         cur = conn.cursor()
@@ -8145,7 +8146,7 @@ def get_available_tags():
                 
                 # CRITICAL FIX: Ensure ALL tags have database lineage fields set, even if they weren't in the batch query
                 # This handles cases where products weren't found in the initial batch but exist in the database
-                if lineage_alignment_needed and 'lineage_cache' in locals() and lineage_cache:
+                if lineage_alignment_needed and lineage_cache:
                     force_updated = 0
                     for tag in cached_tags:
                         name = tag.get('Product Name*') or tag.get('ProductName') or ''
