@@ -3179,6 +3179,16 @@ class ExcelProcessor:
                     self.logger.info(f"Fixed {mixed_lineage_mask.sum()} classic products with MIXED lineage, changed to HYBRID")
 
             self._on_dataset_updated(file_path, file_mtime)
+            
+            # CRITICAL FIX: Update DataFrame Lineage column from database immediately after loading
+            # This ensures the DataFrame always has the latest database lineage, not Excel file lineage
+            try:
+                self._update_dataframe_lineage_from_database()
+                self.logger.info("✅ Updated DataFrame Lineage column from database after file load")
+            except Exception as lineage_update_err:
+                self.logger.warning(f"Could not update DataFrame lineage from database after load: {lineage_update_err}")
+                # Continue - enrichment will handle it later
+            
             self.logger.info(f"File loaded successfully: {len(self.df)} rows, {len(self.df.columns)} columns")
             return True
             
