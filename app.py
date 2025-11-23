@@ -8142,6 +8142,36 @@ def get_available_tags():
 
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms, {updated} tags updated from database)")
+                
+                # CRITICAL FIX: Ensure ALL tags have database lineage fields set, even if they weren't in the batch query
+                # This handles cases where products weren't found in the initial batch but exist in the database
+                if lineage_alignment_needed and 'lineage_cache' in locals() and lineage_cache:
+                    force_updated = 0
+                    for tag in cached_tags:
+                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                        if not name:
+                            continue
+                        
+                        # Check if tag has database lineage fields
+                        has_db_lineage = tag.get('currentLineage') or tag.get('canonical_lineage')
+                        excel_lineage = str(tag.get('Lineage', '')).strip().upper()
+                        
+                        # If tag only has Excel lineage but no database lineage fields, try to get from cache
+                        if excel_lineage and not has_db_lineage:
+                            db_lin, _ = lineage_cache.get(name, (None, None))
+                            if db_lin:
+                                db_lin_clean = str(db_lin).strip().upper()
+                                tag['currentLineage'] = db_lin_clean
+                                tag['canonical_lineage'] = db_lin_clean
+                                tag['Lineage'] = db_lin_clean
+                                tag['lineage'] = db_lin_clean.lower()
+                                force_updated += 1
+                                logging.debug(f"🔄 FORCED LINEAGE SET: '{name}' - set all fields to '{db_lin_clean}'")
+                    
+                    if force_updated > 0:
+                        logging.info(f"🔄 FORCED LINEAGE UPDATE: Set database lineage fields on {force_updated} tags that were missing them")
+                        updated += force_updated
+                
                 safe_cached_tags = make_json_safe(cached_tags)
                 response_payload = {
                     'tags': safe_cached_tags,  # Frontend expects 'tags', not 'available_tags'
