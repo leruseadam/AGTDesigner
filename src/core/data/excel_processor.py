@@ -3606,8 +3606,9 @@ class ExcelProcessor:
                 logger.debug("No database records found for DataFrame lineage update")
                 return
             
-            # Create lookup map
+            # Create lookup map by both exact name and normalized name
             lineage_map = {}
+            normalized_lineage_map = {}
             for db_record in db_records:
                 product_name = db_record.get('Product Name*', '')
                 if product_name:
@@ -3618,18 +3619,47 @@ class ExcelProcessor:
                         db_record.get('Lineage')
                     )
                     if db_lineage:
-                        lineage_map[product_name] = str(db_lineage).strip().upper()
+                        db_lineage_clean = str(db_lineage).strip().upper()
+                        lineage_map[product_name] = db_lineage_clean
+                        # Also store by normalized name for better matching
+                        try:
+                            normalized_name = product_db._normalize_product_name(product_name)
+                            normalized_lineage_map[normalized_name] = db_lineage_clean
+                        except Exception:
+                            pass
             
-            # Update DataFrame Lineage column
+            # Update DataFrame Lineage column - try exact match first, then normalized match
             updated_count = 0
-            for product_name, db_lineage in lineage_map.items():
-                mask = self.df['Product Name*'] == product_name
-                if mask.any():
-                    old_lineage = str(self.df.loc[mask, 'Lineage'].iloc[0] if mask.any() else '').strip().upper()
+            for idx, row in self.df.iterrows():
+                excel_product_name = str(row.get('Product Name*', '')).strip()
+                if not excel_product_name:
+                    continue
+                
+                # Try exact match first
+                db_lineage = lineage_map.get(excel_product_name)
+                
+                # Try normalized match if exact match failed
+                if not db_lineage:
+                    try:
+                        excel_normalized = product_db._normalize_product_name(excel_product_name)
+                        db_lineage = normalized_lineage_map.get(excel_normalized)
+                    except Exception:
+                        pass
+                
+                # Try case-insensitive match if still no match
+                if not db_lineage:
+                    excel_lower = excel_product_name.lower()
+                    for db_name, db_lin in lineage_map.items():
+                        if db_name.lower() == excel_lower:
+                            db_lineage = db_lin
+                            break
+                
+                if db_lineage:
+                    old_lineage = str(row.get('Lineage', '')).strip().upper()
                     if old_lineage != db_lineage:
-                        self.df.loc[mask, 'Lineage'] = db_lineage
+                        self.df.at[idx, 'Lineage'] = db_lineage
                         updated_count += 1
-                        logger.debug(f"✅ DataFrame lineage update: '{product_name}' - '{old_lineage}' → '{db_lineage}'")
+                        logger.debug(f"✅ DataFrame lineage update: '{excel_product_name}' - '{old_lineage}' → '{db_lineage}'")
             
             if updated_count > 0:
                 logger.info(f"✅ Updated {updated_count} products in DataFrame with database lineage")
