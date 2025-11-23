@@ -10115,6 +10115,26 @@ def update_lineage():
                     logging.info(f"✅ LINEAGE UPDATE: Session ExcelProcessor cache invalidated")
             except Exception as session_excel_cache_err:
                 logging.warning(f"Could not invalidate session ExcelProcessor cache: {session_excel_cache_err}")
+            
+            # CRITICAL: Force ExcelProcessor to update DataFrame from database immediately
+            # This ensures the DataFrame has the latest lineage even if file was just loaded
+            try:
+                if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
+                    if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                        excel_processor._update_dataframe_lineage_from_database()
+                        logging.info(f"✅ LINEAGE UPDATE: ExcelProcessor DataFrame updated from database")
+            except Exception as df_update_err:
+                logging.warning(f"Could not update ExcelProcessor DataFrame: {df_update_err}")
+            
+            # Also update session ExcelProcessor DataFrame
+            try:
+                session_excel_processor = get_session_excel_processor()
+                if session_excel_processor and session_excel_processor.df is not None and not session_excel_processor.df.empty:
+                    if hasattr(session_excel_processor, '_update_dataframe_lineage_from_database'):
+                        session_excel_processor._update_dataframe_lineage_from_database()
+                        logging.info(f"✅ LINEAGE UPDATE: Session ExcelProcessor DataFrame updated from database")
+            except Exception as session_df_update_err:
+                logging.warning(f"Could not update session ExcelProcessor DataFrame: {session_df_update_err}")
                     
         except Exception as cache_error:
             logging.warning(f"Cache clear failed (non-critical): {cache_error}")
