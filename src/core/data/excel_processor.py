@@ -7659,6 +7659,49 @@ class ExcelProcessor:
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
         
+        # CRITICAL FIX: Query database for ALL product lineages BEFORE building tags
+        # This ensures database lineage is ALWAYS used, never Excel file lineage
+        db_lineage_map = {}
+        try:
+            import sys
+            if 'app' in sys.modules:
+                app_module = sys.modules['app']
+                if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                    store_name = app_module.get_current_store_name()
+                    product_db = app_module.get_product_database(store_name) if store_name else None
+                    if product_db and filtered_df is not None and not filtered_df.empty:
+                        # Get all product names from filtered DataFrame
+                        product_name_col = 'Product Name*' if 'Product Name*' in filtered_df.columns else 'ProductName'
+                        if product_name_col in filtered_df.columns:
+                            product_names = filtered_df[product_name_col].dropna().unique().tolist()
+                            if product_names:
+                                # Query database for all lineages at once
+                                db_records = product_db.get_products_by_names(product_names)
+                                for db_record in db_records:
+                                    product_name = db_record.get('Product Name*', '')
+                                    if product_name:
+                                        # Get lineage from database (prioritize currentLineage/canonical_lineage)
+                                        db_lineage = (
+                                            db_record.get('currentLineage') or
+                                            db_record.get('canonical_lineage') or
+                                            db_record.get('Lineage')
+                                        )
+                                        if db_lineage:
+                                            db_lineage_map[product_name] = str(db_lineage).strip().upper()
+                                        
+                                        # Also store by normalized name for better matching
+                                        try:
+                                            normalized_name = product_db._normalize_product_name(product_name)
+                                            if normalized_name not in db_lineage_map:
+                                                db_lineage_map[normalized_name] = str(db_lineage).strip().upper() if db_lineage else None
+                                        except Exception:
+                                            pass
+                                
+                                logger.info(f"✅ QUERIED DATABASE: Found lineage for {len(db_lineage_map)} products from database")
+        except Exception as db_query_err:
+            logger.warning(f"Could not query database for lineages: {db_query_err}")
+            # Continue - will use Excel lineage as fallback, but enrichment will fix it later
+        
         tags = []
         seen_product_names = set()  # Track seen product names to prevent duplicates
         
