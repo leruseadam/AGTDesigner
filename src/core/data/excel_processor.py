@@ -7823,6 +7823,47 @@ class ExcelProcessor:
             # Get price value - use the actual column name from Excel file
             price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
             
+            # CRITICAL FIX: ALWAYS use database lineage if available, NEVER use Excel file lineage
+            # Database is the source of truth - Excel file lineage is outdated
+            db_lineage = None
+            if db_lineage_map:
+                # Try exact match first
+                db_lineage = db_lineage_map.get(product_name)
+                # Try normalized name match if exact match failed
+                if not db_lineage:
+                    try:
+                        import sys
+                        if 'app' in sys.modules:
+                            app_module = sys.modules['app']
+                            if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                                store_name = app_module.get_current_store_name()
+                                product_db = app_module.get_product_database(store_name) if store_name else None
+                                if product_db and hasattr(product_db, '_normalize_product_name'):
+                                    normalized_name = product_db._normalize_product_name(product_name)
+                                    db_lineage = db_lineage_map.get(normalized_name)
+                    except Exception:
+                        pass
+                # Try case-insensitive match if still no match
+                if not db_lineage:
+                    product_name_lower = product_name.lower()
+                    for db_name, db_lin in db_lineage_map.items():
+                        if db_name and isinstance(db_name, str) and db_name.lower() == product_name_lower:
+                            db_lineage = db_lin
+                            break
+            
+            # Use database lineage if found, otherwise fall back to Excel/inference
+            if db_lineage:
+                final_lineage = db_lineage
+            else:
+                # Fallback to Excel/inference only if database doesn't have it
+                existing_lineage = str(row.get('Lineage', '') or '').strip().upper()
+                if existing_lineage and existing_lineage in VALID_LINEAGES:
+                    final_lineage = existing_lineage
+                else:
+                    # No valid lineage column - infer from product name and type
+                    product_type_for_inference = safe_get_value(row.get('Product Type*', ''))
+                    final_lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
+            
             tag = {
                 'Product Name*': product_name,
                 'Description': safe_get_value(row.get('Description', '')),  # Add Description field
@@ -7831,7 +7872,7 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'Lineage': final_lineage,  # CRITICAL: Use database lineage, not Excel
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
@@ -7859,28 +7900,25 @@ class ExcelProcessor:
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
                 'productBrand': safe_get_value(row.get('Product Brand', '')),
-                'lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'lineage': final_lineage.lower(),  # CRITICAL: Use database lineage, not Excel
                 'productType': safe_get_value(row.get('Product Type*', '')),
                 'weight': safe_get_value(raw_weight),
                 'weightWithUnits': safe_get_value(weight_with_units),
                 'displayName': product_name
             }
+            
+            # CRITICAL: Set database lineage fields if we got lineage from database
+            if db_lineage:
+                tag['currentLineage'] = db_lineage
+                tag['canonical_lineage'] = db_lineage
+                logger.debug(f"✅ USING DB LINEAGE: '{product_name}' = '{db_lineage}'")
+            else:
+                logger.debug(f"⚠️ USING EXCEL/INFERRED LINEAGE: '{product_name}' = '{final_lineage}' (not in database)")
+            
             # --- Filtering logic ---
             product_brand = str(tag['productBrand']).strip().lower()
             product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
             weight = str(tag['weight']).strip().lower()
-
-            # Sanitize lineage - prioritize existing lineage, fall back to inference from name  
-            existing_lineage = str(row.get('Lineage', '') or '').strip().upper()
-            if existing_lineage and existing_lineage in VALID_LINEAGES:
-                lineage = existing_lineage
-            else:
-                # No valid lineage column - infer from product name and type
-                product_type_for_inference = safe_get_value(row.get('Product Type*', ''))
-                lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
-            
-            tag['Lineage'] = lineage
-            tag['lineage'] = lineage
 
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()
