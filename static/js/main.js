@@ -1254,6 +1254,18 @@ const TagManager = {
         // Debug log for filters
         verboseLog('Updating filters with:', filters, 'preserveExistingValues:', preserveExistingValues);
         
+        // CRITICAL FIX: Check if all filters are empty and we're trying to preserve values
+        // If so, skip the update to prevent clearing user's selections
+        const allEmpty = Object.values(filters).every(arr => !arr || arr.length === 0);
+        if (allEmpty && preserveExistingValues) {
+            // Check if user has any filter selections
+            const hasFilterSelections = Array.from(document.querySelectorAll('select[id*="Filter"]')).some(select => select.value && select.value.trim() !== '');
+            if (hasFilterSelections) {
+                verboseLog('⏭️ Skipping filter update - all filters empty but user has selections to preserve');
+                return;
+            }
+        }
+        
         // Store original filter options to preserve order
         if (!this.state.originalFilterOptions.vendor) {
             this.state.originalFilterOptions = { ...filters };
@@ -1423,6 +1435,35 @@ const TagManager = {
             }
         } catch (error) {
             console.warn('Failed to load filters from localStorage:', error);
+        }
+        return null;
+    },
+    
+    saveSelectedTagsToStorage() {
+        try {
+            if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+                localStorage.setItem('agt_selected_tags', JSON.stringify(this.state.persistentSelectedTags));
+                verboseLog('✅ Saved selected tags to localStorage:', this.state.persistentSelectedTags.length);
+            } else {
+                localStorage.removeItem('agt_selected_tags');
+            }
+        } catch (error) {
+            console.warn('Failed to save selected tags to localStorage:', error);
+        }
+    },
+    
+    loadSelectedTagsFromStorage() {
+        try {
+            const saved = localStorage.getItem('agt_selected_tags');
+            if (saved) {
+                const tags = JSON.parse(saved);
+                if (Array.isArray(tags) && tags.length > 0) {
+                    verboseLog('✅ Loaded selected tags from localStorage:', tags.length);
+                    return tags;
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load selected tags from localStorage:', error);
         }
         return null;
     },
@@ -7543,6 +7584,8 @@ const TagManager = {
             // Update persistentSelectedTags with the fetched tags from backend
             verboseLog('Updating persistentSelectedTags with fetched tags:', selectedTags.map(tag => tag['Product Name*']));
             this.state.persistentSelectedTags = selectedTags.map(tag => tag['Product Name*']);
+            // Save to localStorage for persistence
+            this.saveSelectedTagsToStorage();
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
             verboseLog('persistentSelectedTags after update:', this.state.persistentSelectedTags);
             verboseLog('selectedTags after update:', this.state.selectedTags);
@@ -7565,7 +7608,7 @@ const TagManager = {
         }
     },
 
-    async fetchAndPopulateFilters(retryCount = 0) {
+    async fetchAndPopulateFilters(retryCount = 0, skipIfEmpty = false) {
         const maxRetries = 5; // Increased retries
         const retryDelay = 2000; // Increased to 2 seconds for better chance of data being ready
         
@@ -7594,22 +7637,26 @@ const TagManager = {
                 if (retryCount < maxRetries) {
                     verboseLog(`⚠️ Filter options error (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
                     setTimeout(() => {
-                        this.fetchAndPopulateFilters(retryCount + 1);
+                        this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
                     }, retryDelay);
                     return;
                 } else {
                     console.error('Filter options error after all retries:', filterOptions.error);
-                    // Still update filters with empty arrays to clear previous values
-                    this.updateFilters({
-                        vendor: [],
-                        brand: [],
-                        productType: [],
-                        lineage: [],
-                        weight: [],
-                        strain: [],
-                        doh: [],
-                        highCbd: []
-                    }, true);
+                    // CRITICAL FIX: Don't clear filters if skipIfEmpty is true and user has selections
+                    if (!skipIfEmpty) {
+                        this.updateFilters({
+                            vendor: [],
+                            brand: [],
+                            productType: [],
+                            lineage: [],
+                            weight: [],
+                            strain: [],
+                            doh: [],
+                            highCbd: []
+                        }, true);
+                    } else {
+                        verboseLog('⏭️ Skipping filter update - preserving user selections');
+                    }
                     return;
                 }
             }
@@ -7630,12 +7677,18 @@ const TagManager = {
             if (!hasData && retryCount < maxRetries) {
                 verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
                 setTimeout(() => {
-                    this.fetchAndPopulateFilters(retryCount + 1);
+                    this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
                 }, retryDelay);
                 return;
             }
             
-            // Update filters even if empty (to clear previous values)
+            // CRITICAL FIX: If skipIfEmpty is true and no data, don't update filters to preserve user selections
+            if (!hasData && skipIfEmpty && retryCount >= maxRetries) {
+                verboseLog('⏭️ Skipping filter update - no data and skipIfEmpty=true, preserving user selections');
+                return;
+            }
+            
+            // Update filters even if empty (to clear previous values) - but only if not skipping
             this.updateFilters(filterOptions, true); // Preserve existing filter values
             
             // If filters were empty after retries, log a warning but don't block
@@ -7651,22 +7704,25 @@ const TagManager = {
             if (retryCount < maxRetries) {
                 verboseLog(`⚠️ Filter fetch error (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
                 setTimeout(() => {
-                    this.fetchAndPopulateFilters(retryCount + 1);
+                    this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
                 }, retryDelay);
             } else {
                 console.error('Failed to load filter options after all retries');
-                // Don't show alert - filters will be populated when data loads
-                // Set empty filters to clear previous values
-                this.updateFilters({
-                    vendor: [],
-                    brand: [],
-                    productType: [],
-                    lineage: [],
-                    weight: [],
-                    strain: [],
-                    doh: [],
-                    highCbd: []
-                }, true);
+                // CRITICAL FIX: Don't clear filters if skipIfEmpty is true
+                if (!skipIfEmpty) {
+                    this.updateFilters({
+                        vendor: [],
+                        brand: [],
+                        productType: [],
+                        lineage: [],
+                        weight: [],
+                        strain: [],
+                        doh: [],
+                        highCbd: []
+                    }, true);
+                } else {
+                    verboseLog('⏭️ Skipping filter update on error - preserving user selections');
+                }
             }
         }
     },
@@ -10942,17 +10998,37 @@ const TagManager = {
 
     // Validate and clean up selected tags against current Excel data
     validateSelectedTags() {
+        // CRITICAL FIX: Don't validate if we're in the middle of processing or if tags are being actively used
+        if (this.state.isProcessingDeselection || this.state.isClearing) {
+            verboseLog('⏭️ Skipping validateSelectedTags - operation in progress');
+            return;
+        }
+        
         // Add safeguard to prevent clearing tags that were just added via JSON matching
         const hasJsonMatchedTags = this.state.persistentSelectedTags.length > 0;
         
         if (!this.state.originalTags || this.state.originalTags.length === 0) {
-            // No Excel data loaded, but don't clear if we have JSON matched tags
+            // No Excel data loaded, but don't clear if we have selected tags
             if (!hasJsonMatchedTags) {
-                this.state.persistentSelectedTags = [];
-                this.state.selectedTags.clear();
+                // CRITICAL FIX: Only clear if we're sure there's no data, not just temporarily
+                // Check if tags array exists (might be loading)
+                if (this.state.tags && this.state.tags.length === 0) {
+                    verboseLog('No tags available, clearing selected tags');
+                    this.state.persistentSelectedTags = [];
+                    this.state.selectedTags.clear();
+                } else {
+                    verboseLog('Preserving selected tags - data may be loading');
+                }
             } else {
                 verboseLog('Preserving JSON matched tags even though no Excel data is loaded yet');
             }
+            return;
+        }
+
+        // CRITICAL FIX: Only validate if we have a significant number of originalTags
+        // This prevents clearing during partial data loads
+        if (this.state.originalTags.length < 10 && this.state.persistentSelectedTags.length > 0) {
+            verboseLog('⏭️ Skipping validation - originalTags count is low, may be partial load');
             return;
         }
 
@@ -10983,14 +11059,18 @@ const TagManager = {
             }
         }
 
-        // Only clear and update if we actually found invalid tags
-        if (invalidTags.length > 0) {
+        // CRITICAL FIX: Only clear and update if we actually found invalid tags AND they represent a significant portion
+        // This prevents clearing when data is still loading
+        if (invalidTags.length > 0 && invalidTags.length > this.state.persistentSelectedTags.length * 0.5) {
+            // More than 50% invalid - likely a data mismatch, clean up
+            verboseLog(`Cleaning up ${invalidTags.length} invalid tags (${(invalidTags.length / this.state.persistentSelectedTags.length * 100).toFixed(1)}% of selections)`);
+            
             // Remove invalid tags and update with corrected case
             this.state.persistentSelectedTags = [];
             correctedTags.forEach(tagName => {
                 if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                this.state.persistentSelectedTags.push(tagName);
-                            };
+                    this.state.persistentSelectedTags.push(tagName);
+                }
             });
 
             // Update the regular selectedTags set
@@ -11148,10 +11228,20 @@ const TagManager = {
         this._filterRefreshInterval = setInterval(() => {
             // Only refresh if we have tags loaded and page is visible
             if (this.state.tags && this.state.tags.length > 0 && !document.hidden) {
-                verboseLog('🔄 Periodic filter refresh triggered');
-                this.fetchAndPopulateFilters().catch(error => {
-                    console.warn('Periodic filter refresh failed (non-critical):', error);
-                });
+                // CRITICAL FIX: Skip refresh if filters already have data and user has selections
+                // This prevents clearing user's filter selections
+                const hasFilterSelections = Array.from(document.querySelectorAll('select[id*="Filter"]')).some(select => select.value && select.value.trim() !== '');
+                const hasSelectedTags = this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0;
+                
+                // Only refresh if filters are empty or if we need to update options (but preserve values)
+                if (!hasFilterSelections && !hasSelectedTags) {
+                    verboseLog('🔄 Periodic filter refresh triggered (no user selections)');
+                    this.fetchAndPopulateFilters(true).catch(error => {
+                        console.warn('Periodic filter refresh failed (non-critical):', error);
+                    });
+                } else {
+                    verboseLog('⏭️ Skipping periodic filter refresh - user has active selections');
+                }
             }
         }, 60000); // Every 60 seconds
         
