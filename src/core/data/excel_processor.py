@@ -7548,7 +7548,50 @@ class ExcelProcessor:
         def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # CRITICAL: Enrich tags with database values BEFORE caching
             # This ensures cached tags have database lineage, not Excel lineage
+            # Database lineage ALWAYS overrides Excel lineage
             enriched_tags = self._enrich_tags_with_database_values(tag_list)
+            
+            # CRITICAL FIX: Verify all tags have database lineage fields after enrichment
+            tags_with_db_lineage = sum(1 for tag in enriched_tags if tag.get('currentLineage') or tag.get('canonical_lineage'))
+            if tags_with_db_lineage < len(enriched_tags):
+                logger.warning(f"⚠️ Only {tags_with_db_lineage}/{len(enriched_tags)} tags have database lineage after enrichment - forcing database query")
+                # Force database query for missing lineages
+                try:
+                    import sys
+                    if 'app' in sys.modules:
+                        app_module = sys.modules['app']
+                        if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                            store_name = app_module.get_current_store_name()
+                            product_db = app_module.get_product_database(store_name) if store_name else None
+                            if product_db:
+                                # Query database for tags missing database lineage
+                                missing_lineage_tags = [tag for tag in enriched_tags if not (tag.get('currentLineage') or tag.get('canonical_lineage'))]
+                                if missing_lineage_tags:
+                                    product_names = [tag.get('Product Name*') or tag.get('ProductName', '') for tag in missing_lineage_tags]
+                                    product_names = [n for n in product_names if n]
+                                    if product_names:
+                                        db_records = product_db.get_products_by_names(product_names)
+                                        for db_record in db_records:
+                                            db_product_name = db_record.get('Product Name*', '')
+                                            db_lineage = (
+                                                db_record.get('currentLineage') or
+                                                db_record.get('canonical_lineage') or
+                                                db_record.get('Lineage')
+                                            )
+                                            if db_lineage and db_product_name:
+                                                db_lineage_clean = str(db_lineage).strip().upper()
+                                                # Update all tags with this product name
+                                                for tag in enriched_tags:
+                                                    tag_name = tag.get('Product Name*') or tag.get('ProductName', '')
+                                                    if tag_name == db_product_name:
+                                                        tag['currentLineage'] = db_lineage_clean
+                                                        tag['canonical_lineage'] = db_lineage_clean
+                                                        tag['Lineage'] = db_lineage_clean
+                                                        tag['lineage'] = db_lineage_clean.lower()
+                                                        logger.debug(f"✅ FORCED DB LINEAGE: '{tag_name}' = '{db_lineage_clean}'")
+                except Exception as force_err:
+                    logger.warning(f"Could not force database query for missing lineages: {force_err}")
+            
             cached_copy = self._clone_tag_results(enriched_tags)
             self._store_cache_value(self._available_tags_cache, cache_key, cached_copy)
             return self._clone_tag_results(cached_copy)
