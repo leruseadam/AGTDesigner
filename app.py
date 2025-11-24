@@ -495,6 +495,9 @@ processing_lock = threading.Lock()  # Add thread lock for status updates
 # Thread lock for ExcelProcessor initialization
 excel_processor_lock = threading.Lock()  # Add thread lock for ExcelProcessor initialization
 
+# CRITICAL FIX: Lock for lineage updates to prevent concurrent database conflicts
+lineage_update_lock = threading.Lock()  # Serialize lineage updates to prevent database lock conflicts
+
 # Cache will be initialized after app creation
 cache = None
 
@@ -9837,75 +9840,80 @@ def update_lineage():
         if db_store != store_name:
             logging.warning(f"⚠️  LINEAGE UPDATE: Store mismatch - requested '{store_name}' but database is for '{db_store}'")
         
-        # CRITICAL FIX: Simplified single-transaction update to prevent hangs and ensure persistence
-        # Use direct SQL updates in a single transaction, then commit once at the end
-        products_updated = 0
-        updated_count = 0  # Initialize Excel update count early
-        strain_updated = False
-        vendor = None
-        strain_name = None
-        verified_lineage_after_commit = None  # Will be set after commit verification
-        
-        try:
-            import sqlite3
-            import time as time_module
+        # CRITICAL FIX: Serialize lineage updates using a lock to prevent concurrent database conflicts
+        # This ensures multiple lineage updates don't compete for the same database lock
+        with lineage_update_lock:
+            logging.info(f"🔒 Acquired lineage update lock for '{tag_name}' -> '{new_lineage}'")
             
-            # CRITICAL FIX: Optimized retry logic for database locks with faster timeouts
-            max_retries = 3  # Reduced from 5 to 3 for faster failure
-            retry_delay = 0.05  # Reduced initial delay from 0.1 to 0.05
-            conn = None
-            cursor = None
-            connection_start_time = time_module.time()
-            connection_timeout = 3.0  # Maximum 3 seconds to get connection
+            # CRITICAL FIX: Simplified single-transaction update to prevent hangs and ensure persistence
+            # Use direct SQL updates in a single transaction, then commit once at the end
+            products_updated = 0
+            updated_count = 0  # Initialize Excel update count early
+            strain_updated = False
+            vendor = None
+            strain_name = None
+            verified_lineage_after_commit = None  # Will be set after commit verification
             
-            for attempt in range(max_retries):
-                # Check if we've exceeded connection timeout
-                if time_module.time() - connection_start_time > connection_timeout:
-                    logging.error(f"❌ Connection timeout after {time_module.time() - connection_start_time:.2f}s")
-                    raise Exception(f"Database connection timeout after {connection_timeout}s")
+            try:
+                import sqlite3
+                import time as time_module
                 
-                try:
-                    conn = product_db._get_connection()
-                    # Set shorter timeout to prevent indefinite waiting
-                    conn.execute("PRAGMA busy_timeout = 2000")  # Reduced from 5s to 2s
-                    cursor = conn.cursor()
+                # CRITICAL FIX: Optimized retry logic for database locks with faster timeouts
+                max_retries = 3  # Reduced from 5 to 3 for faster failure
+                retry_delay = 0.05  # Reduced initial delay from 0.1 to 0.05
+                conn = None
+                cursor = None
+                connection_start_time = time_module.time()
+                connection_timeout = 5.0  # Increased to 5 seconds since we're serializing with lock
+                
+                for attempt in range(max_retries):
+                    # Check if we've exceeded connection timeout
+                    if time_module.time() - connection_start_time > connection_timeout:
+                        logging.error(f"❌ Connection timeout after {time_module.time() - connection_start_time:.2f}s")
+                        raise Exception(f"Database connection timeout after {connection_timeout}s")
                     
-                    # Use BEGIN IMMEDIATE to get an immediate lock
                     try:
-                        cursor.execute("BEGIN IMMEDIATE")
-                    except sqlite3.OperationalError as begin_error:
-                        if "cannot start a transaction within a transaction" in str(begin_error).lower():
-                            # Already in a transaction, continue
-                            pass
-                        else:
-                            raise
-                    
-                    # Break out of retry loop if we got the connection and lock
-                    break
-                    
-                except sqlite3.OperationalError as lock_error:
-                    if "database is locked" in str(lock_error).lower() and attempt < max_retries - 1:
-                        logging.warning(f"⚠️  Database locked (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
-                        if conn:
-                            try:
-                                conn.close()
-                            except:
+                        conn = product_db._get_connection()
+                        # Set timeout to prevent indefinite waiting
+                        conn.execute("PRAGMA busy_timeout = 3000")  # 3 seconds
+                        cursor = conn.cursor()
+                        
+                        # Use BEGIN IMMEDIATE to get an immediate lock
+                        try:
+                            cursor.execute("BEGIN IMMEDIATE")
+                        except sqlite3.OperationalError as begin_error:
+                            if "cannot start a transaction within a transaction" in str(begin_error).lower():
+                                # Already in a transaction, continue
                                 pass
-                        conn = None
-                        cursor = None
-                        time_module.sleep(retry_delay)
-                        retry_delay = min(retry_delay * 1.5, 0.3)  # Slower exponential backoff, max 0.3s
-                        continue
-                    else:
-                        # Last attempt or different error - raise it
-                        logging.error(f"❌ Database lock error after {attempt + 1} attempts: {lock_error}")
+                            else:
+                                raise
+                        
+                        # Break out of retry loop if we got the connection and lock
+                        break
+                        
+                    except sqlite3.OperationalError as lock_error:
+                        if "database is locked" in str(lock_error).lower() and attempt < max_retries - 1:
+                            logging.warning(f"⚠️  Database locked (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                            if conn:
+                                try:
+                                    conn.close()
+                                except:
+                                    pass
+                            conn = None
+                            cursor = None
+                            time_module.sleep(retry_delay)
+                            retry_delay = min(retry_delay * 1.5, 0.3)  # Slower exponential backoff, max 0.3s
+                            continue
+                        else:
+                            # Last attempt or different error - raise it
+                            logging.error(f"❌ Database lock error after {attempt + 1} attempts: {lock_error}")
+                            raise
+                    except Exception as conn_error:
+                        logging.error(f"❌ Error getting database connection: {conn_error}")
                         raise
-                except Exception as conn_error:
-                    logging.error(f"❌ Error getting database connection: {conn_error}")
-                    raise
-            
-            if not conn or not cursor:
-                raise Exception("Failed to get database connection after retries")
+                
+                if not conn or not cursor:
+                    raise Exception("Failed to get database connection after retries")
             
             # CRITICAL FIX: Get vendor and strain from database (after connection is established)
             try:
@@ -10632,52 +10640,55 @@ def update_lineage():
                 except Exception as create_error:
                     logging.warning(f"Could not ensure strain override after commit: {create_error}")
             
-        except sqlite3.OperationalError as lock_error:
-            # This should rarely happen now since we retry earlier, but handle it gracefully
-            if "database is locked" in str(lock_error).lower():
-                logging.error(f"❌ Database locked during lineage update after all retries: {lock_error}")
+            except sqlite3.OperationalError as lock_error:
+                # This should rarely happen now since we retry earlier, but handle it gracefully
+                if "database is locked" in str(lock_error).lower():
+                    logging.error(f"❌ Database locked during lineage update after all retries: {lock_error}")
+                    import traceback
+                    logging.error(f"Database lock error traceback: {traceback.format_exc()}")
+                    # Try to rollback if we have a connection
+                    if 'conn' in locals() and conn:
+                        try:
+                            conn.rollback()
+                        except:
+                            pass
+                    products_updated = 0
+                else:
+                    logging.error(f"❌ Database error during lineage update: {lock_error}")
+                    import traceback
+                    logging.error(f"Database error traceback: {traceback.format_exc()}")
+                    # Try to rollback if we have a connection
+                    if 'conn' in locals() and conn:
+                        try:
+                            conn.rollback()
+                        except:
+                            pass
+                    products_updated = 0
+            except sqlite3.Error as db_error:
+                # Catch all SQLite errors
+                logging.error(f"❌ SQLite error during lineage update: {db_error}")
                 import traceback
-                logging.error(f"Database lock error traceback: {traceback.format_exc()}")
-                # Try to rollback if we have a connection
-                if 'conn' in locals() and conn:
-                    try:
+                logging.error(f"SQLite error traceback: {traceback.format_exc()}")
+                try:
+                    if 'conn' in locals():
                         conn.rollback()
-                    except:
-                        pass
+                except:
+                    pass
                 products_updated = 0
-            else:
-                logging.error(f"❌ Database error during lineage update: {lock_error}")
+            except Exception as db_error:
+                # Catch any other database-related errors
+                logging.error(f"❌ Error updating lineage in database: {db_error}", exc_info=True)
                 import traceback
-                logging.error(f"Database error traceback: {traceback.format_exc()}")
-                # Try to rollback if we have a connection
-                if 'conn' in locals() and conn:
-                    try:
+                logging.error(f"Database update error traceback: {traceback.format_exc()}")
+                try:
+                    if 'conn' in locals():
                         conn.rollback()
-                    except:
-                        pass
+                except:
+                    pass
                 products_updated = 0
-        except sqlite3.Error as db_error:
-            # Catch all SQLite errors
-            logging.error(f"❌ SQLite error during lineage update: {db_error}")
-            import traceback
-            logging.error(f"SQLite error traceback: {traceback.format_exc()}")
-            try:
-                if 'conn' in locals():
-                    conn.rollback()
-            except:
-                pass
-            products_updated = 0
-        except Exception as db_error:
-            # Catch any other database-related errors
-            logging.error(f"❌ Error updating lineage in database: {db_error}", exc_info=True)
-            import traceback
-            logging.error(f"Database update error traceback: {traceback.format_exc()}")
-            try:
-                if 'conn' in locals():
-                    conn.rollback()
-            except:
-                pass
-            products_updated = 0
+            finally:
+                # CRITICAL FIX: Release lock and log completion
+                logging.info(f"🔓 Released lineage update lock for '{tag_name}' -> '{new_lineage}'")
         # CRITICAL FIX: Update Excel processor DataFrame AFTER database commit
         # Keep this fast and simple - database is the source of truth
         # Note: updated_count is already initialized earlier, don't reset it here
