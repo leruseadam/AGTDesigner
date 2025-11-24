@@ -4265,10 +4265,14 @@ class ProductDatabase:
                 return None
             
             # Try exact match first (fastest) - also get strain for sativa hybrid check
+            # CRITICAL FIX: JOIN with strains table to get sovereign_lineage (manual overrides)
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE "Product Name*" = ? OR "ProductName" = ?
-                ORDER BY id DESC
+                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" = ? OR p."ProductName" = ?
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -4300,11 +4304,15 @@ class ProductDatabase:
                 return lineage
             
             # Fallback: Case-insensitive and whitespace-insensitive match
+            # CRITICAL FIX: JOIN with strains table to get sovereign_lineage (manual overrides)
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
-                   OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
-                ORDER BY id DESC
+                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
+                   OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -4327,10 +4335,14 @@ class ProductDatabase:
                 return lineage
             
             # Last resort: Partial match (in case product name has extra characters)
+            # CRITICAL FIX: JOIN with strains table to get sovereign_lineage (manual overrides)
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
-                ORDER BY id DESC
+                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" LIKE ? OR p."ProductName" LIKE ?
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (f'%{product_name_norm}%', f'%{product_name_norm}%'))
             
@@ -4926,19 +4938,24 @@ class ProductDatabase:
             # Use placeholders for the IN clause
             placeholders = ','.join(['?' for _ in normalized_names])
             
-            # Fixed query - use products table directly with correct column names
+            # CRITICAL FIX: JOIN with strains table to get sovereign_lineage (manual overrides)
+            # Use COALESCE to prioritize sovereign_lineage, then canonical_lineage, then products.Lineage
             cursor.execute(f'''
-                SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
-                       "Product Strain" as strain_name, "Lineage" as canonical_lineage, total_occurrences, first_seen_date, last_seen_date,
-                       "Description", "Weight*", "Units", "Price", 
-                       "THC test result", "CBD test result", "Test result unit (% or mg)",
-                       "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State", "Is Sample? (yes/no)",
-                       "Is MJ product?(yes/no)", "Discountable? (yes/no)", "Room*", "Batch Number", "Lot Number", "Barcode*",
-                       "Medical Only (Yes/No)", "Med Price", "Expiration Date(YYYY-MM-DD)", "Is Archived? (yes/no)", "THC Per Serving", "Allergens",
-                       "Solvent", "Accepted Date", "Internal Product Identifier", "Product Tags (comma separated)", "Image URL", "Ingredients",
-                       "CombinedWeight", "Ratio_or_THC_CBD", "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN"
-                FROM products
-                WHERE normalized_name IN ({placeholders})
+                SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand",
+                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS "Lineage",
+                       p."Product Strain" as strain_name,
+                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as canonical_lineage,
+                       p.total_occurrences, p.first_seen_date, p.last_seen_date,
+                       p."Description", p."Weight*", p."Units", p."Price", 
+                       p."THC test result", p."CBD test result", p."Test result unit (% or mg)",
+                       p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio", p."State", p."Is Sample? (yes/no)",
+                       p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
+                       p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens",
+                       p."Solvent", p."Accepted Date", p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients",
+                       p."CombinedWeight", p."Ratio_or_THC_CBD", p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p.normalized_name IN ({placeholders})
             ''', normalized_names)
             
             results = cursor.fetchall()
@@ -4968,11 +4985,11 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        'Lineage': result[6] or 'MIXED',  # lineage
+                        'Lineage': result[6] or 'MIXED',  # lineage (now includes sovereign_lineage priority)
                         'Product Strain': result[7],  # strain_name from Product Strain column
                         'strain_name': result[7],  # strain_name from Product Strain column
-                        'canonical_lineage': result[8] or result[6] or 'MIXED',  # canonical_lineage from Lineage column (fallback to Lineage)
-                        'currentLineage': result[8] or result[6] or 'MIXED',  # currentLineage - same as canonical_lineage (from products.Lineage)
+                        'canonical_lineage': result[8] or result[6] or 'MIXED',  # canonical_lineage (now includes sovereign_lineage priority)
+                        'currentLineage': result[8] or result[6] or 'MIXED',  # currentLineage - same as canonical_lineage (includes sovereign_lineage priority)
                         'total_occurrences': result[9],
                         'first_seen_date': result[10],
                         'last_seen_date': result[11],

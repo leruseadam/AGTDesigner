@@ -3241,9 +3241,10 @@ class JSONMatcher:
                 'ProductBrand': excel_brand,
                 'Product Type*': safe_row_get(excel_row, 'Product Type*'),
                 'ProductType': safe_row_get(excel_row, 'Product Type*'),
-                'Weight*': excel_weight,  # Use the improved weight extraction
+                'Weight*': self._format_weight_label(excel_weight, excel_units) if excel_weight else '',  # Format like normal tags (no space: "3.5g")
+                'Weight': self._format_weight_label(excel_weight, excel_units) if excel_weight else '',  # Format like normal tags
                 'Units': excel_units,  # Use the improved units extraction
-                'Weight Value + Unit': f"{excel_weight}{excel_units}" if excel_weight and excel_units else excel_weight,
+                'Weight Value + Unit': self._format_weight_label(excel_weight, excel_units) if excel_weight else '',
                 'Price*': excel_price,  # Use the improved price extraction
                 'Price': excel_price,
                 'Cost*': safe_row_get(excel_row, 'Cost*'),
@@ -8526,13 +8527,19 @@ class JSONMatcher:
                     if match_source == 'Product Database Match':
                         product = best_match.copy()
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
+                        # CRITICAL FIX: Ensure Weight* is properly formatted (no space between number and unit)
+                        self._format_weight_field(product, item)
                     elif match_source == 'Advanced Match':
                         # Convert advanced match to product format
                         product = self._create_product_from_advanced_match(best_match, item, global_vendor)
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
+                        # CRITICAL FIX: Ensure Weight* is properly formatted
+                        self._format_weight_field(product, item)
                     else:  # Excel Match
                         product = self._create_product_from_excel_match(best_match, item, global_vendor)
                         product['Original JSON Product Name'] = str(item.get("product_name", ""))
+                        # CRITICAL FIX: Ensure Weight* is properly formatted
+                        self._format_weight_field(product, item)
                     
                     return [product]
                     
@@ -8571,7 +8578,8 @@ class JSONMatcher:
                 'Product Brand': brand,
                 'Product Type*': product_type,
                 'Description': description,
-                'Weight*': weight,
+                'Weight*': self._format_weight_label(weight, units) if weight else '',  # Format like normal tags (no space: "3.5g")
+                'Weight': self._format_weight_label(weight, units) if weight else '',  # Format like normal tags
                 'Units': units,
                 'Price*': price,
                 'THC test result': thc,
@@ -8744,8 +8752,8 @@ class JSONMatcher:
                 'Product Strain': strain,
                 'Strain Name': strain,
                 'Lineage': lineage,
-                'Weight*': f"{weight} {units}" if weight and units else weight,
-                'Weight': f"{weight} {units}" if weight and units else weight,
+                'Weight*': self._format_weight_label(weight, units) if weight else '',  # Format like normal tags (no space: "3.5g")
+                'Weight': self._format_weight_label(weight, units) if weight else '',  # Format like normal tags
                 'Quantity*': '1',
                 'Quantity': '1',
                 'Units': units,
@@ -10124,6 +10132,41 @@ class JSONMatcher:
             value_str = f"{value:.2f}".rstrip('0').rstrip('.')
         
         return f"{value_str}{unit}"
+    
+    def _format_weight_field(self, product: Dict, json_item: Dict = None) -> None:
+        """
+        Ensure Weight* field is properly formatted (no space between number and unit, e.g., "3.5g").
+        This ensures JSON matched tags display weight exactly like normal tags.
+        """
+        if not product:
+            return
+        
+        # Get weight and units from product or JSON item
+        weight = product.get('Weight*', '') or product.get('Weight', '')
+        units = product.get('Units', '') or product.get('Weight Unit*', '')
+        
+        # Try to get from JSON item if not in product
+        if json_item and (not weight or not units):
+            if not weight:
+                weight = str(json_item.get('unit_weight', '') or json_item.get('weight', '')).strip()
+            if not units:
+                units = str(json_item.get('unit_weight_uom', '') or json_item.get('uom', '')).strip() or 'g'
+        
+        # If weight already includes units (e.g., "3.5g"), extract them
+        if weight and not units:
+            import re
+            match = re.match(r'^([\d.]+)\s*([a-zA-Z]+)$', str(weight).strip())
+            if match:
+                weight = match.group(1)
+                units = match.group(2)
+        
+        # Format weight properly (no space between number and unit)
+        if weight and str(weight).strip():
+            formatted_weight = self._format_weight_label(weight, units)
+            product['Weight*'] = formatted_weight
+            product['Weight'] = formatted_weight
+            if units:
+                product['Units'] = units
 
     def _generate_excel_style_variations(
         self,
