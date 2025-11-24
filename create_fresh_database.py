@@ -15,9 +15,31 @@ def create_fresh_database():
     # Create uploads directory if it doesn't exist
     os.makedirs("uploads", exist_ok=True)
     
-    # Remove old database if it exists
+    # CRITICAL: Only remove database if it's empty or corrupted
+    # DO NOT remove databases with data - this would delete lineage overrides!
     if os.path.exists(db_path):
-        print(f"Removing old database: {db_path}")
+        # Check if database has data
+        try:
+            conn_check = sqlite3.connect(db_path)
+            cursor_check = conn_check.cursor()
+            cursor_check.execute("SELECT COUNT(*) FROM products")
+            product_count = cursor_check.fetchone()[0]
+            cursor_check.execute("SELECT COUNT(*) FROM strains")
+            strain_count = cursor_check.fetchone()[0]
+            conn_check.close()
+            
+            if product_count > 0 or strain_count > 0:
+                print(f"⚠️  WARNING: Database {db_path} contains data ({product_count} products, {strain_count} strains)")
+                print(f"⚠️  NOT removing existing database to preserve lineage overrides and data!")
+                print(f"⚠️  If you need a fresh database, manually delete it first.")
+                return False
+        except Exception as e:
+            print(f"⚠️  Could not check database contents: {e}")
+            print(f"⚠️  NOT removing database to be safe.")
+            return False
+        
+        # Only remove if database is empty
+        print(f"Removing empty database: {db_path}")
         os.remove(db_path)
     
     # Remove lock files
