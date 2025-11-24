@@ -10546,7 +10546,7 @@ def update_lineage():
                     # CRITICAL FIX: Don't do WAL checkpoint inside the lock - it can block other operations
                     # The checkpoint can be done asynchronously or skipped - SQLite will handle it automatically
                     # WAL checkpoint is expensive and can cause database locks
-                    # break
+                    break
                 except sqlite3.OperationalError as commit_lock_error:
                     if "database is locked" in str(commit_lock_error).lower() and commit_attempt < 2:
                         logging.warning(f"⚠️  Commit locked (attempt {commit_attempt + 1}/3), retrying...")
@@ -10598,59 +10598,58 @@ def update_lineage():
                 logging.warning(f"Immediate verification check failed (non-critical): {immediate_verify_error}")
                 verified_lineage_after_commit = None
             
-            # CRITICAL FIX: Release lock BEFORE post-commit operations to prevent blocking other requests
-            # The transaction is committed, so we can safely release the lock now
+            # Lock is released when exiting the 'with' block
             logging.info(f"🔓 Releasing lineage update lock (transaction committed)")
             
-            # AFTER COMMIT: Always use add_or_update_strain with sovereign=True to ensure override persists
-            # This ensures the lineage change is marked as a manual override that won't be overridden by Excel/database sync
-            # Also update products.strain_id if it wasn't set during the transaction
-            # NOTE: These operations happen OUTSIDE the lock to prevent blocking other lineage updates
-            if strain_name and str(strain_name).strip():
-                try:
-                    # Use add_or_update_strain with sovereign=True to ensure the override persists
-                    # This will update both sovereign_lineage and canonical_lineage, marking it as a manual override
-                    strain_id = product_db.add_or_update_strain(strain_name, new_lineage, sovereign=True)
-                    if strain_id:
-                        strain_updated = True
-                        logging.info(f"🌿 Ensured strain '{strain_name}' has sovereign lineage '{new_lineage}' (strain_id: {strain_id}, override enabled)")
-                        
-                        # CRITICAL FIX: Update products.strain_id if it wasn't set during transaction
-                        # This ensures products are linked to strains so sovereign_lineage can be retrieved
-                        if products_updated > 0:
-                            try:
-                                conn2 = product_db._get_connection()
-                                cursor2 = conn2.cursor()
-                                
-                                if actual_product_names:
-                                    placeholders = ','.join(['?'] * len(actual_product_names))
-                                    cursor2.execute(f'''
-                                        UPDATE products
-                                        SET strain_id = ?
-                                        WHERE ("Product Name*" IN ({placeholders}) OR "ProductName" IN ({placeholders}))
-                                          AND (strain_id IS NULL OR strain_id != ?)
-                                    ''', (strain_id, *actual_product_names, *actual_product_names, strain_id))
-                                    strain_id_updated = cursor2.rowcount
-                                    if strain_id_updated > 0:
-                                        conn2.commit()
-                                        logging.info(f"🔗 POST-COMMIT: Linked {strain_id_updated} product(s) to strain_id {strain_id} (enables sovereign_lineage retrieval)")
-                                else:
-                                    cursor2.execute('''
-                                        UPDATE products
-                                        SET strain_id = ?
-                                        WHERE ("Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?)
-                                          AND (strain_id IS NULL OR strain_id != ?)
-                                    ''', (strain_id, tag_name_clean, tag_name_clean, normalized_name, strain_id))
-                                    strain_id_updated = cursor2.rowcount
-                                    if strain_id_updated > 0:
-                                        conn2.commit()
-                                        logging.info(f"🔗 POST-COMMIT: Linked {strain_id_updated} product(s) to strain_id {strain_id} (enables sovereign_lineage retrieval)")
-                            except Exception as post_strain_id_error:
-                                logging.warning(f"⚠️  Could not update products.strain_id after commit: {post_strain_id_error}")
-                except Exception as create_error:
-                    logging.warning(f"Could not ensure strain override after commit: {create_error}")
-            
-            except sqlite3.OperationalError as lock_error:
+        # AFTER LOCK RELEASE: Always use add_or_update_strain with sovereign=True to ensure override persists
+        # This ensures the lineage change is marked as a manual override that won't be overridden by Excel/database sync
+        # Also update products.strain_id if it wasn't set during the transaction
+        # NOTE: These operations happen OUTSIDE the lock to prevent blocking other lineage updates
+        if strain_name and str(strain_name).strip():
+            try:
+                # Use add_or_update_strain with sovereign=True to ensure the override persists
+                # This will update both sovereign_lineage and canonical_lineage, marking it as a manual override
+                strain_id = product_db.add_or_update_strain(strain_name, new_lineage, sovereign=True)
+                if strain_id:
+                    strain_updated = True
+                    logging.info(f"🌿 Ensured strain '{strain_name}' has sovereign lineage '{new_lineage}' (strain_id: {strain_id}, override enabled)")
+                    
+                    # CRITICAL FIX: Update products.strain_id if it wasn't set during transaction
+                    # This ensures products are linked to strains so sovereign_lineage can be retrieved
+                    if products_updated > 0:
+                        try:
+                            conn2 = product_db._get_connection()
+                            cursor2 = conn2.cursor()
+                            
+                            if actual_product_names:
+                                placeholders = ','.join(['?'] * len(actual_product_names))
+                                cursor2.execute(f'''
+                                    UPDATE products
+                                    SET strain_id = ?
+                                    WHERE ("Product Name*" IN ({placeholders}) OR "ProductName" IN ({placeholders}))
+                                      AND (strain_id IS NULL OR strain_id != ?)
+                                ''', (strain_id, *actual_product_names, *actual_product_names, strain_id))
+                                strain_id_updated = cursor2.rowcount
+                                if strain_id_updated > 0:
+                                    conn2.commit()
+                                    logging.info(f"🔗 POST-COMMIT: Linked {strain_id_updated} product(s) to strain_id {strain_id} (enables sovereign_lineage retrieval)")
+                            else:
+                                cursor2.execute('''
+                                    UPDATE products
+                                    SET strain_id = ?
+                                    WHERE ("Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?)
+                                      AND (strain_id IS NULL OR strain_id != ?)
+                                ''', (strain_id, tag_name_clean, tag_name_clean, normalized_name, strain_id))
+                                strain_id_updated = cursor2.rowcount
+                                if strain_id_updated > 0:
+                                    conn2.commit()
+                                    logging.info(f"🔗 POST-COMMIT: Linked {strain_id_updated} product(s) to strain_id {strain_id} (enables sovereign_lineage retrieval)")
+                        except Exception as post_strain_id_error:
+                            logging.warning(f"⚠️  Could not update products.strain_id after commit: {post_strain_id_error}")
+            except Exception as create_error:
+                logging.warning(f"Could not ensure strain override after commit: {create_error}")
+        
+        except sqlite3.OperationalError as lock_error:
                 # This should rarely happen now since we retry earlier, but handle it gracefully
                 if "database is locked" in str(lock_error).lower():
                     logging.error(f"❌ Database locked during lineage update after all retries: {lock_error}")
