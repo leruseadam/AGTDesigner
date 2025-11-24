@@ -11898,6 +11898,22 @@ window.performJsonMatch = function() {
         return;
     }
 
+    // Clear previous selected tags list before processing new match
+    if (typeof TagManager !== 'undefined') {
+        verboseLog('Clearing previous selected tags before JSON match');
+        TagManager.state.persistentSelectedTags = [];
+        TagManager.state.selectedTags = new Set();
+        
+        // Clear the selected tags display
+        const selectedTagsContainer = document.getElementById('selectedTags');
+        if (selectedTagsContainer) {
+            selectedTagsContainer.innerHTML = '';
+        }
+        
+        // Update tag counts
+        TagManager.updateTagCount('selected', 0);
+    }
+
     // Show loading state
     matchBtn.disabled = true;
     matchBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';

@@ -6829,6 +6829,16 @@ def generate_labels():
                 excel_processor.selected_tags = valid_selected_tags
                 logging.info(f"🔍 Set selected_tags on Excel processor: {len(valid_selected_tags)} tags")
             
+            # GUARANTEED FIX: Update DataFrame from database BEFORE getting records
+            # This ensures records are built with database lineage, not Excel file lineage
+            if excel_processor and hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                try:
+                    logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database before get_selected_records...")
+                    excel_processor._update_dataframe_lineage_from_database()
+                    logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database")
+                except Exception as df_update_err:
+                    logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
+            
             records = excel_processor.get_selected_records(template_type)
             logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
             
@@ -6858,21 +6868,41 @@ def generate_labels():
                                 continue
                             
                             try:
-                                # Try to get lineage by product name from database
-                                db_lineage = product_db.get_product_lineage(product_name)
+                                # GUARANTEED FIX: Use get_products_by_names for more reliable matching
+                                # This handles normalized names, case-insensitive matching, etc.
+                                db_records = product_db.get_products_by_names([product_name])
+                                db_lineage = None
+                                
+                                if db_records:
+                                    db_record = db_records[0]
+                                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
+                                    db_lineage = (
+                                        db_record.get('currentLineage') or
+                                        db_record.get('canonical_lineage') or
+                                        db_record.get('Lineage')
+                                    )
+                                
+                                # Fallback to get_product_lineage if get_products_by_names didn't find it
+                                if not db_lineage:
+                                    db_lineage = product_db.get_product_lineage(product_name)
+                                
                                 if db_lineage:
                                     original_lineage = record.get('Lineage', '')
                                     db_lineage_clean = str(db_lineage).strip().upper()
                                     original_lineage_clean = str(original_lineage).strip().upper()
                                     
-                                    # Only update if different (case-insensitive comparison)
+                                    # GUARANTEED FIX: Always update with database lineage (database is source of truth)
+                                    record['Lineage'] = db_lineage_clean
+                                    record['currentLineage'] = db_lineage_clean
+                                    record['canonical_lineage'] = db_lineage_clean
+                                    record['lineage'] = db_lineage_clean.lower()
+                                    
+                                    # Only log if different
                                     if db_lineage_clean != original_lineage_clean:
-                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
-                                        record['Lineage'] = db_lineage_clean
+                                        logging.info(f"🔄 GUARANTEED FIX (output): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
                                         lineage_overrides_applied += 1
                                     else:
-                                        # Verify they match (both clean)
-                                        record['Lineage'] = db_lineage_clean
+                                        logging.debug(f"✅ GUARANTEED FIX (output): '{product_name}' - Lineage confirmed: '{db_lineage_clean}'")
                                 else:
                                     # Try strain-level lookup as fallback
                                     product_strain = record.get('Product Strain', '')
@@ -14371,6 +14401,14 @@ def json_match():
         
         matched_products = _normalize_json_product_names(matched_products)
         
+        # Initialize matched_names to ensure it's always defined
+        matched_names = []
+        if matched_products:
+            matched_names = [
+                p.get('Product Name*') for p in matched_products
+                if isinstance(p, dict) and p.get('Product Name*')
+            ]
+        
         # CRITICAL FIX: Add JSON matched products directly to Excel DataFrame
         # This makes them work exactly like regular tags - no special handling needed
         try:
@@ -14407,21 +14445,16 @@ def json_match():
                 logging.info(f"✅ Successfully added JSON matched products to Excel DataFrame. Total rows: {len(excel_processor.df)}")
                 logging.info(f"DataFrame shape: {excel_processor.df.shape}")
 
-                # Extract product names for selection
-                matched_names = [
-                    p.get('Product Name*') for p in matched_products
-                    if isinstance(p, dict) and p.get('Product Name*')
-                ]
-
                 logging.info(f"Extracted {len(matched_names)} product names from matched products")
                 logging.info(f"Sample matched names: {matched_names[:3]}")
 
-                # Set selected tags - these will be processed like regular Excel tags
-                excel_processor.selected_tags = matched_names
-                session['selected_tags'] = matched_names
+                # Clear selected tags after JSON match - products will be available but not auto-selected
+                if hasattr(excel_processor, 'selected_tags'):
+                    excel_processor.selected_tags = []
+                session['selected_tags'] = []
                 session.modified = True
 
-                logging.info(f"✅ Set {len(matched_names)} products as selected tags for generation")
+                logging.info(f"✅ Cleared selected tags after JSON match - {len(matched_names)} products available but not selected")
 
         except Exception as persist_error:
             logging.error(f"Error adding JSON matched products to Excel DataFrame: {persist_error}")
@@ -14510,6 +14543,13 @@ def json_match():
             logging.info(f"🔍   - displayName: {matched_products[0].get('displayName', 'MISSING')}")
             logging.info(f"🔍   - All keys: {list(matched_products[0].keys())}")
 
+        # Clear selected tags after JSON match
+        if excel_processor and hasattr(excel_processor, 'selected_tags'):
+            excel_processor.selected_tags = []
+        session['selected_tags'] = []
+        session.modified = True
+        logging.info("✅ Cleared selected tags after JSON match")
+
         # Create response data - Return matched products directly
         response_products = json_matcher._upgrade_fallback_products(matched_products, None) if matched_products else []
         response_data = {
@@ -14517,10 +14557,10 @@ def json_match():
             'matched_count': len(response_products),
             'matched_names': matched_names,
             'available_tags': response_products,  # Return matched products directly
-            'selected_tags': matched_names,  # Return names of selected products
-            'message': f"Successfully matched {len(response_products)} products. They are ready for label generation.",
-            'auto_selected': True,
-            'selected_count': len(matched_names)
+            'selected_tags': [],  # Clear selected tags - products available but not auto-selected
+            'message': f"Successfully matched {len(response_products)} products. They are available for selection.",
+            'auto_selected': False,
+            'selected_count': 0
         }
 
         if response_products:

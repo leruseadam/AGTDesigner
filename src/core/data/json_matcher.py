@@ -8656,16 +8656,19 @@ class JSONMatcher:
                            product.get('inventory_type', '') or
                            'Edible (Solid)')  # Default for Ceres products
             
-            # Extract weight and units first
+            # Extract weight and units first - prioritize JSON item fields
             weight = (product.get('Weight*', '') or 
                      product.get('Weight', '') or 
-                     item.get('weight', '') or
+                     str(item.get('unit_weight', '')).strip() or  # JSON uses unit_weight
+                     str(item.get('weight', '')).strip() or
                      item.get('Weight', '') or
                      item.get('weight_with_units', '') or
                      item.get('size', '') or
                      item.get('Size', ''))
             units = (product.get('Units', '') or 
                     product.get('Weight Unit*', '') or
+                    str(item.get('unit_weight_uom', '')).strip() or  # JSON uses unit_weight_uom
+                    str(item.get('uom', '')).strip() or
                     item.get('units', '') or
                     item.get('Units', '') or
                     item.get('weight_unit', '') or
@@ -9130,8 +9133,8 @@ class JSONMatcher:
             if not product_type:
                 product_type = inventory_type or "Unknown"
             
-            # Extract weight
-            weight = str(json_item.get("weight", json_item.get("unit_weight", ""))).strip()
+            # Extract weight - prioritize unit_weight from JSON
+            weight = str(json_item.get("unit_weight", json_item.get("weight", ""))).strip()
             if not weight:
                 # Try to extract from product name
                 import re
@@ -9141,8 +9144,8 @@ class JSONMatcher:
                 else:
                     weight = "1"
             
-            # Extract units
-            units = str(json_item.get("units", json_item.get("unit_weight_uom", ""))).strip()
+            # Extract units - prioritize unit_weight_uom from JSON
+            units = str(json_item.get("unit_weight_uom", json_item.get("uom", json_item.get("units", "")))).strip()
             if not units:
                 if "oz" in product_name.lower() or "ounce" in product_name.lower():
                     units = "oz"
