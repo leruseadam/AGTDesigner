@@ -7559,19 +7559,38 @@ const TagManager = {
         // Check if there's already data loaded (e.g., from a previous session or default file)
         this.checkForExistingData();
         
-        // Ensure all filters default to 'All' on page load
-        this.state.filters = {
+        // GUARANTEED FIX: Restore filters from localStorage on page load
+        const savedFilters = this.loadFiltersFromStorage();
+        this.state.filters = savedFilters || {
             vendor: 'All',
             brand: 'All',
             productType: 'All',
             lineage: 'All',
             weight: 'All'
         };
-        // Set each filter dropdown to 'All' (or '')
+        
+        // Set each filter dropdown to saved value or 'All' (or '')
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const filterMap = {
+            'vendorFilter': 'vendor',
+            'brandFilter': 'brand',
+            'productTypeFilter': 'productType',
+            'lineageFilter': 'lineage',
+            'weightFilter': 'weight',
+            'dohFilter': 'doh',
+            'highCbdFilter': 'highCbd'
+        };
         filterIds.forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.value = '';
+            if (el) {
+                const filterKey = filterMap[id];
+                const savedValue = this.state.filters[filterKey];
+                if (savedValue && savedValue !== 'All') {
+                    el.value = savedValue;
+                } else {
+                    el.value = '';
+                }
+            }
         });
         // Don't apply filters immediately - let checkForExistingData handle it
         // this.applyFilters();
@@ -10243,6 +10262,9 @@ const TagManager = {
             if (stateKey) {
                 this.state.filters[stateKey] = value || 'All';
             }
+            
+            // GUARANTEED FIX: Save filters to localStorage when they change
+            this.saveFiltersToStorage();
             
             // Apply filters immediately with immediate UI update (bypass debounce)
             // Cancel any pending debounced updates to prevent delays
