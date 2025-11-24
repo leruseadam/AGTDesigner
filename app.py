@@ -10113,8 +10113,10 @@ def update_lineage():
                 logging.warning(f"⚠️  No products updated for '{tag_name}' - product may not exist in database")
             
             # Update strains table if we have a strain name
+            # CRITICAL FIX: Use add_or_update_strain with sovereign=True to ensure override persists
             if strain_name and str(strain_name).strip():
                 try:
+                    # First try to update within the transaction
                     strain_name_lower = str(strain_name).strip().lower()
                     cursor.execute('''
                         UPDATE strains
@@ -10126,7 +10128,7 @@ def update_lineage():
                     strain_rows = cursor.rowcount
                     if strain_rows > 0:
                         strain_updated = True
-                        logging.info(f"🌿 Updated {strain_rows} strain(s) to lineage '{new_lineage}'")
+                        logging.info(f"🌿 Updated {strain_rows} strain(s) with sovereign lineage '{new_lineage}' (override enabled)")
                 except Exception as strain_update_error:
                     logging.warning(f"⚠️  Could not update strain in transaction: {strain_update_error}")
                     import traceback
@@ -10201,15 +10203,18 @@ def update_lineage():
                 logging.warning(f"Immediate verification check failed (non-critical): {immediate_verify_error}")
                 verified_lineage_after_commit = None
             
-            # AFTER COMMIT: If strain doesn't exist, create it (this uses its own transaction)
-            if strain_name and str(strain_name).strip() and not strain_updated:
+            # AFTER COMMIT: Always use add_or_update_strain with sovereign=True to ensure override persists
+            # This ensures the lineage change is marked as a manual override that won't be overridden by Excel/database sync
+            if strain_name and str(strain_name).strip():
                 try:
+                    # Use add_or_update_strain with sovereign=True to ensure the override persists
+                    # This will update both sovereign_lineage and canonical_lineage, marking it as a manual override
                     strain_id = product_db.add_or_update_strain(strain_name, new_lineage, sovereign=True)
                     if strain_id:
                         strain_updated = True
-                        logging.info(f"🌿 Created strain '{strain_name}' with lineage '{new_lineage}' (strain_id: {strain_id})")
+                        logging.info(f"🌿 Ensured strain '{strain_name}' has sovereign lineage '{new_lineage}' (strain_id: {strain_id}, override enabled)")
                 except Exception as create_error:
-                    logging.warning(f"Could not create strain after commit: {create_error}")
+                    logging.warning(f"Could not ensure strain override after commit: {create_error}")
             
         except sqlite3.OperationalError as lock_error:
             # This should rarely happen now since we retry earlier, but handle it gracefully
@@ -10723,6 +10728,7 @@ def batch_update_lineage():
                 logging.error(f"Error persisting batch lineage changes to database: {db_error}")
 
         # NEW: Vendor+strain-wide DB updates per change (covers all weights/types for that strain & vendor)
+        # CRITICAL FIX: Also ensure strains are updated with sovereign=True to persist overrides
         try:
             store_name = get_current_store_name()
             product_db = get_product_database(store_name)
@@ -10730,6 +10736,7 @@ def batch_update_lineage():
                 conn = product_db._get_connection()
                 cursor = conn.cursor()
                 total_vendor_updates = 0
+                strains_to_update = set()  # Track unique strains for sovereign update
                 for change in changes_made:
                     tag_name = change.get('tag_name')
                     new_lineage = change.get('new')
@@ -10760,6 +10767,9 @@ def batch_update_lineage():
                                 strain_val = str(info.get('strain_name') or '').strip()
                         except Exception:
                             pass
+                    # Track strain for sovereign update
+                    if strain_val and str(strain_val).strip():
+                        strains_to_update.add((strain_val, new_lineage))
                     # Execute vendor+strain update when vendor exists
                     if vendor_val:
                         if strain_val:
@@ -10792,6 +10802,15 @@ def batch_update_lineage():
                 except Exception as checkpoint_error:
                     logging.warning(f"⚠️  WAL checkpoint failed for batch update (non-critical): {checkpoint_error}")
                 logging.info(f"✅ Batch vendor updates applied to {total_vendor_updates} rows")
+                
+                # CRITICAL FIX: Ensure all affected strains have sovereign_lineage set to persist overrides
+                for strain_name, lineage in strains_to_update:
+                    try:
+                        strain_id = product_db.add_or_update_strain(strain_name, lineage, sovereign=True)
+                        if strain_id:
+                            logging.info(f"🌿 Ensured strain '{strain_name}' has sovereign lineage '{lineage}' (override enabled)")
+                    except Exception as strain_override_error:
+                        logging.warning(f"⚠️  Could not set sovereign lineage for strain '{strain_name}': {strain_override_error}")
         except Exception as vendor_batch_err:
             logging.warning(f"Vendor-wide batch lineage updates failed: {vendor_batch_err}")
         

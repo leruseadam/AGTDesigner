@@ -2444,9 +2444,15 @@ class ProductDatabase:
             # Database should already be initialized with all required columns
             # No need to add missing columns during export
             
-            # Export strains
+            # Export strains - include sovereign_lineage to show manual overrides
             strains_df = pd.read_sql_query('''
-                SELECT strain_name, canonical_lineage, total_occurrences, first_seen_date, last_seen_date
+                SELECT strain_name, 
+                       COALESCE(sovereign_lineage, canonical_lineage) AS lineage,
+                       sovereign_lineage,
+                       canonical_lineage,
+                       total_occurrences, 
+                       first_seen_date, 
+                       last_seen_date
                 FROM strains
                 ORDER BY total_occurrences DESC
             ''', conn)
@@ -2459,12 +2465,30 @@ class ProductDatabase:
             columns_to_export = [col for col in available_columns if col not in ['id', 'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id']]
             
             # Build dynamic SELECT query with proper quoting for column names with special characters
-            select_columns = ', '.join([f'p."{col}"' for col in columns_to_export])
+            # CRITICAL FIX: Use COALESCE to prioritize sovereign_lineage from strains table over products.Lineage
+            # This ensures manual lineage overrides are exported correctly
+            select_columns = []
+            for col in columns_to_export:
+                if col == 'Lineage':
+                    # For Lineage column, prioritize sovereign_lineage, then canonical_lineage, then products.Lineage
+                    select_columns.append('''
+                        COALESCE(
+                            s.sovereign_lineage,
+                            s.canonical_lineage,
+                            p."Lineage"
+                        ) AS "Lineage"
+                    ''')
+                else:
+                    select_columns.append(f'p."{col}"')
             
-            # Query all products with only the columns that exist
+            select_columns_str = ', '.join(select_columns)
+            
+            # Query all products with JOIN to strains table to get sovereign_lineage
+            # CRITICAL FIX: LEFT JOIN with strains to get sovereign_lineage for lineage override
             cursor.execute(f'''
-                SELECT p.id, {select_columns}
+                SELECT p.id, {select_columns_str}
                 FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
                 ORDER BY p.id
             ''')
             
