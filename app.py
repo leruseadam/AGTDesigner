@@ -10262,54 +10262,15 @@ def update_lineage():
                     logging.info(f"💡 Extracted actual product names from existing_products: {actual_product_names[:3]}")
                 
                 if actual_product_names:
-                    # Update using the actual product names found in the database
-                    # Try updating each product individually to ensure we match correctly
-                    products_updated_by_name = 0
-                    for p in existing_products:
-                        try:
-                            # Update using all possible name fields from the found product
-                            # Use exact values from database, not empty strings
-                            product_name_val = p[0] if p[0] else None
-                            productname_val = p[1] if p[1] else None
-                            normalized_val = p[2] if p[2] else None
-                            
-                            # Build WHERE clause with only non-None values
-                            where_conditions = []
-                            where_params = []
-                            
-                            if product_name_val:
-                                where_conditions.append('"Product Name*" = ?')
-                                where_params.append(product_name_val)
-                            if productname_val:
-                                where_conditions.append('"ProductName" = ?')
-                                where_params.append(productname_val)
-                            if normalized_val:
-                                where_conditions.append('normalized_name = ?')
-                                where_params.append(normalized_val)
-                            
-                            if where_conditions:
-                                where_clause = ' OR '.join(where_conditions)
-                                cursor.execute(f'''
-                                    UPDATE products
-                                    SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                                    WHERE ({where_clause})
-                                ''', (new_lineage, *where_params))
-                                if cursor.rowcount > 0:
-                                    products_updated_by_name += cursor.rowcount
-                                    logging.info(f"✅ Updated product: {product_name_val or productname_val} ({cursor.rowcount} rows)")
-                            else:
-                                logging.warning(f"⚠️  No valid name fields for product: {p}")
-                        except Exception as individual_error:
-                            logging.warning(f"⚠️  Individual update failed for {p[0] or p[1]}: {individual_error}")
-                            import traceback
-                            logging.error(f"Update error traceback: {traceback.format_exc()}")
+                    # CRITICAL FIX: Use batch update with all actual product names for better reliability
+                    # This is more efficient and handles edge cases better than individual updates
+                    logging.info(f"🔄 Updating products using {len(actual_product_names)} name variants: {actual_product_names[:3]}")
                     
-                    if products_updated_by_name > 0:
-                        logging.info(f"✅ Total updated {products_updated_by_name} product(s) using actual database names")
-                    else:
-                        # Fallback: try batch update with all names
-                        logging.warning(f"⚠️  Individual updates matched 0 rows. Trying batch update...")
-                        placeholders = ','.join(['?'] * len(actual_product_names))
+                    # Build a comprehensive WHERE clause that matches any of the name variants
+                    placeholders = ','.join(['?'] * len(actual_product_names))
+                    
+                    # Try batch update with all name variants
+                    try:
                         cursor.execute(f'''
                             UPDATE products
                             SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
@@ -10318,8 +10279,57 @@ def update_lineage():
                                OR normalized_name IN ({placeholders})
                         ''', (new_lineage, *actual_product_names, *actual_product_names, *actual_product_names))
                         products_updated_by_name = cursor.rowcount
+                        
                         if products_updated_by_name > 0:
-                            logging.info(f"✅ Batch update succeeded: {products_updated_by_name} product(s)")
+                            logging.info(f"✅ Batch update succeeded: {products_updated_by_name} product(s) updated")
+                        else:
+                            logging.warning(f"⚠️  Batch update matched 0 rows. Trying individual updates...")
+                            # Fallback to individual updates
+                            products_updated_by_name = 0
+                            for p in existing_products:
+                                try:
+                                    product_name_val = p[0] if p[0] else None
+                                    productname_val = p[1] if p[1] else None
+                                    normalized_val = p[2] if p[2] else None
+                                    
+                                    if product_name_val:
+                                        cursor.execute('''
+                                            UPDATE products
+                                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                            WHERE "Product Name*" = ?
+                                        ''', (new_lineage, product_name_val))
+                                        if cursor.rowcount > 0:
+                                            products_updated_by_name += cursor.rowcount
+                                            logging.info(f"✅ Updated product via Product Name*: {product_name_val}")
+                                            continue
+                                    
+                                    if productname_val:
+                                        cursor.execute('''
+                                            UPDATE products
+                                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                            WHERE "ProductName" = ?
+                                        ''', (new_lineage, productname_val))
+                                        if cursor.rowcount > 0:
+                                            products_updated_by_name += cursor.rowcount
+                                            logging.info(f"✅ Updated product via ProductName: {productname_val}")
+                                            continue
+                                    
+                                    if normalized_val:
+                                        cursor.execute('''
+                                            UPDATE products
+                                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                            WHERE normalized_name = ?
+                                        ''', (new_lineage, normalized_val))
+                                        if cursor.rowcount > 0:
+                                            products_updated_by_name += cursor.rowcount
+                                            logging.info(f"✅ Updated product via normalized_name: {normalized_val}")
+                                except Exception as individual_error:
+                                    logging.warning(f"⚠️  Individual update failed for {p[0] or p[1]}: {individual_error}")
+                    except Exception as batch_error:
+                        logging.error(f"❌ Batch update failed: {batch_error}")
+                        import traceback
+                        logging.error(f"Batch update error traceback: {traceback.format_exc()}")
+                        products_updated_by_name = 0
             else:
                 # Fallback: Update by exact product name (most specific)
                 # Try exact match first (including normalized_name)
