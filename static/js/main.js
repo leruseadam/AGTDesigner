@@ -4319,35 +4319,36 @@ const TagManager = {
         } else if (isNonclassic) {
             // CRITICAL FIX: For capsules and nonclassic types, ignore classic lineages from database
             // They should ONLY use MIXED or CBD_BLEND based on CBD indicators
+            // Even if database has SATIVA/INDICA/HYBRID, we ignore it for nonclassic types
             if (isClassicLineage && hasValidDatabaseLineage) {
                 verboseLog(`⚠️ CAPSULE/NONCLASSIC: Ignoring classic lineage "${lineage}" from database for "${displayName}" - forcing MIXED/CBD_BLEND`);
             }
-            // Only apply Product Strain fallback logic if database lineage is missing or invalid
+            
+            // Only apply Product Strain fallback logic if database lineage is missing, invalid, or is a classic lineage
             const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
             const strainStr = String(productStrain).toLowerCase();
             
-            // CRITICAL: For non-classic types without valid DB lineage, check Product Strain
-            if (strainStr.includes('cbd blend') || strainStr.includes('cbd') || strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
+            // CRITICAL: For non-classic types, always check for CBD indicators first
+            // If database has a valid non-classic lineage (like CBD_BLEND or MIXED), use it
+            // But if database has classic lineage, ignore it and use CBD detection
+            if (!isClassicLineage && hasValidDatabaseLineage && (lineage === 'CBD_BLEND' || lineage === 'MIXED' || lineage === 'PARAPHERNALIA')) {
+                // Use valid non-classic lineage from database
+                displayLineage = lineage;
+                verboseLog(`🎨 NON-CLASSIC using valid DB lineage: "${displayName}" → ${displayLineage}`);
+            } else if (strainStr.includes('cbd blend') || strainStr.includes('cbd') || strainStr.includes('cbn') || strainStr.includes('cbc') || strainStr.includes('cbg')) {
                 // CBD family products display as CBD Blend lineage (yellow color)
                 displayLineage = 'CBD_BLEND';
-                verboseLog(`🎨 NON-CLASSIC CBD FAMILY (fallback): "${displayName}" → CBD_BLEND (yellow)`);
+                verboseLog(`🎨 NON-CLASSIC CBD FAMILY: "${displayName}" → CBD_BLEND (yellow)`);
             } else if (hasCbdIndicator()) {
                 displayLineage = 'CBD_BLEND';
-                verboseLog(`🎨 NON-CLASSIC CBD SIGNAL (fallback): "${displayName}" → CBD_BLEND (yellow)`);
+                verboseLog(`🎨 NON-CLASSIC CBD SIGNAL: "${displayName}" → CBD_BLEND (yellow)`);
             } else if (strainStr.includes('paraphernalia')) {
                 displayLineage = 'PARAPHERNALIA'; // Pink color
-                verboseLog(`🎨 NON-CLASSIC PARA (fallback): "${displayName}" → PARAPHERNALIA (pink)`);
-            } else if (strainStr.includes('mixed') || !productStrain) {
-                if (hasCbdIndicator()) {
-                    displayLineage = 'CBD_BLEND';
-                    verboseLog(`🎨 NON-CLASSIC CBD SIGNAL (no strain, fallback): "${displayName}" → CBD_BLEND (yellow)`);
-                } else {
-                    displayLineage = 'MIXED'; // Blue color
-                    verboseLog(`🎨 NON-CLASSIC MIXED (fallback): "${displayName}" → MIXED (blue)`);
-                }
+                verboseLog(`🎨 NON-CLASSIC PARA: "${displayName}" → PARAPHERNALIA (pink)`);
             } else {
-                displayLineage = 'MIXED'; // Blue color default
-                verboseLog(`🎨 NON-CLASSIC default (fallback): "${displayName}" → MIXED (blue)`);
+                // Default to MIXED for all other nonclassic types (including capsules without CBD indicators)
+                displayLineage = 'MIXED'; // Blue color
+                verboseLog(`🎨 NON-CLASSIC default (capsule/nonclassic): "${displayName}" → MIXED (blue)`);
             }
         } else {
             // Classic types - use database lineage or default to MIXED
