@@ -880,9 +880,14 @@ const AppLoadingSplash = {
 
     // Emergency hide function for debugging
     emergencyHide() {
-        verboseLog('Emergency hiding splash screen');
+        console.warn('⚠️ Emergency hiding splash screen - initialization may have failed or timed out');
         this.isVisible = false;
         this.stopAutoAdvance();
+        
+        // CRITICAL FIX: Clear any checking flags
+        if (typeof TagManager !== 'undefined' && TagManager._checkingExistingData) {
+            TagManager._checkingExistingData = false;
+        }
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -894,6 +899,23 @@ const AppLoadingSplash = {
         if (mainContent) {
             mainContent.style.opacity = '1';
             mainContent.classList.add('loaded');
+        }
+        
+        // CRITICAL FIX: Show upload prompt if no data loaded
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (availableTagsContainer && (!TagManager || !TagManager.state || !TagManager.state.tags || TagManager.state.tags.length === 0)) {
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-5">
+                    <div class="upload-prompt">
+                        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">No product data loaded</h5>
+                        <p class="text-muted">Upload an Excel file to get started</p>
+                        <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                            <i class="fas fa-upload me-2"></i>Upload Excel File
+                        </button>
+                    </div>
+                </div>
+            `;
         }
     }
 };
