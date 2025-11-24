@@ -8401,14 +8401,15 @@ def get_available_tags():
         
         logging.info("🔄 Building tag list... (prefer_db={}, request_args={})".format(prefer_db, dict(request.args)))
         
+        # CRITICAL FIX: Initialize excel_processor to prevent UnboundLocalError
+        excel_processor = None
+        
         # When prefer_db is set, skip Excel entirely and go straight to database
         all_tags = []
         if not prefer_db:
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
-            # Note: excel_processor was already retrieved and DataFrame updated above
-            if not excel_processor:
-                excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 try:
                     # PERFORMANCE: Skip enrichment when fast_load is enabled for faster tag loading
@@ -8530,13 +8531,11 @@ def get_available_tags():
                             logging.warning("⚠️ No product names found in tags for guaranteed lineage fix")
                     except Exception as db_query_err:
                         logging.error(f"❌ GUARANTEED FIX: Database query failed: {db_query_err}")
-                        import traceback
                         logging.error(traceback.format_exc())
                 else:
                     logging.warning("⚠️ No product database available for guaranteed lineage fix")
             except Exception as e:
                 logging.error(f"❌ GUARANTEED FIX: Lineage alignment failed: {e}")
-                import traceback
                 logging.error(traceback.format_exc())
         
         # OLD CODE: Keep the existing alignment logic as fallback (but guaranteed fix above should handle it)
