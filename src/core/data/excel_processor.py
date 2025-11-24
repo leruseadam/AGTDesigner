@@ -7675,8 +7675,11 @@ class ExcelProcessor:
                         if product_name_col in filtered_df.columns:
                             product_names = filtered_df[product_name_col].dropna().unique().tolist()
                             if product_names:
+                                logger.info(f"🔍 QUERYING DATABASE: Looking up lineage for {len(product_names)} products...")
                                 # Query database for all lineages at once
                                 db_records = product_db.get_products_by_names(product_names)
+                                logger.info(f"🔍 DATABASE RESPONSE: Got {len(db_records)} records from database")
+                                
                                 for db_record in db_records:
                                     product_name = db_record.get('Product Name*', '')
                                     if product_name:
@@ -7687,19 +7690,29 @@ class ExcelProcessor:
                                             db_record.get('Lineage')
                                         )
                                         if db_lineage:
-                                            db_lineage_map[product_name] = str(db_lineage).strip().upper()
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            db_lineage_map[product_name] = db_lineage_clean
+                                            logger.debug(f"✅ DB LINEAGE: '{product_name}' = '{db_lineage_clean}'")
                                         
                                         # Also store by normalized name for better matching
                                         try:
                                             normalized_name = product_db._normalize_product_name(product_name)
-                                            if normalized_name not in db_lineage_map:
-                                                db_lineage_map[normalized_name] = str(db_lineage).strip().upper() if db_lineage else None
-                                        except Exception:
-                                            pass
+                                            if normalized_name and normalized_name not in db_lineage_map:
+                                                db_lineage_map[normalized_name] = db_lineage_clean if db_lineage else None
+                                        except Exception as norm_err:
+                                            logger.debug(f"Could not normalize '{product_name}': {norm_err}")
                                 
-                                logger.info(f"✅ QUERIED DATABASE: Found lineage for {len(db_lineage_map)} products from database")
+                                logger.info(f"✅ QUERIED DATABASE: Found lineage for {len([k for k in db_lineage_map.keys() if db_lineage_map[k]])} products from database")
+                            else:
+                                logger.warning("⚠️ No product names found in filtered DataFrame")
+                        else:
+                            logger.warning(f"⚠️ Product name column '{product_name_col}' not found in DataFrame")
+                    else:
+                        logger.warning(f"⚠️ Cannot query database: product_db={product_db is not None}, filtered_df_empty={filtered_df is None or filtered_df.empty}")
         except Exception as db_query_err:
-            logger.warning(f"Could not query database for lineages: {db_query_err}")
+            logger.error(f"❌ ERROR querying database for lineages: {db_query_err}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Continue - will use Excel lineage as fallback, but enrichment will fix it later
         
         tags = []
@@ -7829,8 +7842,10 @@ class ExcelProcessor:
             if db_lineage_map:
                 # Try exact match first
                 db_lineage = db_lineage_map.get(product_name)
-                # Try normalized name match if exact match failed
-                if not db_lineage:
+                if db_lineage:
+                    logger.debug(f"✅ EXACT MATCH: '{product_name}' = '{db_lineage}'")
+                else:
+                    # Try normalized name match if exact match failed
                     try:
                         import sys
                         if 'app' in sys.modules:
@@ -7841,15 +7856,19 @@ class ExcelProcessor:
                                 if product_db and hasattr(product_db, '_normalize_product_name'):
                                     normalized_name = product_db._normalize_product_name(product_name)
                                     db_lineage = db_lineage_map.get(normalized_name)
-                    except Exception:
-                        pass
-                # Try case-insensitive match if still no match
-                if not db_lineage:
-                    product_name_lower = product_name.lower()
-                    for db_name, db_lin in db_lineage_map.items():
-                        if db_name and isinstance(db_name, str) and db_name.lower() == product_name_lower:
-                            db_lineage = db_lin
-                            break
+                                    if db_lineage:
+                                        logger.debug(f"✅ NORMALIZED MATCH: '{product_name}' (normalized: '{normalized_name}') = '{db_lineage}'")
+                    except Exception as norm_err:
+                        logger.debug(f"Normalization error for '{product_name}': {norm_err}")
+                    
+                    # Try case-insensitive match if still no match
+                    if not db_lineage:
+                        product_name_lower = product_name.lower()
+                        for db_name, db_lin in db_lineage_map.items():
+                            if db_name and isinstance(db_name, str) and db_name.lower() == product_name_lower:
+                                db_lineage = db_lin
+                                logger.debug(f"✅ CASE-INSENSITIVE MATCH: '{product_name}' = '{db_lineage}' (matched '{db_name}')")
+                                break
             
             # Use database lineage if found, otherwise fall back to Excel/inference
             if db_lineage:
