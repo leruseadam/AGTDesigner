@@ -10056,6 +10056,7 @@ def update_lineage():
             actual_product_names = []  # Store actual product names from database
             for candidate, normalized_candidate in variant_pairs:
                 logging.info(f"🔍 Searching for product: '{candidate}' (normalized: '{normalized_candidate}')")
+                # Try multiple search strategies
                 cursor.execute('''
                     SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
                     FROM products
@@ -10063,6 +10064,18 @@ def update_lineage():
                     LIMIT 5
                 ''', (candidate, candidate, normalized_candidate))
                 existing_products = cursor.fetchall()
+                
+                # If no exact match, try case-insensitive normalized match
+                if not existing_products:
+                    cursor.execute('''
+                        SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                        FROM products
+                        WHERE LOWER(TRIM("Product Name*")) = LOWER(TRIM(?))
+                           OR LOWER(TRIM("ProductName")) = LOWER(TRIM(?))
+                           OR normalized_name = ?
+                    ''', (candidate, candidate, normalized_candidate))
+                    existing_products = cursor.fetchall()
+                
                 if existing_products:
                     logging.info(f"✅ Found {len(existing_products)} exact match(es) for '{candidate}'")
                     tag_name_clean = candidate
@@ -10082,15 +10095,16 @@ def update_lineage():
             
             if not existing_products:
                 for candidate, normalized_candidate in variant_pairs:
-                    tag_name_lower = candidate.lower()
-                    logging.info(f"🔍 Trying case-insensitive search for: '{tag_name_lower}'")
+                    tag_name_lower = candidate.lower().strip()
+                    logging.info(f"🔍 Trying case-insensitive search for: '{tag_name_lower}' (normalized: '{normalized_candidate}')")
+                    # Try case-insensitive match on product names AND normalized name
                     cursor.execute('''
                         SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
                         FROM products
                         WHERE LOWER(TRIM("Product Name*")) = ? 
                            OR LOWER(TRIM("ProductName")) = ?
-                        LIMIT 5
-                    ''', (tag_name_lower, tag_name_lower))
+                           OR normalized_name = ?
+                    ''', (tag_name_lower, tag_name_lower, normalized_candidate))
                     existing_products = cursor.fetchall()
                     if existing_products:
                         logging.info(f"✅ Found {len(existing_products)} case-insensitive match(es) for '{candidate}'")
@@ -10175,16 +10189,41 @@ def update_lineage():
                     for p in existing_products:
                         try:
                             # Update using all possible name fields from the found product
-                            cursor.execute('''
-                                UPDATE products
-                                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                                WHERE ("Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?)
-                            ''', (new_lineage, p[0] or '', p[1] or '', p[2] or ''))
-                            if cursor.rowcount > 0:
-                                products_updated_by_name += cursor.rowcount
-                                logging.info(f"✅ Updated product: {p[0] or p[1]} ({cursor.rowcount} rows)")
+                            # Use exact values from database, not empty strings
+                            product_name_val = p[0] if p[0] else None
+                            productname_val = p[1] if p[1] else None
+                            normalized_val = p[2] if p[2] else None
+                            
+                            # Build WHERE clause with only non-None values
+                            where_conditions = []
+                            where_params = []
+                            
+                            if product_name_val:
+                                where_conditions.append('"Product Name*" = ?')
+                                where_params.append(product_name_val)
+                            if productname_val:
+                                where_conditions.append('"ProductName" = ?')
+                                where_params.append(productname_val)
+                            if normalized_val:
+                                where_conditions.append('normalized_name = ?')
+                                where_params.append(normalized_val)
+                            
+                            if where_conditions:
+                                where_clause = ' OR '.join(where_conditions)
+                                cursor.execute(f'''
+                                    UPDATE products
+                                    SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                    WHERE ({where_clause})
+                                ''', (new_lineage, *where_params))
+                                if cursor.rowcount > 0:
+                                    products_updated_by_name += cursor.rowcount
+                                    logging.info(f"✅ Updated product: {product_name_val or productname_val} ({cursor.rowcount} rows)")
+                            else:
+                                logging.warning(f"⚠️  No valid name fields for product: {p}")
                         except Exception as individual_error:
                             logging.warning(f"⚠️  Individual update failed for {p[0] or p[1]}: {individual_error}")
+                            import traceback
+                            logging.error(f"Update error traceback: {traceback.format_exc()}")
                     
                     if products_updated_by_name > 0:
                         logging.info(f"✅ Total updated {products_updated_by_name} product(s) using actual database names")
