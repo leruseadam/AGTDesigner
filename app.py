@@ -9940,6 +9940,13 @@ def update_lineage():
                 except Exception as db_vendor_error:
                     logging.warning(f"Could not get vendor from database: {db_vendor_error}")
                     vendor = None
+            except Exception as main_try_error:
+                # This except clause is for the main try block that starts at line 9857
+                # It catches any errors in the database connection setup
+                logging.error(f"❌ Error in main try block: {main_try_error}")
+                import traceback
+                logging.error(f"Main try block error traceback: {traceback.format_exc()}")
+                raise
             
             # Fallback to Excel if vendor not found in database and Excel is available
             if not vendor and excel_processor and excel_processor.df is not None:
