@@ -5486,6 +5486,102 @@ def clear_session():
         logging.error(f"Error clearing session: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/debug-product-lineage', methods=['POST'])
+def debug_product_lineage():
+    """Debug endpoint to show actual database values for products."""
+    try:
+        data = request.get_json() or {}
+        product_names = data.get('product_names', [])
+        
+        if not product_names:
+            return jsonify({'error': 'product_names array required'}), 400
+        
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not product_db:
+            return jsonify({'error': 'Database not available'}), 500
+        
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        results = []
+        for product_name in product_names:
+            # Get product from products table
+            cursor.execute('''
+                SELECT p.id, p."Product Name*", p."Lineage" as products_lineage,
+                       p."Product Strain", p.strain_id,
+                       s.sovereign_lineage, s.canonical_lineage, s.strain_name
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" = ? OR p."ProductName" = ?
+                ORDER BY p.id DESC
+                LIMIT 1
+            ''', (product_name, product_name))
+            
+            product_row = cursor.fetchone()
+            
+            if product_row:
+                product_id, db_product_name, products_lineage, product_strain, strain_id, sovereign_lineage, canonical_lineage, strain_name = product_row
+                
+                # Get what get_product_lineage returns
+                lineage_from_method = product_db.get_product_lineage(product_name)
+                
+                # Get what get_products_by_names returns
+                products_from_method = product_db.get_products_by_names([product_name])
+                lineage_from_batch = None
+                if products_from_method:
+                    lineage_from_batch = (
+                        products_from_method[0].get('currentLineage') or
+                        products_from_method[0].get('canonical_lineage') or
+                        products_from_method[0].get('Lineage')
+                    )
+                
+                results.append({
+                    'product_name': product_name,
+                    'database_values': {
+                        'products_table': {
+                            'id': product_id,
+                            'Product Name*': db_product_name,
+                            'Lineage': products_lineage,
+                            'Product Strain': product_strain,
+                            'strain_id': strain_id
+                        },
+                        'strains_table': {
+                            'strain_name': strain_name,
+                            'sovereign_lineage': sovereign_lineage,
+                            'canonical_lineage': canonical_lineage
+                        }
+                    },
+                    'method_results': {
+                        'get_product_lineage': lineage_from_method,
+                        'get_products_by_names': {
+                            'currentLineage': products_from_method[0].get('currentLineage') if products_from_method else None,
+                            'canonical_lineage': products_from_method[0].get('canonical_lineage') if products_from_method else None,
+                            'Lineage': products_from_method[0].get('Lineage') if products_from_method else None
+                        }
+                    },
+                    'effective_lineage': lineage_from_method or lineage_from_batch or products_lineage or sovereign_lineage or canonical_lineage
+                })
+            else:
+                results.append({
+                    'product_name': product_name,
+                    'error': 'Product not found in database'
+                })
+        
+        return jsonify({
+            'success': True,
+            'store_name': store_name,
+            'database_path': product_db.db_path,
+            'products': results
+        })
+        
+    except Exception as e:
+        logging.error(f"Error debugging product lineage: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/debug-database', methods=['GET'])
 def debug_database():
     """Debug endpoint to check database state and session info."""
@@ -10114,6 +10210,8 @@ def update_lineage():
             
             # Update strains table if we have a strain name
             # CRITICAL FIX: Use add_or_update_strain with sovereign=True to ensure override persists
+            # Also get strain_id to link products to strains
+            strain_id_for_products = None
             if strain_name and str(strain_name).strip():
                 try:
                     # First try to update within the transaction
@@ -10128,11 +10226,46 @@ def update_lineage():
                     strain_rows = cursor.rowcount
                     if strain_rows > 0:
                         strain_updated = True
-                        logging.info(f"🌿 Updated {strain_rows} strain(s) with sovereign lineage '{new_lineage}' (override enabled)")
+                        # Get the strain_id to link products
+                        cursor.execute('SELECT id FROM strains WHERE LOWER(strain_name) = ?', (strain_name_lower,))
+                        strain_result = cursor.fetchone()
+                        if strain_result:
+                            strain_id_for_products = strain_result[0]
+                        logging.info(f"🌿 Updated {strain_rows} strain(s) with sovereign lineage '{new_lineage}' (override enabled, strain_id: {strain_id_for_products})")
                 except Exception as strain_update_error:
                     logging.warning(f"⚠️  Could not update strain in transaction: {strain_update_error}")
                     import traceback
                     logging.error(f"Strain update error traceback: {traceback.format_exc()}")
+            
+            # CRITICAL FIX: Update products.strain_id to link products to strains
+            # This ensures sovereign_lineage can be retrieved via JOIN
+            if strain_id_for_products and products_updated > 0:
+                try:
+                    # Update strain_id for all products we just updated
+                    if actual_product_names:
+                        placeholders = ','.join(['?'] * len(actual_product_names))
+                        cursor.execute(f'''
+                            UPDATE products
+                            SET strain_id = ?
+                            WHERE ("Product Name*" IN ({placeholders}) OR "ProductName" IN ({placeholders}))
+                              AND (strain_id IS NULL OR strain_id != ?)
+                        ''', (strain_id_for_products, *actual_product_names, *actual_product_names, strain_id_for_products))
+                        strain_id_updated = cursor.rowcount
+                        if strain_id_updated > 0:
+                            logging.info(f"🔗 Linked {strain_id_updated} product(s) to strain_id {strain_id_for_products} (enables sovereign_lineage retrieval)")
+                    else:
+                        # Fallback: update by tag name
+                        cursor.execute('''
+                            UPDATE products
+                            SET strain_id = ?
+                            WHERE ("Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?)
+                              AND (strain_id IS NULL OR strain_id != ?)
+                        ''', (strain_id_for_products, tag_name_clean, tag_name_clean, normalized_name, strain_id_for_products))
+                        strain_id_updated = cursor.rowcount
+                        if strain_id_updated > 0:
+                            logging.info(f"🔗 Linked {strain_id_updated} product(s) to strain_id {strain_id_for_products} (enables sovereign_lineage retrieval)")
+                except Exception as strain_id_error:
+                    logging.warning(f"⚠️  Could not update products.strain_id: {strain_id_error}")
             
             # SINGLE COMMIT for all updates - this should be fast
             # CRITICAL FIX: Retry commit on lock errors
@@ -10205,6 +10338,7 @@ def update_lineage():
             
             # AFTER COMMIT: Always use add_or_update_strain with sovereign=True to ensure override persists
             # This ensures the lineage change is marked as a manual override that won't be overridden by Excel/database sync
+            # Also update products.strain_id if it wasn't set during the transaction
             if strain_name and str(strain_name).strip():
                 try:
                     # Use add_or_update_strain with sovereign=True to ensure the override persists
@@ -10213,6 +10347,39 @@ def update_lineage():
                     if strain_id:
                         strain_updated = True
                         logging.info(f"🌿 Ensured strain '{strain_name}' has sovereign lineage '{new_lineage}' (strain_id: {strain_id}, override enabled)")
+                        
+                        # CRITICAL FIX: Update products.strain_id if it wasn't set during transaction
+                        # This ensures products are linked to strains so sovereign_lineage can be retrieved
+                        if products_updated > 0:
+                            try:
+                                conn2 = product_db._get_connection()
+                                cursor2 = conn2.cursor()
+                                
+                                if actual_product_names:
+                                    placeholders = ','.join(['?'] * len(actual_product_names))
+                                    cursor2.execute(f'''
+                                        UPDATE products
+                                        SET strain_id = ?
+                                        WHERE ("Product Name*" IN ({placeholders}) OR "ProductName" IN ({placeholders}))
+                                          AND (strain_id IS NULL OR strain_id != ?)
+                                    ''', (strain_id, *actual_product_names, *actual_product_names, strain_id))
+                                    strain_id_updated = cursor2.rowcount
+                                    if strain_id_updated > 0:
+                                        conn2.commit()
+                                        logging.info(f"🔗 POST-COMMIT: Linked {strain_id_updated} product(s) to strain_id {strain_id} (enables sovereign_lineage retrieval)")
+                                else:
+                                    cursor2.execute('''
+                                        UPDATE products
+                                        SET strain_id = ?
+                                        WHERE ("Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?)
+                                          AND (strain_id IS NULL OR strain_id != ?)
+                                    ''', (strain_id, tag_name_clean, tag_name_clean, normalized_name, strain_id))
+                                    strain_id_updated = cursor2.rowcount
+                                    if strain_id_updated > 0:
+                                        conn2.commit()
+                                        logging.info(f"🔗 POST-COMMIT: Linked {strain_id_updated} product(s) to strain_id {strain_id} (enables sovereign_lineage retrieval)")
+                            except Exception as post_strain_id_error:
+                                logging.warning(f"⚠️  Could not update products.strain_id after commit: {post_strain_id_error}")
                 except Exception as create_error:
                     logging.warning(f"Could not ensure strain override after commit: {create_error}")
             
@@ -12327,20 +12494,27 @@ def database_view():
         product_db = get_product_database(store_name)
         
         with sqlite3.connect(product_db.db_path) as conn:
-            # Get strains
+            # Get strains with sovereign_lineage
             strains_df = pd.read_sql_query('''
-                SELECT strain_name, canonical_lineage, 1 as total_occurrences, 'N/A' as first_seen_date, 'N/A' as last_seen_date
+                SELECT strain_name, canonical_lineage, sovereign_lineage,
+                       COALESCE(sovereign_lineage, canonical_lineage) as effective_lineage,
+                       1 as total_occurrences, 'N/A' as first_seen_date, 'N/A' as last_seen_date
                 FROM strains
                 ORDER BY strain_name
                 LIMIT 50
             ''', conn)
             
-            # Get products
+            # Get products with sovereign_lineage from strains table
             products_df = pd.read_sql_query('''
                 SELECT p."Product Name*" as product_name, p."Product Type*" as product_type, 
-                       p."Vendor/Supplier*" as vendor, p."Product Brand" as brand, p."Lineage" as lineage,
-                       p."Product Strain" as strain_name, 1 as total_occurrences, 'N/A' as first_seen_date, 'N/A' as last_seen_date
+                       p."Vendor/Supplier*" as vendor, p."Product Brand" as brand, 
+                       p."Lineage" as products_table_lineage,
+                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
+                       s.sovereign_lineage, s.canonical_lineage,
+                       p."Product Strain" as strain_name, 
+                       1 as total_occurrences, 'N/A' as first_seen_date, 'N/A' as last_seen_date
                 FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
                 ORDER BY p.id DESC
                 LIMIT 50
             ''', conn)
