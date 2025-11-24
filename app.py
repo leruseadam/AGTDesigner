@@ -10543,15 +10543,10 @@ def update_lineage():
                     commit_success = True
                     logging.info(f"✅ Transaction committed: {products_updated} products, strain_updated={strain_updated}")
                     
-                    # CRITICAL FIX: Force WAL checkpoint on the SAME connection that did the commit
-                    # This ensures the changes are immediately visible to other connections and persisted to disk
-                    try:
-                        cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                        logging.info(f"✅ WAL checkpoint completed on commit connection - changes persisted to disk")
-                    except Exception as checkpoint_error:
-                        logging.warning(f"⚠️  WAL checkpoint failed (non-critical): {checkpoint_error}")
-                    
-                    break
+                    # CRITICAL FIX: Don't do WAL checkpoint inside the lock - it can block other operations
+                    # The checkpoint can be done asynchronously or skipped - SQLite will handle it automatically
+                    # WAL checkpoint is expensive and can cause database locks
+                    # break
                 except sqlite3.OperationalError as commit_lock_error:
                     if "database is locked" in str(commit_lock_error).lower() and commit_attempt < 2:
                         logging.warning(f"⚠️  Commit locked (attempt {commit_attempt + 1}/3), retrying...")
@@ -10603,9 +10598,14 @@ def update_lineage():
                 logging.warning(f"Immediate verification check failed (non-critical): {immediate_verify_error}")
                 verified_lineage_after_commit = None
             
+            # CRITICAL FIX: Release lock BEFORE post-commit operations to prevent blocking other requests
+            # The transaction is committed, so we can safely release the lock now
+            logging.info(f"🔓 Releasing lineage update lock (transaction committed)")
+            
             # AFTER COMMIT: Always use add_or_update_strain with sovereign=True to ensure override persists
             # This ensures the lineage change is marked as a manual override that won't be overridden by Excel/database sync
             # Also update products.strain_id if it wasn't set during the transaction
+            # NOTE: These operations happen OUTSIDE the lock to prevent blocking other lineage updates
             if strain_name and str(strain_name).strip():
                 try:
                     # Use add_or_update_strain with sovereign=True to ensure the override persists
