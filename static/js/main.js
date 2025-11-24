@@ -8230,7 +8230,16 @@ const TagManager = {
         AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
-        this.checkForExistingData();
+        // CRITICAL FIX: Don't await - let it run in background so initialization doesn't block
+        this.checkForExistingData().catch(error => {
+            console.error('checkForExistingData failed:', error);
+            // Ensure initialization completes even if checkForExistingData fails
+            AppLoadingSplash.stopAutoAdvance();
+            AppLoadingSplash.complete();
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+        });
         
         // GUARANTEED FIX: Restore filters from localStorage on page load
         const savedFilters = this.loadFiltersFromStorage();
@@ -8310,28 +8319,55 @@ const TagManager = {
 
         // JSON matching is now handled by the modal - removed old above-tags-list logic
         
-        // Emergency initialization fix - force complete after 15 seconds
+        // CRITICAL FIX: Emergency initialization fix - force complete after 8 seconds (reduced from 15)
+        // This ensures the app never gets stuck on initialization
         setTimeout(() => {
             if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                verboseLog('Emergency initialization fix: forcing splash completion');
+                console.warn('⚠️ Emergency initialization timeout (8s): forcing splash completion');
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
+                // Also hide action splash if it exists
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                // Ensure _checkingExistingData flag is cleared
+                this._checkingExistingData = false;
+                // Show upload prompt if no data loaded
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0)) {
+                    availableTagsContainer.innerHTML = `
+                        <div class="text-center py-5">
+                            <div class="upload-prompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No product data loaded</h5>
+                                <p class="text-muted">Upload an Excel file to get started</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-upload me-2"></i>Upload Excel File
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
             }
-        }, 15000);
+        }, 8000); // 8 second emergency timeout
         
-        // Additional emergency fix for stuck initialization
+        // Additional emergency fix for stuck initialization - faster timeout
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const splash = document.getElementById('appLoadingSplash');
                 if (splash && splash.style.display !== 'none') {
-                    verboseLog('Emergency fix: hiding stuck splash screen');
+                    console.warn('⚠️ Emergency fix: hiding stuck splash screen after page load (10s timeout)');
                     splash.style.display = 'none';
                     const mainContent = document.getElementById('mainContent');
                     if (mainContent) {
                         mainContent.style.display = 'block';
                     }
+                    // Ensure flags are cleared
+                    if (TagManager && TagManager._checkingExistingData) {
+                        TagManager._checkingExistingData = false;
+                    }
                 }
-            }, 20000); // 20 second emergency timeout
+            }, 10000); // 10 second emergency timeout (reduced from 20)
         });
     },
 
@@ -8568,9 +8604,10 @@ const TagManager = {
             return; // Exit early - we have cached data
         }
 
-        // PERFORMANCE FIX: Reduced timeout to 8 seconds - if it takes longer, use cache/fallback
+        // PERFORMANCE FIX: Reduced timeout to 5 seconds - if it takes longer, use cache/fallback
+        // CRITICAL FIX: Shorter timeout to prevent app from getting stuck
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 8000);
+            setTimeout(() => reject(new Error('Initialization timeout')), 5000);
         });
 
         // Safety net: ensure loading overlay never blocks interaction for long
@@ -8619,10 +8656,26 @@ const TagManager = {
         try {
             // PERFORMANCE FIX: Use fast_load=1 for initial loads to skip expensive lineage alignment
             // This dramatically speeds up initial tag loading
-            const response = await Promise.race([
-                fetch('/api/initial-data?fast_load=1'),
-                timeoutPromise
-            ]);
+            // CRITICAL FIX: Add AbortController for better timeout handling
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            
+            let response;
+            try {
+                response = await Promise.race([
+                    fetch('/api/initial-data?fast_load=1', { signal: controller.signal }),
+                    timeoutPromise
+                ]);
+            } catch (raceError) {
+                clearTimeout(timeoutId);
+                // If it's a timeout or abort, handle it gracefully
+                if (raceError.name === 'AbortError' || raceError.message === 'Initialization timeout') {
+                    throw new Error('Initialization timeout');
+                }
+                throw raceError;
+            } finally {
+                clearTimeout(timeoutId);
+            }
 
             if (response.ok) {
                 const data = await response.json();
@@ -8800,13 +8853,15 @@ const TagManager = {
         } catch (error) {
             verboseLog('Error loading initial data:', error.message);
             
-            // Handle timeout specifically
-            if (error.message === 'Initialization timeout') {
-                verboseLog('Initialization timed out, proceeding with empty state');
+            // Handle timeout and abort errors specifically
+            const isTimeout = error.message === 'Initialization timeout' || error.name === 'AbortError';
+            if (isTimeout) {
+                verboseLog('Initialization timed out or aborted, proceeding with empty state');
                 AppLoadingSplash.updateProgress(100, 'Ready to upload files');
             }
             
-            // Complete splash loading on error
+            // CRITICAL FIX: Always complete initialization, even on error
+            // Don't block the app from loading
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
             clearTimeout(splashSafetyTimeout);
@@ -8836,7 +8891,11 @@ const TagManager = {
             // FIXED: Initialize empty state instead of loading test data
             this.initializeEmptyState();
             this._checkingExistingData = false;
-            this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
+            
+            // CRITICAL FIX: Don't schedule retry if it's a timeout/abort - just proceed
+            if (!isTimeout) {
+                this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
+            }
             return;
         }
     },
