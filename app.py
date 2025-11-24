@@ -10615,40 +10615,40 @@ def update_lineage():
                 cursor.close()
             # Don't close the connection here - it's managed by ProductDatabase
             # But ensure the transaction is fully committed by doing a final check
-            try:
-                # Verify the commit was successful by checking if we can read the data
-                # CRITICAL FIX: Check if conn exists before creating cursor
-                if conn:
-                    verify_cursor = conn.cursor()
-                    if verify_cursor:
-                        verify_cursor.execute('''
-                            SELECT "Lineage" FROM products 
-                            WHERE ("Product Name*" = ? OR "ProductName" = ?)
-                            LIMIT 1
-                        ''', (tag_name, tag_name))
-                        verify_result = verify_cursor.fetchone()
-                        verify_cursor.close()
-                        if verify_result:
-                            actual_lineage = str(verify_result[0]).strip().upper() if verify_result[0] else None
-                            expected_lineage = str(new_lineage).strip().upper()
-                            if actual_lineage == expected_lineage:
-                                logging.info(f"✅ IMMEDIATE VERIFICATION: Lineage '{actual_lineage}' confirmed in database after commit")
-                                # Store verified lineage for response
-                                verified_lineage_after_commit = actual_lineage
+                try:
+                    # Verify the commit was successful by checking if we can read the data
+                    # CRITICAL FIX: Check if conn exists before creating cursor
+                    if conn:
+                        verify_cursor = conn.cursor()
+                        if verify_cursor:
+                            verify_cursor.execute('''
+                                SELECT "Lineage" FROM products 
+                                WHERE ("Product Name*" = ? OR "ProductName" = ?)
+                                LIMIT 1
+                            ''', (tag_name, tag_name))
+                            verify_result = verify_cursor.fetchone()
+                            verify_cursor.close()
+                            if verify_result:
+                                actual_lineage = str(verify_result[0]).strip().upper() if verify_result[0] else None
+                                expected_lineage = str(new_lineage).strip().upper()
+                                if actual_lineage == expected_lineage:
+                                    logging.info(f"✅ IMMEDIATE VERIFICATION: Lineage '{actual_lineage}' confirmed in database after commit")
+                                    # Store verified lineage for response
+                                    verified_lineage_after_commit = actual_lineage
+                                else:
+                                    logging.warning(f"⚠️  IMMEDIATE VERIFICATION: Lineage mismatch - got '{actual_lineage}', expected '{expected_lineage}'")
+                                    verified_lineage_after_commit = actual_lineage  # Use what's actually in DB
                             else:
-                                logging.warning(f"⚠️  IMMEDIATE VERIFICATION: Lineage mismatch - got '{actual_lineage}', expected '{expected_lineage}'")
-                                verified_lineage_after_commit = actual_lineage  # Use what's actually in DB
+                                verified_lineage_after_commit = None
                         else:
+                            logging.warning("Could not create verify_cursor - cursor is None")
                             verified_lineage_after_commit = None
                     else:
-                        logging.warning("Could not create verify_cursor - cursor is None")
+                        logging.warning("Could not verify commit - connection is None")
                         verified_lineage_after_commit = None
-                else:
-                    logging.warning("Could not verify commit - connection is None")
+                except Exception as immediate_verify_error:
+                    logging.warning(f"Immediate verification check failed (non-critical): {immediate_verify_error}")
                     verified_lineage_after_commit = None
-            except Exception as immediate_verify_error:
-                logging.warning(f"Immediate verification check failed (non-critical): {immediate_verify_error}")
-                verified_lineage_after_commit = None
             
             # Lock is released when exiting the 'with' block
             logging.info(f"🔓 Releasing lineage update lock (transaction committed)")
