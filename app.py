@@ -9877,15 +9877,37 @@ def update_lineage():
             strain_name = None
             verified_lineage_after_commit = None  # Will be set after commit verification
             
+            # CRITICAL FIX: Initialize connection variables and helper function OUTSIDE try block
+            # so they're available throughout the function scope
+            import sqlite3
+            import time as time_module
+            conn = None
+            cursor = None
+            
+            # CRITICAL FIX: Helper function to ensure cursor is valid (defined early for use throughout)
+            def ensure_cursor_valid():
+                nonlocal conn, cursor
+                if cursor is None or conn is None:
+                    logging.warning("Cursor or connection is None, re-establishing...")
+                    try:
+                        conn = product_db._get_connection()
+                        conn.execute("PRAGMA busy_timeout = 3000")
+                        cursor = conn.cursor()
+                        try:
+                            cursor.execute("BEGIN IMMEDIATE")
+                        except sqlite3.OperationalError as begin_error:
+                            if "cannot start a transaction within a transaction" not in str(begin_error).lower():
+                                raise
+                        logging.info("✅ Re-established database connection and cursor")
+                    except Exception as reconnect_error:
+                        logging.error(f"❌ Failed to re-establish connection: {reconnect_error}")
+                        raise Exception(f"Failed to re-establish database connection: {reconnect_error}")
+                return cursor
+            
             try:
-                import sqlite3
-                import time as time_module
-                
                 # CRITICAL FIX: Optimized retry logic for database locks with faster timeouts
                 max_retries = 3  # Reduced from 5 to 3 for faster failure
                 retry_delay = 0.05  # Reduced initial delay from 0.1 to 0.05
-                conn = None
-                cursor = None
                 connection_start_time = time_module.time()
                 connection_timeout = 5.0  # Increased to 5 seconds since we're serializing with lock
                 
@@ -9941,26 +9963,6 @@ def update_lineage():
                 # CRITICAL FIX: Validate cursor before using it
                 if cursor is None:
                     raise Exception("Cursor is None - cannot proceed with database operations")
-                
-                # CRITICAL FIX: Helper function to ensure cursor is valid (defined early for use throughout)
-                def ensure_cursor_valid():
-                    nonlocal conn, cursor
-                    if cursor is None or conn is None:
-                        logging.warning("Cursor or connection is None, re-establishing...")
-                        try:
-                            conn = product_db._get_connection()
-                            conn.execute("PRAGMA busy_timeout = 3000")
-                            cursor = conn.cursor()
-                            try:
-                                cursor.execute("BEGIN IMMEDIATE")
-                            except sqlite3.OperationalError as begin_error:
-                                if "cannot start a transaction within a transaction" not in str(begin_error).lower():
-                                    raise
-                            logging.info("✅ Re-established database connection and cursor")
-                        except Exception as reconnect_error:
-                            logging.error(f"❌ Failed to re-establish connection: {reconnect_error}")
-                            raise Exception(f"Failed to re-establish database connection: {reconnect_error}")
-                    return cursor
                 
                 # CRITICAL FIX: Get vendor and strain from database (after connection is established)
                 try:
@@ -10028,30 +10030,30 @@ def update_lineage():
                 except Exception as excel_vendor_error:
                     logging.warning(f"Could not get vendor from Excel: {excel_vendor_error}")
             
-                # Get strain from database
+            # Get strain from database
+            try:
+                cursor = ensure_cursor_valid()
+                for candidate, _ in variant_pairs:
+                    cursor.execute('''
+                        SELECT "Product Strain" FROM products
+                        WHERE "Product Name*" = ? OR "ProductName" = ?
+                        LIMIT 1
+                    ''', (candidate, candidate))
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        strain_name = str(result[0]).strip()
+                        if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
+                            logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
+                            break
+                        strain_name = None
+            except Exception as db_strain_error:
+                logging.warning(f"Could not get strain from database: {db_strain_error}")
+                strain_name = None
+                # Ensure cursor is still valid after error
                 try:
                     cursor = ensure_cursor_valid()
-                    for candidate, _ in variant_pairs:
-                        cursor.execute('''
-                            SELECT "Product Strain" FROM products
-                            WHERE "Product Name*" = ? OR "ProductName" = ?
-                            LIMIT 1
-                        ''', (candidate, candidate))
-                        result = cursor.fetchone()
-                        if result and result[0]:
-                            strain_name = str(result[0]).strip()
-                            if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
-                                logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
-                                break
-                            strain_name = None
-                except Exception as db_strain_error:
-                    logging.warning(f"Could not get strain from database: {db_strain_error}")
-                    strain_name = None
-                    # Ensure cursor is still valid after error
-                    try:
-                        cursor = ensure_cursor_valid()
-                    except:
-                        pass
+                except:
+                    pass
             
             # Fallback to Excel if strain not found in database and Excel is available
             if not strain_name and excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
