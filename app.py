@@ -9980,28 +9980,28 @@ def update_lineage():
                 except Exception as excel_vendor_error:
                     logging.warning(f"Could not get vendor from Excel: {excel_vendor_error}")
             
-            # Get strain from database
-            try:
-                if cursor is None:
-                    logging.warning("Cursor is None - cannot get strain from database")
+                # Get strain from database
+                try:
+                    if cursor is None:
+                        logging.warning("Cursor is None - cannot get strain from database")
+                        strain_name = None
+                    else:
+                        for candidate, _ in variant_pairs:
+                            cursor.execute('''
+                                SELECT "Product Strain" FROM products
+                                WHERE "Product Name*" = ? OR "ProductName" = ?
+                                LIMIT 1
+                            ''', (candidate, candidate))
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                strain_name = str(result[0]).strip()
+                                if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
+                                    logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
+                                    break
+                                strain_name = None
+                except Exception as db_strain_error:
+                    logging.warning(f"Could not get strain from database: {db_strain_error}")
                     strain_name = None
-                else:
-                    for candidate, _ in variant_pairs:
-                        cursor.execute('''
-                            SELECT "Product Strain" FROM products
-                            WHERE "Product Name*" = ? OR "ProductName" = ?
-                            LIMIT 1
-                        ''', (candidate, candidate))
-                        result = cursor.fetchone()
-                        if result and result[0]:
-                            strain_name = str(result[0]).strip()
-                            if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
-                                logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
-                                break
-                            strain_name = None
-            except Exception as db_strain_error:
-                logging.warning(f"Could not get strain from database: {db_strain_error}")
-                strain_name = None
             
             # Fallback to Excel if strain not found in database and Excel is available
             if not strain_name and excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
