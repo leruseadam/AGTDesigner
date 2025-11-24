@@ -7465,7 +7465,10 @@ const TagManager = {
         }
     },
 
-    async fetchAndPopulateFilters() {
+    async fetchAndPopulateFilters(retryCount = 0) {
+        const maxRetries = 3;
+        const retryDelay = 1000; // 1 second
+        
         try {
             // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
             const timestamp = Date.now();
@@ -7478,10 +7481,40 @@ const TagManager = {
             }
             const filterOptions = await response.json();
             verboseLog('Fetched filter options:', filterOptions);
+            
+            // CRITICAL FIX: Check if filters are empty and retry if needed
+            const hasData = filterOptions.vendor && filterOptions.vendor.length > 0 ||
+                           filterOptions.brand && filterOptions.brand.length > 0 ||
+                           filterOptions.productType && filterOptions.productType.length > 0;
+            
+            if (!hasData && retryCount < maxRetries) {
+                verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
+                setTimeout(() => {
+                    this.fetchAndPopulateFilters(retryCount + 1);
+                }, retryDelay);
+                return;
+            }
+            
+            // Update filters even if empty (to clear previous values)
             this.updateFilters(filterOptions, true); // Preserve existing filter values
+            
+            // If filters were empty after retries, log a warning
+            if (!hasData && retryCount >= maxRetries) {
+                console.warn('⚠️ Filters remain empty after all retries - data may not be loaded yet');
+            }
         } catch (error) {
             console.error('Error fetching filter options:', error);
-            alert('Failed to load filter options');
+            
+            // Retry on error if we haven't exceeded max retries
+            if (retryCount < maxRetries) {
+                verboseLog(`⚠️ Filter fetch error (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
+                setTimeout(() => {
+                    this.fetchAndPopulateFilters(retryCount + 1);
+                }, retryDelay);
+            } else {
+                console.error('Failed to load filter options after all retries');
+                // Don't show alert - filters will be populated when data loads
+            }
         }
     },
 
@@ -7924,10 +7957,16 @@ const TagManager = {
 
             // Continue loading fresh data in background (non-blocking)
             console.log('📡 Background: Fetching selected tags and filters');
+            // CRITICAL FIX: Fetch filters AFTER selected tags to ensure data is ready
             Promise.allSettled([
-                this.fetchAndUpdateSelectedTags(),
-                this.fetchAndPopulateFilters()
+                this.fetchAndUpdateSelectedTags()
             ]).then(() => {
+                // Small delay to ensure Excel processor is ready
+                return new Promise(resolve => setTimeout(resolve, 200));
+            }).then(() => {
+                // Now fetch filters with retry mechanism
+                return this.fetchAndPopulateFilters();
+            }).then(() => {
                 console.log('✅ Background: Selected tags and filters loaded');
             }).catch(err => {
                 console.warn('Background load error (non-critical):', err);
@@ -8051,11 +8090,15 @@ const TagManager = {
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
                     verboseLog('About to fetch and update selected tags and filters in parallel...');
                     
-                    // Run both operations in parallel instead of sequentially
-                    const [selectedTagsResult] = await Promise.allSettled([
-                        this.fetchAndUpdateSelectedTags(),
-                        this.fetchAndPopulateFilters()
-                    ]);
+                    // CRITICAL FIX: Fetch filters AFTER tags are confirmed loaded
+                    // This ensures Excel processor has data before filters are populated
+                    await this.fetchAndUpdateSelectedTags();
+                    
+                    // Small delay to ensure Excel processor is ready
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Now fetch filters with retry mechanism
+                    await this.fetchAndPopulateFilters();
                     
                     verboseLog('fetchAndUpdateSelectedTags result:', selectedTagsResult);
                     verboseLog('persistentSelectedTags after restore:', this.state.persistentSelectedTags);
