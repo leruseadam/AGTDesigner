@@ -131,6 +131,18 @@
           if (window.STORE_MODAL_BLOCKING) {
             console.log('✅ Clearing STORE_MODAL_BLOCKING flag');
             window.STORE_MODAL_BLOCKING = false;
+            
+            // CRITICAL FIX: After store is selected, initialize TagManager if it hasn't been initialized
+            if (window.TagManager && typeof window.TagManager.init === 'function') {
+              console.log('🔄 Store selected - initializing TagManager...');
+              setTimeout(() => {
+                try {
+                  TagManager.init();
+                } catch (initError) {
+                  console.error('❌ Error initializing TagManager after store selection:', initError);
+                }
+              }, 200);
+            }
           }
           window.checkingStoreRequired = false;
 
@@ -593,7 +605,10 @@
           const userHasStore = (data.success && !data.requires_store && data.store);
           console.log('USER HAS STORE?', userHasStore);
           
-          if (userHasStore) {
+          // CRITICAL FIX: Ensure we have a valid store before proceeding
+          const hasValidStore = userHasStore && data.store && data.store.trim() !== '';
+          
+          if (hasValidStore) {
             // USER HAS STORE - Show content, hide modal
             console.log('🎉 STORE FOUND:', data.store);
             
@@ -632,26 +647,59 @@
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
             if (typeof onStoreConfirmed === 'function') {
               console.log('🔄 Store confirmed, calling initialization callback...');
-              setTimeout(() => onStoreConfirmed(), 100);
+              setTimeout(() => {
+                try {
+                  onStoreConfirmed();
+                } catch (initError) {
+                  console.error('❌ Error in onStoreConfirmed callback:', initError);
+                }
+              }, 100);
+            } else {
+              console.warn('⚠️ No onStoreConfirmed callback provided - TagManager may not initialize');
             }
           } else {
             // NO STORE - Show modal
             console.log('⚠️ NO STORE - Showing modal');
+            console.log('⚠️ Store check details:', {
+              success: data.success,
+              requires_store: data.requires_store,
+              store: data.store,
+              userHasStore: userHasStore
+            });
+            
+            // CRITICAL FIX: Set blocking flag BEFORE showing modal
+            window.STORE_MODAL_BLOCKING = true;
             
             if (modalElement) {
               modalElement.style.display = 'block';
               modalElement.classList.add('show');
+              modalElement.setAttribute('aria-hidden', 'false');
               document.body.classList.add('modal-open');
               document.body.style.overflow = 'hidden';
               
               // Add backdrop
-              if (!document.querySelector('.modal-backdrop')) {
+              if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
                 const backdrop = document.createElement('div');
                 backdrop.id = 'storeModalBackdrop';
                 backdrop.className = 'modal-backdrop fade show';
                 backdrop.style.zIndex = '1040';
                 document.body.appendChild(backdrop);
               }
+              
+              // CRITICAL FIX: Try to show modal using Bootstrap if available
+              if (typeof bootstrap !== 'undefined') {
+                try {
+                  const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement, {
+                    backdrop: 'static',
+                    keyboard: false
+                  });
+                  modalInstance.show();
+                } catch (bootstrapError) {
+                  console.warn('⚠️ Bootstrap modal show failed, using fallback:', bootstrapError);
+                }
+              }
+            } else {
+              console.error('❌ Modal element not found when trying to show store selection modal');
             }
             
             if (mainContent) {
@@ -660,6 +708,9 @@
             }
             
             console.log('✅ Modal shown, content hidden');
+            
+            // CRITICAL FIX: Don't call callback if no store - wait for user to select
+            console.log('⏳ Waiting for store selection before initializing TagManager');
           }
         })
         .catch(error => {

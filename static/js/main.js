@@ -5699,7 +5699,14 @@ const TagManager = {
     },
 
     updateSelectedTags(tags) {
-        // Start timer at the beginning to prevent "Timer already exists" warning
+        // CRITICAL FIX: Always end any existing timer first to prevent "Timer already exists" warning
+        // This handles cases where the function is called multiple times rapidly
+        try {
+            console.timeEnd('updateSelectedTags');
+        } catch (e) {
+            // Timer doesn't exist, that's fine - continue
+        }
+        // Now safely start a new timer
         console.time('updateSelectedTags');
         
         if (!tags || !Array.isArray(tags)) {
