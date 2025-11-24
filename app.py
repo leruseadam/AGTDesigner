@@ -8225,7 +8225,9 @@ def get_available_tags():
         if not prefer_db:
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
-            excel_processor = get_session_excel_processor()
+            # Note: excel_processor was already retrieved and DataFrame updated above
+            if not excel_processor:
+                excel_processor = get_session_excel_processor()
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 try:
                     excel_tags = excel_processor.get_available_tags()
