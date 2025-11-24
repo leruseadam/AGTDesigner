@@ -10653,7 +10653,7 @@ def update_lineage():
             # Lock is released when exiting the 'with' block
             logging.info(f"🔓 Releasing lineage update lock (transaction committed)")
             
-        except Exception as db_error:
+            except Exception as db_error:
                 logging.error(f"❌ Database error during lineage update: {db_error}")
                 import traceback
                 logging.error(f"Database error traceback: {traceback.format_exc()}")
