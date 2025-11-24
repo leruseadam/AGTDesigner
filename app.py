@@ -9914,9 +9914,8 @@ def update_lineage():
                 
                 if not conn or not cursor:
                     raise Exception("Failed to get database connection after retries")
-            
-            # CRITICAL FIX: Get vendor and strain from database (after connection is established)
-            try:
+                
+                # CRITICAL FIX: Get vendor and strain from database (after connection is established)
                 for candidate, _ in variant_pairs:
                     cursor.execute('''
                         SELECT "Vendor/Supplier*" FROM products
@@ -10649,7 +10648,7 @@ def update_lineage():
             except Exception as create_error:
                 logging.warning(f"Could not ensure strain override after commit: {create_error}")
         
-        except sqlite3.OperationalError as lock_error:
+            except sqlite3.OperationalError as lock_error:
                 # This should rarely happen now since we retry earlier, but handle it gracefully
                 if "database is locked" in str(lock_error).lower():
                     logging.error(f"❌ Database locked during lineage update after all retries: {lock_error}")
@@ -10695,9 +10694,7 @@ def update_lineage():
                 except:
                     pass
                 products_updated = 0
-            finally:
-                # CRITICAL FIX: Release lock and log completion
-                logging.info(f"🔓 Released lineage update lock for '{tag_name}' -> '{new_lineage}'")
+            # Lock is automatically released when exiting the 'with' block
         # CRITICAL FIX: Update Excel processor DataFrame AFTER database commit
         # Keep this fast and simple - database is the source of truth
         # Note: updated_count is already initialized earlier, don't reset it here
