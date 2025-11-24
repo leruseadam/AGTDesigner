@@ -4307,11 +4307,21 @@ const TagManager = {
         const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
         
-        if (hasValidDatabaseLineage) {
-            // CRITICAL: Use database lineage directly - this is the source of truth
+        // CRITICAL FIX: Classic lineages (SATIVA, INDICA, HYBRID) should NEVER be used for capsules/nonclassic types
+        // Capsules and other nonclassic types should ONLY use MIXED (blue) or CBD_BLEND (yellow)
+        const classicLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
+        const isClassicLineage = classicLineages.includes(lineage);
+        
+        if (hasValidDatabaseLineage && !isNonclassic) {
+            // CRITICAL: Use database lineage directly for classic types only - this is the source of truth
             displayLineage = lineage;
-            verboseLog(`🎨 Using database lineage: "${displayName}" → ${displayLineage}`);
+            verboseLog(`🎨 Using database lineage for classic type: "${displayName}" → ${displayLineage}`);
         } else if (isNonclassic) {
+            // CRITICAL FIX: For capsules and nonclassic types, ignore classic lineages from database
+            // They should ONLY use MIXED or CBD_BLEND based on CBD indicators
+            if (isClassicLineage && hasValidDatabaseLineage) {
+                verboseLog(`⚠️ CAPSULE/NONCLASSIC: Ignoring classic lineage "${lineage}" from database for "${displayName}" - forcing MIXED/CBD_BLEND`);
+            }
             // Only apply Product Strain fallback logic if database lineage is missing or invalid
             const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
             const strainStr = String(productStrain).toLowerCase();
@@ -4641,58 +4651,23 @@ const TagManager = {
             lineageSelect.disabled = true;
             lineageSelect.style.opacity = '0.7';
         }
-        lineageSelect.addEventListener('change', async (e) => {
+        lineageSelect.addEventListener('change', (e) => {
             const newLineage = e.target.value;
             const prevValue = lineage;
-            lineageSelect.disabled = true;
-            // Show temporary 'Saving...' option
-            const savingOption = document.createElement('option');
-            savingOption.value = '';
-            savingOption.textContent = 'Saving...';
-            savingOption.selected = true;
-            savingOption.disabled = true;
-            lineageSelect.appendChild(savingOption);
-            try {
-                await this.updateLineageOnBackend(tag['Product Name*'], newLineage);
-                // On success, update tag lineage in state
-                tag.lineage = newLineage;
-                tag.Lineage = newLineage;
-                lineageSelect.value = newLineage;
-                // Update the data-lineage attribute
-                tagElement.dataset.lineage = newLineage.toUpperCase();
-                
-                // CRITICAL FIX: Update the tag color to reflect the new lineage
-                // Force a re-render of the tag to apply the new lineage color
-                this.forceTagColorUpdate(tag, newLineage);
-                
-                // Remove saving option
-                lineageSelect.removeChild(savingOption);
-                
-                // Log success (no notification to avoid clutter)
-                verboseLog(`✅ Lineage successfully updated to ${newLineage} for ${tag['Product Name*']}`);
-            } catch (error) {
-                console.error('Failed to update lineage:', error);
-                // On failure, revert to previous value
-                lineageSelect.value = prevValue;
-                // Show error message using Toast if available, otherwise alert
-                const errorMsg = error.message || 'Failed to update lineage';
-                if (window.Toast && window.Toast.error) {
-                    window.Toast.error(`Failed to update lineage: ${errorMsg}`, {
-                        duration: 5000,
-                        position: 'top-right'
-                    });
-                } else {
-                    alert('Failed to update lineage: ' + errorMsg);
-                }
-                // Remove saving option
-                if (savingOption.parentNode) {
-                    lineageSelect.removeChild(savingOption);
-                }
-                // Log detailed error for debugging
-                verboseLog(`❌ Lineage update failed for ${tag['Product Name*']}:`, error);
-            } finally {
-                lineageSelect.disabled = false;
-            }
+
+            // CRITICAL FIX: Use debounced update to prevent database locks on rapid changes
+            // Update UI immediately for responsiveness
+            tag.lineage = newLineage;
+            tag.Lineage = newLineage;
+            tagElement.dataset.lineage = newLineage.toUpperCase();
+
+            // Update the tag color to reflect the new lineage
+            this.forceTagColorUpdate(tag, newLineage);
+
+            // Send debounced update to backend (batches rapid changes)
+            this.updateLineageOnBackendDebounced(tag['Product Name*'], newLineage);
+
+            verboseLog(`🔄 Lineage change queued for ${tag['Product Name*']}: ${prevValue} → ${newLineage}`);
         });
         tagInfo.appendChild(lineageSelect);
 
