@@ -4027,6 +4027,15 @@ class ExcelProcessor:
                                 if isinstance(product, dict):
                                     product_name = product.get('Product Name*', product.get('ProductName', ''))
                                     if product_name in selected_tag_names:
+                                        # CRITICAL FIX: Get lineage from database (prioritizes sovereign_lineage)
+                                        db_lineage = (
+                                            product.get('currentLineage') or
+                                            product.get('canonical_lineage') or
+                                            product.get('Lineage') or
+                                            'HYBRID'
+                                        )
+                                        db_lineage_clean = str(db_lineage).strip().upper() if db_lineage else 'HYBRID'
+                                        
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
@@ -4035,7 +4044,7 @@ class ExcelProcessor:
                                             'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
                                             'Product Brand': product.get('Product Brand', ''),
                                             'Product Strain': product.get('Product Strain', ''),
-                                            'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
+                                            'Lineage': db_lineage_clean,  # Use database lineage (includes sovereign_lineage priority)
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
                                             'Price': product.get('Price', ''),  # Database uses 'Price' field
                                             'Price*': product.get('Price', ''),  # Also set Price* for compatibility
@@ -4082,6 +4091,15 @@ class ExcelProcessor:
                                     product_name = product.get('Product Name*', product.get('ProductName', ''))
                                     if product_name in selected_tag_names:
                                         # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
+                                        # CRITICAL FIX: Get lineage from database (prioritizes sovereign_lineage)
+                                        db_lineage = (
+                                            product.get('currentLineage') or
+                                            product.get('canonical_lineage') or
+                                            product.get('Lineage') or
+                                            'HYBRID'
+                                        )
+                                        db_lineage_clean = str(db_lineage).strip().upper() if db_lineage else 'HYBRID'
+                                        
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
@@ -4090,7 +4108,7 @@ class ExcelProcessor:
                                             'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
                                             'Product Brand': product.get('Product Brand', ''),
                                             'Product Strain': product.get('Product Strain', ''),
-                                            'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
+                                            'Lineage': db_lineage_clean,  # Use database lineage (includes sovereign_lineage priority)
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
                                             'Price': product.get('Price', ''),  # Database uses 'Price' field
                                             'Price*': product.get('Price', ''),  # Also set Price* for compatibility
@@ -4220,21 +4238,77 @@ class ExcelProcessor:
                     description = self._process_description_from_product_name(description or product_name)
                     product_type = record.get('Product Type*', '').strip().lower()
                     
-                    # Look up database weight and units as fallback
+                    # CRITICAL FIX: Look up database values (lineage, weight, units) and override Excel values
+                    # Database is the source of truth, especially for lineage overrides
+                    # Use fuzzy matching to handle name variations (e.g., "100 Rackz Super Sale - 14g" vs "100 Rackz by Mt Baker Homegrown - 14g")
                     db_weight = ''
                     db_units = ''
+                    db_lineage = None
                     try:
                         from src.core.data.product_database import get_product_database
                         product_db = get_product_database()
                         if product_db:
+                            # Try exact match first
                             db_products = product_db.get_products_by_names([product_name])
+                            
+                            # If no exact match, try fuzzy matching
+                            if not db_products or len(db_products) == 0:
+                                if hasattr(product_db, 'get_products_by_names_fuzzy'):
+                                    db_products = product_db.get_products_by_names_fuzzy([product_name])
+                                elif hasattr(product_db, 'get_products_by_names_with_fuzzy'):
+                                    db_products = product_db.get_products_by_names_with_fuzzy([product_name])
+                            
+                            # If still no match, try extracting base product name (e.g., "100 Rackz" from "100 Rackz Super Sale - 14g")
+                            if (not db_products or len(db_products) == 0) and ' - ' in product_name:
+                                base_name = product_name.split(' - ')[0].strip()
+                                # Remove common suffixes
+                                for suffix in [' Super Sale', ' Summer Super Sale', ' by ']:
+                                    if suffix in base_name:
+                                        base_name = base_name.split(suffix)[0].strip()
+                                if base_name and base_name != product_name:
+                                    logger.debug(f"Trying base name '{base_name}' for '{product_name}'")
+                                    db_products = product_db.get_products_by_names([base_name])
+                                    if not db_products and hasattr(product_db, 'get_products_by_names_fuzzy'):
+                                        db_products = product_db.get_products_by_names_fuzzy([base_name])
+                            
                             if db_products and len(db_products) > 0:
                                 db_product = db_products[0]
                                 db_weight = db_product.get('Weight*', '')
                                 db_units = db_product.get('Units', '')
-                                logger.debug(f"Found database weight/units for '{product_name}': {db_weight}/{db_units}")
+                                
+                                # CRITICAL FIX: Get lineage from database (prioritizes sovereign_lineage)
+                                db_lineage = (
+                                    db_product.get('currentLineage') or
+                                    db_product.get('canonical_lineage') or
+                                    db_product.get('Lineage')
+                                )
+                                
+                                if db_lineage:
+                                    db_lineage_clean = str(db_lineage).strip().upper()
+                                    excel_lineage = str(record.get('Lineage', '')).strip().upper()
+                                    
+                                    # Always override Excel lineage with database lineage
+                                    if excel_lineage != db_lineage_clean:
+                                        logger.info(f"🔄 LINEAGE OVERRIDE (get_selected_records): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
+                                    record['Lineage'] = db_lineage_clean
+                                
+                                logger.debug(f"Found database values for '{product_name}': Lineage={db_lineage}, Weight={db_weight}, Units={db_units}")
+                            else:
+                                # Last resort: try get_product_lineage which might work even without exact name match
+                                try:
+                                    db_lineage_from_method = product_db.get_product_lineage(product_name)
+                                    if db_lineage_from_method:
+                                        db_lineage_clean = str(db_lineage_from_method).strip().upper()
+                                        excel_lineage = str(record.get('Lineage', '')).strip().upper()
+                                        if excel_lineage != db_lineage_clean:
+                                            logger.info(f"🔄 LINEAGE OVERRIDE (get_product_lineage fallback): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
+                                        record['Lineage'] = db_lineage_clean
+                                        logger.debug(f"Found lineage via get_product_lineage for '{product_name}': {db_lineage_clean}")
+                                except Exception as lineage_method_error:
+                                    logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
+                                logger.debug(f"Could not find database product for '{product_name}' (tried exact, fuzzy, base name, and get_product_lineage)")
                     except Exception as e:
-                        logger.debug(f"Could not lookup database weight/units for '{product_name}': {e}")
+                        logger.debug(f"Could not lookup database values for '{product_name}': {e}")
                     
                     # Add database weight and units to record for _format_weight_units
                     record['db_weight'] = db_weight
