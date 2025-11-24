@@ -12220,6 +12220,102 @@ def get_web_filter_options():
         else:
             logging.error(f"Error in web filter options: {str(e)}")
         return jsonify({'error': str(e)}), 500
+def _get_filter_options_from_database(store_name=None):
+    """Helper function to get filter options from product database when Excel is not available."""
+    try:
+        product_db = get_product_database(store_name)
+        if not product_db:
+            return None
+        
+        all_products = product_db.get_all_products()
+        if not all_products or len(all_products) == 0:
+            return None
+        
+        logging.info(f"Found {len(all_products)} products in database, generating filter options")
+        
+        # Extract unique values for each filter type
+        vendors = set()
+        brands = set()
+        product_types = set()
+        lineages = set()
+        weights = set()
+        strains = set()
+        doh_values = set()
+        high_cbd_types = set()
+        
+        for product in all_products:
+            # Vendor
+            vendor = product.get('Vendor/Supplier*', '') or product.get('Vendor', '')
+            if vendor and str(vendor).strip():
+                vendors.add(str(vendor).strip())
+            
+            # Brand
+            brand = product.get('Product Brand', '') or product.get('Brand', '')
+            if brand and str(brand).strip():
+                brands.add(str(brand).strip())
+            
+            # Product Type
+            product_type = product.get('Product Type*', '') or product.get('Product Type', '')
+            if product_type and str(product_type).strip():
+                product_types.add(str(product_type).strip())
+            
+            # Lineage
+            lineage = product.get('Lineage', '') or product.get('lineage', '')
+            if lineage and str(lineage).strip():
+                lineages.add(str(lineage).strip().upper())
+            
+            # Weight - format similar to Excel processor
+            weight_val = product.get('Weight*', '') or product.get('Weight', '')
+            units = product.get('Units', '') or product.get('Unit', '')
+            if weight_val and str(weight_val).strip():
+                weight_str = str(weight_val).strip()
+                if units and str(units).strip():
+                    weight_str = f"{weight_str}{str(units).strip()}"
+                weights.add(weight_str)
+            
+            # Strain
+            strain = product.get('Product Strain', '') or product.get('Strain', '')
+            if strain and str(strain).strip():
+                strains.add(str(strain).strip())
+            
+            # DOH
+            doh = product.get('DOH', '')
+            if doh and str(doh).strip().upper() in ['YES', 'NO']:
+                doh_values.add(str(doh).strip().upper())
+            
+            # High CBD - check product type for CBD indicators
+            product_type_lower = str(product_type).lower()
+            if 'cbd' in product_type_lower or 'high cbd' in product_type_lower:
+                high_cbd_types.add(product_type)
+        
+        # Convert to sorted lists
+        options = {
+            'vendor': sorted(list(vendors)),
+            'brand': sorted(list(brands)),
+            'productType': sorted(list(product_types)),
+            'lineage': sorted(list(lineages)),
+            'weight': sorted(list(weights)),
+            'strain': sorted(list(strains)),
+            'doh': sorted(list(doh_values)),
+            'highCbd': sorted(list(high_cbd_types))
+        }
+        
+        # Clean lists (remove empty values)
+        import math
+        def clean_list(lst):
+            return [v for v in lst if v and str(v).strip() and str(v).strip().lower() != 'nan']
+        options = {k: clean_list(v) for k, v in options.items()}
+        
+        option_counts = {k: len(v) for k, v in options.items()}
+        logging.info(f"✅ Filter options from database: {option_counts}")
+        
+        return options
+    except Exception as db_error:
+        logging.warning(f"Could not get filter options from database: {db_error}")
+        import traceback
+        logging.debug(traceback.format_exc())
+        return None
+
 @app.route('/api/filter-options', methods=['GET', 'POST'])
 def get_filter_options():
     """Get filter options for dropdowns with enhanced error logging and performance optimizations"""
@@ -12339,7 +12435,17 @@ def get_filter_options():
             else:
                 # CRITICAL FIX: Don't log as warning - this is normal when no Excel file is loaded
                 # Database-only mode is supported and valid
-                logging.debug(f"No default file available (file: {default_file}, exists: {os.path.exists(default_file) if default_file else False}, store: {selected_store}) - database-only mode")
+                # Try to get filter options from database instead
+                logging.info(f"No default file available (file: {default_file}, exists: {os.path.exists(default_file) if default_file else False}, store: {selected_store}) - attempting database-only mode")
+                options = _get_filter_options_from_database(selected_store)
+                if options:
+                    # Cache the options
+                    cache.set(cache_key, options, timeout=300)  # Cache for 5 minutes
+                    response = make_response(jsonify(options))
+                    response = compress_response(response)
+                    return response
+                
+                # If database fallback also failed, return empty arrays with debug info
                 return jsonify({
                     'vendor': [],
                     'brand': [],
@@ -12363,9 +12469,19 @@ def get_filter_options():
             data = request.get_json()
             current_filters = data.get('filters', {})
         
-        # CRITICAL FIX: Verify DataFrame is ready before getting filter options
+        # CRITICAL FIX: If DataFrame is empty, try to get filter options from database
         if excel_processor.df is None or excel_processor.df.empty:
-            logging.error("CRITICAL: DataFrame is still empty after load attempt")
+            logging.info("DataFrame is empty, attempting to get filter options from database")
+            options = _get_filter_options_from_database(selected_store)
+            if options:
+                # Cache the options
+                cache.set(cache_key, options, timeout=300)  # Cache for 5 minutes
+                response = make_response(jsonify(options))
+                response = compress_response(response)
+                return response
+            
+            # If database fallback failed, return empty arrays
+            logging.error("CRITICAL: DataFrame is still empty after load attempt and database fallback failed")
             return jsonify({
                 'vendor': [],
                 'brand': [],

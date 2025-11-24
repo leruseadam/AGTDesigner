@@ -5104,34 +5104,76 @@ const TagManager = {
         }
     },
     
-    // CRITICAL FIX: Debounced wrapper for lineage updates to prevent rapid-fire requests
-    _lineageUpdateQueue: {},
-    _lineageUpdateTimeouts: {},
-    _pendingLineageUpdates: new Set(),
+    // CRITICAL FIX: Global queue system to serialize ALL lineage updates and prevent database locks
+    // This ensures only one update hits the database at a time, even for different tags
+    _lineageUpdateQueue: {},  // Per-tag latest values (deduplicates rapid changes to same tag)
+    _lineageUpdateTimeout: null,  // Single global timeout for all updates
+    _lineageUpdateProcessing: false,  // Flag to prevent concurrent processing
+    _lineageUpdatePending: new Set(),  // Track which tags have pending updates
     
     updateLineageOnBackendDebounced(tagName, newLineage) {
-        // Cancel any pending update for this tag (only send the latest value)
-        if (this._lineageUpdateTimeouts[tagName]) {
-            clearTimeout(this._lineageUpdateTimeouts[tagName]);
+        // Store the latest lineage value for this tag (overwrites previous if same tag)
+        this._lineageUpdateQueue[tagName] = newLineage;
+        this._lineageUpdatePending.add(tagName);
+        
+        // Cancel any pending global timeout
+        if (this._lineageUpdateTimeout) {
+            clearTimeout(this._lineageUpdateTimeout);
+            this._lineageUpdateTimeout = null;
         }
         
-        // Store the latest lineage value for this tag
-        this._lineageUpdateQueue[tagName] = newLineage;
-        this._pendingLineageUpdates.add(tagName);
+        // Debounce: wait 500ms before starting to process updates
+        // This batches rapid changes across ALL tags, not just per-tag
+        this._lineageUpdateTimeout = setTimeout(() => {
+            this._processLineageUpdateQueue();
+        }, 500); // 500ms debounce - batches rapid changes across all tags
+    },
+    
+    async _processLineageUpdateQueue() {
+        // Prevent concurrent processing
+        if (this._lineageUpdateProcessing) {
+            // If already processing, reschedule this batch
+            this._lineageUpdateTimeout = setTimeout(() => {
+                this._processLineageUpdateQueue();
+            }, 200);
+            return;
+        }
         
-        // Debounce: wait 500ms before sending request (allows batching rapid changes)
-        // This prevents database locks when user changes multiple lineages quickly
-        this._lineageUpdateTimeouts[tagName] = setTimeout(() => {
-            const finalLineage = this._lineageUpdateQueue[tagName];
-            if (finalLineage !== undefined) {
-                delete this._lineageUpdateQueue[tagName];
-                delete this._lineageUpdateTimeouts[tagName];
-                this._pendingLineageUpdates.delete(tagName);
+        // Copy the queue before clearing (prevents race conditions with new updates)
+        const updatesToProcess = Object.entries({...this._lineageUpdateQueue});
+        if (updatesToProcess.length === 0) {
+            return;
+        }
+        
+        // Clear the queue and pending set (new updates will create a new batch)
+        this._lineageUpdateQueue = {};
+        this._lineageUpdatePending.clear();
+        this._lineageUpdateTimeout = null;
+        this._lineageUpdateProcessing = true;
+        
+        verboseLog(`🔄 Processing ${updatesToProcess.length} lineage update(s) sequentially...`);
+        
+        // Process updates one at a time with a small delay between each
+        // This ensures database operations don't compete for locks
+        for (let i = 0; i < updatesToProcess.length; i++) {
+            const [tagName, newLineage] = updatesToProcess[i];
+            
+            try {
+                // Wait a bit between updates to ensure previous transaction completes
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay between updates
+                }
                 
-                // Send the update
-                this.updateLineageOnBackend(tagName, finalLineage);
+                await this.updateLineageOnBackend(tagName, newLineage);
+                verboseLog(`✅ Processed lineage update ${i + 1}/${updatesToProcess.length}: ${tagName}`);
+            } catch (error) {
+                console.error(`❌ Failed to update lineage for ${tagName}:`, error);
+                // Continue processing other updates even if one fails
             }
-        }, 500); // 500ms debounce - batches rapid changes
+        }
+        
+        this._lineageUpdateProcessing = false;
+        verboseLog(`✅ Completed processing ${updatesToProcess.length} lineage update(s)`);
     },
 
     async updateLineageOnBackend(tagName, newLineage) {
