@@ -9911,10 +9911,19 @@ def update_lineage():
             
             try:
                 # CRITICAL FIX: Optimized retry logic for database locks with proper timeout handling
-                max_retries = 5  # Increased to 5 to allow more retry attempts
-                retry_delay = 0.1  # Initial delay of 0.1s
+                max_retries = 10  # Increased to 10 to allow more retry attempts for locked databases
+                retry_delay = 0.2  # Initial delay of 0.2s (increased from 0.1s)
                 connection_start_time = time_module.time()
-                connection_timeout = 10.0  # Increased to 10 seconds to account for retries and locks
+                connection_timeout = 15.0  # Increased to 15 seconds to account for retries and locks
+                
+                # CRITICAL FIX: Close any existing connections before retrying to prevent connection leaks
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    conn = None
+                    cursor = None
                 
                 for attempt in range(max_retries):
                     # Check if we've exceeded connection timeout BEFORE attempting connection
@@ -9924,18 +9933,48 @@ def update_lineage():
                         raise Exception(f"Database connection timeout after {connection_timeout}s")
                     
                     try:
+                        # CRITICAL FIX: Get a fresh connection for each retry attempt
+                        # This ensures we're not holding onto a stale locked connection
                         conn = product_db._get_connection()
+                        if conn is None:
+                            raise Exception("Failed to get database connection - connection is None")
+                        
                         # Set timeout to prevent indefinite waiting
-                        conn.execute("PRAGMA busy_timeout = 5000")  # 5 seconds for SQLite busy timeout
+                        conn.execute("PRAGMA busy_timeout = 10000")  # 10 seconds for SQLite busy timeout (increased from 5s)
+                        
+                        # CRITICAL FIX: Set journal mode to WAL if not already set (helps with concurrent access)
+                        try:
+                            conn.execute("PRAGMA journal_mode = WAL")
+                        except:
+                            pass  # May already be in WAL mode
+                        
                         cursor = conn.cursor()
                         
                         # Use BEGIN IMMEDIATE to get an immediate lock
                         try:
                             cursor.execute("BEGIN IMMEDIATE")
                         except sqlite3.OperationalError as begin_error:
-                            if "cannot start a transaction within a transaction" in str(begin_error).lower():
-                                # Already in a transaction, continue
-                                pass
+                            error_str = str(begin_error).lower()
+                            if "cannot start a transaction within a transaction" in error_str:
+                                # Already in a transaction, rollback and try again
+                                try:
+                                    conn.rollback()
+                                    cursor.execute("BEGIN IMMEDIATE")
+                                except:
+                                    # If rollback fails, close connection and retry
+                                    conn.close()
+                                    conn = None
+                                    cursor = None
+                                    raise
+                            elif "database is locked" in error_str:
+                                # Database is locked, close connection and retry
+                                try:
+                                    conn.close()
+                                except:
+                                    pass
+                                conn = None
+                                cursor = None
+                                raise sqlite3.OperationalError("database is locked")
                             else:
                                 raise
                         
@@ -9947,10 +9986,17 @@ def update_lineage():
                         break
                         
                     except sqlite3.OperationalError as lock_error:
-                        if "database is locked" in str(lock_error).lower() and attempt < max_retries - 1:
+                        error_str = str(lock_error).lower()
+                        if "database is locked" in error_str and attempt < max_retries - 1:
                             elapsed = time_module.time() - connection_start_time
                             logging.warning(f"⚠️  Database locked (attempt {attempt + 1}/{max_retries}, elapsed: {elapsed:.2f}s), retrying in {retry_delay}s...")
+                            
+                            # CRITICAL FIX: Always close connection on lock error to prevent connection leaks
                             if conn:
+                                try:
+                                    conn.rollback()  # Try to rollback first
+                                except:
+                                    pass
                                 try:
                                     conn.close()
                                 except:
@@ -9964,7 +10010,7 @@ def update_lineage():
                                 raise Exception(f"Database connection timeout - would exceed {connection_timeout}s limit")
                             
                             time_module.sleep(retry_delay)
-                            retry_delay = min(retry_delay * 1.5, 0.5)  # Exponential backoff, max 0.5s
+                            retry_delay = min(retry_delay * 1.3, 1.0)  # Exponential backoff, max 1.0s (increased from 0.5s)
                             
                             # Check timeout after sleep as well
                             elapsed = time_module.time() - connection_start_time
@@ -9976,9 +10022,21 @@ def update_lineage():
                         else:
                             # Last attempt or different error - raise it
                             logging.error(f"❌ Database lock error after {attempt + 1} attempts: {lock_error}")
+                            # Close connection before raising error
+                            if conn:
+                                try:
+                                    conn.close()
+                                except:
+                                    pass
                             raise
                     except Exception as conn_error:
                         logging.error(f"❌ Error getting database connection: {conn_error}")
+                        # Close connection before raising error
+                        if conn:
+                            try:
+                                conn.close()
+                            except:
+                                pass
                         raise
                 
                 if not conn or not cursor:
@@ -12188,7 +12246,9 @@ def get_filter_options():
                         }
                     }), 200
             else:
-                logging.warning(f"CRITICAL: No default file available (file: {default_file}, exists: {os.path.exists(default_file) if default_file else False}, store: {selected_store})")
+                # CRITICAL FIX: Don't log as warning - this is normal when no Excel file is loaded
+                # Database-only mode is supported and valid
+                logging.debug(f"No default file available (file: {default_file}, exists: {os.path.exists(default_file) if default_file else False}, store: {selected_store}) - database-only mode")
                 return jsonify({
                     'vendor': [],
                     'brand': [],
@@ -12198,11 +12258,13 @@ def get_filter_options():
                     'strain': [],
                     'doh': [],
                     'highCbd': [],
-                    'error': 'No default file available',
+                    # CRITICAL FIX: Don't include error field - this is not an error, just informational
+                    # Frontend should handle empty filters gracefully without showing errors
                     'debug': {
                         'file': default_file,
                         'store': selected_store,
-                        'file_exists': os.path.exists(default_file) if default_file else False
+                        'file_exists': os.path.exists(default_file) if default_file else False,
+                        'database_only_mode': True
                     }
                 }), 200
         current_filters = {}

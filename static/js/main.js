@@ -5176,6 +5176,17 @@ const TagManager = {
             // Use verified lineage from backend response
             this.updateTagLineageInUI(tagName, verifiedLineage);
             verboseLog(`🎨 Updated UI elements for ${tagName} with verified lineage: ${verifiedLineage}`);
+            
+            // CRITICAL FIX: Immediately update the tag in originalTags so future renders show correct lineage
+            // This ensures that when the tag list is filtered or re-rendered, it shows the updated lineage
+            const originalTagIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
+            if (originalTagIndex >= 0) {
+                this.state.originalTags[originalTagIndex].lineage = verifiedLineage;
+                this.state.originalTags[originalTagIndex].Lineage = verifiedLineage;
+                this.state.originalTags[originalTagIndex].currentLineage = verifiedLineage;
+                this.state.originalTags[originalTagIndex].canonical_lineage = verifiedLineage;
+                verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
+            }
 
             // NEW: Instantly update all similar (same vendor + strain) across lists
             // Use verified lineage from backend response
@@ -5187,8 +5198,7 @@ const TagManager = {
             }
             
             // CRITICAL FIX: Debounce backend refresh to prevent race conditions when multiple updates happen
-            // Only update the specific tag in originalTags instead of refreshing all tags
-            // This prevents the list from glitching/clearing when multiple lineage changes happen
+            // Update originalTags and refresh the UI to show the new lineage
             if (!this._pendingLineageRefresh) {
                 this._pendingLineageRefresh = setTimeout(async () => {
                     try {
@@ -5199,26 +5209,60 @@ const TagManager = {
                             const freshData = await freshTagsResponse.json();
                             verboseLog(`✅ Refreshed ${freshData.tags?.length || 0} tags from backend after lineage update(s)`);
                             
-                            // CRITICAL FIX: Only update tags that were actually changed, don't replace entire list
-                            // This prevents the list from glitching when multiple updates happen
+                            // CRITICAL FIX: Update tags in originalTags and current tags to reflect new lineage
+                            // This ensures the UI shows the updated lineage values
                             if (freshData.tags && freshData.tags.length > 0) {
                                 // Update only the changed tags in originalTags, preserve the rest
                                 const updatedTagNames = new Set(this._recentlyUpdatedLineages || []);
                                 let updatedCount = 0;
                                 
                                 freshData.tags.forEach(freshTag => {
-                                    const tagName = freshTag['Product Name*'];
-                                    if (updatedTagNames.has(tagName)) {
-                                        const existingIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
+                                    const updatedTagName = freshTag['Product Name*'];
+                                    if (updatedTagNames.has(updatedTagName)) {
+                                        // Update in originalTags
+                                        const existingIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === updatedTagName);
                                         if (existingIndex >= 0) {
                                             // Update the existing tag with fresh lineage data
-                                            Object.assign(this.state.originalTags[existingIndex], freshTag);
-                                            updatedCount++;
+                                            const dbLineage = freshTag.Lineage || freshTag.currentLineage || freshTag.canonical_lineage || freshTag.lineage;
+                                            if (dbLineage) {
+                                                this.state.originalTags[existingIndex].Lineage = dbLineage;
+                                                this.state.originalTags[existingIndex].lineage = dbLineage;
+                                                this.state.originalTags[existingIndex].currentLineage = dbLineage;
+                                                this.state.originalTags[existingIndex].canonical_lineage = dbLineage;
+                                                updatedCount++;
+                                            }
                                         }
+                                        
+                                        // Also update in current tags if visible
+                                        const currentIndex = this.state.tags.findIndex(t => t['Product Name*'] === updatedTagName);
+                                        if (currentIndex >= 0) {
+                                            const dbLineage = freshTag.Lineage || freshTag.currentLineage || freshTag.canonical_lineage || freshTag.lineage;
+                                            if (dbLineage) {
+                                                this.state.tags[currentIndex].Lineage = dbLineage;
+                                                this.state.tags[currentIndex].lineage = dbLineage;
+                                                this.state.tags[currentIndex].currentLineage = dbLineage;
+                                                this.state.tags[currentIndex].canonical_lineage = dbLineage;
+                                            }
+                                        }
+                                        
+                                        // Update UI element for this tag
+                                        this.updateTagLineageInUI(updatedTagName, dbLineage || verifiedLineage);
                                     }
                                 });
                                 
                                 verboseLog(`✅ Updated ${updatedCount} tags in originalTags with fresh lineage data (preserved ${this.state.originalTags.length - updatedCount} unchanged tags)`);
+                                
+                                // CRITICAL FIX: Force UI refresh by re-applying filters to show updated lineage
+                                // This ensures the available tags list reflects the new lineage values
+                                if (updatedCount > 0 && typeof this.applyFilters === 'function') {
+                                    // Re-apply current filters to refresh the UI with updated lineage
+                                    try {
+                                        this.applyFilters();
+                                        verboseLog('✅ Re-applied filters to refresh UI with updated lineage');
+                                    } catch (filterError) {
+                                        console.warn('Could not re-apply filters:', filterError);
+                                    }
+                                }
                                 
                                 // Clear the recently updated list
                                 this._recentlyUpdatedLineages = [];
@@ -5513,7 +5557,24 @@ const TagManager = {
         if (availableTagElement) {
             const lineageSelect = availableTagElement.querySelector('.lineage-dropdown');
             if (lineageSelect) {
+                const oldValue = lineageSelect.value;
                 lineageSelect.value = newLineage;
+                
+                // CRITICAL FIX: Trigger change event to ensure any listeners are notified
+                if (oldValue !== newLineage) {
+                    lineageSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                
+                // CRITICAL FIX: Also update any lineage display text/span elements
+                const lineageDisplay = availableTagElement.querySelector('.lineage-display, .lineage-text, [data-lineage]');
+                if (lineageDisplay) {
+                    lineageDisplay.textContent = newLineage;
+                    if (lineageDisplay.hasAttribute('data-lineage')) {
+                        lineageDisplay.setAttribute('data-lineage', newLineage);
+                    }
+                }
+                
+                verboseLog(`✅ Updated available tag lineage dropdown for ${tagName} to ${newLineage}`);
             }
         }
 
@@ -5522,7 +5583,24 @@ const TagManager = {
         if (selectedTagElement) {
             const lineageSelect = selectedTagElement.querySelector('.lineage-dropdown');
             if (lineageSelect) {
+                const oldValue = lineageSelect.value;
                 lineageSelect.value = newLineage;
+                
+                // CRITICAL FIX: Trigger change event to ensure any listeners are notified
+                if (oldValue !== newLineage) {
+                    lineageSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                
+                // CRITICAL FIX: Also update any lineage display text/span elements
+                const lineageDisplay = selectedTagElement.querySelector('.lineage-display, .lineage-text, [data-lineage]');
+                if (lineageDisplay) {
+                    lineageDisplay.textContent = newLineage;
+                    if (lineageDisplay.hasAttribute('data-lineage')) {
+                        lineageDisplay.setAttribute('data-lineage', newLineage);
+                    }
+                }
+                
+                verboseLog(`✅ Updated selected tag lineage dropdown for ${tagName} to ${newLineage}`);
             }
         }
     },
@@ -7507,8 +7585,9 @@ const TagManager = {
             const filterOptions = await response.json();
             verboseLog('Fetched filter options:', filterOptions);
             
-            // CRITICAL FIX: Check for error field in response
-            if (filterOptions.error) {
+            // CRITICAL FIX: Check for error field in response, but don't treat "No default file available" as an error
+            // Database-only mode is valid and shouldn't trigger warnings
+            if (filterOptions.error && filterOptions.error !== 'No default file available') {
                 console.warn(`Filter options error: ${filterOptions.error}`, filterOptions.debug || '');
                 
                 // If there's an error but we haven't exceeded retries, retry
@@ -7533,6 +7612,12 @@ const TagManager = {
                     }, true);
                     return;
                 }
+            }
+            
+            // CRITICAL FIX: If database-only mode, don't log as error - this is normal
+            if (filterOptions.error === 'No default file available' || filterOptions.debug?.database_only_mode) {
+                verboseLog('Database-only mode: No Excel file loaded, using database for filters');
+                // Continue to update filters with empty arrays (will be populated from database when available)
             }
             
             // CRITICAL FIX: Check if filters are empty and retry if needed
