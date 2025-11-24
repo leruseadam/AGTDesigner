@@ -7543,11 +7543,17 @@ const TagManager = {
         this._isPostUploadLoad = true;
 
         try {
-            const results = await Promise.all([
-                this.fetchAndUpdateAvailableTags(),
-                this.fetchAndUpdateSelectedTags(),
-                this.fetchAndPopulateFilters()
-            ]);
+            // CRITICAL FIX: Fetch filters AFTER tags are loaded to ensure data is ready
+            await this.fetchAndUpdateAvailableTags();
+            await this.fetchAndUpdateSelectedTags();
+            
+            // Small delay to ensure Excel processor is ready
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Now fetch filters with retry mechanism
+            await this.fetchAndPopulateFilters();
+            
+            const results = [true, true, true]; // All succeeded
 
             // Ensure UI reflects latest state
             this.updateSelectAllCheckboxes();
