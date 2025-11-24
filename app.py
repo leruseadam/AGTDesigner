@@ -9915,23 +9915,31 @@ def update_lineage():
                 if not conn or not cursor:
                     raise Exception("Failed to get database connection after retries")
                 
+                # CRITICAL FIX: Validate cursor before using it
+                if cursor is None:
+                    raise Exception("Cursor is None - cannot proceed with database operations")
+                
                 # CRITICAL FIX: Get vendor and strain from database (after connection is established)
-                for candidate, _ in variant_pairs:
-                    cursor.execute('''
-                        SELECT "Vendor/Supplier*" FROM products
-                        WHERE "Product Name*" = ? OR "ProductName" = ?
-                        LIMIT 1
-                    ''', (candidate, candidate))
-                    result = cursor.fetchone()
-                    if result and result[0]:
-                        vendor = str(result[0]).strip()
-                        if vendor and vendor.lower() not in ['nan', 'none', 'null', '']:
-                            logging.info(f"Found vendor '{vendor}' for product '{candidate}' from database")
+                try:
+                    for candidate, _ in variant_pairs:
+                        if cursor is None:
+                            logging.error("Cursor became None during vendor lookup")
                             break
-                        vendor = None
-            except Exception as db_vendor_error:
-                logging.warning(f"Could not get vendor from database: {db_vendor_error}")
-                vendor = None
+                        cursor.execute('''
+                            SELECT "Vendor/Supplier*" FROM products
+                            WHERE "Product Name*" = ? OR "ProductName" = ?
+                            LIMIT 1
+                        ''', (candidate, candidate))
+                        result = cursor.fetchone()
+                        if result and result[0]:
+                            vendor = str(result[0]).strip()
+                            if vendor and vendor.lower() not in ['nan', 'none', 'null', '']:
+                                logging.info(f"Found vendor '{vendor}' for product '{candidate}' from database")
+                                break
+                            vendor = None
+                except Exception as db_vendor_error:
+                    logging.warning(f"Could not get vendor from database: {db_vendor_error}")
+                    vendor = None
             
             # Fallback to Excel if vendor not found in database and Excel is available
             if not vendor and excel_processor and excel_processor.df is not None:
@@ -9974,19 +9982,23 @@ def update_lineage():
             
             # Get strain from database
             try:
-                for candidate, _ in variant_pairs:
-                    cursor.execute('''
-                        SELECT "Product Strain" FROM products
-                        WHERE "Product Name*" = ? OR "ProductName" = ?
-                        LIMIT 1
-                    ''', (candidate, candidate))
-                    result = cursor.fetchone()
-                    if result and result[0]:
-                        strain_name = str(result[0]).strip()
-                        if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
-                            logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
-                            break
-                        strain_name = None
+                if cursor is None:
+                    logging.warning("Cursor is None - cannot get strain from database")
+                    strain_name = None
+                else:
+                    for candidate, _ in variant_pairs:
+                        cursor.execute('''
+                            SELECT "Product Strain" FROM products
+                            WHERE "Product Name*" = ? OR "ProductName" = ?
+                            LIMIT 1
+                        ''', (candidate, candidate))
+                        result = cursor.fetchone()
+                        if result and result[0]:
+                            strain_name = str(result[0]).strip()
+                            if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
+                                logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
+                                break
+                            strain_name = None
             except Exception as db_strain_error:
                 logging.warning(f"Could not get strain from database: {db_strain_error}")
                 strain_name = None
@@ -10061,9 +10073,18 @@ def update_lineage():
             # FIRST: Check if product exists before trying to update (for better error messages)
             existing_products = []
             actual_product_names = []  # Store actual product names from database
+            
+            # CRITICAL FIX: Check cursor before using it
+            if cursor is None:
+                logging.error("❌ Cursor is None - cannot search for products")
+                raise Exception("Database cursor is None - cannot proceed with lineage update")
+            
             for candidate, normalized_candidate in variant_pairs:
                 logging.info(f"🔍 Searching for product: '{candidate}' (normalized: '{normalized_candidate}')")
                 # Try multiple search strategies
+                if cursor is None:
+                    logging.error("Cursor became None during product search")
+                    break
                 cursor.execute('''
                     SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
                     FROM products
@@ -10073,7 +10094,7 @@ def update_lineage():
                 existing_products = cursor.fetchall()
                 
                 # If no exact match, try case-insensitive normalized match
-                if not existing_products:
+                if not existing_products and cursor is not None:
                     cursor.execute('''
                         SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
                         FROM products
@@ -10085,7 +10106,7 @@ def update_lineage():
                 
                 # CRITICAL FIX: Also try matching against normalized_name column using the normalized candidate
                 # This handles cases where the database has normalized_name populated but exact match fails
-                if not existing_products:
+                if not existing_products and cursor is not None:
                     # Try matching normalized_name column with normalized candidate
                     cursor.execute('''
                         SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
@@ -10099,7 +10120,7 @@ def update_lineage():
                 
                 # CRITICAL FIX: Try word-by-word matching for products with "by" in the name
                 # This handles cases like "Gary Jealousy by Mt Baker Homegrown - 1g" vs "Gary Jealousy by Mt Baker Homegrown"
-                if not existing_products and ' by ' in candidate.lower():
+                if not existing_products and cursor is not None and ' by ' in candidate.lower():
                     # Extract key words (strain name and vendor)
                     words = candidate.lower().split()
                     # Try to find products that contain the key words
@@ -10136,11 +10157,14 @@ def update_lineage():
                     logging.info(f"💡 Extracted {len(actual_product_names)} product name variants: {actual_product_names[:3]}")
                     break
             
-            if not existing_products:
+            if not existing_products and cursor is not None:
                 for candidate, normalized_candidate in variant_pairs:
                     tag_name_lower = candidate.lower().strip()
                     logging.info(f"🔍 Trying case-insensitive search for: '{tag_name_lower}' (normalized: '{normalized_candidate}')")
                     # Try case-insensitive match on product names AND normalized name
+                    if cursor is None:
+                        logging.error("Cursor became None during case-insensitive search")
+                        break
                     cursor.execute('''
                         SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
                         FROM products
@@ -10166,9 +10190,12 @@ def update_lineage():
                         logging.info(f"💡 Extracted {len(actual_product_names)} product name variants: {actual_product_names[:3]}")
                         break
             
-            if not existing_products:
+            if not existing_products and cursor is not None:
                 logging.info(f"🔍 Trying partial match search for variants: {name_variants}")
                 for candidate in name_variants:
+                    if cursor is None:
+                        logging.error("Cursor became None during partial match search")
+                        break
                     # Try case-sensitive partial match
                     cursor.execute('''
                         SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
@@ -10179,7 +10206,7 @@ def update_lineage():
                     existing_products = cursor.fetchall()
                     
                     # If no match, try case-insensitive partial match
-                    if not existing_products:
+                    if not existing_products and cursor is not None:
                         candidate_lower = candidate.lower()
                         cursor.execute('''
                             SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
@@ -10193,7 +10220,7 @@ def update_lineage():
                     
                     # CRITICAL FIX: Also try matching key words from the candidate
                     # This handles cases where spacing or punctuation differs
-                    if not existing_products:
+                    if not existing_products and cursor is not None:
                         # Extract meaningful words (skip common words and short words)
                         words = [w for w in candidate.split() if len(w) > 2 and w.lower() not in ['the', 'and', 'for', 'with', 'by']]
                         if len(words) >= 2:
@@ -10261,74 +10288,82 @@ def update_lineage():
                     logging.info(f"💡 Extracted actual product names from existing_products: {actual_product_names[:3]}")
                 
                 if actual_product_names:
-                    # CRITICAL FIX: Use batch update with all actual product names for better reliability
-                    # This is more efficient and handles edge cases better than individual updates
-                    logging.info(f"🔄 Updating products using {len(actual_product_names)} name variants: {actual_product_names[:3]}")
-                    
-                    # Build a comprehensive WHERE clause that matches any of the name variants
-                    placeholders = ','.join(['?'] * len(actual_product_names))
-                    
-                    # Try batch update with all name variants
-                    try:
-                        cursor.execute(f'''
-                            UPDATE products
-                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                            WHERE "Product Name*" IN ({placeholders}) 
-                               OR "ProductName" IN ({placeholders})
-                               OR normalized_name IN ({placeholders})
-                        ''', (new_lineage, *actual_product_names, *actual_product_names, *actual_product_names))
-                        products_updated_by_name = cursor.rowcount
-                        
-                        if products_updated_by_name > 0:
-                            logging.info(f"✅ Batch update succeeded: {products_updated_by_name} product(s) updated")
-                        else:
-                            logging.warning(f"⚠️  Batch update matched 0 rows. Trying individual updates...")
-                            # Fallback to individual updates
-                            products_updated_by_name = 0
-                            for p in existing_products:
-                                try:
-                                    product_name_val = p[0] if p[0] else None
-                                    productname_val = p[1] if p[1] else None
-                                    normalized_val = p[2] if p[2] else None
-                                    
-                                    if product_name_val:
-                                        cursor.execute('''
-                                            UPDATE products
-                                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                                            WHERE "Product Name*" = ?
-                                        ''', (new_lineage, product_name_val))
-                                        if cursor.rowcount > 0:
-                                            products_updated_by_name += cursor.rowcount
-                                            logging.info(f"✅ Updated product via Product Name*: {product_name_val}")
-                                            continue
-                                    
-                                    if productname_val:
-                                        cursor.execute('''
-                                            UPDATE products
-                                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                                            WHERE "ProductName" = ?
-                                        ''', (new_lineage, productname_val))
-                                        if cursor.rowcount > 0:
-                                            products_updated_by_name += cursor.rowcount
-                                            logging.info(f"✅ Updated product via ProductName: {productname_val}")
-                                            continue
-                                    
-                                    if normalized_val:
-                                        cursor.execute('''
-                                            UPDATE products
-                                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                                            WHERE normalized_name = ?
-                                        ''', (new_lineage, normalized_val))
-                                        if cursor.rowcount > 0:
-                                            products_updated_by_name += cursor.rowcount
-                                            logging.info(f"✅ Updated product via normalized_name: {normalized_val}")
-                                except Exception as individual_error:
-                                    logging.warning(f"⚠️  Individual update failed for {p[0] or p[1]}: {individual_error}")
-                    except Exception as batch_error:
-                        logging.error(f"❌ Batch update failed: {batch_error}")
-                        import traceback
-                        logging.error(f"Batch update error traceback: {traceback.format_exc()}")
+                    # CRITICAL FIX: Check cursor before using it
+                    if cursor is None:
+                        logging.error("❌ Cursor is None - cannot update products")
                         products_updated_by_name = 0
+                    else:
+                        # CRITICAL FIX: Use batch update with all actual product names for better reliability
+                        # This is more efficient and handles edge cases better than individual updates
+                        logging.info(f"🔄 Updating products using {len(actual_product_names)} name variants: {actual_product_names[:3]}")
+                        
+                        # Build a comprehensive WHERE clause that matches any of the name variants
+                        placeholders = ','.join(['?'] * len(actual_product_names))
+                        
+                        # Try batch update with all name variants
+                        try:
+                            cursor.execute(f'''
+                                UPDATE products
+                                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE "Product Name*" IN ({placeholders}) 
+                                   OR "ProductName" IN ({placeholders})
+                                   OR normalized_name IN ({placeholders})
+                            ''', (new_lineage, *actual_product_names, *actual_product_names, *actual_product_names))
+                            products_updated_by_name = cursor.rowcount
+                            
+                            if products_updated_by_name > 0:
+                                logging.info(f"✅ Batch update succeeded: {products_updated_by_name} product(s) updated")
+                            else:
+                                logging.warning(f"⚠️  Batch update matched 0 rows. Trying individual updates...")
+                                # Fallback to individual updates
+                                products_updated_by_name = 0
+                                for p in existing_products:
+                                    try:
+                                        if cursor is None:
+                                            logging.error("Cursor became None during individual updates")
+                                            break
+                                        product_name_val = p[0] if p[0] else None
+                                        productname_val = p[1] if p[1] else None
+                                        normalized_val = p[2] if p[2] else None
+                                        
+                                        if product_name_val:
+                                            cursor.execute('''
+                                                UPDATE products
+                                                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                                WHERE "Product Name*" = ?
+                                            ''', (new_lineage, product_name_val))
+                                            if cursor.rowcount > 0:
+                                                products_updated_by_name += cursor.rowcount
+                                                logging.info(f"✅ Updated product via Product Name*: {product_name_val}")
+                                                continue
+                                        
+                                        if productname_val:
+                                            cursor.execute('''
+                                                UPDATE products
+                                                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                                WHERE "ProductName" = ?
+                                            ''', (new_lineage, productname_val))
+                                            if cursor.rowcount > 0:
+                                                products_updated_by_name += cursor.rowcount
+                                                logging.info(f"✅ Updated product via ProductName: {productname_val}")
+                                                continue
+                                        
+                                        if normalized_val:
+                                            cursor.execute('''
+                                                UPDATE products
+                                                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                                WHERE normalized_name = ?
+                                            ''', (new_lineage, normalized_val))
+                                            if cursor.rowcount > 0:
+                                                products_updated_by_name += cursor.rowcount
+                                                logging.info(f"✅ Updated product via normalized_name: {normalized_val}")
+                                    except Exception as individual_error:
+                                        logging.warning(f"⚠️  Individual update failed for {p[0] or p[1]}: {individual_error}")
+                        except Exception as batch_error:
+                            logging.error(f"❌ Batch update failed: {batch_error}")
+                            import traceback
+                            logging.error(f"Batch update error traceback: {traceback.format_exc()}")
+                            products_updated_by_name = 0
             else:
                 # Fallback: Update by exact product name (most specific)
                 # Try exact match first (including normalized_name)
@@ -10377,7 +10412,7 @@ def update_lineage():
             
             # SECOND: Update by vendor+strain to propagate to similar products (if we have vendor and strain)
             # Only update products that don't already have this exact lineage (avoid unnecessary updates)
-            if vendor and strain_name and str(strain_name).strip():
+            if vendor and strain_name and str(strain_name).strip() and cursor is not None:
                 try:
                     # Simplified query with pre-normalized values for better SQLite compatibility
                     vendor_lower = str(vendor).strip().lower()
@@ -10398,6 +10433,8 @@ def update_lineage():
                     logging.error(f"Vendor+strain update error traceback: {traceback.format_exc()}")
                     # Don't fail the entire request if vendor+strain update fails
                     products_updated_by_strain = 0
+            else:
+                products_updated_by_strain = 0
             
             # Total products updated
             products_updated = products_updated_by_name + products_updated_by_strain
@@ -10536,6 +10573,10 @@ def update_lineage():
             # SINGLE COMMIT for all updates - this should be fast
             # CRITICAL FIX: Retry commit on lock errors
             commit_success = False
+            if conn is None:
+                logging.error("❌ Connection is None - cannot commit transaction")
+                raise Exception("Database connection is None - cannot commit transaction")
+            
             for commit_attempt in range(3):
                 try:
                     conn.commit()
