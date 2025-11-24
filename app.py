@@ -9885,26 +9885,24 @@ def update_lineage():
             cursor = None
             
             # CRITICAL FIX: Helper function to ensure cursor is valid (defined early for use throughout)
-            # Added timeout protection to prevent hangs
+            # Allow re-establishment on each request - connection_established is just a flag for tracking
             connection_established = False
             def ensure_cursor_valid():
                 nonlocal conn, cursor, connection_established
                 if cursor is None or conn is None:
-                    # If initial connection failed, don't try to re-establish (could hang)
-                    if not connection_established:
-                        raise Exception("Database connection was never established - cannot proceed with lineage update")
-                    
                     logging.warning("Cursor or connection is None, re-establishing...")
                     try:
                         # Set a timeout for reconnection attempts
                         conn = product_db._get_connection()
-                        conn.execute("PRAGMA busy_timeout = 3000")
+                        conn.execute("PRAGMA busy_timeout = 5000")  # 5 seconds for SQLite busy timeout
                         cursor = conn.cursor()
                         try:
                             cursor.execute("BEGIN IMMEDIATE")
                         except sqlite3.OperationalError as begin_error:
                             if "cannot start a transaction within a transaction" not in str(begin_error).lower():
                                 raise
+                        # Mark as established after successful reconnection
+                        connection_established = True
                         logging.info("✅ Re-established database connection and cursor")
                     except Exception as reconnect_error:
                         logging.error(f"❌ Failed to re-establish connection: {reconnect_error}")
@@ -10148,25 +10146,32 @@ def update_lineage():
                     strain_name = tag_name_clean
                 logging.info(f"💡 Using product name as strain name: '{strain_name}'")
             
-            # CRITICAL FIX: Check if connection was established before attempting database operations
+            # CRITICAL FIX: Try to ensure connection is available before database operations
+            # If initial connection setup failed, try one more time via ensure_cursor_valid
             if not connection_established:
-                # Get more details about why connection failed
-                db_path = getattr(product_db, 'db_path', 'Unknown')
-                db_exists = os.path.exists(db_path) if db_path != 'Unknown' else False
-                logging.error(f"❌ Database connection was never established - cannot update lineage (db_path: {db_path}, exists: {db_exists})")
-                error_msg = 'Database connection failed - cannot proceed with lineage update'
-                if not db_exists and db_path != 'Unknown':
-                    error_msg = f'Database file not found at {db_path}. Please ensure the database file exists for store {store_name}.'
-                return jsonify({
-                    'success': False,
-                    'error': error_msg,
-                    'error_type': 'ConnectionError',
-                    'debug': {
-                        'db_path': db_path,
-                        'db_exists': db_exists,
-                        'store_name': store_name
-                    }
-                }), 500
+                logging.warning("⚠️  Initial connection setup failed, attempting to establish via ensure_cursor_valid...")
+                try:
+                    cursor = ensure_cursor_valid()
+                    logging.info("✅ Successfully established connection via ensure_cursor_valid")
+                except Exception as final_conn_error:
+                    # Get more details about why connection failed
+                    db_path = getattr(product_db, 'db_path', 'Unknown')
+                    db_exists = os.path.exists(db_path) if db_path != 'Unknown' else False
+                    logging.error(f"❌ Database connection failed after retry - cannot update lineage (db_path: {db_path}, exists: {db_exists}, error: {final_conn_error})")
+                    error_msg = f'Database connection failed - cannot proceed with lineage update: {str(final_conn_error)}'
+                    if not db_exists and db_path != 'Unknown':
+                        error_msg = f'Database file not found at {db_path}. Please ensure the database file exists for store {store_name}.'
+                    return jsonify({
+                        'success': False,
+                        'error': error_msg,
+                        'error_type': 'ConnectionError',
+                        'debug': {
+                            'db_path': db_path,
+                            'db_exists': db_exists,
+                            'store_name': store_name,
+                            'connection_error': str(final_conn_error)
+                        }
+                    }), 500
             
             # CRITICAL FIX: Always update by exact product name FIRST to ensure specific product is updated
             # Then update by vendor+strain to propagate to similar products
@@ -10758,45 +10763,50 @@ def update_lineage():
             if not commit_success:
                 raise Exception("Failed to commit transaction after retries")
             
-            # CRITICAL FIX: Close cursor and ensure connection is properly closed
-            if cursor:
-                cursor.close()
-            # Don't close the connection here - it's managed by ProductDatabase
+            # CRITICAL FIX: Close cursor and ensure connection is properly released
+            # Don't close the connection here - it's managed by ProductDatabase connection pool
             # But ensure the transaction is fully committed by doing a final check
-                try:
-                    # Verify the commit was successful by checking if we can read the data
-                    # CRITICAL FIX: Check if conn exists before creating cursor
-                    if conn:
-                        verify_cursor = conn.cursor()
-                        if verify_cursor:
-                            verify_cursor.execute('''
-                                SELECT "Lineage" FROM products 
-                                WHERE ("Product Name*" = ? OR "ProductName" = ?)
-                                LIMIT 1
-                            ''', (tag_name, tag_name))
-                            verify_result = verify_cursor.fetchone()
-                            verify_cursor.close()
-                            if verify_result:
-                                actual_lineage = str(verify_result[0]).strip().upper() if verify_result[0] else None
-                                expected_lineage = str(new_lineage).strip().upper()
-                                if actual_lineage == expected_lineage:
-                                    logging.info(f"✅ IMMEDIATE VERIFICATION: Lineage '{actual_lineage}' confirmed in database after commit")
-                                    # Store verified lineage for response
-                                    verified_lineage_after_commit = actual_lineage
-                                else:
-                                    logging.warning(f"⚠️  IMMEDIATE VERIFICATION: Lineage mismatch - got '{actual_lineage}', expected '{expected_lineage}'")
-                                    verified_lineage_after_commit = actual_lineage  # Use what's actually in DB
+            try:
+                # Verify the commit was successful by checking if we can read the data
+                # CRITICAL FIX: Check if conn exists before creating cursor
+                if conn and cursor:
+                    verify_cursor = conn.cursor()
+                    if verify_cursor:
+                        verify_cursor.execute('''
+                            SELECT "Lineage" FROM products 
+                            WHERE ("Product Name*" = ? OR "ProductName" = ?)
+                            LIMIT 1
+                        ''', (tag_name, tag_name))
+                        verify_result = verify_cursor.fetchone()
+                        verify_cursor.close()
+                        if verify_result:
+                            actual_lineage = str(verify_result[0]).strip().upper() if verify_result[0] else None
+                            expected_lineage = str(new_lineage).strip().upper()
+                            if actual_lineage == expected_lineage:
+                                logging.info(f"✅ IMMEDIATE VERIFICATION: Lineage '{actual_lineage}' confirmed in database after commit")
+                                # Store verified lineage for response
+                                verified_lineage_after_commit = actual_lineage
                             else:
-                                verified_lineage_after_commit = None
+                                logging.warning(f"⚠️  IMMEDIATE VERIFICATION: Lineage mismatch - got '{actual_lineage}', expected '{expected_lineage}'")
+                                verified_lineage_after_commit = actual_lineage  # Use what's actually in DB
                         else:
-                            logging.warning("Could not create verify_cursor - cursor is None")
                             verified_lineage_after_commit = None
                     else:
-                        logging.warning("Could not verify commit - connection is None")
+                        logging.warning("Could not create verify_cursor - cursor is None")
                         verified_lineage_after_commit = None
-                except Exception as immediate_verify_error:
-                    logging.warning(f"Immediate verification check failed (non-critical): {immediate_verify_error}")
+                else:
+                    logging.warning("Could not verify commit - connection or cursor is None")
                     verified_lineage_after_commit = None
+            except Exception as immediate_verify_error:
+                logging.warning(f"Immediate verification check failed (non-critical): {immediate_verify_error}")
+                verified_lineage_after_commit = None
+            
+            # CRITICAL FIX: Close cursor to release resources (connection is managed by pool)
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
             
             # Lock is released when exiting the 'with' block
             logging.info(f"🔓 Releasing lineage update lock (transaction committed)")
