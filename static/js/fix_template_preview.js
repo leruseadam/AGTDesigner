@@ -4,24 +4,19 @@
 let templatePreviewInitAttempts = 0;
 let templatePreviewInitialized = false;
 
+// CRITICAL FIX: Don't block app initialization - only try to initialize once, then wait for modal to open
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Template Preview Fix: DOM loaded');
-    scheduleTemplatePreviewInit();
-});
-
-function scheduleTemplatePreviewInit(delay = 500) {
+    // Only try once quickly - don't block initialization
     setTimeout(function() {
         initializeTemplatePreview();
-    }, delay);
-}
+    }, 1000); // Single attempt after 1 second
+});
 
 function initializeTemplatePreview() {
     if (templatePreviewInitialized) {
         return;
     }
 
-    console.log('Template Preview Fix: Initializing...');
-    
     // Get all the necessary elements
     const editTemplateModal = document.getElementById('editTemplateModal');
     const templateSelectModal = document.getElementById('templateSelectModal');
@@ -35,43 +30,54 @@ function initializeTemplatePreview() {
     const saveTemplateBtn = document.getElementById('saveTemplateBtn');
     const previewContainer = document.getElementById('templatePreviewModal');
     
-    console.log('Template Preview Fix: Elements found:', {
-        editTemplateModal: !!editTemplateModal,
-        templateSelectModal: !!templateSelectModal,
-        scaleInputModal: !!scaleInputModal,
-        fontSelectModal: !!fontSelectModal,
-        fontSizingModeModal: !!fontSizingModeModal,
-        fieldFontSizesSection: !!fieldFontSizesSection,
-        templateSelect: !!templateSelect,
-        scaleInput: !!scaleInput,
-        fontSelect: !!fontSelect,
-        saveTemplateBtn: !!saveTemplateBtn,
-        previewContainer: !!previewContainer
+    // CRITICAL FIX: Don't block if modals don't exist - they might be lazy-loaded
+    // Instead, set up a listener to initialize when the modal is actually opened
+    if (!editTemplateModal || !previewContainer) {
+        // Modals don't exist yet - set up lazy initialization when modal opens
+        // Use event delegation or mutation observer to catch when modal is added to DOM
+        setupLazyInitialization();
+        return;
+    }
+    
+    // If we got here, modals exist - proceed with initialization
+    templatePreviewInitialized = true;
+    doInitializeTemplatePreview(editTemplateModal, templateSelectModal, scaleInputModal, 
+                                 fontSelectModal, fontSizingModeModal, fieldFontSizesSection,
+                                 templateSelect, scaleInput, fontSelect, saveTemplateBtn, previewContainer);
+}
+
+function setupLazyInitialization() {
+    // CRITICAL FIX: Set up initialization when modal is actually opened or added to DOM
+    // Don't retry - just wait for the modal to appear
+    const observer = new MutationObserver(function(mutations) {
+        const editTemplateModal = document.getElementById('editTemplateModal');
+        const previewContainer = document.getElementById('templatePreviewModal');
+        
+        if (editTemplateModal && previewContainer && !templatePreviewInitialized) {
+            // Modals are now available - initialize
+            observer.disconnect();
+            initializeTemplatePreview();
+        }
     });
     
-    if (!editTemplateModal) {
-        templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
-        } else {
-            console.error('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
-        }
-        return;
-    }
+    // Observe the document body for changes
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
     
-    if (!previewContainer) {
-        templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
-        } else {
-            console.error('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
+    // Also listen for Bootstrap modal events in case modal exists but wasn't found
+    document.addEventListener('show.bs.modal', function(event) {
+        if (event.target && event.target.id === 'editTemplateModal' && !templatePreviewInitialized) {
+            // Modal is opening - try to initialize now
+            setTimeout(initializeTemplatePreview, 100);
         }
-        return;
-    }
-    
-    templatePreviewInitialized = true;
+    }, { once: true });
+}
+
+function doInitializeTemplatePreview(editTemplateModal, templateSelectModal, scaleInputModal, 
+                                     fontSelectModal, fontSizingModeModal, fieldFontSizesSection,
+                                     templateSelect, scaleInput, fontSelect, saveTemplateBtn, previewContainer) {
     
     // Function to update the template preview
     function updateTemplatePreview() {
