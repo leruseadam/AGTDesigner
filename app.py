@@ -9462,16 +9462,36 @@ def download_processed_excel():
         filters = data.get('filters', {})
         selected_tags = data.get('selected_tags', [])
 
-        # Check if DataFrame exists
+        # Check if DataFrame exists - if not, try to use database products instead
         excel_processor = get_excel_processor()
-        if excel_processor.df is None:
-            return jsonify({'error': 'No data loaded'}), 400
+        if excel_processor.df is None or excel_processor.df.empty:
+            # No Excel data - try to use database products instead
+            logging.info("No Excel data loaded, attempting to use database products for download")
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
+            if product_db:
+                try:
+                    # Get all products from database
+                    db_products = product_db.get_all_products(limit=10000)
+                    if db_products:
+                        # Convert database products to DataFrame
+                        import pandas as pd
+                        processed_products = [process_database_product_for_api(p) for p in db_products]
+                        df = pd.DataFrame(processed_products)
+                        logging.info(f"Using {len(df)} database products for Excel download")
+                    else:
+                        return jsonify({'error': 'No data available in database'}), 400
+                except Exception as db_err:
+                    logging.error(f"Error loading database products for download: {db_err}")
+                    return jsonify({'error': 'No data loaded and database query failed'}), 400
+            else:
+                return jsonify({'error': 'No data loaded and no database available'}), 400
+        else:
+            df = excel_processor.df.copy()  # Will be set below
 
         # Log DataFrame info for debugging
-        excel_processor = get_excel_processor()
-        logging.debug(f"DataFrame columns: {list(excel_processor.df.columns)}")
-        excel_processor = get_excel_processor()
-        logging.debug(f"DataFrame shape: {excel_processor.df.shape}")
+        logging.debug(f"DataFrame columns: {list(df.columns)}")
+        logging.debug(f"DataFrame shape: {df.shape}")
         logging.debug(f"Filters received: {filters}")
         logging.debug(f"Selected tags: {selected_tags}")
 
@@ -9485,9 +9505,7 @@ def download_processed_excel():
             'strain': 'Product Strain'
         }
 
-        # Apply filters if provided
-        excel_processor = get_excel_processor()
-        df = excel_processor.df.copy()  # Create a copy to avoid modifying the original
+        # Apply filters if provided (df already created above, either from Excel or database)
         logging.debug(f"Initial DataFrame shape: {df.shape}")
         
         if filters:
