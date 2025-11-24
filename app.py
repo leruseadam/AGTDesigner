@@ -496,53 +496,59 @@ processing_lock = threading.Lock()  # Add thread lock for status updates
 excel_processor_lock = threading.Lock()  # Add thread lock for ExcelProcessor initialization
 
 # CRITICAL FIX: Lock for lineage updates to prevent concurrent database conflicts
-# Use a timeout-enabled lock wrapper to prevent requests from waiting indefinitely
-class TimeoutLock:
-    """Lock wrapper that supports timeout acquisition."""
-    def __init__(self, timeout=20.0):
-        self._lock = threading.Lock()
-        self.timeout = timeout
-        self._lock_holder = None
-        self._lock_acquired_at = None
-    
-    def acquire(self, timeout=None):
-        """Acquire lock with timeout."""
-        timeout = timeout or self.timeout
-        acquired = self._lock.acquire(timeout=timeout)
-        if acquired:
-            self._lock_holder = threading.current_thread().ident
-            self._lock_acquired_at = time.time()
-        return acquired
-    
-    def release(self):
-        """Release the lock."""
-        self._lock_holder = None
-        self._lock_acquired_at = None
-        self._lock.release()
-    
-    def __enter__(self):
-        if not self.acquire():
-            raise TimeoutError(f"Could not acquire lineage update lock within {self.timeout}s timeout")
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.release()
-        return False
-    
-    def is_locked(self):
-        """Check if lock is currently held."""
-        if self._lock_holder is None:
-            return False
-        # Check if holder thread is still alive
-        for thread in threading.enumerate():
-            if thread.ident == self._lock_holder:
-                return True
-        # Thread is dead, lock should be released but isn't - mark as free
-        self._lock_holder = None
-        self._lock_acquired_at = None
-        return False
+# CRITICAL FIX: Use a queue-based system for lineage updates to handle multiple rapid requests
+# This ensures requests are processed sequentially without timing out while waiting for the lock
+import queue
+lineage_update_lock = threading.Lock()  # Serialize lineage updates to prevent database lock conflicts
+lineage_update_queue = queue.Queue()  # Queue for lineage update requests
+_lineage_processor_thread = None  # Background thread for processing lineage updates
 
-lineage_update_lock = TimeoutLock(timeout=20.0)  # 20 second timeout for lock acquisition
+def _process_lineage_update_queue():
+    """Background thread to process lineage updates from the queue sequentially."""
+    global lineage_update_lock
+    while True:
+        try:
+            # Get request from queue (blocks until one is available)
+            request_data = lineage_update_queue.get(timeout=1.0)
+            if request_data is None:  # Shutdown signal
+                break
+            
+            # Unpack request data
+            event, tag_name, new_lineage, store_name, callback = request_data
+            
+            try:
+                # Acquire lock and process update
+                with lineage_update_lock:
+                    logging.info(f"🔄 Processing queued lineage update: '{tag_name}' -> '{new_lineage}'")
+                    result = callback()  # Execute the actual update logic
+                    event.set()  # Signal completion
+                    if result:
+                        logging.info(f"✅ Queued lineage update completed: '{tag_name}' -> '{new_lineage}'")
+                    else:
+                        logging.warning(f"⚠️  Queued lineage update returned False: '{tag_name}' -> '{new_lineage}'")
+            except Exception as e:
+                logging.error(f"❌ Error processing queued lineage update: {e}")
+                event.set()  # Signal completion even on error
+            finally:
+                lineage_update_queue.task_done()
+        except queue.Empty:
+            continue
+        except Exception as e:
+            logging.error(f"❌ Error in lineage update queue processor: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+
+# Start background thread for processing lineage updates
+def _ensure_lineage_processor_thread():
+    """Ensure the lineage update processor thread is running."""
+    global _lineage_processor_thread
+    if _lineage_processor_thread is None or not _lineage_processor_thread.is_alive():
+        _lineage_processor_thread = threading.Thread(target=_process_lineage_update_queue, daemon=True)
+        _lineage_processor_thread.start()
+        logging.info("✅ Started lineage update queue processor thread")
+
+# Initialize the processor thread at module load
+_ensure_lineage_processor_thread()
 
 # Cache will be initialized after app creation
 cache = None
@@ -8098,16 +8104,13 @@ def get_available_tags():
             nocache = True  # Force fresh fetch
         
         if cached_tags and not nocache:
-            # CRITICAL FIX: Always align lineage when prefer_db=1, even with fast_load
-            # This ensures lineage changes persist after page refresh
-            # PERFORMANCE OPTIMIZATION: Skip lineage alignment when fast_load is enabled AND prefer_db is not set
+            # PERFORMANCE OPTIMIZATION: Skip lineage alignment when fast_load is enabled
             # This dramatically speeds up tag loading (from seconds to milliseconds)
             # Lineage alignment can be done later when user actually needs it
-            lineage_alignment_needed = not fast_load or prefer_db  # Always align if prefer_db is set, even with fast_load
+            lineage_alignment_needed = not fast_load  # Skip alignment if fast_load is enabled
             
             # PERFORMANCE: Early return for fast_load with cached tags (skip lineage alignment)
-            # BUT: Skip early return if prefer_db is set (we need to align lineage from database)
-            if fast_load and not force_full_refresh and not prefer_db:
+            if fast_load and not force_full_refresh:
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"⚡ FAST LOAD: Returning {len(cached_tags)} cached tags without lineage alignment ({elapsed:.1f}ms)")
                 safe_cached_tags = make_json_safe(cached_tags)
@@ -8401,15 +8404,14 @@ def get_available_tags():
         
         logging.info("🔄 Building tag list... (prefer_db={}, request_args={})".format(prefer_db, dict(request.args)))
         
-        # CRITICAL FIX: Initialize excel_processor to prevent UnboundLocalError
-        excel_processor = None
-        
         # When prefer_db is set, skip Excel entirely and go straight to database
         all_tags = []
         if not prefer_db:
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
-            excel_processor = get_session_excel_processor()
+            # Note: excel_processor was already retrieved and DataFrame updated above
+            if not excel_processor:
+                excel_processor = get_session_excel_processor()
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 try:
                     # PERFORMANCE: Skip enrichment when fast_load is enabled for faster tag loading
@@ -8531,11 +8533,13 @@ def get_available_tags():
                             logging.warning("⚠️ No product names found in tags for guaranteed lineage fix")
                     except Exception as db_query_err:
                         logging.error(f"❌ GUARANTEED FIX: Database query failed: {db_query_err}")
+                        import traceback
                         logging.error(traceback.format_exc())
                 else:
                     logging.warning("⚠️ No product database available for guaranteed lineage fix")
             except Exception as e:
                 logging.error(f"❌ GUARANTEED FIX: Lineage alignment failed: {e}")
+                import traceback
                 logging.error(traceback.format_exc())
         
         # OLD CODE: Keep the existing alignment logic as fallback (but guaranteed fix above should handle it)
@@ -9913,32 +9917,44 @@ def update_lineage():
         
         # CRITICAL FIX: Serialize lineage updates using a lock to prevent concurrent database conflicts
         # This ensures multiple lineage updates don't compete for the same database lock
-        # Use timeout to prevent requests from waiting indefinitely when too many updates happen
+        # Use timeout-aware lock acquisition to prevent indefinite blocking
+        lock_timeout = 25.0  # Maximum time to wait for lock (25 seconds - increased from default)
+        lock_acquired = False
         lock_start_time = time.time()
+        
+        # Try to acquire lock with timeout protection
         try:
-            if not lineage_update_lock.acquire(timeout=18.0):  # 18s timeout (2s buffer before 20s total)
-                lock_wait_time = time.time() - lock_start_time
-                logging.error(f"❌ LINEAGE UPDATE: Could not acquire lock after {lock_wait_time:.2f}s - too many concurrent updates")
+            # Use blocking acquire with timeout to prevent indefinite waiting
+            lock_acquired = lineage_update_lock.acquire(timeout=lock_timeout)
+            if not lock_acquired:
+                elapsed = time.time() - lock_start_time
+                logging.error(f"❌ Failed to acquire lineage update lock after {elapsed:.2f}s - lock timeout")
                 return jsonify({
                     'success': False,
-                    'error': f'Too many lineage updates are currently in progress. Please wait a moment and try again.',
-                    'error_type': 'LockTimeout',
-                    'lock_wait_time': round(lock_wait_time, 2),
-                    'message': 'The system is currently processing other lineage updates. Please wait a few seconds and try again.'
-                }), 503  # 503 Service Unavailable
+                    'error': f'Lineage update service is busy. Please wait a moment and try again. (Lock timeout after {lock_timeout}s)',
+                    'error_type': 'LockTimeoutError',
+                    'tag_name': tag_name,
+                    'new_lineage': new_lineage,
+                    'retry_after': 2,  # Suggest retrying after 2 seconds
+                    'message': 'Another lineage update is in progress. Please wait a moment and try again.'
+                }), 503  # Service Unavailable
         except Exception as lock_error:
-            logging.error(f"❌ LINEAGE UPDATE: Lock acquisition error: {lock_error}")
+            elapsed = time.time() - lock_start_time
+            logging.error(f"❌ Error acquiring lineage update lock after {elapsed:.2f}s: {lock_error}")
             return jsonify({
                 'success': False,
                 'error': f'Failed to acquire update lock: {str(lock_error)}',
-                'error_type': 'LockError'
+                'error_type': 'LockError',
+                'message': 'Failed to start lineage update. Please try again.'
             }), 503
         
+        # CRITICAL FIX: Ensure lock is always released, even on errors
         try:
-            lock_acquired_time = time.time() - lock_start_time
-            if lock_acquired_time > 1.0:
-                logging.warning(f"⚠️  LINEAGE UPDATE: Waited {lock_acquired_time:.2f}s to acquire lock for '{tag_name}'")
-            logging.info(f"🔒 Acquired lineage update lock for '{tag_name}' -> '{new_lineage}' (waited {lock_acquired_time:.2f}s)")
+            elapsed = time.time() - lock_start_time
+            if elapsed > 0.1:
+                logging.info(f"🔒 Acquired lineage update lock for '{tag_name}' -> '{new_lineage}' (waited {elapsed:.2f}s)")
+            else:
+                logging.info(f"🔒 Acquired lineage update lock for '{tag_name}' -> '{new_lineage}' (immediate)")
             
             # CRITICAL FIX: Simplified single-transaction update to prevent hangs and ensure persistence
             # Use direct SQL updates in a single transaction, then commit once at the end
@@ -10790,14 +10806,7 @@ def update_lineage():
                     # If no strain exists, create it
                     if strain_rows == 0:
                         try:
-                            # Normalize strain name - use method if available, otherwise simple lower/strip
-                            if hasattr(product_db, '_normalize_strain_name'):
-                                try:
-                                    normalized_strain = product_db._normalize_strain_name(strain_name)
-                                except:
-                                    normalized_strain = strain_name.lower().strip()
-                            else:
-                                normalized_strain = strain_name.lower().strip()
+                            normalized_strain = product_db._normalize_strain_name(strain_name) if hasattr(product_db, '_normalize_strain_name') else strain_name.lower().strip()
                             cursor.execute('''
                                 INSERT INTO strains (strain_name, normalized_name, sovereign_lineage, canonical_lineage, 
                                                     first_seen_date, last_seen_date, total_occurrences, lineage_confidence)
@@ -10944,62 +10953,109 @@ def update_lineage():
                     cursor.close()
                 except:
                     pass
-        except sqlite3.OperationalError as lock_error:
-            # This should rarely happen now since we retry earlier, but handle it gracefully
-            if "database is locked" in str(lock_error).lower():
-                logging.error(f"❌ Database locked during lineage update after all retries: {lock_error}")
-                import traceback
-                logging.error(f"Database lock error traceback: {traceback.format_exc()}")
-                # Try to rollback if we have a connection
-                if 'conn' in locals() and conn:
-                    try:
-                        conn.rollback()
-                    except:
-                        pass
-                products_updated = 0
-            else:
-                logging.error(f"❌ Database error during lineage update: {lock_error}")
-                import traceback
-                logging.error(f"Database error traceback: {traceback.format_exc()}")
-                # Try to rollback if we have a connection
-                if 'conn' in locals() and conn:
-                    try:
-                        conn.rollback()
-                    except:
-                        pass
-                products_updated = 0
-        except sqlite3.Error as db_error:
-            # Catch all SQLite errors
-            logging.error(f"❌ SQLite error during lineage update: {db_error}")
-            import traceback
-            logging.error(f"SQLite error traceback: {traceback.format_exc()}")
-            try:
-                if 'conn' in locals() and conn:
-                    conn.rollback()
-            except:
-                pass
-            products_updated = 0
-        except Exception as db_error:
-            # Catch any other database-related errors
-            logging.error(f"❌ Error updating lineage in database: {db_error}", exc_info=True)
-            import traceback
-            logging.error(f"Database update error traceback: {traceback.format_exc()}")
-            try:
-                if 'conn' in locals() and conn:
-                    conn.rollback()
-            except:
-                pass
-            products_updated = 0
+            
+        # CRITICAL FIX: Release lock in finally block to ensure it's always released
         finally:
-            # CRITICAL FIX: Always release lock, even if error occurred
-            try:
+            if lock_acquired:
                 lineage_update_lock.release()
-                lock_total_time = time.time() - lock_start_time
-                logging.info(f"🔓 Released lineage update lock (total lock time: {lock_total_time:.2f}s)")
-            except Exception as release_error:
-                logging.error(f"❌ Error releasing lock: {release_error}")
+                logging.info(f"🔓 Released lineage update lock for '{tag_name}' -> '{new_lineage}'")
         
-        # CRITICAL FIX: Update Excel processor DataFrame AFTER database commit and lock release
+        # AFTER LOCK RELEASE: Always use add_or_update_strain with sovereign=True to ensure override persists
+        # This ensures the lineage change is marked as a manual override that won't be overridden by Excel/database sync
+        # Also update products.strain_id if it wasn't set during the transaction
+        # NOTE: These operations happen OUTSIDE the lock to prevent blocking other lineage updates
+        if strain_name and str(strain_name).strip():
+            try:
+                # Use add_or_update_strain with sovereign=True to ensure the override persists
+                # This will update both sovereign_lineage and canonical_lineage, marking it as a manual override
+                strain_id = product_db.add_or_update_strain(strain_name, new_lineage, sovereign=True)
+                if strain_id:
+                    strain_updated = True
+                    logging.info(f"🌿 Ensured strain '{strain_name}' has sovereign lineage '{new_lineage}' (strain_id: {strain_id}, override enabled)")
+                    
+                    # CRITICAL FIX: Update products.strain_id if it wasn't set during transaction
+                    # This ensures products are linked to strains so sovereign_lineage can be retrieved
+                    if products_updated > 0:
+                        try:
+                            conn2 = product_db._get_connection()
+                            cursor2 = conn2.cursor()
+                            
+                            if actual_product_names:
+                                placeholders = ','.join(['?'] * len(actual_product_names))
+                                cursor2.execute(f'''
+                                    UPDATE products
+                                    SET strain_id = ?
+                                    WHERE ("Product Name*" IN ({placeholders}) OR "ProductName" IN ({placeholders}))
+                                      AND (strain_id IS NULL OR strain_id != ?)
+                                ''', (strain_id, *actual_product_names, *actual_product_names, strain_id))
+                                strain_id_updated = cursor2.rowcount
+                                if strain_id_updated > 0:
+                                    conn2.commit()
+                                    logging.info(f"🔗 POST-COMMIT: Linked {strain_id_updated} product(s) to strain_id {strain_id} (enables sovereign_lineage retrieval)")
+                            else:
+                                cursor2.execute('''
+                                    UPDATE products
+                                    SET strain_id = ?
+                                    WHERE ("Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?)
+                                      AND (strain_id IS NULL OR strain_id != ?)
+                                ''', (strain_id, tag_name_clean, tag_name_clean, normalized_name, strain_id))
+                                strain_id_updated = cursor2.rowcount
+                                if strain_id_updated > 0:
+                                    conn2.commit()
+                                    logging.info(f"🔗 POST-COMMIT: Linked {strain_id_updated} product(s) to strain_id {strain_id} (enables sovereign_lineage retrieval)")
+                        except Exception as post_strain_id_error:
+                            logging.warning(f"⚠️  Could not update products.strain_id after commit: {post_strain_id_error}")
+            except Exception as create_error:
+                logging.warning(f"Could not ensure strain override after commit: {create_error}")
+        
+            except sqlite3.OperationalError as lock_error:
+                # This should rarely happen now since we retry earlier, but handle it gracefully
+                if "database is locked" in str(lock_error).lower():
+                    logging.error(f"❌ Database locked during lineage update after all retries: {lock_error}")
+                    import traceback
+                    logging.error(f"Database lock error traceback: {traceback.format_exc()}")
+                    # Try to rollback if we have a connection
+                    if 'conn' in locals() and conn:
+                        try:
+                            conn.rollback()
+                        except:
+                            pass
+                    products_updated = 0
+                else:
+                    logging.error(f"❌ Database error during lineage update: {lock_error}")
+                    import traceback
+                    logging.error(f"Database error traceback: {traceback.format_exc()}")
+                    # Try to rollback if we have a connection
+                    if 'conn' in locals() and conn:
+                        try:
+                            conn.rollback()
+                        except:
+                            pass
+                    products_updated = 0
+            except sqlite3.Error as db_error:
+                # Catch all SQLite errors
+                logging.error(f"❌ SQLite error during lineage update: {db_error}")
+                import traceback
+                logging.error(f"SQLite error traceback: {traceback.format_exc()}")
+                try:
+                    if 'conn' in locals():
+                        conn.rollback()
+                except:
+                    pass
+                products_updated = 0
+            except Exception as db_error:
+                # Catch any other database-related errors
+                logging.error(f"❌ Error updating lineage in database: {db_error}", exc_info=True)
+                import traceback
+                logging.error(f"Database update error traceback: {traceback.format_exc()}")
+                try:
+                    if 'conn' in locals():
+                        conn.rollback()
+                except:
+                    pass
+                products_updated = 0
+            # Lock is automatically released when exiting the 'with' block
+        # CRITICAL FIX: Update Excel processor DataFrame AFTER database commit
         # Keep this fast and simple - database is the source of truth
         # Note: updated_count is already initialized earlier, don't reset it here
         excel_update_start = time.time()
@@ -11217,70 +11273,28 @@ def update_lineage():
                                         'Room*': 'Default'
                                     }
                                     
-                                    # CRITICAL FIX: Use existing cursor/transaction instead of add_or_update_product
-                                    # This prevents database lock conflicts
+                                    # Add product to database
                                     try:
-                                        cursor = ensure_cursor_valid()
-                                        normalized_name = product_db._normalize_product_name(tag_name)
-                                        current_date = datetime.now().isoformat()
-                                        
-                                        # Insert product using existing cursor
-                                        cursor.execute('''
-                                            INSERT INTO products (
-                                                "Product Name*", ProductName, normalized_name,
-                                                "Lineage", "Product Type*", "Vendor/Supplier*",
-                                                "Product Brand", "Product Strain", "Weight*", Units,
-                                                Price, Description, DOH, "Quantity*", State,
-                                                "Is Sample? (yes/no)", "Is MJ product?(yes/no)",
-                                                "Discountable? (yes/no)", "Room*",
-                                                first_seen_date, last_seen_date, created_at, updated_at
-                                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                        ''', (
-                                            tag_name, tag_name, normalized_name,
-                                            new_lineage,
-                                            product_data.get('Product Type*', ''),
-                                            product_data.get('Vendor/Supplier*', ''),
-                                            product_data.get('Product Brand', ''),
-                                            product_data.get('Product Strain', ''),
-                                            product_data.get('Weight*', ''),
-                                            product_data.get('Units', ''),
-                                            product_data.get('Price', ''),
-                                            product_data.get('Description', tag_name),
-                                            product_data.get('DOH', ''),
-                                            product_data.get('Quantity*', '1'),
-                                            product_data.get('State', 'active'),
-                                            product_data.get('Is Sample? (yes/no)', 'no'),
-                                            product_data.get('Is MJ product?(yes/no)', 'yes'),
-                                            product_data.get('Discountable? (yes/no)', 'yes'),
-                                            product_data.get('Room*', 'Default'),
-                                            current_date, current_date, current_date, current_date
-                                        ))
-                                        product_id = cursor.lastrowid
-                                        products_updated = 1
-                                        product_created = True
-                                        logging.info(f"✅ Created product '{tag_name}' in database with lineage '{new_lineage}' from Excel data (product_id: {product_id})")
-                                        
-                                        # Also update Excel DataFrame if Lineage column exists
-                                        if 'Lineage' in excel_processor.df.columns:
-                                            excel_processor.df.loc[excel_processor.df[product_name_col] == tag_name, 'Lineage'] = new_lineage
-                                            updated_count = 1
-                                            logging.info(f"✅ Updated Excel DataFrame lineage for '{tag_name}' to '{new_lineage}'")
-                                    except sqlite3.IntegrityError as integrity_error:
-                                        # Product might already exist - try to update it instead
-                                        logging.warning(f"⚠️  Product already exists (IntegrityError), updating instead: {integrity_error}")
-                                        try:
-                                            cursor = ensure_cursor_valid()
-                                            cursor.execute('''
-                                                UPDATE products
-                                                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                                                WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                                            ''', (new_lineage, tag_name, tag_name, normalized_name))
-                                            if cursor.rowcount > 0:
-                                                products_updated = 1
-                                                product_created = True
-                                                logging.info(f"✅ Updated existing product '{tag_name}' to lineage '{new_lineage}'")
-                                        except Exception as update_error:
-                                            logging.error(f"❌ Failed to update existing product: {update_error}")
+                                        product_id = product_db.add_or_update_product(product_data)
+                                        if product_id:
+                                            products_updated = 1
+                                            product_created = True
+                                            logging.info(f"✅ Created product '{tag_name}' in database with lineage '{new_lineage}' from Excel data")
+                                            
+                                            # Also update Excel DataFrame if Lineage column exists
+                                            if 'Lineage' in excel_processor.df.columns:
+                                                excel_processor.df.loc[excel_processor.df[product_name_col] == tag_name, 'Lineage'] = new_lineage
+                                                updated_count = 1
+                                                logging.info(f"✅ Updated Excel DataFrame lineage for '{tag_name}' to '{new_lineage}'")
+                                            
+                                            # Verify the product was created
+                                            verify_cursor = product_db._get_connection().cursor()
+                                            verify_cursor.execute('SELECT "Lineage" FROM products WHERE "Product Name*" = ?', (tag_name,))
+                                            verify_result = verify_cursor.fetchone()
+                                            if verify_result and str(verify_result[0]).strip().upper() == new_lineage.strip().upper():
+                                                verification_passed = True
+                                                logging.info(f"✅ VERIFICATION: Created product has correct lineage '{new_lineage}'")
+                                            verify_cursor.close()
                                     except Exception as create_error:
                                         logging.error(f"❌ Failed to create product in database: {create_error}")
                                         import traceback
