@@ -10067,8 +10067,17 @@ def update_lineage():
                     logging.info(f"✅ Found {len(existing_products)} exact match(es) for '{candidate}'")
                     tag_name_clean = candidate
                     normalized_name = normalized_candidate
-                    # Store actual product names from database
-                    actual_product_names = [p[0] or p[1] for p in existing_products if p[0] or p[1]]
+                    # Store actual product names from database (including normalized names)
+                    actual_product_names = []
+                    for p in existing_products:
+                        if p[0]:  # "Product Name*"
+                            actual_product_names.append(p[0])
+                        if p[1]:  # "ProductName"
+                            actual_product_names.append(p[1])
+                        if p[2]:  # normalized_name
+                            actual_product_names.append(p[2])
+                    actual_product_names = list(set(actual_product_names))  # Remove duplicates
+                    logging.info(f"💡 Extracted {len(actual_product_names)} product name variants: {actual_product_names[:3]}")
                     break
             
             if not existing_products:
@@ -10087,8 +10096,17 @@ def update_lineage():
                         logging.info(f"✅ Found {len(existing_products)} case-insensitive match(es) for '{candidate}'")
                         tag_name_clean = candidate
                         normalized_name = normalized_candidate
-                        # Store actual product names from database
-                        actual_product_names = [p[0] or p[1] for p in existing_products if p[0] or p[1]]
+                        # Store actual product names from database (including normalized names)
+                        actual_product_names = []
+                        for p in existing_products:
+                            if p[0]:  # "Product Name*"
+                                actual_product_names.append(p[0])
+                            if p[1]:  # "ProductName"
+                                actual_product_names.append(p[1])
+                            if p[2]:  # normalized_name
+                                actual_product_names.append(p[2])
+                        actual_product_names = list(set(actual_product_names))  # Remove duplicates
+                        logging.info(f"💡 Extracted {len(actual_product_names)} product name variants: {actual_product_names[:3]}")
                         break
             
             if not existing_products:
@@ -10105,8 +10123,17 @@ def update_lineage():
                         logging.warning(f"⚠️  Found {len(existing_products)} similar products for '{candidate}': {[p[0] or p[1] for p in existing_products[:3]]}")
                         tag_name_clean = candidate
                         normalized_name = product_db._normalize_product_name(candidate)
-                        # Store actual product names from database
-                        actual_product_names = [p[0] or p[1] for p in existing_products if p[0] or p[1]]
+                        # Store actual product names from database (including normalized names)
+                        actual_product_names = []
+                        for p in existing_products:
+                            if p[0]:  # "Product Name*"
+                                actual_product_names.append(p[0])
+                            if p[1]:  # "ProductName"
+                                actual_product_names.append(p[1])
+                            if p[2]:  # normalized_name
+                                actual_product_names.append(p[2])
+                        actual_product_names = list(set(actual_product_names))  # Remove duplicates
+                        logging.info(f"💡 Extracted {len(actual_product_names)} product name variants: {actual_product_names[:3]}")
                         break
                 if not existing_products:
                     logging.error(f"❌ Product '{tag_name}' not found in database after all search strategies.")
@@ -10125,17 +10152,56 @@ def update_lineage():
             
             # CRITICAL FIX: Use actual product names from database for UPDATE
             # This ensures we update the products that were actually found, not just the search term
-            if existing_products and actual_product_names:
-                # Update using the actual product names found in the database
-                placeholders = ','.join(['?'] * len(actual_product_names))
-                cursor.execute(f'''
-                    UPDATE products
-                    SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE "Product Name*" IN ({placeholders}) OR "ProductName" IN ({placeholders}) OR normalized_name = ?
-                ''', (new_lineage, *actual_product_names, *actual_product_names, normalized_name))
-                products_updated_by_name = cursor.rowcount
-                if products_updated_by_name > 0:
-                    logging.info(f"✅ Updated {products_updated_by_name} product(s) using actual database names: {actual_product_names[:3]}")
+            if existing_products:
+                # Extract actual product names from existing_products if actual_product_names is empty
+                if not actual_product_names:
+                    actual_product_names = []
+                    for p in existing_products:
+                        # p[0] is "Product Name*", p[1] is "ProductName", p[2] is normalized_name
+                        if p[0]:
+                            actual_product_names.append(p[0])
+                        elif p[1]:
+                            actual_product_names.append(p[1])
+                    # Also add normalized names for matching
+                    normalized_names = [p[2] for p in existing_products if p[2]]
+                    actual_product_names.extend(normalized_names)
+                    actual_product_names = list(set(actual_product_names))  # Remove duplicates
+                    logging.info(f"💡 Extracted actual product names from existing_products: {actual_product_names[:3]}")
+                
+                if actual_product_names:
+                    # Update using the actual product names found in the database
+                    # Try updating each product individually to ensure we match correctly
+                    products_updated_by_name = 0
+                    for p in existing_products:
+                        try:
+                            # Update using all possible name fields from the found product
+                            cursor.execute('''
+                                UPDATE products
+                                SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE ("Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?)
+                            ''', (new_lineage, p[0] or '', p[1] or '', p[2] or ''))
+                            if cursor.rowcount > 0:
+                                products_updated_by_name += cursor.rowcount
+                                logging.info(f"✅ Updated product: {p[0] or p[1]} ({cursor.rowcount} rows)")
+                        except Exception as individual_error:
+                            logging.warning(f"⚠️  Individual update failed for {p[0] or p[1]}: {individual_error}")
+                    
+                    if products_updated_by_name > 0:
+                        logging.info(f"✅ Total updated {products_updated_by_name} product(s) using actual database names")
+                    else:
+                        # Fallback: try batch update with all names
+                        logging.warning(f"⚠️  Individual updates matched 0 rows. Trying batch update...")
+                        placeholders = ','.join(['?'] * len(actual_product_names))
+                        cursor.execute(f'''
+                            UPDATE products
+                            SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE "Product Name*" IN ({placeholders}) 
+                               OR "ProductName" IN ({placeholders})
+                               OR normalized_name IN ({placeholders})
+                        ''', (new_lineage, *actual_product_names, *actual_product_names, *actual_product_names))
+                        products_updated_by_name = cursor.rowcount
+                        if products_updated_by_name > 0:
+                            logging.info(f"✅ Batch update succeeded: {products_updated_by_name} product(s)")
             else:
                 # Fallback: Update by exact product name (most specific)
                 # Try exact match first (including normalized_name)
