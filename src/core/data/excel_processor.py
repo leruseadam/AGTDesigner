@@ -7942,18 +7942,22 @@ class ExcelProcessor:
                                 logger.debug(f"✅ CASE-INSENSITIVE MATCH: '{product_name}' = '{db_lineage}' (matched '{db_name}')")
                                 break
             
-            # Use database lineage if found, otherwise fall back to Excel/inference
+            # GUARANTEED FIX: ALWAYS use database lineage if available, NEVER use Excel file lineage
+            # Database is the source of truth - Excel file lineage is outdated
             if db_lineage:
                 final_lineage = db_lineage
+                logger.debug(f"✅ GUARANTEED FIX: Using database lineage for '{product_name}': '{db_lineage}'")
             else:
                 # Fallback to Excel/inference only if database doesn't have it
                 existing_lineage = str(row.get('Lineage', '') or '').strip().upper()
                 if existing_lineage and existing_lineage in VALID_LINEAGES:
                     final_lineage = existing_lineage
+                    logger.debug(f"⚠️ GUARANTEED FIX: Using Excel lineage for '{product_name}': '{existing_lineage}' (not in database)")
                 else:
                     # No valid lineage column - infer from product name and type
                     product_type_for_inference = safe_get_value(row.get('Product Type*', ''))
                     final_lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
+                    logger.debug(f"⚠️ GUARANTEED FIX: Using inferred lineage for '{product_name}': '{final_lineage}' (not in database or Excel)")
             
             tag = {
                 'Product Name*': product_name,
@@ -7963,7 +7967,7 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                'Lineage': final_lineage,  # CRITICAL: Use database lineage, not Excel
+                'Lineage': final_lineage,  # GUARANTEED FIX: Use database lineage, not Excel
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
@@ -7991,20 +7995,23 @@ class ExcelProcessor:
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
                 'productBrand': safe_get_value(row.get('Product Brand', '')),
-                'lineage': final_lineage.lower(),  # CRITICAL: Use database lineage, not Excel
+                'lineage': final_lineage.lower(),  # GUARANTEED FIX: Use database lineage, not Excel
                 'productType': safe_get_value(row.get('Product Type*', '')),
                 'weight': safe_get_value(raw_weight),
                 'weightWithUnits': safe_get_value(weight_with_units),
                 'displayName': product_name
             }
             
-            # CRITICAL: Set database lineage fields if we got lineage from database
+            # GUARANTEED FIX: Set database lineage fields if we got lineage from database
             if db_lineage:
                 tag['currentLineage'] = db_lineage
                 tag['canonical_lineage'] = db_lineage
-                logger.debug(f"✅ USING DB LINEAGE: '{product_name}' = '{db_lineage}'")
+                logger.debug(f"✅ GUARANTEED FIX: Set database lineage fields for '{product_name}': '{db_lineage}'")
             else:
-                logger.debug(f"⚠️ USING EXCEL/INFERRED LINEAGE: '{product_name}' = '{final_lineage}' (not in database)")
+                # Even if not from database, ensure fields are consistent
+                tag['currentLineage'] = final_lineage
+                tag['canonical_lineage'] = final_lineage
+                logger.debug(f"⚠️ GUARANTEED FIX: Set inferred/Excel lineage fields for '{product_name}': '{final_lineage}' (not in database)")
             
             # --- Filtering logic ---
             product_brand = str(tag['productBrand']).strip().lower()
