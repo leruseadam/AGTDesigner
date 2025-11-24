@@ -10653,12 +10653,12 @@ def update_lineage():
             # Lock is released when exiting the 'with' block
             logging.info(f"🔓 Releasing lineage update lock (transaction committed)")
             
-        except Exception as db_error:
-            logging.error(f"❌ Database error during lineage update: {db_error}")
-            import traceback
-            logging.error(f"Database error traceback: {traceback.format_exc()}")
-            # Re-raise to be handled by outer exception handler
-            raise
+            except Exception as db_error:
+                logging.error(f"❌ Database error during lineage update: {db_error}")
+                import traceback
+                logging.error(f"Database error traceback: {traceback.format_exc()}")
+                # Re-raise to be handled by outer exception handler
+                raise
         
         # AFTER LOCK RELEASE: Always use add_or_update_strain with sovereign=True to ensure override persists
         # This ensures the lineage change is marked as a manual override that won't be overridden by Excel/database sync
