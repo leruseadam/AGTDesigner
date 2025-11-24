@@ -3699,9 +3699,14 @@ class ExcelProcessor:
                 logger.info(f"✅ Updated {updated_count} products in DataFrame with database lineage")
                 # Invalidate cache since DataFrame changed
                 self._invalidate_caches()
+            else:
+                # GUARANTEED FIX: Even if no updates, log what we found for debugging
+                logger.info(f"✅ DataFrame lineage check complete: {len(product_names)} products checked, {len(db_records)} found in database, {len(lineage_map)} with lineage")
         except Exception as e:
-            logger.warning(f"Error updating DataFrame lineage from database: {e}")
-            # Don't fail - enrichment will handle it later
+            logger.error(f"❌ GUARANTEED FIX FAILED: Error updating DataFrame lineage from database: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            # Don't fail - enrichment will handle it later, but log the error
     
     def _enrich_tags_with_database_values(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Enrich tags with current database values (lineage, DOH, etc.) to reflect latest updates."""
