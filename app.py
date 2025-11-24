@@ -10011,6 +10011,41 @@ def update_lineage():
                 except Exception as excel_strain_error:
                     logging.warning(f"Could not get strain from Excel: {excel_strain_error}")
             
+            # CRITICAL FIX: If no strain found, extract from product name
+            # This ensures we can still create/update a strain entry for lineage persistence
+            # For classic types, we can set Product Strain to whatever works - lineage is what matters
+            if not strain_name or not strain_name.strip():
+                # Try to extract strain name from product name
+                # Pattern: "Strain Name by Vendor - Weight" or "Strain Name - Weight"
+                import re
+                product_name_parts = tag_name_clean.split(' by ')[0].strip()  # Remove vendor part
+                product_name_parts = product_name_parts.split(' - ')[0].strip()  # Remove weight part
+                
+                # Remove common suffixes
+                for suffix in [' Super Sale', ' Summer Super Sale', ' Mini Buds', ' Pre-Roll', ' Pre-Rolls']:
+                    if product_name_parts.endswith(suffix):
+                        product_name_parts = product_name_parts[:-len(suffix)].strip()
+                
+                # Use the cleaned product name as strain name
+                if product_name_parts and len(product_name_parts) > 2:
+                    strain_name = product_name_parts
+                    logging.info(f"💡 Extracted strain name '{strain_name}' from product name '{tag_name_clean}'")
+                else:
+                    # Last resort: use first significant word from product name
+                    words = tag_name_clean.split()
+                    if len(words) >= 2:
+                        strain_name = ' '.join(words[:2])  # Use first 2 words
+                        logging.info(f"💡 Using first words as strain name: '{strain_name}'")
+            
+            # CRITICAL FIX: Always ensure we have a strain name for lineage persistence
+            # If still no strain name, use product name as fallback
+            if not strain_name or not strain_name.strip():
+                # Use cleaned product name as strain name
+                strain_name = tag_name_clean.split(' by ')[0].split(' - ')[0].strip()
+                if not strain_name:
+                    strain_name = tag_name_clean
+                logging.info(f"💡 Using product name as strain name: '{strain_name}'")
+            
             # CRITICAL FIX: Always update by exact product name FIRST to ensure specific product is updated
             # Then update by vendor+strain to propagate to similar products
             products_updated_by_name = 0
@@ -10208,14 +10243,29 @@ def update_lineage():
             if products_updated == 0:
                 logging.warning(f"⚠️  No products updated for '{tag_name}' - product may not exist in database")
             
-            # Update strains table if we have a strain name
-            # CRITICAL FIX: Use add_or_update_strain with sovereign=True to ensure override persists
-            # Also get strain_id to link products to strains
+            # CRITICAL FIX: Always create/update strain entry for lineage persistence
+            # Even if Product Strain is empty, we extract from product name to ensure lineage persists
+            # For classic types, Product Strain can be set to whatever works - lineage is what matters
             strain_id_for_products = None
+            
+            # Ensure we have a strain name (extracted from product name if needed)
+            if not strain_name or not str(strain_name).strip():
+                # Use cleaned product name as strain name
+                strain_name = tag_name_clean.split(' by ')[0].split(' - ')[0].strip()
+                # Remove common suffixes
+                for suffix in [' Super Sale', ' Summer Super Sale', ' Mini Buds', ' Pre-Roll', ' Pre-Rolls']:
+                    if strain_name.endswith(suffix):
+                        strain_name = strain_name[:-len(suffix)].strip()
+                if not strain_name:
+                    strain_name = tag_name_clean.split()[0] if tag_name_clean.split() else 'Unknown'
+                logging.info(f"💡 Using extracted strain name: '{strain_name}'")
+            
             if strain_name and str(strain_name).strip():
                 try:
                     # First try to update within the transaction
                     strain_name_lower = str(strain_name).strip().lower()
+                    
+                    # Try to update existing strain
                     cursor.execute('''
                         UPDATE strains
                         SET sovereign_lineage = ?,
@@ -10224,6 +10274,29 @@ def update_lineage():
                         WHERE LOWER(strain_name) = ?
                     ''', (new_lineage, new_lineage, strain_name_lower))
                     strain_rows = cursor.rowcount
+                    
+                    # If no strain exists, create it
+                    if strain_rows == 0:
+                        try:
+                            normalized_strain = product_db._normalize_strain_name(strain_name) if hasattr(product_db, '_normalize_strain_name') else strain_name.lower().strip()
+                            cursor.execute('''
+                                INSERT INTO strains (strain_name, normalized_name, sovereign_lineage, canonical_lineage, 
+                                                    first_seen_date, last_seen_date, total_occurrences, lineage_confidence)
+                                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 1.0)
+                            ''', (strain_name, normalized_strain, new_lineage, new_lineage))
+                            strain_rows = 1
+                            logging.info(f"🌿 Created new strain '{strain_name}' with sovereign lineage '{new_lineage}'")
+                        except sqlite3.IntegrityError:
+                            # Strain might have been created by another connection, try update again
+                            cursor.execute('''
+                                UPDATE strains
+                                SET sovereign_lineage = ?,
+                                    canonical_lineage = ?,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE LOWER(strain_name) = ?
+                            ''', (new_lineage, new_lineage, strain_name_lower))
+                            strain_rows = cursor.rowcount
+                    
                     if strain_rows > 0:
                         strain_updated = True
                         # Get the strain_id to link products
@@ -10231,9 +10304,9 @@ def update_lineage():
                         strain_result = cursor.fetchone()
                         if strain_result:
                             strain_id_for_products = strain_result[0]
-                        logging.info(f"🌿 Updated {strain_rows} strain(s) with sovereign lineage '{new_lineage}' (override enabled, strain_id: {strain_id_for_products})")
+                        logging.info(f"🌿 Updated/created {strain_rows} strain(s) with sovereign lineage '{new_lineage}' (override enabled, strain_id: {strain_id_for_products})")
                 except Exception as strain_update_error:
-                    logging.warning(f"⚠️  Could not update strain in transaction: {strain_update_error}")
+                    logging.warning(f"⚠️  Could not update/create strain in transaction: {strain_update_error}")
                     import traceback
                     logging.error(f"Strain update error traceback: {traceback.format_exc()}")
             
