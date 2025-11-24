@@ -8334,6 +8334,7 @@ canvas#lava-lamp-canvas {
   /* Collapsed state styles */
   .collapsible-content.collapsed,
   .vendor-content.collapsed,
+  .price-tier-content.collapsed,
   .brand-content.collapsed,
   .product-type-content.collapsed,
   .weight-content.collapsed {

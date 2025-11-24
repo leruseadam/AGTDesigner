@@ -2223,6 +2223,39 @@ const TagManager = {
             .join(' ');
     },
 
+    // Helper function to get price tier from price value
+    getPriceTier(price) {
+        if (!price) return 'No Price';
+        
+        // Try to parse price - handle various formats
+        let priceValue = null;
+        if (typeof price === 'number') {
+            priceValue = price;
+        } else if (typeof price === 'string') {
+            // Remove dollar signs and whitespace
+            const cleaned = price.replace(/[$,\s]/g, '').trim();
+            priceValue = parseFloat(cleaned);
+        }
+        
+        // If we couldn't parse a valid number, return 'No Price'
+        if (isNaN(priceValue) || priceValue === null) {
+            return 'No Price';
+        }
+        
+        // Define price tiers
+        if (priceValue < 10) return '$0-$10';
+        if (priceValue < 20) return '$10-$20';
+        if (priceValue < 30) return '$20-$30';
+        if (priceValue < 40) return '$30-$40';
+        if (priceValue < 50) return '$40-$50';
+        if (priceValue < 60) return '$50-$60';
+        if (priceValue < 70) return '$60-$70';
+        if (priceValue < 80) return '$70-$80';
+        if (priceValue < 90) return '$80-$90';
+        if (priceValue < 100) return '$90-$100';
+        return '$100+';
+    },
+
     organizeBrandCategories(tags) {
         const vendorGroups = new Map();
         let skippedTags = 0;
@@ -2281,6 +2314,9 @@ const TagManager = {
             // CRITICAL FIX: Ensure weightWithUnits is properly populated from multiple possible sources
             const weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
                                    tag.CombinedWeight || tag.weightWithUnits || weight || '').toString().trim();
+            // Get price and price tier
+            const price = tag.Price || tag.price || tag['Price'] || tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || '';
+            const priceTier = this.getPriceTier(price);
 
             // If no vendor found, try to extract from product name
             if (!vendor) {
@@ -2327,6 +2363,8 @@ const TagManager = {
                 lineage: (lineage || '').toString().trim().toUpperCase(), // always uppercase for color
                 weight: weight,
                 weightWithUnits: weightWithUnits,
+                price: price,
+                priceTier: priceTier,
                 displayName: tag['Product Name*'] || tag.ProductName || tag.Description || 'Unknown Product'
             };
 
@@ -2348,11 +2386,12 @@ const TagManager = {
             }
             
             // For vape products with subcategory, add an intermediate subcategory level
-            let targetGroups;
+            // Then add price tier level before weight
+            let priceTierGroups;
             if (normalizedTag.subcategory) {
                 let subcategoryGroups = productTypeGroups.get(normalizedTag.productType);
                 // Check if this is actually a Map (subcategory structure) or needs to be converted
-                if (!(subcategoryGroups instanceof Map) || (subcategoryGroups.size > 0 && Array.from(subcategoryGroups.values())[0] instanceof Array)) {
+                if (!(subcategoryGroups instanceof Map) || (subcategoryGroups.size > 0 && Array.from(subcategoryGroups.values())[0] instanceof Map)) {
                     // Need to restructure: convert existing weight groups to subcategory structure
                     const existingWeightGroups = subcategoryGroups;
                     subcategoryGroups = new Map();
@@ -2372,33 +2411,88 @@ const TagManager = {
                 if (!subcategoryGroups.has(normalizedTag.subcategory)) {
                     subcategoryGroups.set(normalizedTag.subcategory, new Map());
                 }
-                targetGroups = subcategoryGroups.get(normalizedTag.subcategory);
+                const subcategoryGroup = subcategoryGroups.get(normalizedTag.subcategory);
+                
+                // Create price tier group if it doesn't exist
+                if (!subcategoryGroup.has(normalizedTag.priceTier)) {
+                    subcategoryGroup.set(normalizedTag.priceTier, new Map());
+                }
+                priceTierGroups = subcategoryGroup.get(normalizedTag.priceTier);
             } else {
                 // For non-subcategory products, check if we need to handle mixed structure
-                let weightGroups = productTypeGroups.get(normalizedTag.productType);
-                if (weightGroups instanceof Map && weightGroups.size > 0) {
-                    // Check if first entry is a Map (subcategory structure) or Array (weight structure)
-                    const firstValue = Array.from(weightGroups.values())[0];
+                let productTypeGroup = productTypeGroups.get(normalizedTag.productType);
+                if (productTypeGroup instanceof Map && productTypeGroup.size > 0) {
+                    // Check if first entry is a Map (subcategory structure) or Map (price tier structure) or Array (weight structure)
+                    const firstValue = Array.from(productTypeGroup.values())[0];
                     if (firstValue instanceof Map) {
-                        // This product type already has subcategory structure, add to 'Other'
-                        if (!weightGroups.has('Other')) {
-                            weightGroups.set('Other', new Map());
+                        const firstSubValue = Array.from(firstValue.values())[0];
+                        if (firstSubValue instanceof Map && Array.from(firstSubValue.keys())[0]?.startsWith('$')) {
+                            // This is already price tier structure
+                            priceTierGroups = productTypeGroup;
+                        } else if (firstSubValue instanceof Map) {
+                            // This product type already has subcategory structure, add to 'Other'
+                            if (!productTypeGroup.has('Other')) {
+                                productTypeGroup.set('Other', new Map());
+                            }
+                            const otherGroup = productTypeGroup.get('Other');
+                            if (!otherGroup.has(normalizedTag.priceTier)) {
+                                otherGroup.set(normalizedTag.priceTier, new Map());
+                            }
+                            priceTierGroups = otherGroup.get(normalizedTag.priceTier);
+                        } else {
+                            // This is still weight structure - need to convert to price tier structure
+                            const existingWeightGroups = productTypeGroup;
+                            productTypeGroup = new Map();
+                            // Migrate existing items to price tier groups
+                            existingWeightGroups.forEach((tags, weight) => {
+                                // Determine price tier from tags (use first tag's price or 'No Price')
+                                const firstTag = Array.isArray(tags) ? tags[0] : null;
+                                const tier = firstTag ? this.getPriceTier(firstTag.Price || firstTag.price || firstTag['Price'] || '') : 'No Price';
+                                if (!productTypeGroup.has(tier)) {
+                                    productTypeGroup.set(tier, new Map());
+                                }
+                                productTypeGroup.get(tier).set(weight, tags);
+                            });
+                            productTypeGroups.set(normalizedTag.productType, productTypeGroup);
+                            if (!productTypeGroup.has(normalizedTag.priceTier)) {
+                                productTypeGroup.set(normalizedTag.priceTier, new Map());
+                            }
+                            priceTierGroups = productTypeGroup.get(normalizedTag.priceTier);
                         }
-                        targetGroups = weightGroups.get('Other');
                     } else {
-                        // This is still weight structure
-                        targetGroups = weightGroups;
+                        // This is still weight structure - need to convert to price tier structure
+                        const existingWeightGroups = productTypeGroup;
+                        productTypeGroup = new Map();
+                        // Migrate existing items to price tier groups
+                        existingWeightGroups.forEach((tags, weight) => {
+                            // Determine price tier from tags (use first tag's price or 'No Price')
+                            const firstTag = Array.isArray(tags) ? tags[0] : null;
+                            const tier = firstTag ? this.getPriceTier(firstTag.Price || firstTag.price || firstTag['Price'] || '') : 'No Price';
+                            if (!productTypeGroup.has(tier)) {
+                                productTypeGroup.set(tier, new Map());
+                            }
+                            productTypeGroup.get(tier).set(weight, tags);
+                        });
+                        productTypeGroups.set(normalizedTag.productType, productTypeGroup);
+                        if (!productTypeGroup.has(normalizedTag.priceTier)) {
+                            productTypeGroup.set(normalizedTag.priceTier, new Map());
+                        }
+                        priceTierGroups = productTypeGroup.get(normalizedTag.priceTier);
                     }
                 } else {
-                    targetGroups = weightGroups;
+                    // New product type - create price tier structure
+                    if (!productTypeGroup.has(normalizedTag.priceTier)) {
+                        productTypeGroup.set(normalizedTag.priceTier, new Map());
+                    }
+                    priceTierGroups = productTypeGroup.get(normalizedTag.priceTier);
                 }
             }
 
             // Create weight group if it doesn't exist - use weightWithUnits as the key
-            if (!targetGroups.has(normalizedTag.weightWithUnits)) {
-                targetGroups.set(normalizedTag.weightWithUnits, []);
+            if (!priceTierGroups.has(normalizedTag.weightWithUnits)) {
+                priceTierGroups.set(normalizedTag.weightWithUnits, []);
             }
-            targetGroups.get(normalizedTag.weightWithUnits).push(normalizedTag);
+            priceTierGroups.get(normalizedTag.weightWithUnits).push(normalizedTag);
         });
 
         if (skippedTags > 0) {
@@ -3694,9 +3788,88 @@ const TagManager = {
                             subcategoryHeader.appendChild(subcategoryNameSpan);
                             subcategorySection.appendChild(subcategoryHeader);
 
-                            // Create weight sections
-                            const sortedWeights = Array.from(weightGroups.entries())
-                                .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+                            if (hasPriceTiers) {
+                                // Render price tier sections
+                                const sortedPriceTiers = Array.from(priceTierGroups.entries())
+                                    .sort(([a], [b]) => {
+                                        // Sort price tiers logically: No Price first, then by price range
+                                        if (a === 'No Price') return -1;
+                                        if (b === 'No Price') return 1;
+                                        return a.localeCompare(b);
+                                    });
+
+                                sortedPriceTiers.forEach(([priceTier, weightGroups]) => {
+                                    const priceTierSection = document.createElement('div');
+                                    priceTierSection.className = 'price-tier-section ms-3 mb-2';
+                                    
+                                    // Create price tier header with checkbox and collapse functionality
+                                    const priceTierHeader = document.createElement('div');
+                                    priceTierHeader.className = 'price-tier-header mb-2 d-flex align-items-center cursor-pointer';
+                                    priceTierHeader.addEventListener('click', (e) => {
+                                        if (e.target.type === 'checkbox') return;
+                                        if (this.state.isSearching) return;
+                                        const priceTierContent = priceTierSection.querySelector('.price-tier-content');
+                                        const isCollapsed = priceTierContent.classList.contains('collapsed');
+                                        priceTierContent.classList.toggle('collapsed', !isCollapsed);
+                                        priceTierHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                        this.removeDropdownInstructionBlurb();
+                                    });
+                                    
+                                    const priceTierCheckbox = document.createElement('input');
+                                    priceTierCheckbox.type = 'checkbox';
+                                    priceTierCheckbox.className = 'select-all-checkbox me-2';
+                                    priceTierCheckbox.addEventListener('change', (e) => {
+                                        const savedScroll = this._saveAvailableScrollPosition();
+                                        const isChecked = e.target.checked;
+                                        const checkboxes = priceTierSection.querySelectorAll('input.tag-checkbox');
+                                        checkboxes.forEach(checkbox => {
+                                            checkbox.checked = isChecked;
+                                            const tagName = checkbox.value;
+                                            const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                            if (tag) {
+                                                if (isChecked) {
+                                                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                        this.state.persistentSelectedTags.push(tagName);
+                                                    }
+                                                } else {
+                                                    if (!e.target.checked) {
+                                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                                        if (index > -1) {
+                                                            this.state.persistentSelectedTags.splice(index, 1);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        });
+                                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                        const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                            this.state.tags.find(t => t['Product Name*'] === name)
+                                        ).filter(Boolean);
+                                        this.updateSelectedTags(selectedTagObjects);
+                                        this.efficientlyUpdateAvailableTagsDisplay();
+                                        requestAnimationFrame(() => {
+                                            this._restoreAvailableScrollPosition(savedScroll);
+                                        });
+                                    });
+                                    
+                                    priceTierHeader.appendChild(priceTierCheckbox);
+                                    priceTierHeader.appendChild(document.createTextNode(priceTier));
+                                    const collapseIcon = document.createElement('span');
+                                    collapseIcon.className = 'collapse-icon ms-auto';
+                                    collapseIcon.textContent = '▼';
+                                    priceTierHeader.appendChild(collapseIcon);
+                                    
+                                    subcategorySection.appendChild(priceTierSection);
+                                    priceTierSection.appendChild(priceTierHeader);
+                                    
+                                    // Create price tier content container
+                                    const priceTierContent = document.createElement('div');
+                                    priceTierContent.className = 'price-tier-content';
+                                    priceTierSection.appendChild(priceTierContent);
+                                    
+                                    // Create weight sections within price tier
+                                    const sortedWeights = Array.from(weightGroups.entries())
+                                        .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
                             sortedWeights.forEach(([weight, tagArray]) => {
                                 const weightSection = document.createElement('div');
@@ -3796,12 +3969,101 @@ const TagManager = {
                                 });
                             });
                             
+                            priceTierContent.appendChild(weightSection);
+                        });
+                            
+                            subcategorySection.appendChild(priceTierSection);
+                        });
+                            
                             productTypeContent.appendChild(subcategorySection);
                         });
                     } else {
-                        // No subcategories - render weights directly
-                        const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
-                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+                        // No subcategories - check if we have price tier structure
+                        const hasPriceTiers = weightGroupsOrSubcategories instanceof Map && 
+                                            weightGroupsOrSubcategories.size > 0 &&
+                                            Array.from(weightGroupsOrSubcategories.keys())[0]?.startsWith('$');
+                        
+                        if (hasPriceTiers) {
+                            // Render price tier sections
+                            const sortedPriceTiers = Array.from(weightGroupsOrSubcategories.entries())
+                                .sort(([a], [b]) => {
+                                    if (a === 'No Price') return -1;
+                                    if (b === 'No Price') return 1;
+                                    return a.localeCompare(b);
+                                });
+                            
+                            sortedPriceTiers.forEach(([priceTier, weightGroups]) => {
+                                const priceTierSection = document.createElement('div');
+                                priceTierSection.className = 'price-tier-section ms-3 mb-2';
+                                
+                                // Create price tier header with checkbox and collapse functionality
+                                const priceTierHeader = document.createElement('div');
+                                priceTierHeader.className = 'price-tier-header mb-2 d-flex align-items-center cursor-pointer';
+                                priceTierHeader.addEventListener('click', (e) => {
+                                    if (e.target.type === 'checkbox') return;
+                                    if (this.state.isSearching) return;
+                                    const priceTierContent = priceTierSection.querySelector('.price-tier-content');
+                                    const isCollapsed = priceTierContent.classList.contains('collapsed');
+                                    priceTierContent.classList.toggle('collapsed', !isCollapsed);
+                                    priceTierHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                    this.removeDropdownInstructionBlurb();
+                                });
+                                
+                                const priceTierCheckbox = document.createElement('input');
+                                priceTierCheckbox.type = 'checkbox';
+                                priceTierCheckbox.className = 'select-all-checkbox me-2';
+                                priceTierCheckbox.addEventListener('change', (e) => {
+                                    const savedScroll = this._saveAvailableScrollPosition();
+                                    const isChecked = e.target.checked;
+                                    const checkboxes = priceTierSection.querySelectorAll('input.tag-checkbox');
+                                    checkboxes.forEach(checkbox => {
+                                        checkbox.checked = isChecked;
+                                        const tagName = checkbox.value;
+                                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                        if (tag) {
+                                            if (isChecked) {
+                                                if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                    this.state.persistentSelectedTags.push(tagName);
+                                                }
+                                            } else {
+                                                if (!e.target.checked) {
+                                                    const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                                    if (index > -1) {
+                                                        this.state.persistentSelectedTags.splice(index, 1);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                        this.state.tags.find(t => t['Product Name*'] === name)
+                                    ).filter(Boolean);
+                                    this.updateSelectedTags(selectedTagObjects);
+                                    this.efficientlyUpdateAvailableTagsDisplay();
+                                    requestAnimationFrame(() => {
+                                        this._restoreAvailableScrollPosition(savedScroll);
+                                    });
+                                });
+                                
+                                priceTierHeader.appendChild(priceTierCheckbox);
+                                priceTierHeader.appendChild(document.createTextNode(priceTier));
+                                const collapseIcon = document.createElement('span');
+                                collapseIcon.className = 'collapse-icon ms-auto';
+                                collapseIcon.textContent = '▼';
+                                priceTierHeader.appendChild(collapseIcon);
+                                
+                                productTypeContent.appendChild(priceTierSection);
+                                priceTierSection.appendChild(priceTierHeader);
+                                
+                                // Create price tier content container
+                                const priceTierContent = document.createElement('div');
+                                priceTierContent.className = 'price-tier-content';
+                                priceTierSection.appendChild(priceTierContent);
+                                
+                                // Create weight sections within price tier
+                                const sortedWeights = Array.from(weightGroups.entries())
+                                    .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
                         sortedWeights.forEach(([weight, tagArray]) => {
                             const weightSection = document.createElement('div');
@@ -3896,6 +4158,96 @@ const TagManager = {
                                 return aName.localeCompare(bName);
                             });
                             // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
+                            this._renderTagsInBatches(tagsToRender, weightContent);
+                        });
+                            
+                            priceTierContent.appendChild(weightSection);
+                        });
+                        });
+                    } else {
+                        // No price tiers - render weights directly (legacy structure)
+                        const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
+                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+
+                        sortedWeights.forEach(([weight, tagArray]) => {
+                            const weightSection = document.createElement('div');
+                            weightSection.className = 'weight-section ms-3 mb-1';
+                            
+                            // Create weight header with checkbox and collapse functionality
+                            const weightHeader = document.createElement('div');
+                            weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                            weightHeader.addEventListener('click', (e) => {
+                                if (e.target.type === 'checkbox') return;
+                                if (this.state.isSearching) return;
+                                const weightContent = weightSection.querySelector('.weight-content');
+                                const isCollapsed = weightContent.classList.contains('collapsed');
+                                weightContent.classList.toggle('collapsed', !isCollapsed);
+                                weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                this.removeDropdownInstructionBlurb();
+                            });
+                            
+                            const weightCheckbox = document.createElement('input');
+                            weightCheckbox.type = 'checkbox';
+                            weightCheckbox.className = 'select-all-checkbox me-2';
+                            weightCheckbox.addEventListener('change', (e) => {
+                                const savedScroll = this._saveAvailableScrollPosition();
+                                const isChecked = e.target.checked;
+                                const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
+                                checkboxes.forEach(checkbox => {
+                                    if (!checkbox.classList.contains('tag-checkbox')) {
+                                        checkbox.checked = isChecked;
+                                        return;
+                                    }
+                                    const tagName = checkbox.value;
+                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                    if (!tag) {
+                                        checkbox.checked = isChecked;
+                                        return;
+                                    }
+                                    checkbox.checked = isChecked;
+                                    if (isChecked) {
+                                        if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                            this.state.persistentSelectedTags.push(tagName);
+                                        }
+                                    } else {
+                                        if (!e.target.checked) {
+                                            const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                            if (index > -1) {
+                                                this.state.persistentSelectedTags.splice(index, 1);
+                                            }
+                                        }
+                                    }
+                                });
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                    this.state.tags.find(t => t['Product Name*'] === name)
+                                ).filter(Boolean);
+                                this.updateSelectedTags(selectedTagObjects);
+                                this.efficientlyUpdateAvailableTagsDisplay();
+                                requestAnimationFrame(() => {
+                                    this._restoreAvailableScrollPosition(savedScroll);
+                                });
+                            });
+                            
+                            weightHeader.appendChild(weightCheckbox);
+                            weightHeader.appendChild(document.createTextNode(weight));
+                            const collapseIcon = document.createElement('span');
+                            collapseIcon.className = 'collapse-icon ms-auto';
+                            collapseIcon.textContent = '▼';
+                            weightHeader.appendChild(collapseIcon);
+                            
+                            productTypeContent.appendChild(weightSection);
+                            weightSection.appendChild(weightHeader);
+                            
+                            const weightContent = document.createElement('div');
+                            weightContent.className = 'weight-content';
+                            weightSection.appendChild(weightContent);
+                            
+                            const tagsToRender = [...tagArray].sort((a, b) => {
+                                const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                                const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                                return aName.localeCompare(bName);
+                            });
                             this._renderTagsInBatches(tagsToRender, weightContent);
                         });
                     }
