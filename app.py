@@ -10076,6 +10076,42 @@ def update_lineage():
                     ''', (candidate, candidate, normalized_candidate))
                     existing_products = cursor.fetchall()
                 
+                # CRITICAL FIX: Also try matching against normalized_name column using the normalized candidate
+                # This handles cases where the database has normalized_name populated but exact match fails
+                if not existing_products:
+                    # Try matching normalized_name column with normalized candidate
+                    cursor.execute('''
+                        SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                        FROM products
+                        WHERE normalized_name = ?
+                           OR LOWER(normalized_name) = LOWER(?)
+                    ''', (normalized_candidate, normalized_candidate))
+                    existing_products = cursor.fetchall()
+                    if existing_products:
+                        logging.info(f"✅ Found {len(existing_products)} match(es) via normalized_name for '{candidate}'")
+                
+                # CRITICAL FIX: Try word-by-word matching for products with "by" in the name
+                # This handles cases like "Gary Jealousy by Mt Baker Homegrown - 1g" vs "Gary Jealousy by Mt Baker Homegrown"
+                if not existing_products and ' by ' in candidate.lower():
+                    # Extract key words (strain name and vendor)
+                    words = candidate.lower().split()
+                    # Try to find products that contain the key words
+                    key_words = [w for w in words if len(w) > 2 and w not in ['the', 'and', 'for', 'with']]
+                    if len(key_words) >= 2:
+                        # Build a LIKE query that matches key words
+                        like_pattern = '%' + '%'.join(key_words[:3]) + '%'  # Use first 3 key words
+                        cursor.execute('''
+                            SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                            FROM products
+                            WHERE LOWER("Product Name*") LIKE ?
+                               OR LOWER("ProductName") LIKE ?
+                               OR LOWER(normalized_name) LIKE ?
+                            LIMIT 5
+                        ''', (like_pattern, like_pattern, like_pattern))
+                        existing_products = cursor.fetchall()
+                        if existing_products:
+                            logging.info(f"✅ Found {len(existing_products)} match(es) via word matching for '{candidate}'")
+                
                 if existing_products:
                     logging.info(f"✅ Found {len(existing_products)} exact match(es) for '{candidate}'")
                     tag_name_clean = candidate
@@ -10126,13 +10162,48 @@ def update_lineage():
             if not existing_products:
                 logging.info(f"🔍 Trying partial match search for variants: {name_variants}")
                 for candidate in name_variants:
+                    # Try case-sensitive partial match
                     cursor.execute('''
                         SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
                         FROM products
-                        WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
+                        WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ? OR normalized_name LIKE ?
                         LIMIT 5
-                    ''', (f'%{candidate}%', f'%{candidate}%'))
+                    ''', (f'%{candidate}%', f'%{candidate}%', f'%{candidate}%'))
                     existing_products = cursor.fetchall()
+                    
+                    # If no match, try case-insensitive partial match
+                    if not existing_products:
+                        candidate_lower = candidate.lower()
+                        cursor.execute('''
+                            SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                            FROM products
+                            WHERE LOWER("Product Name*") LIKE ? 
+                               OR LOWER("ProductName") LIKE ?
+                               OR LOWER(normalized_name) LIKE ?
+                            LIMIT 5
+                        ''', (f'%{candidate_lower}%', f'%{candidate_lower}%', f'%{candidate_lower}%'))
+                        existing_products = cursor.fetchall()
+                    
+                    # CRITICAL FIX: Also try matching key words from the candidate
+                    # This handles cases where spacing or punctuation differs
+                    if not existing_products:
+                        # Extract meaningful words (skip common words and short words)
+                        words = [w for w in candidate.split() if len(w) > 2 and w.lower() not in ['the', 'and', 'for', 'with', 'by']]
+                        if len(words) >= 2:
+                            # Try matching products that contain at least 2 key words
+                            key_words_pattern = '%' + '%'.join(words[:3]) + '%'
+                            cursor.execute('''
+                                SELECT "Product Name*", "ProductName", normalized_name, "Lineage"
+                                FROM products
+                                WHERE LOWER("Product Name*") LIKE ?
+                                   OR LOWER("ProductName") LIKE ?
+                                   OR LOWER(normalized_name) LIKE ?
+                                LIMIT 5
+                            ''', (key_words_pattern, key_words_pattern, key_words_pattern))
+                            existing_products = cursor.fetchall()
+                            if existing_products:
+                                logging.info(f"✅ Found {len(existing_products)} match(es) via key words for '{candidate}'")
+                    
                     if existing_products:
                         logging.warning(f"⚠️  Found {len(existing_products)} similar products for '{candidate}': {[p[0] or p[1] for p in existing_products[:3]]}")
                         tag_name_clean = candidate
@@ -10857,22 +10928,28 @@ def update_lineage():
                     if not product_created:
                         # Product not found in database or Excel - return error
                         error_msg = f'Product "{tag_name}" not found in database.'
+                        if name_variants and len(name_variants) > 1:
+                            error_msg += f' Tried variants: {", ".join(name_variants[:5])}'
                         if similar_products:
                             error_msg += f' Similar products found: {", ".join(similar_products[:3])}'
                         else:
                             error_msg += ' Please check the product name and ensure the product exists in the database or Excel file.'
                         
-                        logging.error(f"❌ LINEAGE UPDATE FAILED: Product '{tag_name}' not found in database or Excel")
+                        logging.error(f"❌ LINEAGE UPDATE FAILED: Product '{tag_name}' not found in database or Excel (tried variants: {name_variants[:5]})")
                         if similar_products:
                             logging.info(f"💡 Found similar products: {similar_products[:3]}")
                         
                         return jsonify({
                             'success': False,
                             'error': error_msg,
+                            'message': error_msg,  # Add message field for consistency
                             'products_updated': 0,
+                            'db_updated': 0,
+                            'excel_updated': 0,
                             'verification_passed': False,
                             'tag_name': tag_name,
                             'new_lineage': new_lineage,
+                            'name_variants_tried': name_variants[:5] if name_variants else [],
                             'similar_products': similar_products[:5] if similar_products else []
                         }), 400
                 else:
