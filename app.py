@@ -10606,12 +10606,6 @@ def update_lineage():
                     except:
                         pass
                     raise
-            except Exception as db_error:
-                logging.error(f"❌ Database error during lineage update: {db_error}")
-                import traceback
-                logging.error(f"Database error traceback: {traceback.format_exc()}")
-                # Re-raise to be handled by outer exception handler
-                raise
             
             if not commit_success:
                 raise Exception("Failed to commit transaction after retries")
