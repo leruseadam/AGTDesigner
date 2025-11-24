@@ -8215,9 +8215,108 @@ def get_available_tags():
                 prefer_db = True  # Force database query when Excel is empty
                 logging.info(f"✅ Set prefer_db=True to force database query")
         
-        # CRITICAL FIX: If we have tags from Excel, ALWAYS align lineage with database values
-        # Database lineage is the source of truth, not Excel lineage
-        # Always run lineage alignment even during fast_load to ensure database lineage is used
+        # GUARANTEED FIX: ALWAYS query database for lineage for ALL tags, regardless of source
+        # This ensures database lineage is ALWAYS used, never Excel/cached lineage
+        if all_tags:
+            logging.info(f"🔄 GUARANTEED FIX: Querying database for lineage for ALL {len(all_tags)} tags")
+            try:
+                store_name = get_current_store_name()
+                if not store_name:
+                    logging.warning("No store selected, skipping guaranteed lineage fix")
+                    raise ValueError("No store selected")
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # GUARANTEED: Query database for ALL product lineages using get_products_by_names
+                    try:
+                        # Get all product names from tags
+                        product_names = []
+                        for tag in all_tags:
+                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            if name:
+                                product_names.append(name)
+                        
+                        if product_names:
+                            logging.info(f"🔍 GUARANTEED FIX: Querying database for {len(product_names)} product lineages...")
+                            # Query database for all lineages at once using the optimized method
+                            db_records = product_db.get_products_by_names(product_names)
+                            logging.info(f"🔍 GUARANTEED FIX: Got {len(db_records)} records from database")
+                            
+                            # Build lineage map with multiple matching strategies
+                            lineage_map = {}
+                            for db_record in db_records:
+                                db_product_name = db_record.get('Product Name*', '')
+                                if db_product_name:
+                                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
+                                    db_lineage = (
+                                        db_record.get('currentLineage') or
+                                        db_record.get('canonical_lineage') or
+                                        db_record.get('Lineage')
+                                    )
+                                    if db_lineage:
+                                        db_lineage_clean = str(db_lineage).strip().upper()
+                                        lineage_map[db_product_name] = db_lineage_clean
+                                        
+                                        # Also store by normalized name
+                                        try:
+                                            normalized_name = product_db._normalize_product_name(db_product_name)
+                                            if normalized_name and normalized_name not in lineage_map:
+                                                lineage_map[normalized_name] = db_lineage_clean
+                                        except Exception:
+                                            pass
+                            
+                            # GUARANTEED FIX: Update ALL tags with database lineage
+                            updated_count = 0
+                            for tag in all_tags:
+                                tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                if not tag_name:
+                                    continue
+                                
+                                # Try to find database lineage with multiple matching strategies
+                                db_lineage = lineage_map.get(tag_name)
+                                
+                                # Try normalized name if exact match failed
+                                if not db_lineage:
+                                    try:
+                                        normalized_name = product_db._normalize_product_name(tag_name)
+                                        db_lineage = lineage_map.get(normalized_name)
+                                    except Exception:
+                                        pass
+                                
+                                # Try case-insensitive match
+                                if not db_lineage:
+                                    tag_name_lower = tag_name.lower()
+                                    for db_name, db_lin in lineage_map.items():
+                                        if db_name and isinstance(db_name, str) and db_name.lower() == tag_name_lower:
+                                            db_lineage = db_lin
+                                            break
+                                
+                                # GUARANTEED: If database has lineage, ALWAYS use it and override Excel/cached values
+                                if db_lineage:
+                                    old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
+                                    # Set ALL lineage fields from database - this is the source of truth
+                                    tag['currentLineage'] = db_lineage
+                                    tag['canonical_lineage'] = db_lineage
+                                    tag['Lineage'] = db_lineage
+                                    tag['lineage'] = db_lineage.lower()
+                                    updated_count += 1
+                                    if old_lineage != db_lineage:
+                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}'")
+                            
+                            logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage")
+                        else:
+                            logging.warning("⚠️ No product names found in tags for guaranteed lineage fix")
+                    except Exception as db_query_err:
+                        logging.error(f"❌ GUARANTEED FIX: Database query failed: {db_query_err}")
+                        import traceback
+                        logging.error(traceback.format_exc())
+                else:
+                    logging.warning("⚠️ No product database available for guaranteed lineage fix")
+            except Exception as e:
+                logging.error(f"❌ GUARANTEED FIX: Lineage alignment failed: {e}")
+                import traceback
+                logging.error(traceback.format_exc())
+        
+        # OLD CODE: Keep the existing alignment logic as fallback (but guaranteed fix above should handle it)
         if all_tags and not prefer_db:
             # CRITICAL: Always apply database lineage, even during fast_load
             # Database lineage must always override Excel lineage

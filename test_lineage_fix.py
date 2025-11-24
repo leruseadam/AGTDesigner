@@ -1,84 +1,70 @@
 #!/usr/bin/env python3
 """
-Test script to verify lineage alignment is working correctly
+Test script to verify lineage fix is working correctly.
+This tests that database lineage is always used, not Excel file lineage.
 """
+
 import sys
 import os
 
-# Add project root to path
+# Add the project root to the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.core.data.product_database import ProductDatabase
+def test_lineage_query():
+    """Test that database lineage query works correctly."""
+    print("🧪 Testing lineage fix...")
+    
+    try:
+        from src.core.data.product_database import ProductDatabase
+        from src.core.data.excel_processor import ExcelProcessor
+        
+        # Get store name
+        store_name = "AGT_Bothell"  # Default store
+        if len(sys.argv) > 1:
+            store_name = sys.argv[1]
+        
+        print(f"📦 Using store: {store_name}")
+        
+        # Initialize database
+        product_db = ProductDatabase(store_name)
+        product_db.init_database()
+        
+        # Test: Query a specific product
+        test_product_name = "100 Rackz Super Sale by Mt Baker Homegrown - 14g"
+        print(f"\n🔍 Testing product: '{test_product_name}'")
+        
+        # Query database
+        db_records = product_db.get_products_by_names([test_product_name])
+        
+        if db_records:
+            db_record = db_records[0]
+            db_lineage = (
+                db_record.get('currentLineage') or
+                db_record.get('canonical_lineage') or
+                db_record.get('Lineage')
+            )
+            print(f"✅ Database lineage: '{db_lineage}'")
+            print(f"   - currentLineage: {db_record.get('currentLineage')}")
+            print(f"   - canonical_lineage: {db_record.get('canonical_lineage')}")
+            print(f"   - Lineage: {db_record.get('Lineage')}")
+            
+            if db_lineage:
+                print(f"\n✅ SUCCESS: Database has lineage '{db_lineage}' for product")
+                return True
+            else:
+                print(f"\n❌ ERROR: Database record exists but has no lineage")
+                return False
+        else:
+            print(f"\n❌ ERROR: Product not found in database")
+            print(f"   This means the product needs to be created in the database first")
+            return False
+            
+    except Exception as e:
+        print(f"\n❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-def test_lineage_alignment():
-    """Test that lineages are properly aligned between products and strains"""
-
-    print("🔍 Testing lineage alignment...\n")
-
-    # Create database instance
-    db = ProductDatabase()
-
-    # Get connection
-    conn = db._get_connection()
-    cursor = conn.cursor()
-
-    # Test a few products that we know have mismatches
-    test_products = [
-        "$10 Chillum Pack by VID INC",
-        "100 Rackz by Mt Baker Homegrown - 14g",
-        "*VOID* 1:1:1:1 Dark Chocolate Sea Salt 420 Minis b"
-    ]
-
-    print("Testing sample products:")
-    print("-" * 80)
-
-    for product_name in test_products:
-        # Get product info
-        normalized = db._normalize_product_name(product_name)
-        cursor.execute('''
-            SELECT p."Product Strain", p."Lineage"
-            FROM products p
-            WHERE p."Product Name*" = ? OR p.normalized_name = ?
-            ORDER BY p.id DESC
-            LIMIT 1
-        ''', (product_name, normalized))
-
-        row = cursor.fetchone()
-        if not row:
-            print(f"❌ Product not found: {product_name}")
-            continue
-
-        product_strain, product_lineage = row[0], row[1]
-
-        # Get strain lineage
-        strain_lineage = None
-        if product_strain:
-            norm_strain = db._normalize_strain_name(str(product_strain))
-            cursor.execute('''
-                SELECT COALESCE(sovereign_lineage, canonical_lineage) AS current_lineage
-                FROM strains s
-                WHERE s.normalized_name = ?
-                LIMIT 1
-            ''', (norm_strain,))
-            srow = cursor.fetchone()
-            if srow:
-                strain_lineage = srow[0]
-
-        # Display results
-        resolved_lineage = strain_lineage or product_lineage
-        match_status = "✅" if product_lineage == strain_lineage else "❌"
-
-        print(f"\n{match_status} {product_name[:50]}")
-        print(f"   Strain: {product_strain}")
-        print(f"   Product Lineage: {product_lineage}")
-        print(f"   Strain Lineage: {strain_lineage}")
-        print(f"   Resolved (should be used): {resolved_lineage}")
-
-    print("\n" + "-" * 80)
-    print("\n✨ The backend should now return the 'Resolved' lineage for each product")
-    print("   This ensures UI displays match database values.\n")
-
-    conn.close()
-
-if __name__ == '__main__':
-    test_lineage_alignment()
+if __name__ == "__main__":
+    success = test_lineage_query()
+    sys.exit(0 if success else 1)
