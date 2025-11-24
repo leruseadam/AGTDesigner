@@ -1376,6 +1376,55 @@ const TagManager = {
                 }
             }
         });
+        
+        // GUARANTEED FIX: Save current filter values to localStorage
+        this.saveFiltersToStorage();
+    },
+    
+    saveFiltersToStorage() {
+        try {
+            const filters = {
+                vendor: document.getElementById('vendorFilter')?.value || '',
+                brand: document.getElementById('brandFilter')?.value || '',
+                productType: document.getElementById('productTypeFilter')?.value || '',
+                lineage: document.getElementById('lineageFilter')?.value || '',
+                weight: document.getElementById('weightFilter')?.value || '',
+                doh: document.getElementById('dohFilter')?.value || '',
+                highCbd: document.getElementById('highCbdFilter')?.value || ''
+            };
+            
+            // Only save non-empty values (not 'All')
+            const filtersToSave = {};
+            Object.entries(filters).forEach(([key, value]) => {
+                if (value && value.trim() !== '' && value !== 'All') {
+                    filtersToSave[key] = value;
+                }
+            });
+            
+            if (Object.keys(filtersToSave).length > 0) {
+                localStorage.setItem('agt_filters', JSON.stringify(filtersToSave));
+                verboseLog('✅ Saved filters to localStorage:', filtersToSave);
+            } else {
+                // Clear saved filters if all are empty
+                localStorage.removeItem('agt_filters');
+            }
+        } catch (error) {
+            console.warn('Failed to save filters to localStorage:', error);
+        }
+    },
+    
+    loadFiltersFromStorage() {
+        try {
+            const saved = localStorage.getItem('agt_filters');
+            if (saved) {
+                const filters = JSON.parse(saved);
+                verboseLog('✅ Loaded filters from localStorage:', filters);
+                return filters;
+            }
+        } catch (error) {
+            console.warn('Failed to load filters from localStorage:', error);
+        }
+        return null;
     },
 
     async updateFilterOptions() {
