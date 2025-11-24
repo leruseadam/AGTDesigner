@@ -166,7 +166,10 @@ async function handleFiles(files) {
       
       const response = await fetch('/upload', {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: {
+          'X-Post-Upload': '1'  // Flag for fast tag loading
+        }
       });
       console.log('📡 Upload response status:', response.status);
       

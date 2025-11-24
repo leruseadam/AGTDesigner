@@ -7707,6 +7707,13 @@ class ExcelProcessor:
             # Continue even if update fails - enrichment will handle it later
 
         def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            # PERFORMANCE: Skip enrichment if flag is set (for fast post-upload loading)
+            if getattr(self, '_skip_enrichment', False):
+                logger.info("⚡ Skipping database enrichment for fast tag loading")
+                cached_copy = self._clone_tag_results(tag_list)
+                self._store_cache_value(self._available_tags_cache, cache_key, cached_copy)
+                return self._clone_tag_results(cached_copy)
+            
             # CRITICAL: Enrich tags with database values BEFORE caching
             # This ensures cached tags have database lineage, not Excel lineage
             # Database lineage ALWAYS overrides Excel lineage

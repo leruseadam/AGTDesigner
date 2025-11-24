@@ -5699,6 +5699,9 @@ const TagManager = {
     },
 
     updateSelectedTags(tags) {
+        // Start timer at the beginning to prevent "Timer already exists" warning
+        console.time('updateSelectedTags');
+        
         if (!tags || !Array.isArray(tags)) {
             console.warn('updateSelectedTags called with invalid tags:', tags);
             tags = [];
@@ -5707,6 +5710,7 @@ const TagManager = {
         // Prevent updates during tag move operations to avoid race conditions
         if (this.isMovingTags) {
             verboseLog('Ignoring updateSelectedTags during tag move operation');
+            console.timeEnd('updateSelectedTags');
             return;
         }
         
@@ -5714,6 +5718,7 @@ const TagManager = {
         const container = document.getElementById('selectedTags');
         if (!container) {
             console.error('Selected tags container not found');
+            console.timeEnd('updateSelectedTags');
             return;
         }
         
@@ -5746,8 +5751,6 @@ const TagManager = {
         
         // Dispatch event to notify drag and drop manager that tag updates are starting
         document.dispatchEvent(new CustomEvent('updateSelectedTags'));
-        
-        console.time('updateSelectedTags');
         verboseLog('updateSelectedTags called with tags:', tags);
 
         // Clear existing content
@@ -7096,6 +7099,18 @@ const TagManager = {
             // CRITICAL: Prefer canonical_lineage/currentLineage (from DB) over Lineage to ensure UI matches database
             tags = tags.map(tag => this._normalizeLineageFields(tag));
             
+            // CRITICAL FIX: Auto-refresh filters after tags are successfully loaded
+            // This ensures filters are populated when data becomes available
+            if (tags.length > 0) {
+                verboseLog('Tags loaded successfully, refreshing filters...');
+                // Use a small delay to ensure Excel processor is ready
+                setTimeout(() => {
+                    this.fetchAndPopulateFilters(0).catch(error => {
+                        console.warn('Auto-refresh filters after tag load failed (non-critical):', error);
+                    });
+                }, 500);
+            }
+            
             // Debug: Verify database lineage is being used
             console.log('🔄 Normalized lineage data (database is source of truth):');
             const lineageStats = { withCanonical: 0, withCurrent: 0, withLineage: 0, none: 0 };
@@ -7466,8 +7481,8 @@ const TagManager = {
     },
 
     async fetchAndPopulateFilters(retryCount = 0) {
-        const maxRetries = 3;
-        const retryDelay = 1000; // 1 second
+        const maxRetries = 5; // Increased retries
+        const retryDelay = 2000; // Increased to 2 seconds for better chance of data being ready
         
         try {
             // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
@@ -7476,16 +7491,49 @@ const TagManager = {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
             });
+            
             if (!response.ok) {
-                throw new Error('Failed to fetch filter options');
+                const errorText = await response.text();
+                throw new Error(`Failed to fetch filter options: ${response.status} ${errorText}`);
             }
+            
             const filterOptions = await response.json();
             verboseLog('Fetched filter options:', filterOptions);
             
+            // CRITICAL FIX: Check for error field in response
+            if (filterOptions.error) {
+                console.warn(`Filter options error: ${filterOptions.error}`, filterOptions.debug || '');
+                
+                // If there's an error but we haven't exceeded retries, retry
+                if (retryCount < maxRetries) {
+                    verboseLog(`⚠️ Filter options error (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
+                    setTimeout(() => {
+                        this.fetchAndPopulateFilters(retryCount + 1);
+                    }, retryDelay);
+                    return;
+                } else {
+                    console.error('Filter options error after all retries:', filterOptions.error);
+                    // Still update filters with empty arrays to clear previous values
+                    this.updateFilters({
+                        vendor: [],
+                        brand: [],
+                        productType: [],
+                        lineage: [],
+                        weight: [],
+                        strain: [],
+                        doh: [],
+                        highCbd: []
+                    }, true);
+                    return;
+                }
+            }
+            
             // CRITICAL FIX: Check if filters are empty and retry if needed
-            const hasData = filterOptions.vendor && filterOptions.vendor.length > 0 ||
-                           filterOptions.brand && filterOptions.brand.length > 0 ||
-                           filterOptions.productType && filterOptions.productType.length > 0;
+            const hasData = (filterOptions.vendor && filterOptions.vendor.length > 0) ||
+                           (filterOptions.brand && filterOptions.brand.length > 0) ||
+                           (filterOptions.productType && filterOptions.productType.length > 0) ||
+                           (filterOptions.lineage && filterOptions.lineage.length > 0) ||
+                           (filterOptions.weight && filterOptions.weight.length > 0);
             
             if (!hasData && retryCount < maxRetries) {
                 verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
@@ -7498,9 +7546,11 @@ const TagManager = {
             // Update filters even if empty (to clear previous values)
             this.updateFilters(filterOptions, true); // Preserve existing filter values
             
-            // If filters were empty after retries, log a warning
+            // If filters were empty after retries, log a warning but don't block
             if (!hasData && retryCount >= maxRetries) {
-                console.warn('⚠️ Filters remain empty after all retries - data may not be loaded yet');
+                console.warn('⚠️ Filters remain empty after all retries - data may not be loaded yet. Filters will refresh when data becomes available.');
+            } else if (hasData) {
+                verboseLog(`✅ Filters loaded successfully: vendor=${filterOptions.vendor?.length || 0}, brand=${filterOptions.brand?.length || 0}, productType=${filterOptions.productType?.length || 0}`);
             }
         } catch (error) {
             console.error('Error fetching filter options:', error);
@@ -7514,6 +7564,17 @@ const TagManager = {
             } else {
                 console.error('Failed to load filter options after all retries');
                 // Don't show alert - filters will be populated when data loads
+                // Set empty filters to clear previous values
+                this.updateFilters({
+                    vendor: [],
+                    brand: [],
+                    productType: [],
+                    lineage: [],
+                    weight: [],
+                    strain: [],
+                    doh: [],
+                    highCbd: []
+                }, true);
             }
         }
     },
@@ -7543,6 +7604,15 @@ const TagManager = {
         this._isPostUploadLoad = true;
 
         try {
+            // PERFORMANCE FIX: For post-upload, use fast-load mode to skip database enrichment initially
+            // This allows tags to display immediately, then enrich in background
+            const isPostUpload = force || this._isPostUploadLoad;
+            if (isPostUpload) {
+                console.log('⚡ Post-upload detected - using fast tag loading');
+                // Set flag to skip enrichment in initial load
+                this._skipEnrichment = true;
+            }
+            
             // CRITICAL FIX: Fetch filters AFTER tags are loaded to ensure data is ready
             await this.fetchAndUpdateAvailableTags();
             await this.fetchAndUpdateSelectedTags();
@@ -7552,6 +7622,21 @@ const TagManager = {
             
             // Now fetch filters with retry mechanism
             await this.fetchAndPopulateFilters();
+            
+            // PERFORMANCE: After tags are displayed, enrich them in background
+            if (isPostUpload && this._skipEnrichment) {
+                console.log('⚡ Enriching tags in background...');
+                this._skipEnrichment = false;
+                // Enrich tags in background without blocking UI
+                setTimeout(async () => {
+                    try {
+                        await this.fetchAndUpdateAvailableTags();
+                        console.log('✅ Background tag enrichment complete');
+                    } catch (err) {
+                        console.warn('Background enrichment failed:', err);
+                    }
+                }, 100);
+            }
             
             const results = [true, true, true]; // All succeeded
 

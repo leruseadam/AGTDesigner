@@ -11810,18 +11810,63 @@ def get_filter_options():
             cache.delete(cache_key)
         
         excel_processor = get_session_excel_processor()
+        
+        # CRITICAL FIX: Better handling of empty DataFrame with detailed logging
+        if excel_processor is None:
+            logging.error("CRITICAL: Excel processor is None in filter options endpoint")
+            return jsonify({
+                'vendor': [],
+                'brand': [],
+                'productType': [],
+                'lineage': [],
+                'weight': [],
+                'strain': [],
+                'doh': [],
+                'highCbd': [],
+                'error': 'Excel processor not initialized'
+            }), 200
+        
         if excel_processor.df is None or excel_processor.df.empty:
+            logging.warning(f"CRITICAL: Excel processor DataFrame is empty (df is None: {excel_processor.df is None}, df.empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'})")
+            
             from src.core.data.excel_processor import get_default_upload_file
             selected_store = get_current_store_name() if has_store_selection() else None
             default_file = get_default_upload_file(selected_store)
+            
             if default_file and os.path.exists(default_file):
                 if ENHANCED_LOGGING_AVAILABLE:
                     enhanced_logger.log_info(f"Attempting to load default file for filter options", 
-                                           {'file': default_file})
+                                           {'file': default_file, 'store': selected_store})
                 else:
-                    logging.info(f"Attempting to load default file for filter options: {default_file}")
-                success = excel_processor.load_file(default_file)
-                if not success:
+                    logging.info(f"Attempting to load default file for filter options: {default_file} (store: {selected_store})")
+                
+                try:
+                    success = excel_processor.load_file(default_file)
+                    if success and excel_processor.df is not None and not excel_processor.df.empty:
+                        logging.info(f"✅ Successfully loaded default file: {len(excel_processor.df)} rows")
+                    else:
+                        logging.error(f"❌ Failed to load default file or file is empty after load")
+                        return jsonify({
+                            'vendor': [],
+                            'brand': [],
+                            'productType': [],
+                            'lineage': [],
+                            'weight': [],
+                            'strain': [],
+                            'doh': [],
+                            'highCbd': [],
+                            'error': 'Default file load failed or is empty',
+                            'debug': {
+                                'file': default_file,
+                                'store': selected_store,
+                                'df_is_none': excel_processor.df is None,
+                                'df_empty': excel_processor.df.empty if excel_processor.df is not None else 'N/A'
+                            }
+                        }), 200
+                except Exception as load_error:
+                    logging.error(f"❌ Exception loading default file: {load_error}")
+                    import traceback
+                    logging.error(traceback.format_exc())
                     return jsonify({
                         'vendor': [],
                         'brand': [],
@@ -11830,9 +11875,15 @@ def get_filter_options():
                         'weight': [],
                         'strain': [],
                         'doh': [],
-                        'highCbd': []
-                    })
+                        'highCbd': [],
+                        'error': f'Exception loading default file: {str(load_error)}',
+                        'debug': {
+                            'file': default_file,
+                            'store': selected_store
+                        }
+                    }), 200
             else:
+                logging.warning(f"CRITICAL: No default file available (file: {default_file}, exists: {os.path.exists(default_file) if default_file else False}, store: {selected_store})")
                 return jsonify({
                     'vendor': [],
                     'brand': [],
@@ -11841,23 +11892,76 @@ def get_filter_options():
                     'weight': [],
                     'strain': [],
                     'doh': [],
-                    'highCbd': []
-                })
+                    'highCbd': [],
+                    'error': 'No default file available',
+                    'debug': {
+                        'file': default_file,
+                        'store': selected_store,
+                        'file_exists': os.path.exists(default_file) if default_file else False
+                    }
+                }), 200
         current_filters = {}
         if request.method == 'POST':
             data = request.get_json()
             current_filters = data.get('filters', {})
         
+        # CRITICAL FIX: Verify DataFrame is ready before getting filter options
+        if excel_processor.df is None or excel_processor.df.empty:
+            logging.error("CRITICAL: DataFrame is still empty after load attempt")
+            return jsonify({
+                'vendor': [],
+                'brand': [],
+                'productType': [],
+                'lineage': [],
+                'weight': [],
+                'strain': [],
+                'doh': [],
+                'highCbd': [],
+                'error': 'DataFrame is empty after load',
+                'debug': {
+                    'df_is_none': excel_processor.df is None,
+                    'df_empty': excel_processor.df.empty if excel_processor.df is not None else 'N/A',
+                    'df_shape': excel_processor.df.shape if excel_processor.df is not None else 'N/A'
+                }
+            }), 200
+        
+        # Log DataFrame info for debugging
+        logging.info(f"Filter options: DataFrame has {len(excel_processor.df)} rows, {len(excel_processor.df.columns)} columns")
+        
         # Use optimized method for Windows
-        if is_windows_request or is_windows_ua:
-            options = excel_processor.get_dynamic_filter_options(current_filters)
-        else:
-            options = excel_processor.get_dynamic_filter_options(current_filters)
+        try:
+            if is_windows_request or is_windows_ua:
+                options = excel_processor.get_dynamic_filter_options(current_filters)
+            else:
+                options = excel_processor.get_dynamic_filter_options(current_filters)
+        except Exception as filter_error:
+            logging.error(f"CRITICAL: Error getting filter options: {filter_error}")
+            import traceback
+            logging.error(traceback.format_exc())
+            return jsonify({
+                'vendor': [],
+                'brand': [],
+                'productType': [],
+                'lineage': [],
+                'weight': [],
+                'strain': [],
+                'doh': [],
+                'highCbd': [],
+                'error': f'Error generating filter options: {str(filter_error)}'
+            }), 200
             
         import math
         def clean_list(lst):
             return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
         options = {k: clean_list(v) for k, v in options.items()}
+        
+        # CRITICAL FIX: Log filter options counts for debugging
+        option_counts = {k: len(v) for k, v in options.items()}
+        logging.info(f"Filter options generated: {option_counts}")
+        
+        # If all options are empty, log a warning
+        if all(len(v) == 0 for v in options.values()):
+            logging.warning("CRITICAL: All filter options are empty - this indicates a data issue")
         
         # Debug: Log available columns and weight options
         if excel_processor.df is not None:
@@ -16273,11 +16377,30 @@ def get_initial_data():
             logging.info(f"Current file: {current_file}")
             
             # Get available tags
+            # PERFORMANCE: Check if this is a post-upload request - if so, skip database enrichment initially
+            # This allows tags to load immediately, then enrich in background
+            is_post_upload = request.args.get('post_upload') == '1' or request.headers.get('X-Post-Upload') == '1'
             logging.info("Getting available tags...")
             tags_start = time.time()
-            available_tags = excel_processor.get_available_tags()
-            tags_elapsed = (time.time() - tags_start) * 1000
-            logging.info(f"Available tags count: {len(available_tags)} (took {tags_elapsed:.0f}ms)")
+            
+            if is_post_upload:
+                # PERFORMANCE FIX: For post-upload, get tags without database enrichment first
+                # This allows immediate display, then enrich in background
+                logging.info("⚡ Post-upload detected - getting tags without database enrichment for fast display")
+                # Temporarily disable enrichment by using a flag
+                original_enrich = getattr(excel_processor, '_skip_enrichment', False)
+                excel_processor._skip_enrichment = True
+                try:
+                    available_tags = excel_processor.get_available_tags()
+                finally:
+                    excel_processor._skip_enrichment = original_enrich
+                tags_elapsed = (time.time() - tags_start) * 1000
+                logging.info(f"⚡ Available tags count: {len(available_tags)} (took {tags_elapsed:.0f}ms - fast mode)")
+            else:
+                # Normal mode - include database enrichment
+                available_tags = excel_processor.get_available_tags()
+                tags_elapsed = (time.time() - tags_start) * 1000
+                logging.info(f"Available tags count: {len(available_tags)} (took {tags_elapsed:.0f}ms)")
 
             initial_data = {
                 'success': True,
