@@ -18865,6 +18865,141 @@ def clear_performance_cache():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 # Database Import/Export API endpoints for migration
+@app.route('/api/backup-database', methods=['GET'])
+def backup_database():
+    """Backup the current database by downloading it."""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not product_db or not os.path.exists(product_db.db_path):
+            return jsonify({'error': 'Database not found'}), 404
+        
+        # Create backup filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        store_suffix = f'_{store_name}' if store_name else ''
+        backup_filename = f'product_database_backup{store_suffix}_{timestamp}.db'
+        
+        # Read the database file
+        with open(product_db.db_path, 'rb') as f:
+            database_data = f.read()
+        
+        # Create response with database file
+        response = make_response(database_data)
+        response.headers['Content-Type'] = 'application/x-sqlite3'
+        response.headers['Content-Disposition'] = f'attachment; filename="{backup_filename}"'
+        response.headers['Content-Length'] = len(database_data)
+        
+        logging.info(f"Database backup created: {backup_filename} ({len(database_data)} bytes)")
+        return response
+        
+    except Exception as e:
+        logging.error(f"Error backing up database: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/restore-database', methods=['POST'])
+def restore_database():
+    """Restore database from an uploaded backup file."""
+    try:
+        if 'database_file' not in request.files:
+            return jsonify({'error': 'No database file provided'}), 400
+        
+        file = request.files['database_file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Validate file extension
+        if not file.filename.lower().endswith(('.db', '.sqlite', '.sqlite3')):
+            return jsonify({'error': 'Invalid file type. Please upload a .db, .sqlite, or .sqlite3 file'}), 400
+        
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not product_db:
+            return jsonify({'error': 'Could not get product database'}), 500
+        
+        # Validate the uploaded database file
+        try:
+            import sqlite3
+            import tempfile
+            
+            # Save uploaded file to temp location
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as temp_file:
+                file.save(temp_file.name)
+                temp_path = temp_file.name
+            
+            # Validate it's a valid SQLite database
+            test_conn = sqlite3.connect(temp_path)
+            test_cursor = test_conn.cursor()
+            
+            # Check if it has required tables
+            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('products', 'strains')")
+            tables = [row[0] for row in test_cursor.fetchall()]
+            test_conn.close()
+            
+            if 'products' not in tables or 'strains' not in tables:
+                os.unlink(temp_path)
+                return jsonify({'error': 'Invalid database file. Missing required tables (products, strains)'}), 400
+            
+            # Create backup of current database before restore
+            backup_path = f"{product_db.db_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            if os.path.exists(product_db.db_path):
+                import shutil
+                shutil.copy2(product_db.db_path, backup_path)
+                logging.info(f"Created backup of current database: {backup_path}")
+            
+            # Close any existing connections
+            if hasattr(product_db, '_connection') and product_db._connection:
+                try:
+                    product_db._connection.close()
+                except:
+                    pass
+            
+            # Replace current database with uploaded one
+            import shutil
+            shutil.copy2(temp_path, product_db.db_path)
+            
+            # Clean up temp file
+            os.unlink(temp_path)
+            
+            # Reset database initialization flag to force re-initialization
+            product_db._initialized = False
+            
+            # Verify the restored database
+            restored_conn = sqlite3.connect(product_db.db_path)
+            restored_cursor = restored_conn.cursor()
+            restored_cursor.execute("SELECT COUNT(*) FROM products")
+            product_count = restored_cursor.fetchone()[0]
+            restored_cursor.execute("SELECT COUNT(*) FROM strains")
+            strain_count = restored_cursor.fetchone()[0]
+            restored_conn.close()
+            
+            logging.info(f"Database restored successfully: {product_count} products, {strain_count} strains")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Database restored successfully',
+                'products': product_count,
+                'strains': strain_count,
+                'backup_created': backup_path if os.path.exists(backup_path) else None
+            })
+            
+        except sqlite3.Error as db_error:
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.unlink(temp_path)
+            logging.error(f"Database validation error: {db_error}")
+            return jsonify({'error': f'Invalid database file: {str(db_error)}'}), 400
+        except Exception as restore_error:
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise restore_error
+        
+    except Exception as e:
+        logging.error(f"Error restoring database: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/clear-database', methods=['POST'])
 def clear_database():
     """Clear the database for migration."""

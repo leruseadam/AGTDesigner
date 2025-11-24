@@ -947,6 +947,34 @@
                   </div>
                 </div>
               </div>
+
+              <div class="row mt-4">
+                <div class="col-12">
+                  <div class="card glass-card">
+                    <div class="card-header">
+                      <h6 class="mb-0">Database Management</h6>
+                    </div>
+                    <div class="card-body">
+                      <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary" onclick="backupDatabase()">
+                          <i class="bi bi-download"></i> Backup Database
+                        </button>
+                        <button class="btn btn-success" onclick="restoreDatabase()">
+                          <i class="bi bi-upload"></i> Restore Database
+                        </button>
+                        <button class="btn btn-info" onclick="exportDatabase()">
+                          <i class="bi bi-file-earmark-spreadsheet"></i> Export to Excel
+                        </button>
+                      </div>
+                      <small class="text-muted d-block mt-2">
+                        <strong>Backup:</strong> Download a complete copy of your database<br>
+                        <strong>Restore:</strong> Upload a previously backed up database file<br>
+                        <strong>Export:</strong> Export database data to Excel format
+                      </small>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           `;
           
@@ -983,6 +1011,95 @@
         // Reset loading flag
         window._analyticsLoading = false;
       }
+    };
+
+    // Database Backup and Restore Functions
+    window.backupDatabase = async function() {
+      try {
+        const storeName = getCurrentStoreName();
+        const response = await fetch(`/api/backup-database?store=${encodeURIComponent(storeName || '')}`, {
+          method: 'GET'
+        });
+
+        if (!response.ok) {
+          throw new Error(`Backup failed: ${response.statusText}`);
+        }
+
+        // Get filename from Content-Disposition header or use default
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = 'database_backup.db';
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+          if (filenameMatch) {
+            filename = filenameMatch[1];
+          }
+        }
+
+        // Download the file
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        alert('✅ Database backup downloaded successfully!');
+      } catch (error) {
+        console.error('Backup error:', error);
+        alert('❌ Error backing up database: ' + error.message);
+      }
+    };
+
+    window.restoreDatabase = function() {
+      // Create file input
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.db,.sqlite,.sqlite3';
+      input.onchange = async function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (!confirm(`⚠️ WARNING: This will replace your current database with the backup file.\n\nFile: ${file.name}\nSize: ${(file.size / 1024 / 1024).toFixed(2)} MB\n\nAre you sure you want to continue?`)) {
+          return;
+        }
+
+        try {
+          const formData = new FormData();
+          formData.append('database_file', file);
+
+          const storeName = getCurrentStoreName();
+          const response = await fetch(`/api/restore-database?store=${encodeURIComponent(storeName || '')}`, {
+            method: 'POST',
+            body: formData
+          });
+
+          const result = await response.json();
+
+          if (!response.ok || !result.success) {
+            throw new Error(result.error || `Restore failed: ${response.statusText}`);
+          }
+
+          alert('✅ Database restored successfully! The page will reload in 3 seconds...');
+          setTimeout(() => {
+            window.location.reload();
+          }, 3000);
+        } catch (error) {
+          console.error('Restore error:', error);
+          alert('❌ Error restoring database: ' + error.message);
+        }
+      };
+      input.click();
+    };
+
+    function getCurrentStoreName() {
+      // Try to get store name from various sources
+      if (window.currentStoreName) return window.currentStoreName;
+      const storeDisplay = document.querySelector('[data-store-name]');
+      if (storeDisplay) return storeDisplay.getAttribute('data-store-name');
+      return null;
     };
     
                 window.openLineageEditor = function() {
