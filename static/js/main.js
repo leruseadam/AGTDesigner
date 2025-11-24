@@ -759,9 +759,11 @@ const AppLoadingSplash = {
         if (this._emergencyTimer) {
             clearTimeout(this._emergencyTimer);
         }
+        // CRITICAL FIX: Reduce emergency timeout to 5 seconds to prevent getting stuck
         this._emergencyTimer = setTimeout(() => {
+            console.warn('⚠️ Emergency splash hide triggered (5s timeout)');
             this.emergencyHide();
-        }, 7000);
+        }, 5000);
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
