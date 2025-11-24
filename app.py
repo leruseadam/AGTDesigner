@@ -9885,11 +9885,18 @@ def update_lineage():
             cursor = None
             
             # CRITICAL FIX: Helper function to ensure cursor is valid (defined early for use throughout)
+            # Added timeout protection to prevent hangs
+            connection_established = False
             def ensure_cursor_valid():
-                nonlocal conn, cursor
+                nonlocal conn, cursor, connection_established
                 if cursor is None or conn is None:
+                    # If initial connection failed, don't try to re-establish (could hang)
+                    if not connection_established:
+                        raise Exception("Database connection was never established - cannot proceed with lineage update")
+                    
                     logging.warning("Cursor or connection is None, re-establishing...")
                     try:
+                        # Set a timeout for reconnection attempts
                         conn = product_db._get_connection()
                         conn.execute("PRAGMA busy_timeout = 3000")
                         cursor = conn.cursor()
@@ -9964,6 +9971,9 @@ def update_lineage():
                 if cursor is None:
                     raise Exception("Cursor is None - cannot proceed with database operations")
                 
+                # Mark connection as established so ensure_cursor_valid() can safely re-establish if needed
+                connection_established = True
+                
                 # CRITICAL FIX: Get vendor and strain from database (after connection is established)
                 try:
                     for candidate, _ in variant_pairs:
@@ -10030,30 +10040,28 @@ def update_lineage():
                 except Exception as excel_vendor_error:
                     logging.warning(f"Could not get vendor from Excel: {excel_vendor_error}")
             
-            # Get strain from database
-            try:
-                cursor = ensure_cursor_valid()
-                for candidate, _ in variant_pairs:
-                    cursor.execute('''
-                        SELECT "Product Strain" FROM products
-                        WHERE "Product Name*" = ? OR "ProductName" = ?
-                        LIMIT 1
-                    ''', (candidate, candidate))
-                    result = cursor.fetchone()
-                    if result and result[0]:
-                        strain_name = str(result[0]).strip()
-                        if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
-                            logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
-                            break
-                        strain_name = None
-            except Exception as db_strain_error:
-                logging.warning(f"Could not get strain from database: {db_strain_error}")
-                strain_name = None
-                # Ensure cursor is still valid after error
+            # Get strain from database (only if connection was established)
+            if connection_established:
                 try:
                     cursor = ensure_cursor_valid()
-                except:
-                    pass
+                    for candidate, _ in variant_pairs:
+                        cursor.execute('''
+                            SELECT "Product Strain" FROM products
+                            WHERE "Product Name*" = ? OR "ProductName" = ?
+                            LIMIT 1
+                        ''', (candidate, candidate))
+                        result = cursor.fetchone()
+                        if result and result[0]:
+                            strain_name = str(result[0]).strip()
+                            if strain_name and strain_name.lower() not in ['nan', 'none', 'null', '']:
+                                logging.info(f"Found strain '{strain_name}' for product '{candidate}' from database")
+                                break
+                            strain_name = None
+                except Exception as db_strain_error:
+                    logging.warning(f"Could not get strain from database: {db_strain_error}")
+                    strain_name = None
+            else:
+                logging.warning("Skipping database strain lookup - connection was not established")
             
             # Fallback to Excel if strain not found in database and Excel is available
             if not strain_name and excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
@@ -10117,6 +10125,15 @@ def update_lineage():
                     strain_name = tag_name_clean
                 logging.info(f"💡 Using product name as strain name: '{strain_name}'")
             
+            # CRITICAL FIX: Check if connection was established before attempting database operations
+            if not connection_established:
+                logging.error("❌ Database connection was never established - cannot update lineage")
+                return jsonify({
+                    'success': False,
+                    'error': 'Database connection failed - cannot proceed with lineage update',
+                    'error_type': 'ConnectionError'
+                }), 500
+            
             # CRITICAL FIX: Always update by exact product name FIRST to ensure specific product is updated
             # Then update by vendor+strain to propagate to similar products
             products_updated_by_name = 0
@@ -10131,7 +10148,11 @@ def update_lineage():
                 cursor = ensure_cursor_valid()
             except Exception as cursor_error:
                 logging.error(f"❌ Failed to ensure cursor is valid: {cursor_error}")
-                raise Exception(f"Database cursor is None - cannot proceed with lineage update: {cursor_error}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Database cursor error: {str(cursor_error)}',
+                    'error_type': 'CursorError'
+                }), 500
             
             for candidate, normalized_candidate in variant_pairs:
                 logging.info(f"🔍 Searching for product: '{candidate}' (normalized: '{normalized_candidate}')")
