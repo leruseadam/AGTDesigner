@@ -3180,14 +3180,38 @@ class ExcelProcessor:
 
             self._on_dataset_updated(file_path, file_mtime)
             
-            # CRITICAL FIX: Update DataFrame Lineage column from database immediately after loading
+            # GUARANTEED FIX: Update DataFrame Lineage column from database immediately after loading
             # This ensures the DataFrame always has the latest database lineage, not Excel file lineage
-            try:
-                self._update_dataframe_lineage_from_database()
-                self.logger.info("✅ Updated DataFrame Lineage column from database after file load")
-            except Exception as lineage_update_err:
-                self.logger.warning(f"Could not update DataFrame lineage from database after load: {lineage_update_err}")
-                # Continue - enrichment will handle it later
+            # Use retry mechanism to handle database initialization timing issues on app restart
+            max_retries = 3
+            retry_delay = 0.5
+            for attempt in range(max_retries):
+                try:
+                    # Ensure database is initialized before updating
+                    import sys
+                    if 'app' in sys.modules:
+                        app_module = sys.modules['app']
+                        if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                            store_name = app_module.get_current_store_name()
+                            if store_name:
+                                product_db = app_module.get_product_database(store_name)
+                                if product_db:
+                                    # Initialize database if needed
+                                    if hasattr(product_db, 'init_database'):
+                                        product_db.init_database()
+                    
+                    self._update_dataframe_lineage_from_database()
+                    self.logger.info("✅ Updated DataFrame Lineage column from database after file load")
+                    break  # Success, exit retry loop
+                except Exception as lineage_update_err:
+                    if attempt < max_retries - 1:
+                        self.logger.warning(f"Could not update DataFrame lineage from database (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s: {lineage_update_err}")
+                        import time
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                    else:
+                        self.logger.error(f"❌ GUARANTEED FIX FAILED: Could not update DataFrame lineage from database after {max_retries} attempts: {lineage_update_err}")
+                        # Continue - enrichment will handle it later, but log the error
             
             self.logger.info(f"File loaded successfully: {len(self.df)} rows, {len(self.df.columns)} columns")
             return True

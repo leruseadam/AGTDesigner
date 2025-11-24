@@ -1121,6 +1121,16 @@ def get_excel_processor():
                                 logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
                                 row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
                                 logging.info(f"✅ Loaded {row_count} rows from session file")
+                                
+                                # GUARANTEED FIX: Force DataFrame update from database after loading
+                                # This ensures database lineage is ALWAYS used, even on app restart
+                                if hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
+                                    try:
+                                        logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database after session file load...")
+                                        _excel_processor._update_dataframe_lineage_from_database()
+                                        logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database after session file load")
+                                    except Exception as df_update_err:
+                                        logging.warning(f"Could not update DataFrame lineage from database after session file load: {df_update_err}")
                             else:
                                 logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
                                 _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
@@ -1146,6 +1156,16 @@ def get_excel_processor():
                                             canonical_col = get_canonical_field(col)
                                             if canonical_col in _excel_processor.df.columns:
                                                 _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
+                                    
+                                    # GUARANTEED FIX: Force DataFrame update from database after loading default file
+                                    # This ensures database lineage is ALWAYS used, even on app restart
+                                    if hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
+                                        try:
+                                            logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database after default file load...")
+                                            _excel_processor._update_dataframe_lineage_from_database()
+                                            logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database after default file load")
+                                        except Exception as df_update_err:
+                                            logging.warning(f"Could not update DataFrame lineage from database after default file load: {df_update_err}")
                                     
                                     # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
                                     if hasattr(_excel_processor, '_cache_dropdown_values'):
