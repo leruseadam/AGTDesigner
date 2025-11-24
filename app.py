@@ -9912,22 +9912,23 @@ def update_lineage():
                 return cursor
             
             try:
-                # CRITICAL FIX: Optimized retry logic for database locks with faster timeouts
-                max_retries = 3  # Reduced from 5 to 3 for faster failure
-                retry_delay = 0.05  # Reduced initial delay from 0.1 to 0.05
+                # CRITICAL FIX: Optimized retry logic for database locks with proper timeout handling
+                max_retries = 5  # Increased to 5 to allow more retry attempts
+                retry_delay = 0.1  # Initial delay of 0.1s
                 connection_start_time = time_module.time()
-                connection_timeout = 5.0  # Increased to 5 seconds since we're serializing with lock
+                connection_timeout = 10.0  # Increased to 10 seconds to account for retries and locks
                 
                 for attempt in range(max_retries):
-                    # Check if we've exceeded connection timeout
-                    if time_module.time() - connection_start_time > connection_timeout:
-                        logging.error(f"❌ Connection timeout after {time_module.time() - connection_start_time:.2f}s")
+                    # Check if we've exceeded connection timeout BEFORE attempting connection
+                    elapsed = time_module.time() - connection_start_time
+                    if elapsed > connection_timeout:
+                        logging.error(f"❌ Connection timeout after {elapsed:.2f}s (timeout: {connection_timeout}s)")
                         raise Exception(f"Database connection timeout after {connection_timeout}s")
                     
                     try:
                         conn = product_db._get_connection()
                         # Set timeout to prevent indefinite waiting
-                        conn.execute("PRAGMA busy_timeout = 3000")  # 3 seconds
+                        conn.execute("PRAGMA busy_timeout = 5000")  # 5 seconds for SQLite busy timeout
                         cursor = conn.cursor()
                         
                         # Use BEGIN IMMEDIATE to get an immediate lock
@@ -9941,11 +9942,16 @@ def update_lineage():
                                 raise
                         
                         # Break out of retry loop if we got the connection and lock
+                        # CRITICAL FIX: Mark connection as established immediately after successful connection
+                        # This ensures the flag is set even if subsequent queries fail
+                        connection_established = True
+                        logging.info(f"✅ Database connection established after {attempt + 1} attempt(s) in {time_module.time() - connection_start_time:.2f}s")
                         break
                         
                     except sqlite3.OperationalError as lock_error:
                         if "database is locked" in str(lock_error).lower() and attempt < max_retries - 1:
-                            logging.warning(f"⚠️  Database locked (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                            elapsed = time_module.time() - connection_start_time
+                            logging.warning(f"⚠️  Database locked (attempt {attempt + 1}/{max_retries}, elapsed: {elapsed:.2f}s), retrying in {retry_delay}s...")
                             if conn:
                                 try:
                                     conn.close()
@@ -9953,8 +9959,21 @@ def update_lineage():
                                     pass
                             conn = None
                             cursor = None
+                            
+                            # Check timeout before sleeping
+                            if elapsed + retry_delay > connection_timeout:
+                                logging.error(f"❌ Would exceed timeout ({elapsed + retry_delay:.2f}s > {connection_timeout}s), aborting")
+                                raise Exception(f"Database connection timeout - would exceed {connection_timeout}s limit")
+                            
                             time_module.sleep(retry_delay)
-                            retry_delay = min(retry_delay * 1.5, 0.3)  # Slower exponential backoff, max 0.3s
+                            retry_delay = min(retry_delay * 1.5, 0.5)  # Exponential backoff, max 0.5s
+                            
+                            # Check timeout after sleep as well
+                            elapsed = time_module.time() - connection_start_time
+                            if elapsed > connection_timeout:
+                                logging.error(f"❌ Connection timeout after sleep ({elapsed:.2f}s)")
+                                raise Exception(f"Database connection timeout after {connection_timeout}s")
+                            
                             continue
                         else:
                             # Last attempt or different error - raise it
@@ -9965,14 +9984,18 @@ def update_lineage():
                         raise
                 
                 if not conn or not cursor:
-                    raise Exception("Failed to get database connection after retries")
+                    db_path = getattr(product_db, 'db_path', 'Unknown')
+                    db_exists = os.path.exists(db_path) if db_path != 'Unknown' else False
+                    error_detail = f"Failed to get database connection after {max_retries} retries"
+                    if not db_exists:
+                        error_detail += f" - Database file does not exist at {db_path}"
+                    raise Exception(error_detail)
                 
                 # CRITICAL FIX: Validate cursor before using it
                 if cursor is None:
                     raise Exception("Cursor is None - cannot proceed with database operations")
                 
-                # Mark connection as established so ensure_cursor_valid() can safely re-establish if needed
-                connection_established = True
+                # Connection is already marked as established above when we break out of retry loop
                 
                 # CRITICAL FIX: Get vendor and strain from database (after connection is established)
                 try:
@@ -10127,11 +10150,22 @@ def update_lineage():
             
             # CRITICAL FIX: Check if connection was established before attempting database operations
             if not connection_established:
-                logging.error("❌ Database connection was never established - cannot update lineage")
+                # Get more details about why connection failed
+                db_path = getattr(product_db, 'db_path', 'Unknown')
+                db_exists = os.path.exists(db_path) if db_path != 'Unknown' else False
+                logging.error(f"❌ Database connection was never established - cannot update lineage (db_path: {db_path}, exists: {db_exists})")
+                error_msg = 'Database connection failed - cannot proceed with lineage update'
+                if not db_exists and db_path != 'Unknown':
+                    error_msg = f'Database file not found at {db_path}. Please ensure the database file exists for store {store_name}.'
                 return jsonify({
                     'success': False,
-                    'error': 'Database connection failed - cannot proceed with lineage update',
-                    'error_type': 'ConnectionError'
+                    'error': error_msg,
+                    'error_type': 'ConnectionError',
+                    'debug': {
+                        'db_path': db_path,
+                        'db_exists': db_exists,
+                        'store_name': store_name
+                    }
                 }), 500
             
             # CRITICAL FIX: Always update by exact product name FIRST to ensure specific product is updated
