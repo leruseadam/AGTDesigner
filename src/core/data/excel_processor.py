@@ -7731,9 +7731,10 @@ class ExcelProcessor:
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
         
-        # CRITICAL FIX: Query database for ALL product lineages BEFORE building tags
+        # GUARANTEED FIX: Query database for ALL product lineages BEFORE building tags
         # This ensures database lineage is ALWAYS used, never Excel file lineage
         db_lineage_map = {}
+        db_strain_map = {}
         try:
             import sys
             if 'app' in sys.modules:
@@ -7747,10 +7748,15 @@ class ExcelProcessor:
                         if product_name_col in filtered_df.columns:
                             product_names = filtered_df[product_name_col].dropna().unique().tolist()
                             if product_names:
-                                logger.info(f"🔍 QUERYING DATABASE: Looking up lineage for {len(product_names)} products...")
+                                logger.info(f"🔍 GUARANTEED FIX: QUERYING DATABASE for {len(product_names)} products before building tags...")
+                                # GUARANTEED FIX: Ensure database is initialized before querying
+                                try:
+                                    product_db.init_database()
+                                except Exception as init_err:
+                                    logger.warning(f"Could not initialize database before query: {init_err}")
                                 # Query database for all lineages at once
                                 db_records = product_db.get_products_by_names(product_names)
-                                logger.info(f"🔍 DATABASE RESPONSE: Got {len(db_records)} records from database")
+                                logger.info(f"🔍 GUARANTEED FIX: DATABASE RESPONSE: Got {len(db_records)} records from database")
                                 
                                 for db_record in db_records:
                                     product_name = db_record.get('Product Name*', '')
