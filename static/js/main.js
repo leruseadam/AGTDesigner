@@ -7664,6 +7664,9 @@ const TagManager = {
         // Start memory optimization
         this.startMemoryOptimization();
         
+        // Start periodic filter refresh to ensure filters stay in sync with data
+        this.startPeriodicFilterRefresh();
+        
         // Update table header if TagsTable is available
         setTimeout(() => {
             // Also update table header if TagsTable is available
@@ -10907,6 +10910,37 @@ const TagManager = {
         verboseLog('Memory optimization started');
     },
 
+    // Start periodic filter refresh to ensure filters stay in sync with data
+    startPeriodicFilterRefresh() {
+        // Clear any existing interval
+        if (this._filterRefreshInterval) {
+            clearInterval(this._filterRefreshInterval);
+            this._filterRefreshInterval = null;
+        }
+        
+        // Refresh filters every 60 seconds to ensure they stay in sync with data
+        this._filterRefreshInterval = setInterval(() => {
+            // Only refresh if we have tags loaded and page is visible
+            if (this.state.tags && this.state.tags.length > 0 && !document.hidden) {
+                verboseLog('🔄 Periodic filter refresh triggered');
+                this.fetchAndPopulateFilters().catch(error => {
+                    console.warn('Periodic filter refresh failed (non-critical):', error);
+                });
+            }
+        }, 60000); // Every 60 seconds
+        
+        verboseLog('Periodic filter refresh started (every 60 seconds)');
+    },
+
+    // Stop periodic filter refresh
+    stopPeriodicFilterRefresh() {
+        if (this._filterRefreshInterval) {
+            clearInterval(this._filterRefreshInterval);
+            this._filterRefreshInterval = null;
+            verboseLog('Periodic filter refresh stopped');
+        }
+    },
+
     // Memory optimization functions
     optimizeMemory() {
         const now = Date.now();
@@ -12169,6 +12203,11 @@ window.performJsonMatch = function() {
                     updateJsonFilterToggleVisibility();
                 }
             }, 1000);
+            
+            // CRITICAL FIX: Refresh filters after JSON match to ensure new products appear in filter dropdowns
+            TagManager.fetchAndPopulateFilters().catch(error => {
+                console.warn('Filter refresh after JSON match failed (non-critical):', error);
+            });
         }
         
         verboseLog('Available tags updated with JSON matched items');

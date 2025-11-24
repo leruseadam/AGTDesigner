@@ -3737,19 +3737,46 @@ class ExcelProcessor:
             if not product_names:
                 return tags
             
-            # Get database records in batch
+            # Get database records in batch - try exact match first
             db_records = product_db.get_products_by_names(product_names)
+            
+            # If exact match fails for some products, try fuzzy matching
+            if db_records:
+                found_names = {r.get('Product Name*', '') for r in db_records if r.get('Product Name*')}
+                missing_names = [n for n in product_names if n not in found_names]
+                if missing_names:
+                    logger.debug(f"Trying fuzzy matching for {len(missing_names)} products not found in exact match")
+                    if hasattr(product_db, 'get_products_by_names_fuzzy'):
+                        fuzzy_records = product_db.get_products_by_names_fuzzy(missing_names)
+                        if fuzzy_records:
+                            db_records.extend(fuzzy_records)
+                    elif hasattr(product_db, 'get_products_by_names_with_fuzzy'):
+                        fuzzy_records = product_db.get_products_by_names_with_fuzzy(missing_names)
+                        if fuzzy_records:
+                            db_records.extend(fuzzy_records)
+            
             if not db_records:
                 logger.debug("No database records found for tag enrichment")
                 return tags
             
-            # Create a lookup map by normalized product name
+            # Create a lookup map by normalized product name AND by base name
             db_lookup = {}
+            db_lookup_by_base = {}
             for db_record in db_records:
                 product_name = db_record.get('Product Name*', '')
                 if product_name:
                     normalized_name = product_db._normalize_product_name(product_name)
                     db_lookup[normalized_name] = db_record
+                    
+                    # Also create base name lookup (e.g., "100 Rackz" from "100 Rackz Super Sale - 14g")
+                    base_name = product_name
+                    for suffix in [' - ', ' by ', ' Super Sale', ' Summer Super Sale']:
+                        if suffix in base_name:
+                            base_name = base_name.split(suffix)[0].strip()
+                    if base_name and base_name != product_name:
+                        base_normalized = product_db._normalize_product_name(base_name)
+                        if base_normalized not in db_lookup_by_base:
+                            db_lookup_by_base[base_normalized] = db_record
             
             # Enrich each tag with database values
             enriched_tags = []
@@ -3762,6 +3789,37 @@ class ExcelProcessor:
                 
                 normalized_name = product_db._normalize_product_name(product_name)
                 db_record = db_lookup.get(normalized_name)
+                
+                # If exact match failed, try base name matching
+                if not db_record:
+                    base_name = product_name
+                    for suffix in [' - ', ' by ', ' Super Sale', ' Summer Super Sale']:
+                        if suffix in base_name:
+                            base_name = base_name.split(suffix)[0].strip()
+                    if base_name and base_name != product_name:
+                        base_normalized = product_db._normalize_product_name(base_name)
+                        db_record = db_lookup_by_base.get(base_normalized)
+                        if db_record:
+                            logger.debug(f"Matched '{product_name}' to database product '{db_record.get('Product Name*', '')}' via base name '{base_name}'")
+                
+                # Last resort: try get_product_lineage for lineage only
+                if not db_record:
+                    try:
+                        db_lineage_from_method = product_db.get_product_lineage(product_name)
+                        if db_lineage_from_method:
+                            db_lineage_clean = str(db_lineage_from_method).strip().upper()
+                            old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
+                            if old_lineage != db_lineage_clean:
+                                tag['Lineage'] = db_lineage_clean
+                                tag['lineage'] = db_lineage_clean.lower()
+                                tag['canonical_lineage'] = db_lineage_clean
+                                tag['currentLineage'] = db_lineage_clean
+                                enriched_count += 1
+                                logger.info(f"🔄 EXCEL ENRICHMENT (get_product_lineage): Tag '{product_name}' lineage updated: '{old_lineage}' → '{db_lineage_clean}'")
+                            enriched_tags.append(tag)
+                            continue
+                    except Exception as lineage_method_error:
+                        logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
                 
                 if db_record:
                     # Update tag with database values (database takes precedence)
