@@ -9979,6 +9979,11 @@ def update_lineage():
                 nonlocal conn, cursor, connection_established
                 if cursor is None or conn is None:
                     logging.warning("Cursor or connection is None, re-establishing...")
+                    # Clear the connection from pool to ensure we get a fresh one
+                    try:
+                        product_db._clear_connection()
+                    except:
+                        pass
                     try:
                         # Set a timeout for reconnection attempts
                         conn = product_db._get_connection()
@@ -12628,10 +12633,9 @@ def get_filter_options():
             # Compress response for Windows to reduce transfer time
             import gzip
             import json
-            from flask import make_response
             response_data = json.dumps(options)
             compressed_data = gzip.compress(response_data.encode('utf-8'))
-            
+
             response = make_response(compressed_data)
             response.headers['Content-Type'] = 'application/json'
             response.headers['Content-Encoding'] = 'gzip'
