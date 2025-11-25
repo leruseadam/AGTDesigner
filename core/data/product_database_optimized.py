@@ -21,6 +21,11 @@ class OptimizedProductDatabase:
         self._cache_lock = threading.Lock()
         self._initialized = False
         self._init_lock = threading.Lock()
+        self._connection_lock = threading.Lock()  # Lock for connection creation
+        
+        # Database connection settings
+        self._connection_timeout = 30.0  # 30 seconds timeout for connection operations
+        self._busy_timeout = 30000  # 30 seconds in milliseconds for SQLite busy_timeout
         
         # Performance timing
         self._timing_stats = {
@@ -30,22 +35,103 @@ class OptimizedProductDatabase:
             'cache_misses': 0
         }
     
+    def _create_connection(self):
+        """Create a new database connection with proper settings for concurrent access."""
+        max_retries = 5
+        retry_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                # Create connection with timeout and thread safety
+                conn = sqlite3.connect(
+                    self.db_path,
+                    timeout=self._connection_timeout,
+                    check_same_thread=False  # Allow connections from different threads
+                )
+                
+                # CRITICAL: Enable WAL mode immediately for better concurrent access
+                conn.execute("PRAGMA journal_mode = WAL")
+                
+                # CRITICAL: Set busy_timeout to handle locked database gracefully
+                conn.execute(f"PRAGMA busy_timeout = {self._busy_timeout}")
+                
+                # Performance optimizations
+                conn.execute("PRAGMA synchronous = NORMAL")  # Balance between safety and speed
+                conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
+                conn.execute("PRAGMA temp_store = MEMORY")  # Use memory for temp tables
+                
+                # Enable row factory for named access
+                conn.row_factory = sqlite3.Row
+                
+                logger.debug(f"Created new database connection (attempt {attempt + 1})")
+                return conn
+                
+            except sqlite3.OperationalError as e:
+                error_str = str(e).lower()
+                if "database is locked" in error_str and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"Database locked during connection creation (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Failed to create database connection after {attempt + 1} attempts: {e}")
+                    raise
+            except Exception as e:
+                logger.error(f"Unexpected error creating database connection: {e}")
+                raise
+    
     def _get_connection(self):
-        """Get a database connection, reusing if possible."""
+        """Get a database connection, reusing if possible. Creates new connection with proper settings."""
         thread_id = threading.get_ident()
-        if thread_id not in self._connection_pool:
-            self._connection_pool[thread_id] = sqlite3.connect(self.db_path)
-        return self._connection_pool[thread_id]
+        
+        # Check if we have a valid connection for this thread
+        if thread_id in self._connection_pool:
+            conn = self._connection_pool[thread_id]
+            try:
+                # Test if connection is still valid
+                conn.execute("SELECT 1")
+                return conn
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError, sqlite3.DatabaseError):
+                # Connection is invalid, remove it and create a new one
+                logger.warning(f"Connection for thread {thread_id} is invalid, creating new one")
+                try:
+                    conn.close()
+                except:
+                    pass
+                del self._connection_pool[thread_id]
+        
+        # Create new connection with proper locking to prevent race conditions
+        with self._connection_lock:
+            # Double-check after acquiring lock
+            if thread_id in self._connection_pool:
+                return self._connection_pool[thread_id]
+            
+            # Create new connection with proper settings
+            conn = self._create_connection()
+            self._connection_pool[thread_id] = conn
+            return conn
 
     def _clear_connection(self):
         """Clear the current thread's connection from the pool."""
         thread_id = threading.get_ident()
-        if thread_id in self._connection_pool:
-            try:
-                self._connection_pool[thread_id].close()
-            except:
-                pass
-            del self._connection_pool[thread_id]
+        with self._connection_lock:
+            if thread_id in self._connection_pool:
+                try:
+                    conn = self._connection_pool[thread_id]
+                    # Try to rollback any pending transaction
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
+                    # Close the connection
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                except:
+                    pass
+                del self._connection_pool[thread_id]
+                logger.debug(f"Cleared connection for thread {thread_id}")
 
     def _timed_operation(self, operation_name: str):
         """Decorator to time database operations."""
@@ -79,6 +165,15 @@ class OptimizedProductDatabase:
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
+                
+                # Ensure WAL mode is enabled (should already be set in _create_connection, but double-check)
+                try:
+                    cursor.execute("PRAGMA journal_mode = WAL")
+                    journal_mode = cursor.fetchone()[0]
+                    if journal_mode.upper() != 'WAL':
+                        logger.warning(f"WAL mode not enabled, current mode: {journal_mode}")
+                except:
+                    pass  # Non-critical
                 
                 # Create strains table
                 cursor.execute('''
@@ -306,9 +401,18 @@ class OptimizedProductDatabase:
     
     def close_connections(self):
         """Close all database connections."""
-        for conn in self._connection_pool.values():
-            conn.close()
-        self._connection_pool.clear()
+        with self._connection_lock:
+            for thread_id, conn in list(self._connection_pool.items()):
+                try:
+                    conn.rollback()  # Rollback any pending transactions
+                except:
+                    pass
+                try:
+                    conn.close()
+                except:
+                    pass
+            self._connection_pool.clear()
+            logger.debug("Closed all database connections")
     
     def _normalize_strain_name(self, strain_name: str) -> str:
         """Normalize strain name for consistent matching."""
