@@ -9961,18 +9961,43 @@ def update_lineage():
         for vrow in verification_rows:
             logging.info(f"✅ VERIFIED: Product '{vrow[0]}' now has lineage '{vrow[1]}'")
 
+        # CRITICAL FIX: Update Excel DataFrame lineage if Excel processor exists
+        # This ensures both database and Excel DataFrame stay in sync
+        excel_updated = False
+        try:
+            excel_processor = get_excel_processor()
+            if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
+                # Update lineage in Excel DataFrame for all matching products
+                if "Product Name*" in excel_processor.df.columns and "Lineage" in excel_processor.df.columns:
+                    # Find all rows matching the product name
+                    mask = (
+                        (excel_processor.df["Product Name*"].astype(str).str.strip() == str(tag_name).strip()) |
+                        (excel_processor.df["Product Name*"].astype(str).str.strip().str.lower() == str(tag_name).strip().lower())
+                    )
+                    matching_rows = mask.sum()
+                    if matching_rows > 0:
+                        excel_processor.df.loc[mask, "Lineage"] = new_lineage
+                        excel_updated = True
+                        logging.info(f"✅ Updated Excel DataFrame lineage for {matching_rows} row(s) matching '{tag_name}' to '{new_lineage}'")
+                    else:
+                        logging.debug(f"⚠️ No matching rows in Excel DataFrame for '{tag_name}'")
+        except Exception as excel_err:
+            logging.warning(f"Could not update Excel DataFrame lineage: {excel_err}")
+        
         # Clear caches AND Excel processor to force fresh data load
         try:
             cache.clear()
             clear_available_tags_cache(reason="lineage_update")
-            # CRITICAL FIX: Clear Excel processor from both global and request context to force reload with fresh database lineage
-            global _excel_processor
-            if hasattr(g, 'excel_processor'):
-                delattr(g, 'excel_processor')
-                logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
-            if _excel_processor is not None:
-                _excel_processor = None
-                logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
+            # CRITICAL FIX: Don't clear Excel processor if we just updated it - keep the updated DataFrame
+            # Only clear if we didn't update it (to force reload with fresh database lineage)
+            if not excel_updated:
+                global _excel_processor
+                if hasattr(g, 'excel_processor'):
+                    delattr(g, 'excel_processor')
+                    logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
+                if _excel_processor is not None:
+                    _excel_processor = None
+                    logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
         except Exception as clear_err:
             logging.warning(f"Could not clear caches/processor: {clear_err}")
 
