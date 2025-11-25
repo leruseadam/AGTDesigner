@@ -44,36 +44,22 @@ function createTagRow(tag) {
     lineage: tag.lineage
   };
   
-  // CRITICAL FIX: Prioritize Lineage field FIRST (user-editable, most recent from database)
-  // Then fall back to canonical_lineage/currentLineage (from strain table)
-  // This ensures manual lineage updates via /api/update-lineage are respected
-  let lineage = tag.Lineage || tag.canonical_lineage || tag.currentLineage || tag.lineage || 'MIXED';
-  // CRITICAL: Normalize lineage to uppercase for consistent dropdown matching
-  lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
-  
-  // DEBUG: Always log lineage fields for debugging
-  const tagName = tag['Product Name*'] || tag.ProductName || 'Unknown';
-  console.log(`🔍 LINEAGE DEBUG for "${tagName}":`, {
-    Lineage: tag.Lineage,
-    canonical_lineage: tag.canonical_lineage,
-    currentLineage: tag.currentLineage,
-    lineage: tag.lineage,
-    selected: lineage
-  });
-  
-  // DEBUG: Log if we're not using database lineage when it exists
-  if ((tag.canonical_lineage || tag.currentLineage) && lineage !== (tag.canonical_lineage || tag.currentLineage || '').toString().trim().toUpperCase()) {
-    console.warn(`⚠️ Lineage mismatch for "${tagName}":`, {
-      expected: (tag.canonical_lineage || tag.currentLineage || '').toString().trim().toUpperCase(),
-      actual: lineage,
-      allFields: lineageDebug
-    });
+  // CRITICAL FIX: ALWAYS use Lineage field FIRST - this is what /api/update-lineage updates
+  // Do NOT fall back to canonical_lineage/currentLineage - they come from strain table and may be stale
+  let lineage = 'MIXED';
+  if (tag.Lineage) {
+    lineage = tag.Lineage.toString().trim().toUpperCase();
+  } else if (tag.canonical_lineage) {
+    lineage = tag.canonical_lineage.toString().trim().toUpperCase();
+  } else if (tag.currentLineage) {
+    lineage = tag.currentLineage.toString().trim().toUpperCase();
+  } else if (tag.lineage) {
+    lineage = tag.lineage.toString().trim().toUpperCase();
   }
   
-  // CRITICAL: If Lineage field exists and is different from what we selected, use it
-  if (tag.Lineage && tag.Lineage.toString().trim().toUpperCase() !== lineage) {
-    console.log(`🔄 FORCING Lineage field for "${tagName}": ${lineage} → ${tag.Lineage.toString().trim().toUpperCase()}`);
-    lineage = tag.Lineage.toString().trim().toUpperCase();
+  // Ensure we have a valid lineage
+  if (!lineage || lineage === 'NAN' || lineage === '') {
+    lineage = 'MIXED';
   }
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
@@ -94,7 +80,8 @@ function createTagRow(tag) {
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
-                            onchange="TagsTable.handleLineageChange(this, '${tagName}')">
+                            onchange="TagsTable.handleLineageChange(this, '${tagName}')"
+                            data-current-lineage="${lineage}">
                         <option value="SATIVA" ${lineage === 'SATIVA' ? 'selected' : ''}>S</option>
                         <option value="INDICA" ${lineage === 'INDICA' ? 'selected' : ''}>I</option>
                         <option value="HYBRID" ${lineage === 'HYBRID' ? 'selected' : ''}>H</option>
@@ -102,7 +89,7 @@ function createTagRow(tag) {
                         <option value="HYBRID/INDICA" ${lineage === 'HYBRID/INDICA' ? 'selected' : ''}>H/I</option>
                         <option value="CBD" ${(lineage === 'CBD' || lineage === 'CBD_BLEND') ? 'selected' : ''}>CBD</option>
                         <option value="MIXED" ${(lineage === 'MIXED' || !['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'].includes((lineage || '').toUpperCase())) ? 'selected' : ''}>THC</option>
-                        <option value="PARA" ${lineage === 'PARA' ? 'selected' : ''}>P</option>
+                        <option value="PARA" ${(lineage === 'PARA' || lineage === 'PARAPHERNALIA') ? 'selected' : ''}>P</option>
                     </select>
                 </div>
             </td>

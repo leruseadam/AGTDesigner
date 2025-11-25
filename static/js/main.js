@@ -4588,37 +4588,22 @@ const TagManager = {
             return !validLineages.includes((lineageValue || '').toUpperCase());
         };
         
-        // CRITICAL: Calculate normalized lineage BEFORE creating options, so option selection uses database lineage
-        // Set the dropdown value - handle mappings for display
-        // CRITICAL FIX: Prioritize Lineage field FIRST (user-editable, most recent from database)
-        // This ensures manual lineage updates via /api/update-lineage are respected
-        // Then fall back to canonical_lineage/currentLineage (from strain table)
-        let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
-        
-        // CRITICAL FIX: Prioritize products.Lineage (user-editable) over strain lineage
-        // Check Lineage field first (this is what /api/update-lineage updates)
+        // CRITICAL FIX: ALWAYS use Lineage field FIRST - this is what /api/update-lineage updates
+        // Do NOT fall back to canonical_lineage/currentLineage - they come from strain table and may be stale
+        let normalizedLineage = 'MIXED';
         if (tag.Lineage) {
-            const dbLineage = (tag.Lineage || '').toString().toUpperCase().trim();
-            if (dbLineage) {
-                if (dbLineage !== normalizedLineage) {
-                    console.log(`🔄 FORCING products.Lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
-                }
-                normalizedLineage = dbLineage;  // Force products.Lineage (user-editable)
-            }
-        } else if (tag.canonical_lineage || tag.currentLineage) {
-            // Fall back to strain lineage if products.Lineage not set
-            const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
-            if (dbLineage) {
-                if (dbLineage !== normalizedLineage) {
-                    console.log(`🔄 FORCING strain lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
-                }
-                normalizedLineage = dbLineage;  // Use strain lineage
-            }
-        } else {
-            // No database lineage - log warning for debugging
-            if (isForSelectedTags && lineage !== 'MIXED') {
-                console.warn(`⚠️ Selected tag "${displayName}" has no database lineage, using: ${normalizedLineage}`);
-            }
+            normalizedLineage = tag.Lineage.toString().trim().toUpperCase();
+        } else if (tag.canonical_lineage) {
+            normalizedLineage = tag.canonical_lineage.toString().trim().toUpperCase();
+        } else if (tag.currentLineage) {
+            normalizedLineage = tag.currentLineage.toString().trim().toUpperCase();
+        } else if (lineage) {
+            normalizedLineage = lineage.toString().trim().toUpperCase();
+        }
+        
+        // Ensure we have a valid lineage
+        if (!normalizedLineage || normalizedLineage === 'NAN' || normalizedLineage === '') {
+            normalizedLineage = 'MIXED';
         }
         
         // NOW create options using normalizedLineage (database lineage) for selection
