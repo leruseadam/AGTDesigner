@@ -8171,6 +8171,12 @@ def get_available_tags():
             fast_load = False  # Disable fast_load when lineage was recently updated
             cached_tags = None  # CRITICAL: Bypass cache when lineage was updated to ensure fresh database values
             nocache = True  # Force fresh fetch
+        
+        # CRITICAL FIX: ALWAYS disable fast_load to ensure database lineage is always loaded
+        # This ensures lineage changes persist after refresh
+        # Performance impact is minimal since we're querying database anyway for lineage alignment
+        fast_load = False
+        logging.info("🔄 CRITICAL FIX: Disabled fast_load to ensure database lineage is always loaded")
 
         logging.info(f"🔍 LINEAGE DEBUG: cached_tags={'present' if cached_tags else 'None'}, nocache={nocache}, force_full_refresh={force_full_refresh}")
 
@@ -8569,6 +8575,7 @@ def get_available_tags():
                             
                             # GUARANTEED FIX: Update ALL tags with database lineage - OVERRIDE Excel/cached values
                             updated_count = 0
+                            not_found_count = 0
                             for tag in all_tags:
                                 tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
                                 if not tag_name:
@@ -8607,6 +8614,13 @@ def get_available_tags():
                                         logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}' (DB override)")
                                     else:
                                         logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed as '{db_lineage}' from database")
+                                else:
+                                    not_found_count += 1
+                                    # Log warning for products not found in database
+                                    old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
+                                    logging.warning(f"⚠️ GUARANTEED FIX: '{tag_name}' not found in database lineage map (current: '{old_lineage}')")
+                            
+                            logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage ({not_found_count} not found in DB)")
                             
                             logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage (database is source of truth)")
                         else:
