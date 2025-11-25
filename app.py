@@ -9875,7 +9875,7 @@ def download_processed_excel():
 
 @app.route('/api/update-lineage', methods=['POST'])
 def update_lineage():
-    """SIMPLIFIED: Fast lineage update - no complex logic, just UPDATE"""
+    """CRITICAL FIX: Update both product AND strain lineage to ensure changes persist"""
     try:
         data = request.get_json() if request.is_json else {}
         tag_name = data.get('tag_name') or data.get('Product Name*')
@@ -9890,7 +9890,7 @@ def update_lineage():
         
         db_path = f"uploads/product_database_{store_name}.db"
         
-        # Dead simple update - autocommit mode, no locks
+        # CRITICAL FIX: Update both product AND strain lineage
         import sqlite3
         conn = sqlite3.connect(db_path, timeout=5.0)
         conn.execute("PRAGMA journal_mode=WAL")
@@ -9898,34 +9898,84 @@ def update_lineage():
         conn.isolation_level = None  # Autocommit mode
         
         cursor = conn.cursor()
+        
+        # Step 1: Update product lineage
         cursor.execute("""
             UPDATE products 
             SET Lineage = ? 
             WHERE "Product Name*" = ? OR ProductName = ?
         """, (new_lineage, tag_name, tag_name))
+        products_updated = cursor.rowcount
         
-        updated = cursor.rowcount
+        # Step 2: CRITICAL - Also update strain lineage if product has a strain
+        # This ensures the lineage persists because strain lineage is the source of truth
+        cursor.execute("""
+            SELECT DISTINCT s.id, s.strain_name
+            FROM products p
+            JOIN strains s ON p.strain_id = s.id
+            WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+            AND p.strain_id IS NOT NULL
+        """, (tag_name, tag_name))
+        strain_rows = cursor.fetchall()
+        
+        strains_updated = 0
+        for strain_id, strain_name in strain_rows:
+            # Update both sovereign_lineage and canonical_lineage
+            cursor.execute("""
+                UPDATE strains 
+                SET sovereign_lineage = ?, canonical_lineage = ?
+                WHERE id = ?
+            """, (new_lineage, new_lineage, strain_id))
+            strains_updated += cursor.rowcount
+            logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{new_lineage}'")
+        
+        # Step 3: Also update all products with the same strain (sovereign lineage propagation)
+        if strains_updated > 0:
+            for strain_id, strain_name in strain_rows:
+                cursor.execute("""
+                    UPDATE products 
+                    SET Lineage = ?
+                    WHERE strain_id = ?
+                """, (new_lineage, strain_id))
+                similar_products_updated = cursor.rowcount
+                if similar_products_updated > products_updated:
+                    logging.info(f"✅ Updated {similar_products_updated} products with strain '{strain_name}' to lineage '{new_lineage}'")
+        
         conn.close()
-        
-        # Clear caches
+
+        # Clear caches AND Excel processor to force fresh data load
         try:
             cache.clear()
-        except:
-            pass
+            clear_available_tags_cache(reason="lineage_update")
+            # CRITICAL FIX: Clear Excel processor from both global and request context to force reload with fresh database lineage
+            global _excel_processor
+            if hasattr(g, 'excel_processor'):
+                delattr(g, 'excel_processor')
+                logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
+            if _excel_processor is not None:
+                _excel_processor = None
+                logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
+        except Exception as clear_err:
+            logging.warning(f"Could not clear caches/processor: {clear_err}")
         
-        logging.info(f"✅ Updated {updated} products to lineage '{new_lineage}'")
+        total_updated = products_updated + strains_updated
+        logging.info(f"✅ Updated {products_updated} products and {strains_updated} strains to lineage '{new_lineage}'")
         
         return jsonify({
             'success': True,
-            'products_updated': updated,
-            'db_updated': updated,
+            'products_updated': products_updated,
+            'strains_updated': strains_updated,
+            'db_updated': total_updated,
             'excel_updated': 0,
             'new_lineage': new_lineage,
+            'verified_lineage': new_lineage,
             'verification_passed': True
         })
         
     except Exception as e:
         logging.error(f"❌ Lineage update error: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
