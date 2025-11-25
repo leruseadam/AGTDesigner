@@ -6993,7 +6993,6 @@ const TagManager = {
         });
 
         this.updateTagCount('selected', fullTags.length);
-        console.timeEnd('updateSelectedTags');
 
         // Attach delegated change handler once (idempotent)
         if (!container._hasDeselectionHandler) {
