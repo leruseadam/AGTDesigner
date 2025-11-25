@@ -36,7 +36,17 @@ class OptimizedProductDatabase:
         if thread_id not in self._connection_pool:
             self._connection_pool[thread_id] = sqlite3.connect(self.db_path)
         return self._connection_pool[thread_id]
-    
+
+    def _clear_connection(self):
+        """Clear the current thread's connection from the pool."""
+        thread_id = threading.get_ident()
+        if thread_id in self._connection_pool:
+            try:
+                self._connection_pool[thread_id].close()
+            except:
+                pass
+            del self._connection_pool[thread_id]
+
     def _timed_operation(self, operation_name: str):
         """Decorator to time database operations."""
         def decorator(func):

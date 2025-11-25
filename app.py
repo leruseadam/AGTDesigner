@@ -10003,16 +10003,21 @@ def update_lineage():
                 retry_delay = 0.2  # Initial delay of 0.2s (increased from 0.1s)
                 connection_start_time = time_module.time()
                 connection_timeout = 15.0  # Increased to 15 seconds to account for retries and locks
-                
+
                 # CRITICAL FIX: Close any existing connections before retrying to prevent connection leaks
                 if conn:
                     try:
                         conn.close()
                     except:
                         pass
+                    # Clear connection from pool so next _get_connection() returns a fresh one
+                    try:
+                        product_db._clear_connection()
+                    except:
+                        pass
                     conn = None
                     cursor = None
-                
+
                 for attempt in range(max_retries):
                     # Check if we've exceeded connection timeout BEFORE attempting connection
                     elapsed = time_module.time() - connection_start_time
@@ -10051,6 +10056,11 @@ def update_lineage():
                                 except:
                                     # If rollback fails, close connection and retry
                                     conn.close()
+                                    # Clear connection from pool so next _get_connection() returns a fresh one
+                                    try:
+                                        product_db._clear_connection()
+                                    except:
+                                        pass
                                     conn = None
                                     cursor = None
                                     raise
@@ -10058,6 +10068,11 @@ def update_lineage():
                                 # Database is locked, close connection and retry
                                 try:
                                     conn.close()
+                                except:
+                                    pass
+                                # Clear connection from pool so next _get_connection() returns a fresh one
+                                try:
+                                    product_db._clear_connection()
                                 except:
                                     pass
                                 conn = None
@@ -10089,6 +10104,11 @@ def update_lineage():
                                     conn.close()
                                 except:
                                     pass
+                                # Clear connection from pool so next _get_connection() returns a fresh one
+                                try:
+                                    product_db._clear_connection()
+                                except:
+                                    pass
                             conn = None
                             cursor = None
                             
@@ -10116,6 +10136,11 @@ def update_lineage():
                                     conn.close()
                                 except:
                                     pass
+                                # Clear connection from pool
+                                try:
+                                    product_db._clear_connection()
+                                except:
+                                    pass
                             raise
                     except Exception as conn_error:
                         logging.error(f"❌ Error getting database connection: {conn_error}")
@@ -10123,6 +10148,11 @@ def update_lineage():
                         if conn:
                             try:
                                 conn.close()
+                            except:
+                                pass
+                            # Clear connection from pool
+                            try:
+                                product_db._clear_connection()
                             except:
                                 pass
                         raise
@@ -11372,6 +11402,17 @@ def update_lineage():
         return jsonify(response_data)
             
     except Exception as e:
+        # CRITICAL FIX: Always release lock in exception handler
+        try:
+            if 'lock_acquired' in locals() and lock_acquired:
+                try:
+                    lineage_update_lock.release()
+                    logging.info(f"🔓 Released lineage update lock in exception handler")
+                except Exception as lock_release_error:
+                    logging.warning(f"⚠️  Could not release lock in exception handler: {lock_release_error}")
+        except:
+            pass  # Ignore errors during lock release attempt
+        
         try:
             request_duration = time.time() - request_start_time if 'request_start_time' in locals() else 0
             error_msg = str(e) if e else 'Unknown error'
@@ -12283,9 +12324,9 @@ def _get_filter_options_from_database(store_name=None):
             if doh and str(doh).strip().upper() in ['YES', 'NO']:
                 doh_values.add(str(doh).strip().upper())
             
-            # High CBD - check product type for CBD indicators
+            # High CBD - collect product types to check later
             product_type_lower = str(product_type).lower()
-            if 'cbd' in product_type_lower or 'high cbd' in product_type_lower:
+            if product_type_lower.startswith('high cbd'):
                 high_cbd_types.add(product_type)
         
         # Convert to sorted lists
@@ -12297,7 +12338,7 @@ def _get_filter_options_from_database(store_name=None):
             'weight': sorted(list(weights)),
             'strain': sorted(list(strains)),
             'doh': sorted(list(doh_values)),
-            'highCbd': sorted(list(high_cbd_types))
+            'highCbd': []  # Will be set below
         }
         
         # Clean lists (remove empty values)
@@ -12305,6 +12346,11 @@ def _get_filter_options_from_database(store_name=None):
         def clean_list(lst):
             return [v for v in lst if v and str(v).strip() and str(v).strip().lower() != 'nan']
         options = {k: clean_list(v) for k, v in options.items()}
+        
+        # CRITICAL FIX: Process High CBD filter the same way as Excel processor
+        # Check if any product types start with "high cbd"
+        has_high_cbd = any(str(pt).strip().lower().startswith('high cbd') for pt in product_types)
+        options['highCbd'] = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
         
         option_counts = {k: len(v) for k, v in options.items()}
         logging.info(f"✅ Filter options from database: {option_counts}")

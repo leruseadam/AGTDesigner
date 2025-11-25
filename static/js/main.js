@@ -1312,6 +1312,13 @@ const TagManager = {
                         return aIndex - bIndex;
                     }
                 }
+                // Special handling for High CBD filter - High CBD Products should come first
+                if (filterType === 'highCbd') {
+                    if (a === 'High CBD Products') return -1;
+                    if (b === 'High CBD Products') return 1;
+                    if (a === 'Non-High CBD Products') return 1;
+                    if (b === 'Non-High CBD Products') return -1;
+                }
                 return a.localeCompare(b);
             });
             
@@ -5289,8 +5296,9 @@ const TagManager = {
             
             // CRITICAL FIX: Debounce backend refresh to prevent race conditions when multiple updates happen
             // Update originalTags and refresh the UI to show the new lineage
-            // CRITICAL: Capture verifiedLineage in closure to ensure it's accessible in setTimeout callback
+            // CRITICAL: Capture verifiedLineage and newLineage in closure to ensure they're accessible in setTimeout callback
             const capturedVerifiedLineage = verifiedLineage;
+            const capturedNewLineage = newLineage;
             if (!this._pendingLineageRefresh) {
                 this._pendingLineageRefresh = setTimeout(async () => {
                     try {
@@ -5315,8 +5323,8 @@ const TagManager = {
                                         // Always define it, even if it's undefined/null
                                         const dbLineage = freshTag.Lineage || freshTag.currentLineage || freshTag.canonical_lineage || freshTag.lineage || null;
                                         
-                                        // Use capturedVerifiedLineage as fallback if dbLineage is not available
-                                        const lineageToUse = dbLineage || capturedVerifiedLineage || newLineage;
+                                        // Use capturedVerifiedLineage or capturedNewLineage as fallback if dbLineage is not available
+                                        const lineageToUse = dbLineage || capturedVerifiedLineage || capturedNewLineage;
                                         
                                         // Update in originalTags
                                         const existingIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === updatedTagName);
@@ -5368,7 +5376,11 @@ const TagManager = {
                             }
                         }
                     } catch (refreshError) {
-                        console.warn('Could not refresh backend cache:', refreshError);
+                        // CRITICAL FIX: Better error logging to help diagnose issues
+                        console.error('❌ Could not refresh backend cache:', refreshError);
+                        if (refreshError.stack) {
+                            console.error('Error stack:', refreshError.stack);
+                        }
                     } finally {
                         this._pendingLineageRefresh = null;
                     }
