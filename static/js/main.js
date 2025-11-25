@@ -4446,6 +4446,18 @@ const TagManager = {
             dohValue = (tag.DOH || '').toString().toUpperCase();
         }
         const productTypeForImages = (tag['Product Type*'] || '').toString().toLowerCase();
+
+        // Debug logging for High THC products
+        if (productTypeForImages.includes('high thc') || dohValue === 'THC') {
+            console.log('🔍 High THC Product:', {
+                name: tag['Product Name*'],
+                dohValue: dohValue,
+                productType: productTypeForImages,
+                isJsonMatched: isJsonMatched,
+                dohField: tag.DOH,
+                dohCompliantField: tag['DOH Compliant (Yes/No)']
+            });
+        }
         
         // Create image container for dynamic updates
         const imageContainer = document.createElement('span');
