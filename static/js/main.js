@@ -5988,15 +5988,8 @@ const TagManager = {
     },
 
     updateSelectedTags(tags) {
-        // CRITICAL FIX: Always end any existing timer first to prevent "Timer already exists" warning
-        // This handles cases where the function is called multiple times rapidly
-        try {
-            console.timeEnd('updateSelectedTags');
-        } catch (e) {
-            // Timer doesn't exist, that's fine - continue
-        }
-        // Now safely start a new timer
-        console.time('updateSelectedTags');
+        // CRITICAL FIX: Removed console.time/timeEnd to prevent "Timer does not exist" errors
+        // These were only for debugging and causing issues when called from lineage updates
         
         if (!tags || !Array.isArray(tags)) {
             console.warn('updateSelectedTags called with invalid tags:', tags);
@@ -6006,7 +5999,6 @@ const TagManager = {
         // Prevent updates during tag move operations to avoid race conditions
         if (this.isMovingTags) {
             verboseLog('Ignoring updateSelectedTags during tag move operation');
-            console.timeEnd('updateSelectedTags');
             return;
         }
         
@@ -6014,7 +6006,6 @@ const TagManager = {
         const container = document.getElementById('selectedTags');
         if (!container) {
             console.error('Selected tags container not found');
-            console.timeEnd('updateSelectedTags');
             return;
         }
         
@@ -6040,7 +6031,6 @@ const TagManager = {
             if (currentTagNames.size === newTagNames.size && 
                 [...currentTagNames].every(name => newTagNames.has(name))) {
                 verboseLog('updateSelectedTags: No changes detected, skipping update');
-                console.timeEnd('updateSelectedTags');
                 return;
             }
         }
@@ -6322,7 +6312,6 @@ const TagManager = {
         if (!fullTags || fullTags.length === 0) {
             verboseLog('No tags to display in selected tags');
             this.updateTagCount('selected', 0);
-            console.timeEnd('updateSelectedTags');
             return;
         }
 
