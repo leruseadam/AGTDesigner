@@ -5289,6 +5289,8 @@ const TagManager = {
             
             // CRITICAL FIX: Debounce backend refresh to prevent race conditions when multiple updates happen
             // Update originalTags and refresh the UI to show the new lineage
+            // CRITICAL: Capture verifiedLineage in closure to ensure it's accessible in setTimeout callback
+            const capturedVerifiedLineage = verifiedLineage;
             if (!this._pendingLineageRefresh) {
                 this._pendingLineageRefresh = setTimeout(async () => {
                     try {
@@ -5308,17 +5310,23 @@ const TagManager = {
                                 
                                 freshData.tags.forEach(freshTag => {
                                     const updatedTagName = freshTag['Product Name*'];
-                                    if (updatedTagNames.has(updatedTagName)) {
+                                    if (updatedTagName && updatedTagNames.has(updatedTagName)) {
+                                        // CRITICAL FIX: Define dbLineage at function scope so it's available throughout
+                                        // Always define it, even if it's undefined/null
+                                        const dbLineage = freshTag.Lineage || freshTag.currentLineage || freshTag.canonical_lineage || freshTag.lineage || null;
+                                        
+                                        // Use capturedVerifiedLineage as fallback if dbLineage is not available
+                                        const lineageToUse = dbLineage || capturedVerifiedLineage || newLineage;
+                                        
                                         // Update in originalTags
                                         const existingIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === updatedTagName);
                                         if (existingIndex >= 0) {
                                             // Update the existing tag with fresh lineage data
-                                            const dbLineage = freshTag.Lineage || freshTag.currentLineage || freshTag.canonical_lineage || freshTag.lineage;
-                                            if (dbLineage) {
-                                                this.state.originalTags[existingIndex].Lineage = dbLineage;
-                                                this.state.originalTags[existingIndex].lineage = dbLineage;
-                                                this.state.originalTags[existingIndex].currentLineage = dbLineage;
-                                                this.state.originalTags[existingIndex].canonical_lineage = dbLineage;
+                                            if (lineageToUse) {
+                                                this.state.originalTags[existingIndex].Lineage = lineageToUse;
+                                                this.state.originalTags[existingIndex].lineage = lineageToUse;
+                                                this.state.originalTags[existingIndex].currentLineage = lineageToUse;
+                                                this.state.originalTags[existingIndex].canonical_lineage = lineageToUse;
                                                 updatedCount++;
                                             }
                                         }
@@ -5326,17 +5334,18 @@ const TagManager = {
                                         // Also update in current tags if visible
                                         const currentIndex = this.state.tags.findIndex(t => t['Product Name*'] === updatedTagName);
                                         if (currentIndex >= 0) {
-                                            const dbLineage = freshTag.Lineage || freshTag.currentLineage || freshTag.canonical_lineage || freshTag.lineage;
-                                            if (dbLineage) {
-                                                this.state.tags[currentIndex].Lineage = dbLineage;
-                                                this.state.tags[currentIndex].lineage = dbLineage;
-                                                this.state.tags[currentIndex].currentLineage = dbLineage;
-                                                this.state.tags[currentIndex].canonical_lineage = dbLineage;
+                                            if (lineageToUse) {
+                                                this.state.tags[currentIndex].Lineage = lineageToUse;
+                                                this.state.tags[currentIndex].lineage = lineageToUse;
+                                                this.state.tags[currentIndex].currentLineage = lineageToUse;
+                                                this.state.tags[currentIndex].canonical_lineage = lineageToUse;
                                             }
                                         }
                                         
-                                        // Update UI element for this tag
-                                        this.updateTagLineageInUI(updatedTagName, dbLineage || verifiedLineage);
+                                        // Update UI element for this tag - always use a defined value
+                                        if (lineageToUse) {
+                                            this.updateTagLineageInUI(updatedTagName, lineageToUse);
+                                        }
                                     }
                                 });
                                 
