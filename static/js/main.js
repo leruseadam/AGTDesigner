@@ -5722,12 +5722,16 @@ const TagManager = {
                 }
             }
             // Fallback: manual search when name contains quotes or CSS.escape not available
-            const candidates = document.querySelectorAll(`${containerSelector} .tag-item`);
+            // Search in both .tag-item and .tag-row elements
+            const candidates = document.querySelectorAll(`${containerSelector} .tag-item, ${containerSelector} .tag-row`);
             for (const el of candidates) {
                 const dataName = el.getAttribute('data-tag-name');
                 const checkbox = el.querySelector('.tag-checkbox');
                 const cbValue = checkbox ? checkbox.value : null;
-                if (dataName === name || cbValue === name) return el;
+                // Also check if the tag name appears in the element's text content or label
+                const tagLabel = el.querySelector('.tag-name, label');
+                const labelText = tagLabel ? tagLabel.textContent.trim() : '';
+                if (dataName === name || cbValue === name || labelText === name) return el;
             }
             return null;
         };
@@ -5759,73 +5763,116 @@ const TagManager = {
             tagElement.dataset.lineage = newLineage.toUpperCase();
         };
 
-        // Update lineage dropdown in available tags
-        const availableTagElement = findTagElement('#availableTags', tagName);
+        // Update lineage dropdown in available tags - search in multiple containers
+        const availableContainers = ['#availableTags', '#availableTagsTable', '#available-tags'];
+        let availableTagElement = null;
+        for (const container of availableContainers) {
+            availableTagElement = findTagElement(container, tagName);
+            if (availableTagElement) break;
+        }
+        
         if (availableTagElement) {
             // CRITICAL FIX: Update state first to prevent change handler from reverting
             updateTagInState(availableTagElement);
             
-            const lineageSelect = availableTagElement.querySelector('.lineage-dropdown');
-            if (lineageSelect) {
+            // Find all lineage dropdowns in this element (might be multiple)
+            const lineageSelects = availableTagElement.querySelectorAll('.lineage-dropdown');
+            lineageSelects.forEach(lineageSelect => {
                 const oldValue = lineageSelect.value;
                 if (oldValue !== newLineage) {
                     // CRITICAL FIX: Mark as programmatic update to prevent change handler from processing
                     lineageSelect._isProgrammaticUpdate = true;
                     lineageSelect.value = newLineage;
-                    
-                    // Update tag color
-                    const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
-                    if (tag) {
-                        this.forceTagColorUpdate(tag, newLineage);
-                    }
+                    verboseLog(`✅ Updated available tag lineage dropdown for ${tagName} from ${oldValue} to ${newLineage}`);
                 }
-                
-                // CRITICAL FIX: Also update any lineage display text/span elements
-                const lineageDisplay = availableTagElement.querySelector('.lineage-display, .lineage-text, [data-lineage]');
-                if (lineageDisplay) {
-                    lineageDisplay.textContent = newLineage;
-                    if (lineageDisplay.hasAttribute('data-lineage')) {
-                        lineageDisplay.setAttribute('data-lineage', newLineage);
-                    }
-                }
-                
-                verboseLog(`✅ Updated available tag lineage dropdown for ${tagName} to ${newLineage}`);
+            });
+            
+            // Update tag color
+            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
+            if (tag) {
+                this.forceTagColorUpdate(tag, newLineage);
             }
+            
+            // CRITICAL FIX: Also update any lineage display text/span elements
+            const lineageDisplays = availableTagElement.querySelectorAll('.lineage-display, .lineage-text, [data-lineage]');
+            lineageDisplays.forEach(lineageDisplay => {
+                lineageDisplay.textContent = newLineage;
+                if (lineageDisplay.hasAttribute('data-lineage')) {
+                    lineageDisplay.setAttribute('data-lineage', newLineage);
+                }
+            });
+            
+            // Update data-lineage attribute on the element itself
+            availableTagElement.setAttribute('data-lineage', newLineage.toUpperCase());
+            
+            verboseLog(`✅ Updated available tag lineage for ${tagName} to ${newLineage}`);
         }
 
-        // Update lineage dropdown in selected tags
-        const selectedTagElement = findTagElement('#selectedTags', tagName);
+        // Update lineage dropdown in selected tags - search in multiple containers
+        const selectedContainers = ['#selectedTags', '#selectedTagsTable', '#selected-tags'];
+        let selectedTagElement = null;
+        for (const container of selectedContainers) {
+            selectedTagElement = findTagElement(container, tagName);
+            if (selectedTagElement) break;
+        }
+        
         if (selectedTagElement) {
             // CRITICAL FIX: Update state first to prevent change handler from reverting
             updateTagInState(selectedTagElement);
             
-            const lineageSelect = selectedTagElement.querySelector('.lineage-dropdown');
-            if (lineageSelect) {
+            // Find all lineage dropdowns in this element (might be multiple)
+            const lineageSelects = selectedTagElement.querySelectorAll('.lineage-dropdown');
+            lineageSelects.forEach(lineageSelect => {
                 const oldValue = lineageSelect.value;
                 if (oldValue !== newLineage) {
                     // CRITICAL FIX: Mark as programmatic update to prevent change handler from processing
                     lineageSelect._isProgrammaticUpdate = true;
                     lineageSelect.value = newLineage;
-                    
-                    // Update tag color
-                    const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
-                    if (tag) {
-                        this.forceTagColorUpdate(tag, newLineage);
-                    }
+                    verboseLog(`✅ Updated selected tag lineage dropdown for ${tagName} from ${oldValue} to ${newLineage}`);
                 }
-                
-                // CRITICAL FIX: Also update any lineage display text/span elements
-                const lineageDisplay = selectedTagElement.querySelector('.lineage-display, .lineage-text, [data-lineage]');
-                if (lineageDisplay) {
-                    lineageDisplay.textContent = newLineage;
-                    if (lineageDisplay.hasAttribute('data-lineage')) {
-                        lineageDisplay.setAttribute('data-lineage', newLineage);
-                    }
-                }
-                
-                verboseLog(`✅ Updated selected tag lineage dropdown for ${tagName} to ${newLineage}`);
+            });
+            
+            // Update tag color
+            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
+            if (tag) {
+                this.forceTagColorUpdate(tag, newLineage);
             }
+            
+            // CRITICAL FIX: Also update any lineage display text/span elements
+            const lineageDisplays = selectedTagElement.querySelectorAll('.lineage-display, .lineage-text, [data-lineage]');
+            lineageDisplays.forEach(lineageDisplay => {
+                lineageDisplay.textContent = newLineage;
+                if (lineageDisplay.hasAttribute('data-lineage')) {
+                    lineageDisplay.setAttribute('data-lineage', newLineage);
+                }
+            });
+            
+            // Update data-lineage attribute on the element itself
+            selectedTagElement.setAttribute('data-lineage', newLineage.toUpperCase());
+            
+            verboseLog(`✅ Updated selected tag lineage for ${tagName} to ${newLineage}`);
         }
+        
+        // CRITICAL FIX: Also search for lineage dropdowns by tag name directly (fallback for table rows)
+        // This handles cases where the element structure doesn't match expected patterns
+        const allLineageDropdowns = document.querySelectorAll('.lineage-dropdown');
+        allLineageDropdowns.forEach(dropdown => {
+            // Check if this dropdown is associated with the tag we're updating
+            const parentRow = dropdown.closest('.tag-row, .tag-item, tr');
+            if (parentRow) {
+                const rowTagName = parentRow.getAttribute('data-tag-name') || 
+                                  parentRow.querySelector('.tag-name, label')?.textContent?.trim() ||
+                                  parentRow.querySelector('td')?.textContent?.trim();
+                if (rowTagName === tagName) {
+                    const oldValue = dropdown.value;
+                    if (oldValue !== newLineage) {
+                        dropdown._isProgrammaticUpdate = true;
+                        dropdown.value = newLineage;
+                        verboseLog(`✅ Updated lineage dropdown (fallback search) for ${tagName} from ${oldValue} to ${newLineage}`);
+                    }
+                }
+            }
+        });
     },
 
     // NEW: Update lineage for all items with the same vendor + strain immediately in UI/state

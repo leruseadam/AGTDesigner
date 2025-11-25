@@ -433,6 +433,7 @@ class TagsTable {
 
     // CRITICAL FIX: Force refresh available tags with fresh lineage from database
     // This ensures UI shows updated lineage values immediately
+    // Wait longer (500ms) to ensure backend update has completed
     setTimeout(async () => {
       try {
         // Call /api/available-tags with prefer_db and nocache to force database lineage alignment
@@ -452,11 +453,12 @@ class TagsTable {
               );
               
               if (tagIndex >= 0) {
-                const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage;
+                const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage || updatedTag.lineage;
                 if (dbLineage) {
                   const currentLineage = TagManager.state.originalTags[tagIndex].Lineage || 
                                          TagManager.state.originalTags[tagIndex].currentLineage ||
-                                         TagManager.state.originalTags[tagIndex].canonical_lineage;
+                                         TagManager.state.originalTags[tagIndex].canonical_lineage ||
+                                         TagManager.state.originalTags[tagIndex].lineage;
                   
                   // Update all lineage-related fields
                   TagManager.state.originalTags[tagIndex].Lineage = dbLineage;
@@ -483,6 +485,22 @@ class TagsTable {
               }
             });
             
+            // CRITICAL: Force update all lineage dropdowns immediately after state update
+            // This ensures UI reflects database changes even if re-render doesn't happen
+            refreshData.tags.forEach(updatedTag => {
+              const tagNameToUpdate = updatedTag['Product Name*'] || updatedTag.ProductName;
+              if (!tagNameToUpdate) return;
+              
+              const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage || updatedTag.lineage;
+              if (dbLineage) {
+                // Force update UI dropdowns directly
+                if (typeof TagManager !== 'undefined' && typeof TagManager.updateTagLineageInUI === 'function') {
+                  TagManager.updateTagLineageInUI(tagNameToUpdate, dbLineage);
+                  console.log(`🎨 Force updated UI lineage dropdown for "${tagNameToUpdate}" to ${dbLineage}`);
+                }
+              }
+            });
+            
             // CRITICAL: Re-render available tags to show updated lineage dropdowns
             if (needsRerender && typeof TagManager._updateAvailableTags === 'function') {
               console.log('🔄 Re-rendering available tags with updated lineage values...');
@@ -502,7 +520,7 @@ class TagsTable {
       } catch (e) {
         console.warn('Background cache refresh failed:', e);
       }
-    }, 100);
+    }, 500);
 
     // Show brief visual feedback
     selectElement.style.backgroundColor = '#d4edda';

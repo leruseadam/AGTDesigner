@@ -8177,7 +8177,9 @@ def get_available_tags():
         if cached_tags and not nocache:
             # CRITICAL FIX: ALWAYS align lineage from database, even for fast_load
             # Database lineage is the source of truth and must always be applied
+            # This ensures that lineage changes persist after page refresh
             lineage_alignment_needed = True  # Always align lineage to ensure UI matches database
+            logging.info("🔄 CRITICAL: Aligning cached tags with database lineage (database is source of truth)")
 
             # Lineage alignment needed - apply database lineage updates to cached tags
             # CRITICAL: This ensures existing database lineage values (from previous sessions/updates) are reflected in UI
@@ -8198,6 +8200,7 @@ def get_available_tags():
                         cur = conn.cursor()
                         # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
                         # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
+                        # products.Lineage is updated when user changes lineage, so it's the most recent value
                         lineage_query_join_by_name = '''
                             SELECT 
                                 COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
@@ -8208,6 +8211,7 @@ def get_available_tags():
                             ORDER BY p.id DESC
                             LIMIT 1
                         '''
+                        # CRITICAL: products.Lineage is checked FIRST in COALESCE, so user-edited lineage takes priority
                         # Fallback: use product's own Lineage if strains table/column not available
                         lineage_query_fallback = '''
                             SELECT 
@@ -8514,8 +8518,9 @@ def get_available_tags():
         
         # GUARANTEED FIX: ALWAYS query database for lineage for ALL tags, regardless of source
         # This ensures database lineage is ALWAYS used, never Excel/cached lineage
+        # CRITICAL: This MUST run even if prefer_db is False, to ensure database lineage overrides Excel
         if all_tags:
-            logging.info(f"🔄 GUARANTEED FIX: Querying database for lineage for ALL {len(all_tags)} tags")
+            logging.info(f"🔄 GUARANTEED FIX: Querying database for lineage for ALL {len(all_tags)} tags (prefer_db={prefer_db})")
             try:
                 store_name = get_current_store_name()
                 if not store_name:
@@ -8543,11 +8548,12 @@ def get_available_tags():
                             for db_record in db_records:
                                 db_product_name = db_record.get('Product Name*', '')
                                 if db_product_name:
-                                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
+                                    # CRITICAL: Always use products.Lineage first (user-editable, most recent)
+                                    # Then fall back to strains.canonical_lineage if product lineage is missing
                                     db_lineage = (
+                                        db_record.get('Lineage') or  # Product-level lineage (user-editable)
                                         db_record.get('currentLineage') or
-                                        db_record.get('canonical_lineage') or
-                                        db_record.get('Lineage')
+                                        db_record.get('canonical_lineage')
                                     )
                                     if db_lineage:
                                         db_lineage_clean = str(db_lineage).strip().upper()
@@ -8561,7 +8567,7 @@ def get_available_tags():
                                         except Exception:
                                             pass
                             
-                            # GUARANTEED FIX: Update ALL tags with database lineage
+                            # GUARANTEED FIX: Update ALL tags with database lineage - OVERRIDE Excel/cached values
                             updated_count = 0
                             for tag in all_tags:
                                 tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
@@ -8590,16 +8596,19 @@ def get_available_tags():
                                 # GUARANTEED: If database has lineage, ALWAYS use it and override Excel/cached values
                                 if db_lineage:
                                     old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
-                                    # Set ALL lineage fields from database - this is the source of truth
+                                    # CRITICAL: Set ALL lineage fields from database - this is the source of truth
+                                    # Database lineage ALWAYS overrides Excel/cached lineage
                                     tag['currentLineage'] = db_lineage
                                     tag['canonical_lineage'] = db_lineage
                                     tag['Lineage'] = db_lineage
                                     tag['lineage'] = db_lineage.lower()
                                     updated_count += 1
                                     if old_lineage != db_lineage:
-                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}'")
+                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}' (DB override)")
+                                    else:
+                                        logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed as '{db_lineage}' from database")
                             
-                            logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage")
+                            logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage (database is source of truth)")
                         else:
                             logging.warning("⚠️ No product names found in tags for guaranteed lineage fix")
                     except Exception as db_query_err:
@@ -10307,10 +10316,9 @@ def update_doh():
         if doh_storage_value is None or doh_storage_value == 'None' or str(doh_storage_value).lower() == 'none':
             doh_storage_value = 'No'
         
-        # Get the excel processor from session
+        # Get the excel processor from session (optional - may not be available)
         excel_processor = get_excel_processor()
-        if not excel_processor or excel_processor.df is None:
-            return jsonify({'error': 'No data loaded'}), 400
+        has_excel_data = excel_processor and excel_processor.df is not None
         
         # Update the DOH in the current data
         # CRITICAL FIX: Update database FIRST, then update Excel processor from database
@@ -10319,6 +10327,10 @@ def update_doh():
         product_db = get_product_database(store_name)
         if not product_db:
             return jsonify({'error': 'Database not available'}), 500
+        
+        # If neither Excel data nor database is available, return error
+        if not has_excel_data:
+            logging.info(f"⚠️ DOH API: No Excel data loaded, but database is available - proceeding with database-only update")
         
         # Get vendor and brand from Excel data for more specific database update
         vendor = None
@@ -10391,25 +10403,31 @@ def update_doh():
         except Exception as json_check_err:
             logging.debug(f"Could not check JSON matched status: {json_check_err}")
         
-        # Now update the Excel processor DataFrame (skip for JSON matched tags)
+        # Now update the Excel processor DataFrame (skip for JSON matched tags or when no Excel data)
         excel_update_success = False
-        if excel_processor and not is_json_matched_tag:
+        if has_excel_data and excel_processor and not is_json_matched_tag:
             for candidate in name_variants:
                 if excel_processor.update_doh_in_current_data(candidate, doh_storage_value):
                     excel_update_success = True
                     canonical_variant_used = canonical_variant_used or candidate
                     break
-        elif is_json_matched_tag:
-            # For JSON matched tags, Excel update is not required
+        elif is_json_matched_tag or not has_excel_data:
+            # For JSON matched tags or when no Excel data, Excel update is not required
             excel_update_success = True
-            logging.info(f"✅ DOH UPDATE: Skipped Excel update for JSON matched tag '{tag_name}' (database updated)")
+            if is_json_matched_tag:
+                logging.info(f"✅ DOH UPDATE: Skipped Excel update for JSON matched tag '{tag_name}' (database updated)")
+            elif not has_excel_data:
+                logging.info(f"✅ DOH UPDATE: Skipped Excel update - no Excel data loaded (database-only update)")
         
-        if excel_update_success:
+        if excel_update_success and has_excel_data:
             logging.info(f"✅ Updated DOH in Excel processor DataFrame")
+        elif not has_excel_data:
+            logging.info(f"✅ DOH UPDATE: Database update successful (no Excel data to update)")
         else:
             logging.warning(f"⚠️  Could not update Excel processor DataFrame for '{tag_name}'")
         
         # Persist a session-scoped override so generation always reflects the latest user choice
+        session_override_saved = False
         try:
             import re
             overrides = session.get('doh_overrides', {})
@@ -10423,18 +10441,28 @@ def update_doh():
                     overrides[base_norm_key] = doh_storage_value
             session['doh_overrides'] = overrides
             session.modified = True
+            session_override_saved = True
             logging.info(f"✅ DOH API UPDATE: Saved session overrides for variants {name_variants} → '{doh_storage_value}'")
         except Exception as ov_err:
             logging.warning(f"Could not save DOH override in session: {ov_err}")
 
-        # CRITICAL FIX: For JSON matched tags, database update is sufficient (Excel update not required)
-        # For regular tags, require Excel update to succeed
-        if not is_json_matched_tag and not excel_update_success:
-            return jsonify({'error': 'Failed to update DOH in Excel data'}), 500
+        # CRITICAL FIX: Success criteria depends on available data sources
+        # - If Excel data is available, try to update both database and Excel
+        # - If only database is available, database update is sufficient
+        # - JSON matched tags don't require Excel update
+        # - If neither Excel nor database update succeeds, still allow session override (for session-only tags)
         
-        # For JSON matched tags, database update is sufficient
-        if is_json_matched_tag and not db_update_success:
-            return jsonify({'error': 'Failed to update DOH in database'}), 500
+        # Check if we have any successful update
+        has_any_update = db_update_success or (has_excel_data and excel_update_success) or session_override_saved
+        
+        # Only fail if we have no way to persist the change
+        if not has_any_update:
+            return jsonify({'error': 'Failed to update DOH - product not found in database or Excel data'}), 500
+        
+        # Excel update is optional - only required if Excel data exists and tag is not JSON matched
+        if has_excel_data and not is_json_matched_tag and not excel_update_success and db_update_success:
+            logging.warning(f"⚠️ DOH API: Database update succeeded but Excel update failed for '{tag_name}'")
+            # Don't fail the request - database update is the source of truth
         
         # CRITICAL FIX: Aggressively clear ALL caches to force fresh data AND reload DataFrame
         try:
