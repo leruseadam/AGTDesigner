@@ -51,13 +51,29 @@ function createTagRow(tag) {
   // CRITICAL: Normalize lineage to uppercase for consistent dropdown matching
   lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
   
+  // DEBUG: Always log lineage fields for debugging
+  const tagName = tag['Product Name*'] || tag.ProductName || 'Unknown';
+  console.log(`🔍 LINEAGE DEBUG for "${tagName}":`, {
+    Lineage: tag.Lineage,
+    canonical_lineage: tag.canonical_lineage,
+    currentLineage: tag.currentLineage,
+    lineage: tag.lineage,
+    selected: lineage
+  });
+  
   // DEBUG: Log if we're not using database lineage when it exists
   if ((tag.canonical_lineage || tag.currentLineage) && lineage !== (tag.canonical_lineage || tag.currentLineage || '').toString().trim().toUpperCase()) {
-    console.warn(`⚠️ Lineage mismatch for "${tag['Product Name*'] || tag.ProductName}":`, {
+    console.warn(`⚠️ Lineage mismatch for "${tagName}":`, {
       expected: (tag.canonical_lineage || tag.currentLineage || '').toString().trim().toUpperCase(),
       actual: lineage,
       allFields: lineageDebug
     });
+  }
+  
+  // CRITICAL: If Lineage field exists and is different from what we selected, use it
+  if (tag.Lineage && tag.Lineage.toString().trim().toUpperCase() !== lineage) {
+    console.log(`🔄 FORCING Lineage field for "${tagName}": ${lineage} → ${tag.Lineage.toString().trim().toUpperCase()}`);
+    lineage = tag.Lineage.toString().trim().toUpperCase();
   }
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     

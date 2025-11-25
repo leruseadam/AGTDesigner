@@ -8379,10 +8379,13 @@ def get_available_tags():
                                     
                                     # CRITICAL FIX: Always update from database, even if values appear to match
                                     # Database is the source of truth - always use database values
+                                    # CRITICAL: Set Lineage FIRST and make it the primary field
+                                    tag['Lineage'] = db_lin_clean  # Set this FIRST - it's the user-editable field
                                     tag['currentLineage'] = db_lin_clean
                                     tag['canonical_lineage'] = db_lin_clean
-                                    tag['Lineage'] = db_lin_clean
                                     tag['lineage'] = db_lin_clean.lower()
+                                    # DEBUG: Log to verify fields are set
+                                    logging.debug(f"🔍 CACHE LINEAGE SET for '{name}': Lineage={tag.get('Lineage')}, currentLineage={tag.get('currentLineage')}, canonical_lineage={tag.get('canonical_lineage')}")
                                     
                                     # Always count as updated to ensure frontend gets fresh data
                                     updated += 1
@@ -8609,15 +8612,18 @@ def get_available_tags():
                                     old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
                                     # CRITICAL: Set ALL lineage fields from database - this is the source of truth
                                     # Database lineage ALWAYS overrides Excel/cached lineage
+                                    # CRITICAL: Set Lineage FIRST and make it the primary field
+                                    tag['Lineage'] = db_lineage  # Set this FIRST - it's the user-editable field
                                     tag['currentLineage'] = db_lineage
                                     tag['canonical_lineage'] = db_lineage
-                                    tag['Lineage'] = db_lineage
                                     tag['lineage'] = db_lineage.lower()
                                     updated_count += 1
                                     if old_lineage != db_lineage:
-                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}' (DB override)")
+                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}' (DB override) - ALL fields set")
                                     else:
-                                        logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed as '{db_lineage}' from database")
+                                        logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed as '{db_lineage}' from database - ALL fields set")
+                                    # DEBUG: Log all lineage fields to verify they're set
+                                    logging.debug(f"🔍 LINEAGE FIELDS SET for '{tag_name}': Lineage={tag.get('Lineage')}, currentLineage={tag.get('currentLineage')}, canonical_lineage={tag.get('canonical_lineage')}")
                                 else:
                                     not_found_count += 1
                                     # Log warning for products not found in database
@@ -8625,8 +8631,6 @@ def get_available_tags():
                                     logging.warning(f"⚠️ GUARANTEED FIX: '{tag_name}' not found in database lineage map (current: '{old_lineage}')")
                             
                             logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage ({not_found_count} not found in DB)")
-                            
-                            logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage (database is source of truth)")
                         else:
                             logging.warning("⚠️ No product names found in tags for guaranteed lineage fix")
                     except Exception as db_query_err:
