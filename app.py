@@ -8609,19 +8609,20 @@ def get_available_tags():
                                 
                                 # GUARANTEED: If database has lineage, ALWAYS use it and override Excel/cached values
                                 if db_lineage:
+                                    db_lineage_clean = str(db_lineage).strip().upper()
                                     old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
                                     # CRITICAL: Set ALL lineage fields from database - this is the source of truth
                                     # Database lineage ALWAYS overrides Excel/cached lineage
                                     # CRITICAL: Set Lineage FIRST and make it the primary field
-                                    tag['Lineage'] = db_lineage  # Set this FIRST - it's the user-editable field
-                                    tag['currentLineage'] = db_lineage
-                                    tag['canonical_lineage'] = db_lineage
-                                    tag['lineage'] = db_lineage.lower()
+                                    tag['Lineage'] = db_lineage_clean  # Set this FIRST - it's the user-editable field
+                                    tag['currentLineage'] = db_lineage_clean
+                                    tag['canonical_lineage'] = db_lineage_clean
+                                    tag['lineage'] = db_lineage_clean.lower()
                                     updated_count += 1
-                                    if old_lineage != db_lineage:
-                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}' (DB override) - ALL fields set")
+                                    if old_lineage != db_lineage_clean:
+                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage_clean}' (DB override) - ALL fields set")
                                     else:
-                                        logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed as '{db_lineage}' from database - ALL fields set")
+                                        logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed as '{db_lineage_clean}' from database - ALL fields set")
                                     # DEBUG: Log all lineage fields to verify they're set
                                     logging.debug(f"🔍 LINEAGE FIELDS SET for '{tag_name}': Lineage={tag.get('Lineage')}, currentLineage={tag.get('currentLineage')}, canonical_lineage={tag.get('canonical_lineage')}")
                                 else:
