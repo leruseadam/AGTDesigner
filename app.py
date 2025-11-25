@@ -8377,7 +8377,7 @@ def get_available_tags():
                                     if old_lineage != db_lin_clean:
                                         logging.info(f"🔄 LINEAGE ALIGNMENT (cache): '{name}' - cached: '{old_lineage}' → DB: '{db_lin_clean}'")
                                     else:
-                                        logging.debug(f"✅ Lineage confirmed (cache): '{name}' = '{db_lin_clean}' (forcing refresh from DB)")
+                                        logging.info(f"✅ Lineage confirmed (cache): '{name}' = '{db_lin_clean}' (already matches DB, forcing refresh)")
                                 else:
                                     # Even if no DB lineage found, ensure fields are consistent
                                     existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
