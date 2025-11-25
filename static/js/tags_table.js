@@ -46,20 +46,29 @@ function createTagRow(tag) {
   
   // CRITICAL FIX: ALWAYS use Lineage field FIRST - this is what /api/update-lineage updates
   // Do NOT fall back to canonical_lineage/currentLineage - they come from strain table and may be stale
+  // This ensures UI reflects database changes after reload
   let lineage = 'MIXED';
-  if (tag.Lineage) {
+  
+  // CRITICAL: Check Lineage field FIRST - this is the user-editable field from database
+  if (tag.Lineage && tag.Lineage.toString().trim() !== '' && tag.Lineage.toString().trim().toUpperCase() !== 'NAN') {
     lineage = tag.Lineage.toString().trim().toUpperCase();
-  } else if (tag.canonical_lineage) {
+  } else if (tag.canonical_lineage && tag.canonical_lineage.toString().trim() !== '' && tag.canonical_lineage.toString().trim().toUpperCase() !== 'NAN') {
     lineage = tag.canonical_lineage.toString().trim().toUpperCase();
-  } else if (tag.currentLineage) {
+  } else if (tag.currentLineage && tag.currentLineage.toString().trim() !== '' && tag.currentLineage.toString().trim().toUpperCase() !== 'NAN') {
     lineage = tag.currentLineage.toString().trim().toUpperCase();
-  } else if (tag.lineage) {
+  } else if (tag.lineage && tag.lineage.toString().trim() !== '' && tag.lineage.toString().trim().toUpperCase() !== 'NAN') {
     lineage = tag.lineage.toString().trim().toUpperCase();
   }
   
   // Ensure we have a valid lineage
-  if (!lineage || lineage === 'NAN' || lineage === '') {
+  if (!lineage || lineage === 'NAN' || lineage === '' || lineage === 'NULL') {
     lineage = 'MIXED';
+  }
+  
+  // DEBUG: Log lineage selection for troubleshooting
+  const tagName = tag['Product Name*'] || tag.ProductName || 'Unknown';
+  if (tag.Lineage && tag.Lineage.toString().trim().toUpperCase() !== lineage) {
+    console.warn(`⚠️ Lineage mismatch for "${tagName}": Lineage field="${tag.Lineage}" but using "${lineage}"`);
   }
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
