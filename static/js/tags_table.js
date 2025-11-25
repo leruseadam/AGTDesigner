@@ -44,7 +44,10 @@ function createTagRow(tag) {
     lineage: tag.lineage
   };
   
-  let lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+  // CRITICAL FIX: Prioritize Lineage field FIRST (user-editable, most recent from database)
+  // Then fall back to canonical_lineage/currentLineage (from strain table)
+  // This ensures manual lineage updates via /api/update-lineage are respected
+  let lineage = tag.Lineage || tag.canonical_lineage || tag.currentLineage || tag.lineage || 'MIXED';
   // CRITICAL: Normalize lineage to uppercase for consistent dropdown matching
   lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
   
@@ -140,9 +143,10 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
-  // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
-  const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+  // CRITICAL FIX: Prioritize Lineage field FIRST (user-editable, most recent from database)
+  // Then fall back to canonical_lineage/currentLineage (from strain table)
+  // This ensures manual lineage updates via /api/update-lineage are respected
+  const lineage = tag.Lineage || tag.canonical_lineage || tag.currentLineage || tag.lineage || 'MIXED';
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
     

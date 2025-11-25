@@ -4590,23 +4590,34 @@ const TagManager = {
         
         // CRITICAL: Calculate normalized lineage BEFORE creating options, so option selection uses database lineage
         // Set the dropdown value - handle mappings for display
-        // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
+        // CRITICAL FIX: Prioritize Lineage field FIRST (user-editable, most recent from database)
+        // This ensures manual lineage updates via /api/update-lineage are respected
+        // Then fall back to canonical_lineage/currentLineage (from strain table)
         let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
-        // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
-        if (tag.canonical_lineage || tag.currentLineage) {
-            // Database lineage exists - use it exclusively, ignore Excel Lineage completely
+        // CRITICAL FIX: Prioritize products.Lineage (user-editable) over strain lineage
+        // Check Lineage field first (this is what /api/update-lineage updates)
+        if (tag.Lineage) {
+            const dbLineage = (tag.Lineage || '').toString().toUpperCase().trim();
+            if (dbLineage) {
+                if (dbLineage !== normalizedLineage) {
+                    console.log(`🔄 FORCING products.Lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
+                }
+                normalizedLineage = dbLineage;  // Force products.Lineage (user-editable)
+            }
+        } else if (tag.canonical_lineage || tag.currentLineage) {
+            // Fall back to strain lineage if products.Lineage not set
             const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
             if (dbLineage) {
                 if (dbLineage !== normalizedLineage) {
-                    console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
+                    console.log(`🔄 FORCING strain lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
                 }
-                normalizedLineage = dbLineage;  // Force database lineage
+                normalizedLineage = dbLineage;  // Use strain lineage
             }
         } else {
             // No database lineage - log warning for debugging
             if (isForSelectedTags && lineage !== 'MIXED') {
-                console.warn(`⚠️ Selected tag "${displayName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
+                console.warn(`⚠️ Selected tag "${displayName}" has no database lineage, using: ${normalizedLineage}`);
             }
         }
         
