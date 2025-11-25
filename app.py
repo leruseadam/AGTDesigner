@@ -8475,13 +8475,21 @@ def get_available_tags():
         
         # When prefer_db is set, skip Excel entirely and go straight to database
         all_tags = []
+        excel_processor = None  # CRITICAL FIX: Initialize excel_processor to avoid UnboundLocalError
         if not prefer_db:
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
-            # Note: excel_processor was already retrieved and DataFrame updated above
-            if not excel_processor:
-                excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+                # CRITICAL FIX: Update DataFrame lineage from database BEFORE loading tags
+                # This ensures lineage changes persist after page refresh
+                if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                    try:
+                        logging.info("🔄 CRITICAL FIX: Updating DataFrame lineage from database before loading tags...")
+                        excel_processor._update_dataframe_lineage_from_database()
+                        logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database")
+                    except Exception as df_update_err:
+                        logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
                 try:
                     # PERFORMANCE: Skip enrichment when fast_load is enabled for faster tag loading
                     if fast_load:
@@ -8846,6 +8854,15 @@ def get_available_tags():
         if not prefer_db and len(all_tags) == 0:
             excel_processor = get_excel_processor()
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+                # CRITICAL FIX: Update DataFrame lineage from database BEFORE loading tags
+                # This ensures lineage changes persist after page refresh
+                if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                    try:
+                        logging.info("🔄 CRITICAL FIX: Updating DataFrame lineage from database before loading tags (fallback path)...")
+                        excel_processor._update_dataframe_lineage_from_database()
+                        logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database (fallback path)")
+                    except Exception as df_update_err:
+                        logging.warning(f"Could not update DataFrame lineage from database (fallback path): {df_update_err}")
                 try:
                     excel_tags = excel_processor.get_available_tags()
                     logging.info(f"Excel processor returned {len(excel_tags)} tags")
@@ -9411,6 +9428,7 @@ def get_available_tags():
         return resp
         
     except Exception as e:
+        import traceback  # CRITICAL FIX: Import traceback in exception handler to avoid UnboundLocalError
         elapsed = (time.time() - start_time) * 1000 if 'start_time' in locals() else 0
         logging.error(f"❌ Error getting available tags after {elapsed:.1f}ms: {str(e)}")
         logging.error(traceback.format_exc())
@@ -10070,10 +10088,13 @@ def update_lineage():
             
             try:
                 # CRITICAL FIX: Optimized retry logic for database locks with proper timeout handling
-                max_retries = 10  # Increased to 10 to allow more retry attempts for locked databases
+                # Increased timeouts significantly to handle long-running Excel uploads (which can take 180+ seconds)
+                max_retries = 30  # Increased to 30 to allow more retry attempts for locked databases during Excel uploads
                 retry_delay = 0.2  # Initial delay of 0.2s (increased from 0.1s)
                 connection_start_time = time_module.time()
-                connection_timeout = 15.0  # Increased to 15 seconds to account for retries and locks
+                connection_timeout = 90.0  # Increased to 90 seconds to handle Excel uploads that can take 180+ seconds
+                hard_max_timeout = 120.0  # Hard maximum - never wait longer than 2 minutes total
+                # CRITICAL: Allow lineage updates to wait longer when database is busy with Excel uploads
 
                 # CRITICAL FIX: Close any existing connections before retrying to prevent connection leaks
                 if conn:
@@ -10090,11 +10111,17 @@ def update_lineage():
                     cursor = None
 
                 for attempt in range(max_retries):
-                    # Check if we've exceeded connection timeout BEFORE attempting connection
+                    # CRITICAL FIX: Check timeout more leniently - allow retries if we're close but not over
+                    # This prevents premature aborting when we're just slightly over but could still succeed
                     elapsed = time_module.time() - connection_start_time
-                    if elapsed > connection_timeout:
-                        logging.error(f"❌ Connection timeout after {elapsed:.2f}s (timeout: {connection_timeout}s)")
-                        raise Exception(f"Database connection timeout after {connection_timeout}s")
+                    # Hard maximum timeout - never wait longer than this (prevents infinite retries)
+                    if elapsed > hard_max_timeout:
+                        logging.error(f"❌ Hard maximum timeout exceeded after {elapsed:.2f}s (max: {hard_max_timeout}s)")
+                        raise Exception(f"Database connection timeout - exceeded hard maximum of {hard_max_timeout}s")
+                    # Only abort if we're significantly over soft timeout (10% buffer) to allow for timing variations
+                    if elapsed > connection_timeout * 1.1 and attempt > 5:  # Allow first 5 attempts even if over soft timeout
+                        logging.warning(f"⚠️  Soft timeout exceeded ({elapsed:.2f}s > {connection_timeout * 1.1:.2f}s), but continuing (attempt {attempt + 1}/{max_retries})")
+                        # Continue retrying - Excel uploads can take a long time
                     
                     try:
                         # CRITICAL FIX: Get a fresh connection for each retry attempt
@@ -10103,8 +10130,9 @@ def update_lineage():
                         if conn is None:
                             raise Exception("Failed to get database connection - connection is None")
                         
-                        # Set timeout to prevent indefinite waiting
-                        conn.execute("PRAGMA busy_timeout = 10000")  # 10 seconds for SQLite busy timeout (increased from 5s)
+                        # CRITICAL FIX: Increase busy_timeout significantly to handle long-running Excel uploads
+                        # Excel uploads can hold locks for 180+ seconds, so we need a longer timeout
+                        conn.execute("PRAGMA busy_timeout = 30000")  # 30 seconds for SQLite busy timeout (increased from 10s for Excel upload compatibility)
                         
                         # CRITICAL FIX: Set journal mode to WAL if not already set (helps with concurrent access)
                         try:
@@ -10152,19 +10180,30 @@ def update_lineage():
                             conn = None
                             cursor = None
                             
-                            # Check timeout before sleeping
-                            if elapsed + retry_delay > connection_timeout:
-                                logging.error(f"❌ Would exceed timeout ({elapsed + retry_delay:.2f}s > {connection_timeout}s), aborting")
-                                raise Exception(f"Database connection timeout - would exceed {connection_timeout}s limit")
+                            # CRITICAL FIX: Check hard maximum timeout before sleeping
+                            if elapsed + retry_delay > hard_max_timeout:
+                                logging.error(f"❌ Would exceed hard maximum timeout ({elapsed + retry_delay:.2f}s > {hard_max_timeout}s), aborting")
+                                raise Exception(f"Database connection timeout - would exceed hard maximum of {hard_max_timeout}s")
+                            
+                            # CRITICAL FIX: More lenient soft timeout check - allow retries if close to timeout
+                            # This prevents aborting when Excel uploads are holding locks for 180+ seconds
+                            if elapsed + retry_delay > connection_timeout * 1.2:
+                                logging.warning(f"⚠️  Approaching soft timeout ({elapsed + retry_delay:.2f}s > {connection_timeout * 1.2:.2f}s), but continuing retry for Excel upload compatibility")
+                                # Don't abort - continue retrying as Excel uploads can take a long time
                             
                             time_module.sleep(retry_delay)
-                            retry_delay = min(retry_delay * 1.3, 1.0)  # Exponential backoff, max 1.0s (increased from 0.5s)
+                            retry_delay = min(retry_delay * 1.3, 2.0)  # Exponential backoff, max 2.0s (increased from 1.0s for Excel upload compatibility)
                             
-                            # Check timeout after sleep as well
+                            # CRITICAL FIX: Check hard maximum after sleep
                             elapsed = time_module.time() - connection_start_time
-                            if elapsed > connection_timeout:
-                                logging.error(f"❌ Connection timeout after sleep ({elapsed:.2f}s)")
-                                raise Exception(f"Database connection timeout after {connection_timeout}s")
+                            if elapsed > hard_max_timeout:
+                                logging.error(f"❌ Hard maximum timeout exceeded after sleep ({elapsed:.2f}s > {hard_max_timeout}s)")
+                                raise Exception(f"Database connection timeout - exceeded hard maximum of {hard_max_timeout}s")
+                            
+                            # Soft timeout check - warn but continue
+                            if elapsed > connection_timeout * 1.2:
+                                logging.warning(f"⚠️  Exceeded soft timeout after sleep ({elapsed:.2f}s > {connection_timeout * 1.2:.2f}s), but continuing retry")
+                                # Continue retrying - Excel uploads can take 180+ seconds
                             
                             continue
                         else:
