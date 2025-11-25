@@ -7409,6 +7409,31 @@ const TagManager = {
                 // New format: {tags: [...], total_count: N, source: '...'}
                 tags = responseData.tags;
                 verboseLog(`Backend returned ${tags.length} tags from ${responseData.source || 'unknown source'}`);
+                
+                // CRITICAL FIX: Ensure all tags have database lineage fields preserved
+                // This is essential for lineage changes to persist after refresh
+                tags = tags.map(tag => {
+                    // Get database lineage (source of truth)
+                    const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage;
+                    if (dbLineage) {
+                        // Ensure ALL lineage fields are set consistently from database
+                        const lineageUpper = dbLineage.toString().trim().toUpperCase();
+                        return {
+                            ...tag,
+                            canonical_lineage: tag.canonical_lineage || lineageUpper,
+                            currentLineage: tag.currentLineage || lineageUpper,
+                            Lineage: tag.Lineage || lineageUpper,
+                            lineage: tag.lineage || lineageUpper.toLowerCase()
+                        };
+                    }
+                    return tag;
+                });
+                
+                // Log lineage field preservation for debugging
+                const tagsWithDbLineage = tags.filter(t => t.canonical_lineage || t.currentLineage).length;
+                if (tagsWithDbLineage > 0) {
+                    verboseLog(`✅ Preserved database lineage for ${tagsWithDbLineage}/${tags.length} tags`);
+                }
             } else {
                 console.error('No tags loaded from backend or invalid response format:', responseData);
                 // Clear existing tags if no new data
@@ -7472,9 +7497,27 @@ const TagManager = {
             
             // Clear existing state and set new data
             this.state.tags = [...tags];
-            this.state.originalTags = [...tags]; // Store original tags for validation
+            // CRITICAL FIX: Ensure all tags have lineage fields preserved when storing in originalTags
+            // This ensures lineage changes persist after refresh
+            const tagsWithLineage = tags.map(tag => {
+                // Preserve all lineage-related fields
+                const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage;
+                if (lineage) {
+                    // Ensure all lineage fields are set consistently
+                    return {
+                        ...tag,
+                        canonical_lineage: tag.canonical_lineage || lineage,
+                        currentLineage: tag.currentLineage || lineage,
+                        Lineage: tag.Lineage || lineage,
+                        lineage: tag.lineage || lineage.toLowerCase()
+                    };
+                }
+                return tag;
+            });
+            
+            this.state.originalTags = [...tagsWithLineage]; // Store original tags for validation
             this.state.hydratedFromCache = false;
-            this.saveAvailableTagsToCache(tags);
+            this.saveAvailableTagsToCache(tagsWithLineage);
             
             // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
             // This is especially important when lineage alignment happened on the backend
