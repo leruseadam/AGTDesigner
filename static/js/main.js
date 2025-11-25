@@ -5160,22 +5160,56 @@ const TagManager = {
         
         verboseLog(`🔄 Processing ${updatesToProcess.length} lineage update(s) sequentially...`);
         
-        // Process updates one at a time with a small delay between each
-        // This ensures database operations don't compete for locks
+        // Process updates one at a time with increasing delays between each
+        // This ensures database operations don't compete for locks, especially during Excel uploads
         for (let i = 0; i < updatesToProcess.length; i++) {
             const [tagName, newLineage] = updatesToProcess[i];
             
-            try {
-                // Wait a bit between updates to ensure previous transaction completes
-                if (i > 0) {
-                    await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay between updates
+            // Retry logic with exponential backoff for database lock errors
+            let retryCount = 0;
+            const maxRetries = 3;
+            let lastError = null;
+            
+            while (retryCount <= maxRetries) {
+                try {
+                    // Wait between updates (longer delay if retrying)
+                    if (i > 0 || retryCount > 0) {
+                        const delay = retryCount > 0 
+                            ? Math.min(500 * Math.pow(2, retryCount - 1), 2000) // Exponential backoff: 500ms, 1000ms, 2000ms
+                            : 300; // 300ms delay between different tags (increased from 100ms)
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                    
+                    await this.updateLineageOnBackend(tagName, newLineage);
+                    verboseLog(`✅ Processed lineage update ${i + 1}/${updatesToProcess.length}: ${tagName}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
+                    lastError = null;
+                    break; // Success, exit retry loop
+                } catch (error) {
+                    lastError = error;
+                    const errorMsg = error.message || String(error);
+                    
+                    // Only retry on database lock/timeout errors
+                    if (retryCount < maxRetries && (
+                        errorMsg.includes('database is locked') || 
+                        errorMsg.includes('timeout') ||
+                        errorMsg.includes('LockTimeoutError') ||
+                        errorMsg.includes('Service Unavailable') ||
+                        errorMsg.includes('connection timeout')
+                    )) {
+                        retryCount++;
+                        console.warn(`⚠️ Database locked for ${tagName}, retrying in ${Math.min(500 * Math.pow(2, retryCount - 1), 2000)}ms (attempt ${retryCount}/${maxRetries})...`);
+                        continue; // Retry
+                    } else {
+                        // Not a retryable error or max retries reached
+                        console.error(`❌ Failed to update lineage for ${tagName}:`, error);
+                        break; // Exit retry loop
+                    }
                 }
-                
-                await this.updateLineageOnBackend(tagName, newLineage);
-                verboseLog(`✅ Processed lineage update ${i + 1}/${updatesToProcess.length}: ${tagName}`);
-            } catch (error) {
-                console.error(`❌ Failed to update lineage for ${tagName}:`, error);
-                // Continue processing other updates even if one fails
+            }
+            
+            // If we exhausted retries, log the final error
+            if (lastError && retryCount > maxRetries) {
+                console.error(`❌ Failed to update lineage for ${tagName} after ${maxRetries} retries:`, lastError);
             }
         }
         

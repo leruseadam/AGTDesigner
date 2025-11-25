@@ -267,6 +267,75 @@ def load_available_tags_cache(store_name):
 
 from pathlib import Path
 from werkzeug.utils import secure_filename
+import sqlite3
+from contextlib import contextmanager
+
+# CRITICAL FIX: Helper function for creating properly configured database connections
+# This ensures all database connections have proper timeout, WAL mode, and busy_timeout settings
+def create_db_connection(db_path, timeout=30.0, check_same_thread=False):
+    """
+    Create a properly configured SQLite database connection with:
+    - Timeout handling
+    - WAL mode for concurrent access
+    - Busy timeout for handling locks gracefully
+    - Performance optimizations
+    """
+    max_retries = 5
+    retry_delay = 0.5
+    
+    for attempt in range(max_retries):
+        try:
+            conn = sqlite3.connect(
+                db_path,
+                timeout=timeout,
+                check_same_thread=check_same_thread
+            )
+            
+            # CRITICAL: Enable WAL mode immediately for better concurrent access
+            conn.execute("PRAGMA journal_mode = WAL")
+            
+            # CRITICAL: Set busy_timeout to handle locked database gracefully (30 seconds)
+            conn.execute("PRAGMA busy_timeout = 30000")
+            
+            # Performance optimizations
+            conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
+            conn.execute("PRAGMA temp_store = MEMORY")
+            
+            return conn
+            
+        except sqlite3.OperationalError as e:
+            error_str = str(e).lower()
+            if "database is locked" in error_str and attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                logging.warning(f"Database locked during connection (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            else:
+                logging.error(f"Failed to create database connection after {attempt + 1} attempts: {e}")
+                raise
+        except Exception as e:
+            logging.error(f"Unexpected error creating database connection: {e}")
+            raise
+
+@contextmanager
+def db_connection(db_path, timeout=30.0, check_same_thread=False):
+    """
+    Context manager for properly configured database connections.
+    Automatically handles connection cleanup.
+    """
+    conn = None
+    try:
+        conn = create_db_connection(db_path, timeout, check_same_thread)
+        yield conn
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 # Performance optimizations
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
@@ -732,7 +801,7 @@ def get_current_store_name(allow_fallback=True):
                     
                     for db_file in db_files:
                         try:
-                            conn = sqlite3.connect(db_file)
+                            conn = create_db_connection(db_file)
                             cursor = conn.cursor()
                             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                             if cursor.fetchone():
@@ -1427,7 +1496,7 @@ def _get_bothell_product_db():
             for pattern in patterns:
                 for path in glob.glob(pattern):
                     try:
-                        with sqlite3.connect(path) as conn:
+                        with db_connection(path) as conn:
                             cur = conn.cursor()
                             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                             has_products = cur.fetchone() is not None
@@ -1443,7 +1512,7 @@ def _get_bothell_product_db():
         def has_required_tables(db_path: str) -> bool:
             import sqlite3
             try:
-                with sqlite3.connect(db_path) as conn:
+                with db_connection(db_path) as conn:
                     cur = conn.cursor()
                     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                     has_products = cur.fetchone() is not None
@@ -8807,7 +8876,7 @@ def get_available_tags():
                 # Note: os is already imported at top of file, don't re-import here
                 if os.path.exists(product_db.db_path):
                     logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
-                    with sqlite3.connect(product_db.db_path) as conn:
+                    with db_connection(product_db.db_path) as conn:
                         cursor = conn.cursor()
                         
                         # First check if products table exists
@@ -8821,7 +8890,7 @@ def get_available_tags():
                             main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
                             logging.info(f"Using main database path: {main_db_path}")
                             if os.path.exists(main_db_path):
-                                with sqlite3.connect(main_db_path) as main_conn:
+                                with db_connection(main_db_path) as main_conn:
                                     main_cursor = main_conn.cursor()
                                     main_cursor.execute('SELECT COUNT(*) FROM products')
                                     total_count = main_cursor.fetchone()[0]
@@ -9988,15 +10057,12 @@ def update_lineage():
                         # Set a timeout for reconnection attempts
                         conn = product_db._get_connection()
                         conn.execute("PRAGMA busy_timeout = 5000")  # 5 seconds for SQLite busy timeout
+                        # CRITICAL: Enable autocommit mode (no transactions)
+                        conn.isolation_level = None
                         cursor = conn.cursor()
-                        try:
-                            cursor.execute("BEGIN IMMEDIATE")
-                        except sqlite3.OperationalError as begin_error:
-                            if "cannot start a transaction within a transaction" not in str(begin_error).lower():
-                                raise
                         # Mark as established after successful reconnection
                         connection_established = True
-                        logging.info("✅ Re-established database connection and cursor")
+                        logging.info("✅ Re-established database connection and cursor (autocommit mode)")
                     except Exception as reconnect_error:
                         logging.error(f"❌ Failed to re-establish connection: {reconnect_error}")
                         raise Exception(f"Failed to re-establish database connection: {reconnect_error}")
@@ -10047,44 +10113,13 @@ def update_lineage():
                             pass  # May already be in WAL mode
                         
                         cursor = conn.cursor()
-                        
-                        # Use BEGIN IMMEDIATE to get an immediate lock
-                        try:
-                            cursor.execute("BEGIN IMMEDIATE")
-                        except sqlite3.OperationalError as begin_error:
-                            error_str = str(begin_error).lower()
-                            if "cannot start a transaction within a transaction" in error_str:
-                                # Already in a transaction, rollback and try again
-                                try:
-                                    conn.rollback()
-                                    cursor.execute("BEGIN IMMEDIATE")
-                                except:
-                                    # If rollback fails, close connection and retry
-                                    conn.close()
-                                    # Clear connection from pool so next _get_connection() returns a fresh one
-                                    try:
-                                        product_db._clear_connection()
-                                    except:
-                                        pass
-                                    conn = None
-                                    cursor = None
-                                    raise
-                            elif "database is locked" in error_str:
-                                # Database is locked, close connection and retry
-                                try:
-                                    conn.close()
-                                except:
-                                    pass
-                                # Clear connection from pool so next _get_connection() returns a fresh one
-                                try:
-                                    product_db._clear_connection()
-                                except:
-                                    pass
-                                conn = None
-                                cursor = None
-                                raise sqlite3.OperationalError("database is locked")
-                            else:
-                                raise
+
+                        # CRITICAL FIX: Use autocommit mode instead of explicit transaction
+                        # SQLite with WAL mode handles concurrent writes much better in autocommit
+                        # The previous BEGIN IMMEDIATE was holding locks for 26+ seconds causing timeouts
+                        # Now each UPDATE/INSERT will be an atomic operation that commits immediately
+                        # This dramatically reduces lock contention and prevents timeouts
+                        conn.isolation_level = None  # Enable autocommit mode
                         
                         # Break out of retry loop if we got the connection and lock
                         # CRITICAL FIX: Mark connection as established immediately after successful connection
@@ -10907,42 +10942,10 @@ def update_lineage():
             # SINGLE COMMIT for all updates - this should be fast
             # CRITICAL FIX: Retry commit on lock errors
             commit_success = False
-            if conn is None:
-                logging.error("❌ Connection is None - cannot commit transaction")
-                raise Exception("Database connection is None - cannot commit transaction")
-            
-            for commit_attempt in range(3):
-                try:
-                    conn.commit()
-                    commit_success = True
-                    logging.info(f"✅ Transaction committed: {products_updated} products, strain_updated={strain_updated}")
-                    
-                    # CRITICAL FIX: Don't do WAL checkpoint inside the lock - it can block other operations
-                    # The checkpoint can be done asynchronously or skipped - SQLite will handle it automatically
-                    # WAL checkpoint is expensive and can cause database locks
-                    break
-                except sqlite3.OperationalError as commit_lock_error:
-                    if "database is locked" in str(commit_lock_error).lower() and commit_attempt < 2:
-                        logging.warning(f"⚠️  Commit locked (attempt {commit_attempt + 1}/3), retrying...")
-                        time_module.sleep(0.1 * (commit_attempt + 1))
-                        continue
-                    else:
-                        logging.error(f"❌ Commit failed after retries: {commit_lock_error}")
-                        try:
-                            conn.rollback()
-                        except:
-                            pass
-                        raise
-                except Exception as commit_error:
-                    logging.error(f"❌ Commit error: {commit_error}")
-                    try:
-                        conn.rollback()
-                    except:
-                        pass
-                    raise
-            
-            if not commit_success:
-                raise Exception("Failed to commit transaction after retries")
+            # CRITICAL FIX: No explicit commit needed - we're in autocommit mode
+            # Each UPDATE/INSERT already committed immediately after execution
+            commit_success = True
+            logging.info(f"✅ Database updates completed (autocommit): {products_updated} products, strain_updated={strain_updated}")
             
             # CRITICAL FIX: Close cursor and ensure connection is properly released
             # Don't close the connection here - it's managed by ProductDatabase connection pool
@@ -12784,7 +12787,7 @@ def database_stats():
         # Test database connection
         try:
             import sqlite3
-            test_conn = sqlite3.connect(product_db.db_path)
+            test_conn = create_db_connection(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
@@ -12792,7 +12795,7 @@ def database_stats():
                 # If store-specific database doesn't have products table, fall back to main database
                 logging.info(f"Not falling back to main database; honoring store selection '{getattr(_product_database, '_store_name', 'unknown')}'.")
                 # Re-test using store-specific DB only
-                test_conn = sqlite3.connect(product_db.db_path)
+                test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
@@ -12810,7 +12813,7 @@ def database_stats():
         vendor_stats = {}
         try:
             import sqlite3
-            with sqlite3.connect(product_db.db_path) as conn:
+            with db_connection(product_db.db_path) as conn:
                 # Get basic counts
                 cursor = conn.cursor()
                 
@@ -12921,7 +12924,7 @@ def database_schema():
         product_db = get_product_database(store_name)
         
         import sqlite3
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             cursor = conn.cursor()
             
             # Get all tables
@@ -12988,7 +12991,7 @@ def database_vendor_stats():
         
         # Test database connection and fallback if needed
         try:
-            test_conn = sqlite3.connect(product_db.db_path)
+            test_conn = create_db_connection(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
@@ -12996,7 +12999,7 @@ def database_vendor_stats():
                 # If store-specific database doesn't have products table, fall back to main database
                 logging.info("Not falling back to main database; honoring current store selection")
                 # Re-test using the current store-specific database only
-                test_conn = sqlite3.connect(product_db.db_path)
+                test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
@@ -13009,7 +13012,7 @@ def database_vendor_stats():
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             # Get all vendors with their product counts
             vendors_df = pd.read_sql_query('''
                 SELECT "Vendor/Supplier*" as vendor, COUNT(*) as product_count, 
@@ -13399,7 +13402,7 @@ def database_view():
         store_name = get_current_store_name()
         product_db = get_product_database(store_name)
         
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             # Get strains with sovereign_lineage
             strains_df = pd.read_sql_query('''
                 SELECT strain_name, canonical_lineage, sovereign_lineage,
@@ -13553,7 +13556,7 @@ def database_analytics():
         
         # Test database connection and fallback if needed
         try:
-            test_conn = sqlite3.connect(product_db.db_path)
+            test_conn = create_db_connection(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
@@ -13570,7 +13573,7 @@ def database_analytics():
                 global _product_database
                 _product_database = product_db
                 # Test main database
-                test_conn = sqlite3.connect(product_db.db_path)
+                test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
@@ -13583,7 +13586,7 @@ def database_analytics():
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
         
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             # Get product type distribution
             product_types_df = pd.read_sql_query('''
                 SELECT "Product Type*" as product_type, COUNT(*) as count
@@ -13681,7 +13684,7 @@ def database_health():
         db_size_mb = round(db_size / (1024 * 1024), 2)
         
         # Check database integrity
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             # Check for corruption
             integrity_check = conn.execute("PRAGMA integrity_check").fetchone()
             is_corrupted = integrity_check[0] != "ok"
@@ -13776,7 +13779,7 @@ def database_test():
         
         # Test 3: Try to create a simple connection
         try:
-            conn = sqlite3.connect(db_path)
+            conn = create_db_connection(db_path)
             cursor = conn.cursor()
             cursor.execute("SELECT 1")
             result = cursor.fetchone()
@@ -13820,7 +13823,7 @@ def database_status():
         # Try to get basic database info
         try:
             import sqlite3
-            with sqlite3.connect(product_db.db_path) as conn:
+            with db_connection(product_db.db_path) as conn:
                 cursor = conn.cursor()
                 
                 # Get table list
@@ -13872,7 +13875,7 @@ def get_database_products():
         try:
             import sqlite3
             needs_fallback = False
-            with sqlite3.connect(product_db.db_path) as test_conn:
+            with db_connection(product_db.db_path) as test_conn:
                 cur = test_conn.cursor()
                 cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not cur.fetchone():
@@ -13903,7 +13906,7 @@ def get_database_products():
         
         # Inspect table schema to select correct columns and build query dynamically
         import sqlite3
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute('PRAGMA table_info(products)')
@@ -14315,7 +14318,7 @@ def product_similarity():
         store_name = get_current_store_name()
         product_db = get_product_database(store_name)
         
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             # Get the base product
             base_product = pd.read_sql_query('''
                 SELECT p.*, s.canonical_lineage
@@ -14399,7 +14402,7 @@ def advanced_search():
         store_name = get_current_store_name()
         product_db = get_product_database(store_name)
         
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             # Build dynamic query based on search criteria
             query = '''
                 SELECT p.*, s.canonical_lineage
@@ -14480,8 +14483,8 @@ def create_backup():
             shutil.copy2(product_db.db_path, backup_path)
         else:
             # Partial backup - create new database with specific tables
-            with sqlite3.connect(backup_path) as backup_conn:
-                with sqlite3.connect(product_db.db_path) as source_conn:
+            with db_connection(backup_path) as backup_conn:
+                with db_connection(product_db.db_path) as source_conn:
                     if backup_type == 'products':
                         backup_conn.execute('''
                             CREATE TABLE products AS 
@@ -14541,7 +14544,7 @@ def optimize_database():
         store_name = get_current_store_name()
         product_db = get_product_database(store_name)
         
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             # Analyze database
             conn.execute("ANALYZE")
             
@@ -14578,7 +14581,7 @@ def trend_analysis():
         store_name = get_current_store_name()
         product_db = get_product_database(store_name)
         
-        with sqlite3.connect(product_db.db_path) as conn:
+        with db_connection(product_db.db_path) as conn:
             # Get product trends over time
             trends_df = pd.read_sql_query('''
                 SELECT p."Product Name*" as product_name, p."Lineage" as canonical_lineage,
@@ -18950,7 +18953,7 @@ def upload_database_file():
         # Verify the database file
         try:
             import sqlite3
-            conn = sqlite3.connect(db_file_path)
+            conn = create_db_connection(db_file_path)
             cursor = conn.cursor()
             
             # Check tables
@@ -18997,7 +19000,7 @@ def setup_database_endpoint():
         db_file_path = os.path.join(current_dir, 'uploads', 'product_database.db')
         
         # Create a new database with sample data
-        conn = sqlite3.connect(db_file_path)
+        conn = create_db_connection(db_file_path)
         cursor = conn.cursor()
         
         # Create strains table
@@ -19142,7 +19145,7 @@ def setup_database_endpoint():
         conn.close()
         
         # Verify the database
-        conn = sqlite3.connect(db_file_path)
+        conn = create_db_connection(db_file_path)
         cursor = conn.cursor()
         
         cursor.execute('SELECT COUNT(*) FROM products')
@@ -19854,7 +19857,7 @@ def restore_database():
                 temp_path = temp_file.name
             
             # Validate it's a valid SQLite database
-            test_conn = sqlite3.connect(temp_path)
+            test_conn = create_db_connection(temp_path)
             test_cursor = test_conn.cursor()
             
             # Check if it has required tables
@@ -19891,7 +19894,7 @@ def restore_database():
             product_db._initialized = False
             
             # Verify the restored database
-            restored_conn = sqlite3.connect(product_db.db_path)
+            restored_conn = create_db_connection(product_db.db_path)
             restored_cursor = restored_conn.cursor()
             restored_cursor.execute("SELECT COUNT(*) FROM products")
             product_count = restored_cursor.fetchone()[0]
@@ -20921,7 +20924,7 @@ def backfill_units():
         
         # Update database
         import sqlite3
-        conn = sqlite3.connect(db_path, timeout=30)
+        conn = create_db_connection(db_path, timeout=30)
         cursor = conn.cursor()
         
         # Get products needing updates
