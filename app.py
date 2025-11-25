@@ -8171,7 +8171,9 @@ def get_available_tags():
             fast_load = False  # Disable fast_load when lineage was recently updated
             cached_tags = None  # CRITICAL: Bypass cache when lineage was updated to ensure fresh database values
             nocache = True  # Force fresh fetch
-        
+
+        logging.info(f"🔍 LINEAGE DEBUG: cached_tags={'present' if cached_tags else 'None'}, nocache={nocache}, force_full_refresh={force_full_refresh}")
+
         if cached_tags and not nocache:
             # CRITICAL FIX: ALWAYS align lineage from database, even for fast_load
             # Database lineage is the source of truth and must always be applied
@@ -9413,6 +9415,16 @@ def get_available_tags():
             logging.warning("⚠️ WARNING: Returning empty tags array! prefer_db={}, database_tags_count={}".format(
                 prefer_db, len(database_tags) if 'database_tags' in locals() else 'unknown'
             ))
+
+        # Final debug: Show sample of what we're returning
+        try:
+            sample_tags = safe_all_tags[:3]
+            for stag in sample_tags:
+                sname = stag.get('Product Name*') or stag.get('ProductName') or 'unknown'
+                slin = stag.get('Lineage', 'missing')
+                logging.info(f"🔍 FINAL RETURN: '{sname}' → Lineage='{slin}'")
+        except Exception:
+            pass
 
         resp = jsonify({
             'tags': safe_all_tags,  # Frontend expects 'tags' property
