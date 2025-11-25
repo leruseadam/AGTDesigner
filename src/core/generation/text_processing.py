@@ -259,11 +259,13 @@ def process_doh_image(doh_value, product_type):
     logger = logging.getLogger(__name__)
 
     try:
-        logger.warning(f"process_doh_image called with doh_value='{doh_value}', product_type='{product_type}'")
+        logger.warning(f"🔍 DOH IMAGE: doh_value='{doh_value}' (type: {type(doh_value)}), product_type='{product_type}'")
         doh_upper = str(doh_value).strip().upper() if doh_value else ''
-        
+        logger.warning(f"🔍 DOH IMAGE: doh_upper after conversion='{doh_upper}'")
+
         # Map DOH values to appropriate images
         if doh_upper == 'CBD':
+            logger.warning(f"✅ DOH IMAGE: Matched CBD case")
             # High CBD image
             high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
             # Fallback to static path if template image is missing
@@ -275,9 +277,10 @@ def process_doh_image(doh_value, product_type):
                     high_cbd_image_path = fallback_path
             except Exception:
                 pass
-            logger.warning(f"Using HighCBD image for CBD value: {high_cbd_image_path}")
+            logger.warning(f"✅ DOH IMAGE: Using HighCBD image for CBD value: {high_cbd_image_path}")
             return high_cbd_image_path
         elif doh_upper == 'THC':
+            logger.warning(f"✅ DOH IMAGE: Matched THC case")
             # High THC image
             high_thc_image_path = resource_path(os.path.join("templates", "HighTHC.png"))
             # Fallback to static path if template image is missing
@@ -289,9 +292,10 @@ def process_doh_image(doh_value, product_type):
                     high_thc_image_path = fallback_path
             except Exception:
                 pass
-            logger.warning(f"Using HighTHC image for THC value: {high_thc_image_path}")
+            logger.warning(f"✅ DOH IMAGE: Using HighTHC image for THC value: {high_thc_image_path}")
             return high_thc_image_path
         elif doh_upper in ['YES', 'DOH']:
+            logger.warning(f"✅ DOH IMAGE: Matched YES/DOH case")
             # Get DOH image paths
             doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
             high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
