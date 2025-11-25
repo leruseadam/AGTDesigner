@@ -9534,7 +9534,10 @@ const TagManager = {
         }
     },
 
-    async clearSelected() {
+    clearSelected() {
+        // INSTANT CLEAR: Only clear selected tags list, no filters, no API calls, no delays
+        verboseLog('🔄 Clearing selected tags list...');
+        
         // Prevent multiple simultaneous calls
         if (this.state.isClearing) {
             verboseLog('⚠️ Clear operation already in progress, ignoring duplicate call');
@@ -9542,42 +9545,9 @@ const TagManager = {
         }
         
         this.state.isClearing = true;
-        this.clearAvailableTagsCache();
         
         try {
-            verboseLog('🔄 Clearing selected tags and performing full app reset...');
-            
-            // Show loading feedback
-            this.showActionSplash('Clearing and resetting...');
-
-            // Clear search inputs without nuking the entire DOM
-            this.resetSearchInputs();
-            
-            // Call the backend API to clear selected tags
-            let response;
-            try {
-                response = await fetch('/api/clear-filters', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            } catch (fetchError) {
-                console.error('Network error clearing filters:', fetchError);
-                // Continue with local clearing even if API fails
-                response = null;
-            }
-            
-            if (response && response.ok) {
-                try {
-                    const data = await response.json();
-                    verboseLog('Backend clear-filters response:', data);
-                } catch (jsonError) {
-                    console.error('Error parsing response:', jsonError);
-                }
-            } else if (response) {
-                console.error('Failed to clear selected tags on server:', response.status, response.statusText);
-            }
-            
-            // Clear persistent selected tags
+            // Clear persistent selected tags immediately
             if (this.state) {
                 if (Array.isArray(this.state.persistentSelectedTags)) {
                     this.state.persistentSelectedTags = [];
@@ -9589,128 +9559,34 @@ const TagManager = {
             
             // Update the selected tags display immediately
             if (this.updateSelectedTags) {
-                try {
-                    this.updateSelectedTags([]);
-                } catch (updateError) {
-                    console.error('Error updating selected tags display:', updateError);
-                }
+                this.updateSelectedTags([]);
             }
             
-            // PERFORMANCE: Clear checkboxes in batches without dispatching events to prevent UI freeze
-            // Event handlers check isClearing flag, so no need to dispatch events
-            try {
-                const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
-                const batchSize = 100; // Process 100 checkboxes at a time
-                
-                // Clear checkboxes in batches to prevent blocking UI
-                const clearBatch = (index) => {
-                    const end = Math.min(index + batchSize, availableCheckboxes.length);
-                    for (let i = index; i < end; i++) {
-                        availableCheckboxes[i].checked = false;
-                    }
-                    
-                    if (end < availableCheckboxes.length) {
-                        // Process next batch in next frame to avoid blocking
-                        requestAnimationFrame(() => clearBatch(end));
-                    } else {
-                        // All checkboxes cleared, now clear selected tags
-                        requestAnimationFrame(() => {
-                            const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
-                            selectedCheckboxes.forEach(checkbox => {
-                                checkbox.checked = false;
-                            });
-                            
-                            // Show all available tags in next frame
-                            requestAnimationFrame(() => {
-                                try {
-                                    const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
-                                    // Use display style in batch
-                                    const tagBatchSize = 200;
-                                    const showBatch = (tagIndex) => {
-                                        const tagEnd = Math.min(tagIndex + tagBatchSize, availableTagItems.length);
-                                        for (let i = tagIndex; i < tagEnd; i++) {
-                                            availableTagItems[i].style.display = 'block';
-                                        }
-                                        if (tagEnd < availableTagItems.length) {
-                                            requestAnimationFrame(() => showBatch(tagEnd));
-                                        }
-                                    };
-                                    showBatch(0);
-                                } catch (displayError) {
-                                    console.error('Error showing available tags:', displayError);
-                                }
-                            });
-                        });
-                    }
-                };
-                
-                if (availableCheckboxes.length > 0) {
-                    clearBatch(0);
-                } else {
-                    // No checkboxes to clear, proceed directly
-                    const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
-                    selectedCheckboxes.forEach(checkbox => {
-                        checkbox.checked = false;
-                    });
-                }
-            } catch (checkboxError) {
-                console.error('Error clearing checkboxes:', checkboxError);
-            }
-            
-            // Clear filter cache to ensure fresh data
-            if (this.state) {
-                this.state.filterCache = null;
-            }
-            
-            // PERFORMANCE: Defer expensive operations to avoid blocking UI during clear
-            // Use requestAnimationFrame to batch these operations after checkbox clearing completes
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    // Update available tags display to reflect cleared state
-                    if (this.efficientlyUpdateAvailableTagsDisplay) {
-                        try {
-                            this.efficientlyUpdateAvailableTagsDisplay();
-                        } catch (updateError) {
-                            console.error('Error updating available tags display:', updateError);
-                        }
-                    }
-                    
-                    // Update select all checkboxes to unchecked state
-                    if (this.updateSelectAllCheckboxes) {
-                        try {
-                            this.updateSelectAllCheckboxes();
-                        } catch (updateError) {
-                            console.error('Error updating select all checkboxes:', updateError);
-                        }
-                    }
-                    
-                    // Also clear filters (non-blocking)
-                    if (this.clearAllFilters) {
-                        this.clearAllFilters().catch(filterError => {
-                            console.error('Error clearing filters:', filterError);
-                        });
-                    }
-                });
+            // Uncheck all checkboxes in selected tags list immediately
+            const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
+            selectedCheckboxes.forEach(checkbox => {
+                checkbox.checked = false;
             });
             
-            verboseLog('✅ Selected tags cleared and app reset completed successfully');
+            // Uncheck all checkboxes in available tags list immediately
+            const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
+            availableCheckboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
             
-            // Show success message
-            if (window.Toast && window.Toast.show) {
-                window.Toast.show('success', 'Cleared and reset successfully', { duration: 2000 });
+            // Update tag count immediately
+            this.updateTagCount('selected', 0);
+            
+            // Update select all checkboxes immediately
+            if (this.updateSelectAllCheckboxes) {
+                this.updateSelectAllCheckboxes();
             }
+            
+            verboseLog('✅ Selected tags cleared instantly');
             
         } catch (error) {
             console.error('Failed to clear selected tags:', error);
-            // Show error message
-            if (window.Toast && window.Toast.show) {
-                window.Toast.show('error', `Failed to clear: ${error.message}`, { duration: 5000 });
-            } else {
-                alert(`Failed to clear and reset: ${error.message}`);
-            }
         } finally {
-            // Hide loading splash
-            this.hideActionSplash();
             // Reset the clearing flag
             this.state.isClearing = false;
         }
@@ -11646,16 +11522,36 @@ function attachSelectedTagsCheckboxListeners() {
         const newCheckbox = checkbox.cloneNode(true);
         checkbox.parentNode.replaceChild(newCheckbox, checkbox);
 
-        newCheckbox.addEventListener('change', function() {
+        newCheckbox.addEventListener('change', function(e) {
+            const tagName = this.value;
+            
+            // Update persistent selected tags
             if (this.checked) {
-                TagManager.state.selectedTags.add(this.value);
+                if (!TagManager.state.persistentSelectedTags.includes(tagName)) {
+                    TagManager.state.persistentSelectedTags.push(tagName);
+                }
             } else {
-                TagManager.state.selectedTags.delete(this.value);
+                const index = TagManager.state.persistentSelectedTags.indexOf(tagName);
+                if (index > -1) {
+                    TagManager.state.persistentSelectedTags.splice(index, 1);
+                }
             }
-            // Only update selected tags panel
-            TagManager.updateSelectedTags(Array.from(TagManager.state.selectedTags).map(name =>
-                TagManager.state.tags.find(t => t['Product Name*'] === name)
-            ));
+            
+            // Update the regular selectedTags set to match persistent ones
+            TagManager.state.selectedTags = new Set(TagManager.state.persistentSelectedTags);
+            
+            // Find the tag object and call handleTagSelection to properly move tags between sections
+            const currentTag = TagManager.state.tags.find(t => t && t['Product Name*'] === tagName) ||
+                              TagManager.state.originalTags.find(t => t && t['Product Name*'] === tagName);
+            
+            if (currentTag) {
+                TagManager.handleTagSelection(e, currentTag);
+            } else {
+                // Fallback: if tag not found, just update selected tags panel
+                TagManager.updateSelectedTags(Array.from(TagManager.state.selectedTags).map(name =>
+                    TagManager.state.tags.find(t => t['Product Name*'] === name)
+                ));
+            }
         });
     });
 }

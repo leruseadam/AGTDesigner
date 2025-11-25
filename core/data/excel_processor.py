@@ -3498,6 +3498,30 @@ class ExcelProcessor:
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
+            # CRITICAL FIX: Update DOH based on product type and product name for high THC/CBD products
+            product_type_for_doh = safe_get_value(row.get('Product Type*', '')).lower()
+            product_name_for_doh = product_name.lower()
+            current_doh = tag.get('DOH', '').upper() if tag.get('DOH') else ''
+            
+            # Check product name first (works even if product type is "Unknown Type")
+            if 'high thc' in product_name_for_doh or 'highthc' in product_name_for_doh:
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+            elif 'high cbd' in product_name_for_doh or 'highcbd' in product_name_for_doh:
+                tag['DOH'] = 'CBD'
+                tag['DOH Compliant (Yes/No)'] = 'CBD'
+            # Check product type
+            elif 'high thc' in product_type_for_doh or 'highthc' in product_type_for_doh:
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+            elif 'high cbd' in product_type_for_doh or 'highcbd' in product_type_for_doh:
+                tag['DOH'] = 'CBD'
+                tag['DOH Compliant (Yes/No)'] = 'CBD'
+            # If DOH is currently "DOH" or "YES" and product type contains "high thc", update to "THC"
+            elif current_doh in ['DOH', 'YES', 'Y'] and ('high thc' in product_type_for_doh or 'highthc' in product_type_for_doh or 'high thc' in product_name_for_doh):
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
@@ -5576,7 +5600,7 @@ class ExcelProcessor:
             
             # Remove excluded product types (minimal check)
             if 'Product Type*' in df.columns:
-                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
+                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 2"]
                 df = df[~df['Product Type*'].isin(excluded_types)]
                 df.reset_index(drop=True, inplace=True)
             
@@ -7681,6 +7705,30 @@ class ExcelProcessor:
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
 
+            # CRITICAL FIX: Update DOH based on product type and product name for high THC/CBD products
+            product_type_for_doh = safe_get_value(row.get('Product Type*', '')).lower()
+            product_name_for_doh = product_name.lower()
+            current_doh = tag.get('DOH', '').upper() if tag.get('DOH') else ''
+            
+            # Check product name first (works even if product type is "Unknown Type")
+            if 'high thc' in product_name_for_doh or 'highthc' in product_name_for_doh:
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+            elif 'high cbd' in product_name_for_doh or 'highcbd' in product_name_for_doh:
+                tag['DOH'] = 'CBD'
+                tag['DOH Compliant (Yes/No)'] = 'CBD'
+            # Check product type
+            elif 'high thc' in product_type_for_doh or 'highthc' in product_type_for_doh:
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+            elif 'high cbd' in product_type_for_doh or 'highcbd' in product_type_for_doh:
+                tag['DOH'] = 'CBD'
+                tag['DOH Compliant (Yes/No)'] = 'CBD'
+            # If DOH is currently "DOH" or "YES" and product type contains "high thc", update to "THC"
+            elif current_doh in ['DOH', 'YES', 'Y'] and ('high thc' in product_type_for_doh or 'highthc' in product_type_for_doh or 'high thc' in product_name_for_doh):
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
@@ -7800,7 +7848,7 @@ class ExcelProcessor:
             
             # Remove excluded product types (minimal check)
             if 'Product Type*' in df.columns:
-                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
+                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 2"]
                 df = df[~df['Product Type*'].isin(excluded_types)]
                 df.reset_index(drop=True, inplace=True)
             
