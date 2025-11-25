@@ -8173,24 +8173,10 @@ def get_available_tags():
             nocache = True  # Force fresh fetch
         
         if cached_tags and not nocache:
-            # PERFORMANCE OPTIMIZATION: Skip lineage alignment when fast_load is enabled
-            # This dramatically speeds up tag loading (from seconds to milliseconds)
-            # Lineage alignment can be done later when user actually needs it
-            lineage_alignment_needed = not fast_load  # Skip alignment if fast_load is enabled
-            
-            # PERFORMANCE: Early return for fast_load with cached tags (skip lineage alignment)
-            if fast_load and not force_full_refresh:
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"⚡ FAST LOAD: Returning {len(cached_tags)} cached tags without lineage alignment ({elapsed:.1f}ms)")
-                safe_cached_tags = make_json_safe(cached_tags)
-                return jsonify({
-                    'tags': safe_cached_tags,
-                    'total_count': len(safe_cached_tags),
-                    'source': 'cache-fast',
-                    'lineage_aligned': False,
-                    'fast_load': True
-                })
-            
+            # CRITICAL FIX: ALWAYS align lineage from database, even for fast_load
+            # Database lineage is the source of truth and must always be applied
+            lineage_alignment_needed = True  # Always align lineage to ensure UI matches database
+
             # Lineage alignment needed - apply database lineage updates to cached tags
             # CRITICAL: This ensures existing database lineage values (from previous sessions/updates) are reflected in UI
             # Perform lineage alignment to assign/update lineage from database
