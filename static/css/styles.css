@@ -161,11 +161,11 @@ h6 { font-size: 1.15rem !important; font-weight: 600 !important; }
 
 /* Larger filter bar and dropdowns */
 .filter-bar, .filters-row {
-  font-size: 0.85rem !important;
+  font-size: 1.05rem !important;
 }
 
 .filter-bar select, .filter-bar .form-select, .filter-bar option {
-  font-size: 0.85rem !important;
+  font-size: 1.05rem !important;
   padding: 0.75rem 0.9rem !important;
   min-height: 52px !important;
   line-height: 1.5 !important;
@@ -816,7 +816,7 @@ canvas#lava-lamp-canvas {
 
   .filter-item select,
   .filter-item .form-select {
-    font-size: 0.85rem;
+    font-size: 1.05rem;
     width: 100%;
     min-width: 0;
   }
@@ -3603,7 +3603,7 @@ canvas#lava-lamp-canvas {
   
   /* Filter section */
 .filter-label {
-  font-size: 0.8rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 0.4rem;
@@ -4494,7 +4494,7 @@ canvas#lava-lamp-canvas {
     min-width: 200px !important;
     max-width: 280px !important;
     width: 240px !important;
-    font-size: 0.85rem !important;
+    font-size: 1.05rem !important;
     background: rgba(45, 34, 58, 0.92);
     backdrop-filter: blur(15px) !important;
     -webkit-backdrop-filter: blur(15px) !important;
@@ -4516,7 +4516,7 @@ canvas#lava-lamp-canvas {
   .filter-bar select {
     min-width: 160px !important;
     max-width: 250px !important;
-    font-size: 0.85rem !important;
+    font-size: 1.05rem !important;
     height: 36px !important;
     padding: 6px 12px !important;
     background: rgba(45, 34, 58, 0.8) !important;
@@ -4531,7 +4531,7 @@ canvas#lava-lamp-canvas {
   }
 
   .filter-bar label {
-    font-size: 0.8rem !important;
+    font-size: 1.0rem !important;
     color: #fff !important;
     font-weight: 600 !important;
     text-shadow: 0 2px 4px rgba(0,0,0,0.4) !important;
@@ -6848,7 +6848,7 @@ canvas#lava-lamp-canvas {
     height: 36px;
     min-height: 36px;
     padding: 6px 10px;
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     /* Bright blue arrow */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%2300BFFF" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
@@ -6858,9 +6858,8 @@ canvas#lava-lamp-canvas {
   /* Make each filter item take an equal share of the row */
 .horizontal-filter-bar .filter-item {
   flex: 1 1 0 !important;
-  min-width: 140px !important; /* Ensure minimum width for full text display */
+  min-width: 0 !important; /* Remove fixed min-width to allow equal distribution */
   max-width: none !important; /* Remove max-width constraints */
-  overflow: visible !important;
 }
   .horizontal-filter-bar select:focus,
   .horizontal-filter-bar .form-select:focus,
@@ -6907,7 +6906,7 @@ canvas#lava-lamp-canvas {
   .sticky-filter-bar select,
   .sticky-filter-bar .form-select,
   .sticky-filter-bar .form-select-sm {
-    font-size: 0.85em !important;
+    font-size: 0.97em !important;
     padding: 4px 10px !important;
     min-height: 20px !important;
     height: 26px !important;
@@ -9722,13 +9721,12 @@ html, body {
   flex-direction: column;
   gap: 0.5rem;
   min-height: 75px;
-  min-width: 140px !important;
+  min-width: 0;
   max-width: 100%;
-  overflow: visible !important;
 }
 
 .filter-group .filter-label {
-  font-size: 0.75rem !important;
+  font-size: 0.95rem !important;
   font-weight: 700 !important;
   letter-spacing: 0.5px !important;
   line-height: 1.2 !important;
@@ -9736,70 +9734,9 @@ html, body {
 }
 
 .filter-group .form-select {
-  min-height: 60px !important;
-  height: auto !important;
+  min-height: 52px !important;
   padding: 0.85rem 2.5rem 0.85rem 0.85rem !important;
   font-size: 0.95rem !important;
-  line-height: 1.5 !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: normal !important;
-  display: block !important;
-}
-
-/* Ensure filter select elements show full text - no truncation */
-.filter-select,
-.filter-group select,
-.filter-group .form-select,
-.filter-row select,
-.filter-row .form-select,
-.enhanced-filter-bar select,
-.enhanced-filter-bar .form-select {
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: normal !important;
-  word-wrap: break-word !important;
-  overflow-wrap: break-word !important;
-  min-width: fit-content !important;
-}
-
-/* Ensure filter select options show full text */
-.filter-select option,
-.filter-group select option,
-.filter-group .form-select option,
-.filter-row select option,
-.filter-row .form-select option,
-.enhanced-filter-bar select option,
-.enhanced-filter-bar .form-select option {
-  white-space: normal !important;
-  word-wrap: break-word !important;
-  overflow-wrap: break-word !important;
-}
-
-/* Ensure filter group containers allow full text */
-.filter-group {
-  overflow: visible !important;
-  min-width: 140px !important; /* Override inline styles that set min-width: 0 */
-}
-
-.filter-row {
-  overflow: visible !important;
-}
-
-/* Override inline styles that might truncate text */
-.filter-group[style*="min-width: 0"] {
-  min-width: 140px !important;
-}
-
-/* Ensure all filter selects show full text without clipping */
-.enhanced-filter-bar .filter-group select,
-.enhanced-filter-bar .filter-group .form-select,
-.enhanced-filter-bar .filter-select {
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: normal !important;
-  height: auto !important;
-  min-height: 60px !important;
   line-height: 1.5 !important;
 }
 

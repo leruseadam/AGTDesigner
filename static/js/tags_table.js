@@ -36,31 +36,9 @@ const getUniqueLineages = () => {
 function createTagRow(tag) {
   // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
   // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
-  // DEBUG: Log lineage fields to help diagnose issues
-  const lineageDebug = {
-    canonical_lineage: tag.canonical_lineage,
-    currentLineage: tag.currentLineage,
-    Lineage: tag.Lineage,
-    lineage: tag.lineage
-  };
-  
-  // CRITICAL FIX: ALWAYS use Lineage field FIRST - this is what /api/update-lineage updates
-  // Do NOT fall back to canonical_lineage/currentLineage - they come from strain table and may be stale
-  let lineage = 'MIXED';
-  if (tag.Lineage) {
-    lineage = tag.Lineage.toString().trim().toUpperCase();
-  } else if (tag.canonical_lineage) {
-    lineage = tag.canonical_lineage.toString().trim().toUpperCase();
-  } else if (tag.currentLineage) {
-    lineage = tag.currentLineage.toString().trim().toUpperCase();
-  } else if (tag.lineage) {
-    lineage = tag.lineage.toString().trim().toUpperCase();
-  }
-  
-  // Ensure we have a valid lineage
-  if (!lineage || lineage === 'NAN' || lineage === '') {
-    lineage = 'MIXED';
-  }
+  let lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+  // CRITICAL: Normalize lineage to uppercase for consistent dropdown matching
+  lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
@@ -80,8 +58,7 @@ function createTagRow(tag) {
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
-                            onchange="TagsTable.handleLineageChange(this, '${tagName}')"
-                            data-current-lineage="${lineage}">
+                            onchange="TagsTable.handleLineageChange(this, '${tagName}')">
                         <option value="SATIVA" ${lineage === 'SATIVA' ? 'selected' : ''}>S</option>
                         <option value="INDICA" ${lineage === 'INDICA' ? 'selected' : ''}>I</option>
                         <option value="HYBRID" ${lineage === 'HYBRID' ? 'selected' : ''}>H</option>
@@ -89,7 +66,7 @@ function createTagRow(tag) {
                         <option value="HYBRID/INDICA" ${lineage === 'HYBRID/INDICA' ? 'selected' : ''}>H/I</option>
                         <option value="CBD" ${(lineage === 'CBD' || lineage === 'CBD_BLEND') ? 'selected' : ''}>CBD</option>
                         <option value="MIXED" ${(lineage === 'MIXED' || !['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'].includes((lineage || '').toUpperCase())) ? 'selected' : ''}>THC</option>
-                        <option value="PARA" ${(lineage === 'PARA' || lineage === 'PARAPHERNALIA') ? 'selected' : ''}>P</option>
+                        <option value="PARA" ${lineage === 'PARA' ? 'selected' : ''}>P</option>
                     </select>
                 </div>
             </td>
@@ -146,10 +123,9 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL FIX: Prioritize Lineage field FIRST (user-editable, most recent from database)
-  // Then fall back to canonical_lineage/currentLineage (from strain table)
-  // This ensures manual lineage updates via /api/update-lineage are respected
-  const lineage = tag.Lineage || tag.canonical_lineage || tag.currentLineage || tag.lineage || 'MIXED';
+  // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
+  // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
+  const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
     
@@ -457,7 +433,6 @@ class TagsTable {
 
     // CRITICAL FIX: Force refresh available tags with fresh lineage from database
     // This ensures UI shows updated lineage values immediately
-    // Wait longer (500ms) to ensure backend update has completed
     setTimeout(async () => {
       try {
         // Call /api/available-tags with prefer_db and nocache to force database lineage alignment
@@ -477,12 +452,11 @@ class TagsTable {
               );
               
               if (tagIndex >= 0) {
-                const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage || updatedTag.lineage;
+                const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage;
                 if (dbLineage) {
                   const currentLineage = TagManager.state.originalTags[tagIndex].Lineage || 
                                          TagManager.state.originalTags[tagIndex].currentLineage ||
-                                         TagManager.state.originalTags[tagIndex].canonical_lineage ||
-                                         TagManager.state.originalTags[tagIndex].lineage;
+                                         TagManager.state.originalTags[tagIndex].canonical_lineage;
                   
                   // Update all lineage-related fields
                   TagManager.state.originalTags[tagIndex].Lineage = dbLineage;
@@ -509,22 +483,6 @@ class TagsTable {
               }
             });
             
-            // CRITICAL: Force update all lineage dropdowns immediately after state update
-            // This ensures UI reflects database changes even if re-render doesn't happen
-            refreshData.tags.forEach(updatedTag => {
-              const tagNameToUpdate = updatedTag['Product Name*'] || updatedTag.ProductName;
-              if (!tagNameToUpdate) return;
-              
-              const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage || updatedTag.lineage;
-              if (dbLineage) {
-                // Force update UI dropdowns directly
-                if (typeof TagManager !== 'undefined' && typeof TagManager.updateTagLineageInUI === 'function') {
-                  TagManager.updateTagLineageInUI(tagNameToUpdate, dbLineage);
-                  console.log(`🎨 Force updated UI lineage dropdown for "${tagNameToUpdate}" to ${dbLineage}`);
-                }
-              }
-            });
-            
             // CRITICAL: Re-render available tags to show updated lineage dropdowns
             if (needsRerender && typeof TagManager._updateAvailableTags === 'function') {
               console.log('🔄 Re-rendering available tags with updated lineage values...');
@@ -544,7 +502,7 @@ class TagsTable {
       } catch (e) {
         console.warn('Background cache refresh failed:', e);
       }
-    }, 500);
+    }, 100);
 
     // Show brief visual feedback
     selectElement.style.backgroundColor = '#d4edda';

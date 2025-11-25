@@ -4446,18 +4446,6 @@ const TagManager = {
             dohValue = (tag.DOH || '').toString().toUpperCase();
         }
         const productTypeForImages = (tag['Product Type*'] || '').toString().toLowerCase();
-
-        // Debug logging for High THC products
-        if (productTypeForImages.includes('high thc') || dohValue === 'THC') {
-            console.log('🔍 High THC Product:', {
-                name: tag['Product Name*'],
-                dohValue: dohValue,
-                productType: productTypeForImages,
-                isJsonMatched: isJsonMatched,
-                dohField: tag.DOH,
-                dohCompliantField: tag['DOH Compliant (Yes/No)']
-            });
-        }
         
         // Create image container for dynamic updates
         const imageContainer = document.createElement('span');
@@ -4588,22 +4576,26 @@ const TagManager = {
             return !validLineages.includes((lineageValue || '').toUpperCase());
         };
         
-        // CRITICAL FIX: ALWAYS use Lineage field FIRST - this is what /api/update-lineage updates
-        // Do NOT fall back to canonical_lineage/currentLineage - they come from strain table and may be stale
-        let normalizedLineage = 'MIXED';
-        if (tag.Lineage) {
-            normalizedLineage = tag.Lineage.toString().trim().toUpperCase();
-        } else if (tag.canonical_lineage) {
-            normalizedLineage = tag.canonical_lineage.toString().trim().toUpperCase();
-        } else if (tag.currentLineage) {
-            normalizedLineage = tag.currentLineage.toString().trim().toUpperCase();
-        } else if (lineage) {
-            normalizedLineage = lineage.toString().trim().toUpperCase();
-        }
+        // CRITICAL: Calculate normalized lineage BEFORE creating options, so option selection uses database lineage
+        // Set the dropdown value - handle mappings for display
+        // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
+        let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
-        // Ensure we have a valid lineage
-        if (!normalizedLineage || normalizedLineage === 'NAN' || normalizedLineage === '') {
-            normalizedLineage = 'MIXED';
+        // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
+        if (tag.canonical_lineage || tag.currentLineage) {
+            // Database lineage exists - use it exclusively, ignore Excel Lineage completely
+            const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+            if (dbLineage) {
+                if (dbLineage !== normalizedLineage) {
+                    console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
+                }
+                normalizedLineage = dbLineage;  // Force database lineage
+            }
+        } else {
+            // No database lineage - log warning for debugging
+            if (isForSelectedTags && lineage !== 'MIXED') {
+                console.warn(`⚠️ Selected tag "${displayName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
+            }
         }
         
         // NOW create options using normalizedLineage (database lineage) for selection
@@ -5718,16 +5710,12 @@ const TagManager = {
                 }
             }
             // Fallback: manual search when name contains quotes or CSS.escape not available
-            // Search in both .tag-item and .tag-row elements
-            const candidates = document.querySelectorAll(`${containerSelector} .tag-item, ${containerSelector} .tag-row`);
+            const candidates = document.querySelectorAll(`${containerSelector} .tag-item`);
             for (const el of candidates) {
                 const dataName = el.getAttribute('data-tag-name');
                 const checkbox = el.querySelector('.tag-checkbox');
                 const cbValue = checkbox ? checkbox.value : null;
-                // Also check if the tag name appears in the element's text content or label
-                const tagLabel = el.querySelector('.tag-name, label');
-                const labelText = tagLabel ? tagLabel.textContent.trim() : '';
-                if (dataName === name || cbValue === name || labelText === name) return el;
+                if (dataName === name || cbValue === name) return el;
             }
             return null;
         };
@@ -5759,116 +5747,73 @@ const TagManager = {
             tagElement.dataset.lineage = newLineage.toUpperCase();
         };
 
-        // Update lineage dropdown in available tags - search in multiple containers
-        const availableContainers = ['#availableTags', '#availableTagsTable', '#available-tags'];
-        let availableTagElement = null;
-        for (const container of availableContainers) {
-            availableTagElement = findTagElement(container, tagName);
-            if (availableTagElement) break;
-        }
-        
+        // Update lineage dropdown in available tags
+        const availableTagElement = findTagElement('#availableTags', tagName);
         if (availableTagElement) {
             // CRITICAL FIX: Update state first to prevent change handler from reverting
             updateTagInState(availableTagElement);
             
-            // Find all lineage dropdowns in this element (might be multiple)
-            const lineageSelects = availableTagElement.querySelectorAll('.lineage-dropdown');
-            lineageSelects.forEach(lineageSelect => {
+            const lineageSelect = availableTagElement.querySelector('.lineage-dropdown');
+            if (lineageSelect) {
                 const oldValue = lineageSelect.value;
                 if (oldValue !== newLineage) {
                     // CRITICAL FIX: Mark as programmatic update to prevent change handler from processing
                     lineageSelect._isProgrammaticUpdate = true;
                     lineageSelect.value = newLineage;
-                    verboseLog(`✅ Updated available tag lineage dropdown for ${tagName} from ${oldValue} to ${newLineage}`);
+                    
+                    // Update tag color
+                    const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
+                    if (tag) {
+                        this.forceTagColorUpdate(tag, newLineage);
+                    }
                 }
-            });
-            
-            // Update tag color
-            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
-            if (tag) {
-                this.forceTagColorUpdate(tag, newLineage);
+                
+                // CRITICAL FIX: Also update any lineage display text/span elements
+                const lineageDisplay = availableTagElement.querySelector('.lineage-display, .lineage-text, [data-lineage]');
+                if (lineageDisplay) {
+                    lineageDisplay.textContent = newLineage;
+                    if (lineageDisplay.hasAttribute('data-lineage')) {
+                        lineageDisplay.setAttribute('data-lineage', newLineage);
+                    }
+                }
+                
+                verboseLog(`✅ Updated available tag lineage dropdown for ${tagName} to ${newLineage}`);
             }
-            
-            // CRITICAL FIX: Also update any lineage display text/span elements
-            const lineageDisplays = availableTagElement.querySelectorAll('.lineage-display, .lineage-text, [data-lineage]');
-            lineageDisplays.forEach(lineageDisplay => {
-                lineageDisplay.textContent = newLineage;
-                if (lineageDisplay.hasAttribute('data-lineage')) {
-                    lineageDisplay.setAttribute('data-lineage', newLineage);
-                }
-            });
-            
-            // Update data-lineage attribute on the element itself
-            availableTagElement.setAttribute('data-lineage', newLineage.toUpperCase());
-            
-            verboseLog(`✅ Updated available tag lineage for ${tagName} to ${newLineage}`);
         }
 
-        // Update lineage dropdown in selected tags - search in multiple containers
-        const selectedContainers = ['#selectedTags', '#selectedTagsTable', '#selected-tags'];
-        let selectedTagElement = null;
-        for (const container of selectedContainers) {
-            selectedTagElement = findTagElement(container, tagName);
-            if (selectedTagElement) break;
-        }
-        
+        // Update lineage dropdown in selected tags
+        const selectedTagElement = findTagElement('#selectedTags', tagName);
         if (selectedTagElement) {
             // CRITICAL FIX: Update state first to prevent change handler from reverting
             updateTagInState(selectedTagElement);
             
-            // Find all lineage dropdowns in this element (might be multiple)
-            const lineageSelects = selectedTagElement.querySelectorAll('.lineage-dropdown');
-            lineageSelects.forEach(lineageSelect => {
+            const lineageSelect = selectedTagElement.querySelector('.lineage-dropdown');
+            if (lineageSelect) {
                 const oldValue = lineageSelect.value;
                 if (oldValue !== newLineage) {
                     // CRITICAL FIX: Mark as programmatic update to prevent change handler from processing
                     lineageSelect._isProgrammaticUpdate = true;
                     lineageSelect.value = newLineage;
-                    verboseLog(`✅ Updated selected tag lineage dropdown for ${tagName} from ${oldValue} to ${newLineage}`);
-                }
-            });
-            
-            // Update tag color
-            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
-            if (tag) {
-                this.forceTagColorUpdate(tag, newLineage);
-            }
-            
-            // CRITICAL FIX: Also update any lineage display text/span elements
-            const lineageDisplays = selectedTagElement.querySelectorAll('.lineage-display, .lineage-text, [data-lineage]');
-            lineageDisplays.forEach(lineageDisplay => {
-                lineageDisplay.textContent = newLineage;
-                if (lineageDisplay.hasAttribute('data-lineage')) {
-                    lineageDisplay.setAttribute('data-lineage', newLineage);
-                }
-            });
-            
-            // Update data-lineage attribute on the element itself
-            selectedTagElement.setAttribute('data-lineage', newLineage.toUpperCase());
-            
-            verboseLog(`✅ Updated selected tag lineage for ${tagName} to ${newLineage}`);
-        }
-        
-        // CRITICAL FIX: Also search for lineage dropdowns by tag name directly (fallback for table rows)
-        // This handles cases where the element structure doesn't match expected patterns
-        const allLineageDropdowns = document.querySelectorAll('.lineage-dropdown');
-        allLineageDropdowns.forEach(dropdown => {
-            // Check if this dropdown is associated with the tag we're updating
-            const parentRow = dropdown.closest('.tag-row, .tag-item, tr');
-            if (parentRow) {
-                const rowTagName = parentRow.getAttribute('data-tag-name') || 
-                                  parentRow.querySelector('.tag-name, label')?.textContent?.trim() ||
-                                  parentRow.querySelector('td')?.textContent?.trim();
-                if (rowTagName === tagName) {
-                    const oldValue = dropdown.value;
-                    if (oldValue !== newLineage) {
-                        dropdown._isProgrammaticUpdate = true;
-                        dropdown.value = newLineage;
-                        verboseLog(`✅ Updated lineage dropdown (fallback search) for ${tagName} from ${oldValue} to ${newLineage}`);
+                    
+                    // Update tag color
+                    const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
+                    if (tag) {
+                        this.forceTagColorUpdate(tag, newLineage);
                     }
                 }
+                
+                // CRITICAL FIX: Also update any lineage display text/span elements
+                const lineageDisplay = selectedTagElement.querySelector('.lineage-display, .lineage-text, [data-lineage]');
+                if (lineageDisplay) {
+                    lineageDisplay.textContent = newLineage;
+                    if (lineageDisplay.hasAttribute('data-lineage')) {
+                        lineageDisplay.setAttribute('data-lineage', newLineage);
+                    }
+                }
+                
+                verboseLog(`✅ Updated selected tag lineage dropdown for ${tagName} to ${newLineage}`);
             }
-        });
+        }
     },
 
     // NEW: Update lineage for all items with the same vendor + strain immediately in UI/state
@@ -7405,31 +7350,6 @@ const TagManager = {
                 // New format: {tags: [...], total_count: N, source: '...'}
                 tags = responseData.tags;
                 verboseLog(`Backend returned ${tags.length} tags from ${responseData.source || 'unknown source'}`);
-                
-                // CRITICAL FIX: Ensure all tags have database lineage fields preserved
-                // This is essential for lineage changes to persist after refresh
-                tags = tags.map(tag => {
-                    // Get database lineage (source of truth)
-                    const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage;
-                    if (dbLineage) {
-                        // Ensure ALL lineage fields are set consistently from database
-                        const lineageUpper = dbLineage.toString().trim().toUpperCase();
-                        return {
-                            ...tag,
-                            canonical_lineage: tag.canonical_lineage || lineageUpper,
-                            currentLineage: tag.currentLineage || lineageUpper,
-                            Lineage: tag.Lineage || lineageUpper,
-                            lineage: tag.lineage || lineageUpper.toLowerCase()
-                        };
-                    }
-                    return tag;
-                });
-                
-                // Log lineage field preservation for debugging
-                const tagsWithDbLineage = tags.filter(t => t.canonical_lineage || t.currentLineage).length;
-                if (tagsWithDbLineage > 0) {
-                    verboseLog(`✅ Preserved database lineage for ${tagsWithDbLineage}/${tags.length} tags`);
-                }
             } else {
                 console.error('No tags loaded from backend or invalid response format:', responseData);
                 // Clear existing tags if no new data
@@ -7493,27 +7413,9 @@ const TagManager = {
             
             // Clear existing state and set new data
             this.state.tags = [...tags];
-            // CRITICAL FIX: Ensure all tags have lineage fields preserved when storing in originalTags
-            // This ensures lineage changes persist after refresh
-            const tagsWithLineage = tags.map(tag => {
-                // Preserve all lineage-related fields
-                const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage;
-                if (lineage) {
-                    // Ensure all lineage fields are set consistently
-                    return {
-                        ...tag,
-                        canonical_lineage: tag.canonical_lineage || lineage,
-                        currentLineage: tag.currentLineage || lineage,
-                        Lineage: tag.Lineage || lineage,
-                        lineage: tag.lineage || lineage.toLowerCase()
-                    };
-                }
-                return tag;
-            });
-            
-            this.state.originalTags = [...tagsWithLineage]; // Store original tags for validation
+            this.state.originalTags = [...tags]; // Store original tags for validation
             this.state.hydratedFromCache = false;
-            this.saveAvailableTagsToCache(tagsWithLineage);
+            this.saveAvailableTagsToCache(tags);
             
             // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
             // This is especially important when lineage alignment happened on the backend
@@ -9530,10 +9432,7 @@ const TagManager = {
         }
     },
 
-    clearSelected() {
-        // INSTANT CLEAR: Only clear selected tags list, no filters, no API calls, no delays
-        verboseLog('🔄 Clearing selected tags list...');
-        
+    async clearSelected() {
         // Prevent multiple simultaneous calls
         if (this.state.isClearing) {
             verboseLog('⚠️ Clear operation already in progress, ignoring duplicate call');
@@ -9541,9 +9440,42 @@ const TagManager = {
         }
         
         this.state.isClearing = true;
+        this.clearAvailableTagsCache();
         
         try {
-            // Clear persistent selected tags immediately
+            verboseLog('🔄 Clearing selected tags and performing full app reset...');
+            
+            // Show loading feedback
+            this.showActionSplash('Clearing and resetting...');
+
+            // Clear search inputs without nuking the entire DOM
+            this.resetSearchInputs();
+            
+            // Call the backend API to clear selected tags
+            let response;
+            try {
+                response = await fetch('/api/clear-filters', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (fetchError) {
+                console.error('Network error clearing filters:', fetchError);
+                // Continue with local clearing even if API fails
+                response = null;
+            }
+            
+            if (response && response.ok) {
+                try {
+                    const data = await response.json();
+                    verboseLog('Backend clear-filters response:', data);
+                } catch (jsonError) {
+                    console.error('Error parsing response:', jsonError);
+                }
+            } else if (response) {
+                console.error('Failed to clear selected tags on server:', response.status, response.statusText);
+            }
+            
+            // Clear persistent selected tags
             if (this.state) {
                 if (Array.isArray(this.state.persistentSelectedTags)) {
                     this.state.persistentSelectedTags = [];
@@ -9555,34 +9487,128 @@ const TagManager = {
             
             // Update the selected tags display immediately
             if (this.updateSelectedTags) {
-                this.updateSelectedTags([]);
+                try {
+                    this.updateSelectedTags([]);
+                } catch (updateError) {
+                    console.error('Error updating selected tags display:', updateError);
+                }
             }
             
-            // Uncheck all checkboxes in selected tags list immediately
-            const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
-            selectedCheckboxes.forEach(checkbox => {
-                checkbox.checked = false;
-            });
-            
-            // Uncheck all checkboxes in available tags list immediately
-            const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
-            availableCheckboxes.forEach(checkbox => {
-                checkbox.checked = false;
-            });
-            
-            // Update tag count immediately
-            this.updateTagCount('selected', 0);
-            
-            // Update select all checkboxes immediately
-            if (this.updateSelectAllCheckboxes) {
-                this.updateSelectAllCheckboxes();
+            // PERFORMANCE: Clear checkboxes in batches without dispatching events to prevent UI freeze
+            // Event handlers check isClearing flag, so no need to dispatch events
+            try {
+                const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
+                const batchSize = 100; // Process 100 checkboxes at a time
+                
+                // Clear checkboxes in batches to prevent blocking UI
+                const clearBatch = (index) => {
+                    const end = Math.min(index + batchSize, availableCheckboxes.length);
+                    for (let i = index; i < end; i++) {
+                        availableCheckboxes[i].checked = false;
+                    }
+                    
+                    if (end < availableCheckboxes.length) {
+                        // Process next batch in next frame to avoid blocking
+                        requestAnimationFrame(() => clearBatch(end));
+                    } else {
+                        // All checkboxes cleared, now clear selected tags
+                        requestAnimationFrame(() => {
+                            const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
+                            selectedCheckboxes.forEach(checkbox => {
+                                checkbox.checked = false;
+                            });
+                            
+                            // Show all available tags in next frame
+                            requestAnimationFrame(() => {
+                                try {
+                                    const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
+                                    // Use display style in batch
+                                    const tagBatchSize = 200;
+                                    const showBatch = (tagIndex) => {
+                                        const tagEnd = Math.min(tagIndex + tagBatchSize, availableTagItems.length);
+                                        for (let i = tagIndex; i < tagEnd; i++) {
+                                            availableTagItems[i].style.display = 'block';
+                                        }
+                                        if (tagEnd < availableTagItems.length) {
+                                            requestAnimationFrame(() => showBatch(tagEnd));
+                                        }
+                                    };
+                                    showBatch(0);
+                                } catch (displayError) {
+                                    console.error('Error showing available tags:', displayError);
+                                }
+                            });
+                        });
+                    }
+                };
+                
+                if (availableCheckboxes.length > 0) {
+                    clearBatch(0);
+                } else {
+                    // No checkboxes to clear, proceed directly
+                    const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
+                    selectedCheckboxes.forEach(checkbox => {
+                        checkbox.checked = false;
+                    });
+                }
+            } catch (checkboxError) {
+                console.error('Error clearing checkboxes:', checkboxError);
             }
             
-            verboseLog('✅ Selected tags cleared instantly');
+            // Clear filter cache to ensure fresh data
+            if (this.state) {
+                this.state.filterCache = null;
+            }
+            
+            // PERFORMANCE: Defer expensive operations to avoid blocking UI during clear
+            // Use requestAnimationFrame to batch these operations after checkbox clearing completes
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    // Update available tags display to reflect cleared state
+                    if (this.efficientlyUpdateAvailableTagsDisplay) {
+                        try {
+                            this.efficientlyUpdateAvailableTagsDisplay();
+                        } catch (updateError) {
+                            console.error('Error updating available tags display:', updateError);
+                        }
+                    }
+                    
+                    // Update select all checkboxes to unchecked state
+                    if (this.updateSelectAllCheckboxes) {
+                        try {
+                            this.updateSelectAllCheckboxes();
+                        } catch (updateError) {
+                            console.error('Error updating select all checkboxes:', updateError);
+                        }
+                    }
+                    
+                    // Also clear filters (non-blocking)
+                    if (this.clearAllFilters) {
+                        this.clearAllFilters().catch(filterError => {
+                            console.error('Error clearing filters:', filterError);
+                        });
+                    }
+                });
+            });
+            
+            verboseLog('✅ Selected tags cleared and app reset completed successfully');
+            
+            // Show success message
+            if (window.Toast && window.Toast.show) {
+                window.Toast.show('success', 'Cleared and reset successfully', { duration: 2000 });
+            }
             
         } catch (error) {
             console.error('Failed to clear selected tags:', error);
+            // Show error message
+            if (window.Toast && window.Toast.show) {
+                window.Toast.show('error', `Failed to clear: ${error.message}`, { duration: 5000 });
+            } else {
+                alert(`Failed to clear and reset: ${error.message}`);
+            }
         } finally {
+            // Hide loading splash
+            this.hideActionSplash();
             // Reset the clearing flag
             this.state.isClearing = false;
         }
@@ -11518,36 +11544,16 @@ function attachSelectedTagsCheckboxListeners() {
         const newCheckbox = checkbox.cloneNode(true);
         checkbox.parentNode.replaceChild(newCheckbox, checkbox);
 
-        newCheckbox.addEventListener('change', function(e) {
-            const tagName = this.value;
-            
-            // Update persistent selected tags
+        newCheckbox.addEventListener('change', function() {
             if (this.checked) {
-                if (!TagManager.state.persistentSelectedTags.includes(tagName)) {
-                    TagManager.state.persistentSelectedTags.push(tagName);
-                }
+                TagManager.state.selectedTags.add(this.value);
             } else {
-                const index = TagManager.state.persistentSelectedTags.indexOf(tagName);
-                if (index > -1) {
-                    TagManager.state.persistentSelectedTags.splice(index, 1);
-                }
+                TagManager.state.selectedTags.delete(this.value);
             }
-            
-            // Update the regular selectedTags set to match persistent ones
-            TagManager.state.selectedTags = new Set(TagManager.state.persistentSelectedTags);
-            
-            // Find the tag object and call handleTagSelection to properly move tags between sections
-            const currentTag = TagManager.state.tags.find(t => t && t['Product Name*'] === tagName) ||
-                              TagManager.state.originalTags.find(t => t && t['Product Name*'] === tagName);
-            
-            if (currentTag) {
-                TagManager.handleTagSelection(e, currentTag);
-            } else {
-                // Fallback: if tag not found, just update selected tags panel
-                TagManager.updateSelectedTags(Array.from(TagManager.state.selectedTags).map(name =>
-                    TagManager.state.tags.find(t => t['Product Name*'] === name)
-                ));
-            }
+            // Only update selected tags panel
+            TagManager.updateSelectedTags(Array.from(TagManager.state.selectedTags).map(name =>
+                TagManager.state.tags.find(t => t['Product Name*'] === name)
+            ));
         });
     });
 }

@@ -129,6 +129,7 @@ VALID_CLASSIC_LINEAGES = {
 EXCLUDED_PRODUCT_TYPES = [
     "Samples - Educational", 
     "Sample - Vendor",
+    "x-DEACTIVATED 1",
     "x-DEACTIVATED 2"
 ]
 

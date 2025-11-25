@@ -8172,20 +8172,10 @@ def get_available_tags():
             cached_tags = None  # CRITICAL: Bypass cache when lineage was updated to ensure fresh database values
             nocache = True  # Force fresh fetch
         
-        # CRITICAL FIX: ALWAYS disable fast_load to ensure database lineage is always loaded
-        # This ensures lineage changes persist after refresh
-        # Performance impact is minimal since we're querying database anyway for lineage alignment
-        fast_load = False
-        logging.info("🔄 CRITICAL FIX: Disabled fast_load to ensure database lineage is always loaded")
-
-        logging.info(f"🔍 LINEAGE DEBUG: cached_tags={'present' if cached_tags else 'None'}, nocache={nocache}, force_full_refresh={force_full_refresh}")
-
         if cached_tags and not nocache:
             # CRITICAL FIX: ALWAYS align lineage from database, even for fast_load
             # Database lineage is the source of truth and must always be applied
-            # This ensures that lineage changes persist after page refresh
             lineage_alignment_needed = True  # Always align lineage to ensure UI matches database
-            logging.info("🔄 CRITICAL: Aligning cached tags with database lineage (database is source of truth)")
 
             # Lineage alignment needed - apply database lineage updates to cached tags
             # CRITICAL: This ensures existing database lineage values (from previous sessions/updates) are reflected in UI
@@ -8206,7 +8196,6 @@ def get_available_tags():
                         cur = conn.cursor()
                         # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
                         # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
-                        # products.Lineage is updated when user changes lineage, so it's the most recent value
                         lineage_query_join_by_name = '''
                             SELECT 
                                 COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
@@ -8217,7 +8206,6 @@ def get_available_tags():
                             ORDER BY p.id DESC
                             LIMIT 1
                         '''
-                        # CRITICAL: products.Lineage is checked FIRST in COALESCE, so user-edited lineage takes priority
                         # Fallback: use product's own Lineage if strains table/column not available
                         lineage_query_fallback = '''
                             SELECT 
@@ -8379,20 +8367,17 @@ def get_available_tags():
                                     
                                     # CRITICAL FIX: Always update from database, even if values appear to match
                                     # Database is the source of truth - always use database values
-                                    # CRITICAL: Set Lineage FIRST and make it the primary field
-                                    tag['Lineage'] = db_lin_clean  # Set this FIRST - it's the user-editable field
                                     tag['currentLineage'] = db_lin_clean
                                     tag['canonical_lineage'] = db_lin_clean
+                                    tag['Lineage'] = db_lin_clean
                                     tag['lineage'] = db_lin_clean.lower()
-                                    # DEBUG: Log to verify fields are set
-                                    logging.debug(f"🔍 CACHE LINEAGE SET for '{name}': Lineage={tag.get('Lineage')}, currentLineage={tag.get('currentLineage')}, canonical_lineage={tag.get('canonical_lineage')}")
                                     
                                     # Always count as updated to ensure frontend gets fresh data
                                     updated += 1
                                     if old_lineage != db_lin_clean:
                                         logging.info(f"🔄 LINEAGE ALIGNMENT (cache): '{name}' - cached: '{old_lineage}' → DB: '{db_lin_clean}'")
                                     else:
-                                        logging.info(f"✅ Lineage confirmed (cache): '{name}' = '{db_lin_clean}' (already matches DB, forcing refresh)")
+                                        logging.debug(f"✅ Lineage confirmed (cache): '{name}' = '{db_lin_clean}' (forcing refresh from DB)")
                                 else:
                                     # Even if no DB lineage found, ensure fields are consistent
                                     existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
@@ -8427,13 +8412,7 @@ def get_available_tags():
 
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms, {updated} tags updated from database)")
-
-                # CRITICAL FIX: Sort cached tags consistently to prevent reordering
-                try:
-                    cached_tags.sort(key=lambda x: str(x.get('Product Name*') or x.get('ProductName') or '').lower())
-                except Exception:
-                    pass
-
+                
                 # CRITICAL FIX: Ensure ALL tags have database lineage fields set, even if they weren't in the batch query
                 # This handles cases where products weren't found in the initial batch but exist in the database
                 if lineage_alignment_needed and lineage_cache:
@@ -8527,9 +8506,8 @@ def get_available_tags():
         
         # GUARANTEED FIX: ALWAYS query database for lineage for ALL tags, regardless of source
         # This ensures database lineage is ALWAYS used, never Excel/cached lineage
-        # CRITICAL: This MUST run even if prefer_db is False, to ensure database lineage overrides Excel
         if all_tags:
-            logging.info(f"🔄 GUARANTEED FIX: Querying database for lineage for ALL {len(all_tags)} tags (prefer_db={prefer_db})")
+            logging.info(f"🔄 GUARANTEED FIX: Querying database for lineage for ALL {len(all_tags)} tags")
             try:
                 store_name = get_current_store_name()
                 if not store_name:
@@ -8548,25 +8526,20 @@ def get_available_tags():
                         
                         if product_names:
                             logging.info(f"🔍 GUARANTEED FIX: Querying database for {len(product_names)} product lineages...")
-                            logging.info(f"🔍 GUARANTEED FIX: Sample product names: {product_names[:3]}")
                             # Query database for all lineages at once using the optimized method
                             db_records = product_db.get_products_by_names(product_names)
                             logging.info(f"🔍 GUARANTEED FIX: Got {len(db_records)} records from database")
-                            if db_records:
-                                sample_record = db_records[0]
-                                logging.info(f"🔍 GUARANTEED FIX: Sample record lineage fields - Lineage: {sample_record.get('Lineage')}, currentLineage: {sample_record.get('currentLineage')}, canonical_lineage: {sample_record.get('canonical_lineage')}")
                             
                             # Build lineage map with multiple matching strategies
                             lineage_map = {}
                             for db_record in db_records:
                                 db_product_name = db_record.get('Product Name*', '')
                                 if db_product_name:
-                                    # CRITICAL: Always use products.Lineage first (user-editable, most recent)
-                                    # Then fall back to strains.canonical_lineage if product lineage is missing
+                                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
                                     db_lineage = (
-                                        db_record.get('Lineage') or  # Product-level lineage (user-editable)
                                         db_record.get('currentLineage') or
-                                        db_record.get('canonical_lineage')
+                                        db_record.get('canonical_lineage') or
+                                        db_record.get('Lineage')
                                     )
                                     if db_lineage:
                                         db_lineage_clean = str(db_lineage).strip().upper()
@@ -8580,9 +8553,8 @@ def get_available_tags():
                                         except Exception:
                                             pass
                             
-                            # GUARANTEED FIX: Update ALL tags with database lineage - OVERRIDE Excel/cached values
+                            # GUARANTEED FIX: Update ALL tags with database lineage
                             updated_count = 0
-                            not_found_count = 0
                             for tag in all_tags:
                                 tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
                                 if not tag_name:
@@ -8609,29 +8581,17 @@ def get_available_tags():
                                 
                                 # GUARANTEED: If database has lineage, ALWAYS use it and override Excel/cached values
                                 if db_lineage:
-                                    db_lineage_clean = str(db_lineage).strip().upper()
                                     old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
-                                    # CRITICAL: Set ALL lineage fields from database - this is the source of truth
-                                    # Database lineage ALWAYS overrides Excel/cached lineage
-                                    # CRITICAL: Set Lineage FIRST and make it the primary field
-                                    tag['Lineage'] = db_lineage_clean  # Set this FIRST - it's the user-editable field
-                                    tag['currentLineage'] = db_lineage_clean
-                                    tag['canonical_lineage'] = db_lineage_clean
-                                    tag['lineage'] = db_lineage_clean.lower()
+                                    # Set ALL lineage fields from database - this is the source of truth
+                                    tag['currentLineage'] = db_lineage
+                                    tag['canonical_lineage'] = db_lineage
+                                    tag['Lineage'] = db_lineage
+                                    tag['lineage'] = db_lineage.lower()
                                     updated_count += 1
-                                    if old_lineage != db_lineage_clean:
-                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage_clean}' (DB override) - ALL fields set")
-                                    else:
-                                        logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed as '{db_lineage_clean}' from database - ALL fields set")
-                                    # DEBUG: Log all lineage fields to verify they're set
-                                    logging.debug(f"🔍 LINEAGE FIELDS SET for '{tag_name}': Lineage={tag.get('Lineage')}, currentLineage={tag.get('currentLineage')}, canonical_lineage={tag.get('canonical_lineage')}")
-                                else:
-                                    not_found_count += 1
-                                    # Log warning for products not found in database
-                                    old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
-                                    logging.warning(f"⚠️ GUARANTEED FIX: '{tag_name}' not found in database lineage map (current: '{old_lineage}')")
+                                    if old_lineage != db_lineage:
+                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}'")
                             
-                            logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage ({not_found_count} not found in DB)")
+                            logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage")
                         else:
                             logging.warning("⚠️ No product names found in tags for guaranteed lineage fix")
                     except Exception as db_query_err:
@@ -9431,33 +9391,15 @@ def get_available_tags():
         except Exception:
             pass
 
-        # CRITICAL FIX: Sort tags consistently to prevent reordering on refresh
-        # Sort by Product Name to maintain stable order across requests
-        try:
-            safe_all_tags.sort(key=lambda x: str(x.get('Product Name*') or x.get('ProductName') or '').lower())
-            logging.info("✅ Sorted tags by Product Name for consistent order")
-        except Exception as sort_err:
-            logging.warning(f"Could not sort tags: {sort_err}")
-
         # Return the combined tags in the format expected by frontend
         elapsed = (time.time() - start_time) * 1000
         logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} tags")
-
+        
         if len(safe_all_tags) == 0:
             logging.warning("⚠️ WARNING: Returning empty tags array! prefer_db={}, database_tags_count={}".format(
                 prefer_db, len(database_tags) if 'database_tags' in locals() else 'unknown'
             ))
-
-        # Final debug: Show sample of what we're returning
-        try:
-            sample_tags = safe_all_tags[:3]
-            for stag in sample_tags:
-                sname = stag.get('Product Name*') or stag.get('ProductName') or 'unknown'
-                slin = stag.get('Lineage', 'missing')
-                logging.info(f"🔍 FINAL RETURN: '{sname}' → Lineage='{slin}'")
-        except Exception:
-            pass
-
+        
         resp = jsonify({
             'tags': safe_all_tags,  # Frontend expects 'tags' property
             'total_count': len(safe_all_tags),
@@ -9919,104 +9861,103 @@ def download_processed_excel():
 
 @app.route('/api/update-lineage', methods=['POST'])
 def update_lineage():
-    """SIMPLIFIED: Update product lineage directly in database"""
+    """CRITICAL FIX: Update both product AND strain lineage to ensure changes persist"""
     try:
         data = request.get_json() if request.is_json else {}
         tag_name = data.get('tag_name') or data.get('Product Name*')
         new_lineage = data.get('lineage')
-
+        
         if not tag_name or not new_lineage:
             return jsonify({'success': False, 'error': 'Missing tag_name or lineage'}), 400
-
+        
         store_name = get_current_store_name()
         if not store_name:
             return jsonify({'success': False, 'error': 'No store selected'}), 400
-
+        
         db_path = f"uploads/product_database_{store_name}.db"
-
-        # Simple direct update with autocommit
+        
+        # CRITICAL FIX: Update both product AND strain lineage
         import sqlite3
         conn = sqlite3.connect(db_path, timeout=5.0)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.isolation_level = None  # Autocommit mode
-
+        
         cursor = conn.cursor()
-
-        # Update ALL products with this name
+        
+        # Step 1: Update product lineage
         cursor.execute("""
-            UPDATE products
-            SET Lineage = ?
+            UPDATE products 
+            SET Lineage = ? 
             WHERE "Product Name*" = ? OR ProductName = ?
         """, (new_lineage, tag_name, tag_name))
         products_updated = cursor.rowcount
-
-        # Verify the update worked by reading it back
+        
+        # Step 2: CRITICAL - Also update strain lineage if product has a strain
+        # This ensures the lineage persists because strain lineage is the source of truth
         cursor.execute("""
-            SELECT "Product Name*", Lineage
-            FROM products
-            WHERE "Product Name*" = ? OR ProductName = ?
-            LIMIT 5
+            SELECT DISTINCT s.id, s.strain_name
+            FROM products p
+            JOIN strains s ON p.strain_id = s.id
+            WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+            AND p.strain_id IS NOT NULL
         """, (tag_name, tag_name))
-        verification_rows = cursor.fetchall()
-
+        strain_rows = cursor.fetchall()
+        
+        strains_updated = 0
+        for strain_id, strain_name in strain_rows:
+            # Update both sovereign_lineage and canonical_lineage
+            cursor.execute("""
+                UPDATE strains 
+                SET sovereign_lineage = ?, canonical_lineage = ?
+                WHERE id = ?
+            """, (new_lineage, new_lineage, strain_id))
+            strains_updated += cursor.rowcount
+            logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{new_lineage}'")
+        
+        # Step 3: Also update all products with the same strain (sovereign lineage propagation)
+        if strains_updated > 0:
+            for strain_id, strain_name in strain_rows:
+                cursor.execute("""
+                    UPDATE products 
+                    SET Lineage = ?
+                    WHERE strain_id = ?
+                """, (new_lineage, strain_id))
+                similar_products_updated = cursor.rowcount
+                if similar_products_updated > products_updated:
+                    logging.info(f"✅ Updated {similar_products_updated} products with strain '{strain_name}' to lineage '{new_lineage}'")
+        
         conn.close()
 
-        # Log verification
-        for vrow in verification_rows:
-            logging.info(f"✅ VERIFIED: Product '{vrow[0]}' now has lineage '{vrow[1]}'")
-
-        # CRITICAL FIX: Update Excel DataFrame lineage if Excel processor exists
-        # This ensures both database and Excel DataFrame stay in sync
-        excel_updated = False
-        try:
-            excel_processor = get_excel_processor()
-            if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
-                # Update lineage in Excel DataFrame for all matching products
-                if "Product Name*" in excel_processor.df.columns and "Lineage" in excel_processor.df.columns:
-                    # Find all rows matching the product name
-                    mask = (
-                        (excel_processor.df["Product Name*"].astype(str).str.strip() == str(tag_name).strip()) |
-                        (excel_processor.df["Product Name*"].astype(str).str.strip().str.lower() == str(tag_name).strip().lower())
-                    )
-                    matching_rows = mask.sum()
-                    if matching_rows > 0:
-                        excel_processor.df.loc[mask, "Lineage"] = new_lineage
-                        excel_updated = True
-                        logging.info(f"✅ Updated Excel DataFrame lineage for {matching_rows} row(s) matching '{tag_name}' to '{new_lineage}'")
-                    else:
-                        logging.debug(f"⚠️ No matching rows in Excel DataFrame for '{tag_name}'")
-        except Exception as excel_err:
-            logging.warning(f"Could not update Excel DataFrame lineage: {excel_err}")
-        
         # Clear caches AND Excel processor to force fresh data load
         try:
             cache.clear()
             clear_available_tags_cache(reason="lineage_update")
-            # CRITICAL FIX: Don't clear Excel processor if we just updated it - keep the updated DataFrame
-            # Only clear if we didn't update it (to force reload with fresh database lineage)
-            if not excel_updated:
-                global _excel_processor
-                if hasattr(g, 'excel_processor'):
-                    delattr(g, 'excel_processor')
-                    logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
-                if _excel_processor is not None:
-                    _excel_processor = None
-                    logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
+            # CRITICAL FIX: Clear Excel processor from both global and request context to force reload with fresh database lineage
+            global _excel_processor
+            if hasattr(g, 'excel_processor'):
+                delattr(g, 'excel_processor')
+                logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
+            if _excel_processor is not None:
+                _excel_processor = None
+                logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
         except Exception as clear_err:
             logging.warning(f"Could not clear caches/processor: {clear_err}")
-
-        logging.info(f"✅ Updated {products_updated} products to lineage '{new_lineage}'")
-
+        
+        total_updated = products_updated + strains_updated
+        logging.info(f"✅ Updated {products_updated} products and {strains_updated} strains to lineage '{new_lineage}'")
+        
         return jsonify({
             'success': True,
             'products_updated': products_updated,
-            'db_updated': products_updated,
+            'strains_updated': strains_updated,
+            'db_updated': total_updated,
+            'excel_updated': 0,
             'new_lineage': new_lineage,
             'verified_lineage': new_lineage,
             'verification_passed': True
         })
-
+        
     except Exception as e:
         logging.error(f"❌ Lineage update error: {e}")
         import traceback
@@ -10364,9 +10305,10 @@ def update_doh():
         if doh_storage_value is None or doh_storage_value == 'None' or str(doh_storage_value).lower() == 'none':
             doh_storage_value = 'No'
         
-        # Get the excel processor from session (optional - may not be available)
+        # Get the excel processor from session
         excel_processor = get_excel_processor()
-        has_excel_data = excel_processor and excel_processor.df is not None
+        if not excel_processor or excel_processor.df is None:
+            return jsonify({'error': 'No data loaded'}), 400
         
         # Update the DOH in the current data
         # CRITICAL FIX: Update database FIRST, then update Excel processor from database
@@ -10375,10 +10317,6 @@ def update_doh():
         product_db = get_product_database(store_name)
         if not product_db:
             return jsonify({'error': 'Database not available'}), 500
-        
-        # If neither Excel data nor database is available, return error
-        if not has_excel_data:
-            logging.info(f"⚠️ DOH API: No Excel data loaded, but database is available - proceeding with database-only update")
         
         # Get vendor and brand from Excel data for more specific database update
         vendor = None
@@ -10451,31 +10389,25 @@ def update_doh():
         except Exception as json_check_err:
             logging.debug(f"Could not check JSON matched status: {json_check_err}")
         
-        # Now update the Excel processor DataFrame (skip for JSON matched tags or when no Excel data)
+        # Now update the Excel processor DataFrame (skip for JSON matched tags)
         excel_update_success = False
-        if has_excel_data and excel_processor and not is_json_matched_tag:
+        if excel_processor and not is_json_matched_tag:
             for candidate in name_variants:
                 if excel_processor.update_doh_in_current_data(candidate, doh_storage_value):
                     excel_update_success = True
                     canonical_variant_used = canonical_variant_used or candidate
                     break
-        elif is_json_matched_tag or not has_excel_data:
-            # For JSON matched tags or when no Excel data, Excel update is not required
+        elif is_json_matched_tag:
+            # For JSON matched tags, Excel update is not required
             excel_update_success = True
-            if is_json_matched_tag:
-                logging.info(f"✅ DOH UPDATE: Skipped Excel update for JSON matched tag '{tag_name}' (database updated)")
-            elif not has_excel_data:
-                logging.info(f"✅ DOH UPDATE: Skipped Excel update - no Excel data loaded (database-only update)")
+            logging.info(f"✅ DOH UPDATE: Skipped Excel update for JSON matched tag '{tag_name}' (database updated)")
         
-        if excel_update_success and has_excel_data:
+        if excel_update_success:
             logging.info(f"✅ Updated DOH in Excel processor DataFrame")
-        elif not has_excel_data:
-            logging.info(f"✅ DOH UPDATE: Database update successful (no Excel data to update)")
         else:
             logging.warning(f"⚠️  Could not update Excel processor DataFrame for '{tag_name}'")
         
         # Persist a session-scoped override so generation always reflects the latest user choice
-        session_override_saved = False
         try:
             import re
             overrides = session.get('doh_overrides', {})
@@ -10489,28 +10421,18 @@ def update_doh():
                     overrides[base_norm_key] = doh_storage_value
             session['doh_overrides'] = overrides
             session.modified = True
-            session_override_saved = True
             logging.info(f"✅ DOH API UPDATE: Saved session overrides for variants {name_variants} → '{doh_storage_value}'")
         except Exception as ov_err:
             logging.warning(f"Could not save DOH override in session: {ov_err}")
 
-        # CRITICAL FIX: Success criteria depends on available data sources
-        # - If Excel data is available, try to update both database and Excel
-        # - If only database is available, database update is sufficient
-        # - JSON matched tags don't require Excel update
-        # - If neither Excel nor database update succeeds, still allow session override (for session-only tags)
+        # CRITICAL FIX: For JSON matched tags, database update is sufficient (Excel update not required)
+        # For regular tags, require Excel update to succeed
+        if not is_json_matched_tag and not excel_update_success:
+            return jsonify({'error': 'Failed to update DOH in Excel data'}), 500
         
-        # Check if we have any successful update
-        has_any_update = db_update_success or (has_excel_data and excel_update_success) or session_override_saved
-        
-        # Only fail if we have no way to persist the change
-        if not has_any_update:
-            return jsonify({'error': 'Failed to update DOH - product not found in database or Excel data'}), 500
-        
-        # Excel update is optional - only required if Excel data exists and tag is not JSON matched
-        if has_excel_data and not is_json_matched_tag and not excel_update_success and db_update_success:
-            logging.warning(f"⚠️ DOH API: Database update succeeded but Excel update failed for '{tag_name}'")
-            # Don't fail the request - database update is the source of truth
+        # For JSON matched tags, database update is sufficient
+        if is_json_matched_tag and not db_update_success:
+            return jsonify({'error': 'Failed to update DOH in database'}), 500
         
         # CRITICAL FIX: Aggressively clear ALL caches to force fresh data AND reload DataFrame
         try:

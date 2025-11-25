@@ -639,32 +639,17 @@ def infer_product_type_from_name(product_name: str) -> str:
         if key in name_lower:
             return value
     
-    # CRITICAL FIX: Check for high THC/CBD indicators first to set proper product type
-    has_high_thc = 'high thc' in name_lower or 'highthc' in name_lower
-    has_high_cbd = 'high cbd' in name_lower or 'highcbd' in name_lower
-    
     # Pattern-based inference - prioritize vape keywords over concentrate keywords
     if any(x in name_lower for x in ["flower", "bud", "nug", "herb", "marijuana", "cannabis"]):
-        return "High THC Flower" if has_high_thc else "Flower"
+        return "Flower"
     elif any(x in name_lower for x in ["vape", "cart", "cartridge", "disposable", "pod", "battery", "jefe", "twisted", "fire", "pen"]):
         return "Vape Cartridge"
     elif any(x in name_lower for x in ["concentrate", "rosin", "shatter", "wax", "live resin", "diamonds", "sauce", "extract", "oil", "distillate"]):
         return "Concentrate"
-    elif any(x in name_lower for x in ["edible", "gummy", "chocolate", "cookie", "brownie", "candy", "tablet"]):
-        # CRITICAL FIX: High THC edibles should show as "High THC Edible" not "Unknown Type"
-        if has_high_thc:
-            return "High THC Edible"
-        elif has_high_cbd:
-            return "High CBD Edible"
-        else:
-            return "Edible (Solid)"
+    elif any(x in name_lower for x in ["edible", "gummy", "chocolate", "cookie", "brownie", "candy"]):
+        return "Edible (Solid)"
     elif any(x in name_lower for x in ["tincture", "oil", "drops", "liquid"]):
-        if has_high_thc:
-            return "High THC Edible (Liquid)"
-        elif has_high_cbd:
-            return "High CBD Edible (Liquid)"
-        else:
-            return "Edible (Liquid)"
+        return "Edible (Liquid)"
     elif any(x in name_lower for x in ["pre-roll", "joint", "cigar", "blunt"]):
         return "Pre-roll"
     elif any(x in name_lower for x in ["topical", "cream", "lotion", "salve", "balm"]):
@@ -10375,12 +10360,6 @@ class JSONMatcher:
         product_type_lower = str(product_type).lower().strip()
         product_name_lower = str(product_name).lower().strip()
         
-        # CRITICAL FIX: Check product name for high THC/CBD indicators first (works even if product type is "Unknown Type")
-        if 'high thc' in product_name_lower or 'highthc' in product_name_lower:
-            return 'THC'
-        if 'high cbd' in product_name_lower or 'highcbd' in product_name_lower:
-            return 'CBD'
-        
         # High CBD products get CBD designation
         if 'high cbd' in product_type_lower or 'highcbd' in product_type_lower:
             return 'CBD'
@@ -10400,11 +10379,11 @@ class JSONMatcher:
         if any(classic_type in product_type_lower for classic_type in classic_types):
             return 'THC'
         
-        # High THC products get THC designation (check both product type and name)
+        # High THC products get THC designation
         if 'high thc' in product_type_lower or 'highthc' in product_type_lower:
             return 'THC'
         
-        # Non-classic types (edibles, tinctures, topicals) - check if they're high THC first
+        # Non-classic types (edibles, tinctures, topicals) default to YES
         nonclassic_types = [
             'edible', 'tincture', 'topical', 'capsule', 'pill',
             'tablet', 'gummy', 'gummies', 'chocolate', 'candy',
@@ -10413,11 +10392,6 @@ class JSONMatcher:
         ]
         
         if any(nonclassic_type in product_type_lower for nonclassic_type in nonclassic_types):
-            # CRITICAL FIX: High THC edibles should get THC, not YES
-            # Check product name for high THC indicators even if product type doesn't have it
-            if 'high thc' in product_name_lower or 'highthc' in product_name_lower:
-                return 'THC'
-            # Default non-classic types to YES (legacy behavior)
             return 'YES'
         
         # Default to THC for unrecognized types
