@@ -4939,12 +4939,14 @@ class ProductDatabase:
             placeholders = ','.join(['?' for _ in normalized_names])
             
             # CRITICAL FIX: JOIN with strains table to get sovereign_lineage (manual overrides)
-            # Use COALESCE to prioritize sovereign_lineage, then canonical_lineage, then products.Lineage
+            # CRITICAL: Prioritize products.Lineage FIRST (user-editable, most recent) over strain lineage
+            # This ensures manual lineage updates via /api/update-lineage take precedence
+            # Only use strain lineage if products.Lineage is NULL or empty
             cursor.execute(f'''
                 SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand",
-                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS "Lineage",
+                       COALESCE(NULLIF(p."Lineage", ''), s.sovereign_lineage, s.canonical_lineage, 'MIXED') AS "Lineage",
                        p."Product Strain" as strain_name,
-                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as canonical_lineage,
+                       COALESCE(NULLIF(p."Lineage", ''), s.sovereign_lineage, s.canonical_lineage, 'MIXED') as canonical_lineage,
                        p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        p."Description", p."Weight*", p."Units", p."Price", 
                        p."THC test result", p."CBD test result", p."Test result unit (% or mg)",
@@ -4985,11 +4987,11 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        'Lineage': result[6] or 'MIXED',  # lineage (now includes sovereign_lineage priority)
+                        'Lineage': result[6] or 'MIXED',  # lineage (prioritizes products.Lineage over strain lineage)
                         'Product Strain': result[7],  # strain_name from Product Strain column
                         'strain_name': result[7],  # strain_name from Product Strain column
-                        'canonical_lineage': result[8] or result[6] or 'MIXED',  # canonical_lineage (now includes sovereign_lineage priority)
-                        'currentLineage': result[8] or result[6] or 'MIXED',  # currentLineage - same as canonical_lineage (includes sovereign_lineage priority)
+                        'canonical_lineage': result[8] or result[6] or 'MIXED',  # canonical_lineage (prioritizes products.Lineage)
+                        'currentLineage': result[8] or result[6] or 'MIXED',  # currentLineage - same as canonical_lineage (prioritizes products.Lineage)
                         'total_occurrences': result[9],
                         'first_seen_date': result[10],
                         'last_seen_date': result[11],
