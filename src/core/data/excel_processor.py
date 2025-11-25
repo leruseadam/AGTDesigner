@@ -3154,7 +3154,27 @@ class ExcelProcessor:
             # Re-enabled to ensure lineage changes persist after reload
             self._schedule_product_db_integration()
             
-            # Load lineage data from database to ensure changes persist
+            # CRITICAL FIX: Set default HYBRID for classic types BEFORE loading from database
+            # This ensures new products get HYBRID, not MIXED
+            if "Product Type*" in self.df.columns and "Lineage" in self.df.columns:
+                from src.core.constants import CLASSIC_TYPES
+                classic_mask = self.df["Product Type*"].str.strip().str.lower().isin([c.lower() for c in CLASSIC_TYPES])
+                empty_lineage_mask = (
+                    self.df["Lineage"].isnull() | 
+                    (self.df["Lineage"].astype(str).str.strip() == "") |
+                    (self.df["Lineage"].astype(str).str.lower().str.strip() == "nan") |
+                    (self.df["Lineage"].astype(str).str.strip() == "MIXED")
+                )
+                classic_cbd_mask = classic_mask & (self.df["Lineage"] == "CBD")
+                set_hybrid_mask = classic_mask & empty_lineage_mask & ~classic_cbd_mask
+                if set_hybrid_mask.any():
+                    if "HYBRID" not in self.df["Lineage"].cat.categories:
+                        self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["HYBRID"])
+                    self.df.loc[set_hybrid_mask, "Lineage"] = "HYBRID"
+                    self.logger.info(f"✅ Set HYBRID lineage for {set_hybrid_mask.sum()} classic products with missing/MIXED lineage")
+            
+            # Load lineage data from database to ensure changes persist after reload
+            # This runs AFTER defaults are set, so database values override defaults but defaults are set first
             self._load_lineage_from_database()
             
             # Cache the processed file
