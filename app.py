@@ -8545,9 +8545,13 @@ def get_available_tags():
                         
                         if product_names:
                             logging.info(f"🔍 GUARANTEED FIX: Querying database for {len(product_names)} product lineages...")
+                            logging.info(f"🔍 GUARANTEED FIX: Sample product names: {product_names[:3]}")
                             # Query database for all lineages at once using the optimized method
                             db_records = product_db.get_products_by_names(product_names)
                             logging.info(f"🔍 GUARANTEED FIX: Got {len(db_records)} records from database")
+                            if db_records:
+                                sample_record = db_records[0]
+                                logging.info(f"🔍 GUARANTEED FIX: Sample record lineage fields - Lineage: {sample_record.get('Lineage')}, currentLineage: {sample_record.get('currentLineage')}, canonical_lineage: {sample_record.get('canonical_lineage')}")
                             
                             # Build lineage map with multiple matching strategies
                             lineage_map = {}
