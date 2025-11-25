@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp Background Capture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            background: #000;
+        }
+        #lava-lamp-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            margin: 0;
+            padding: 0;
+            border: none;
+            z-index: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="lava-lamp-canvas"></canvas>
+    <script>
+// WebGL Shader-Based Lava Lamp Metaballs - Enhanced Realistic 3D
+(function() {
+  const canvas = document.getElementById('lava-lamp-canvas');
+  let gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  if (!gl) {
+    canvas.style.display = 'none';
+    return;
+  }
+
+  function resize() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const dpr = window.devicePixelRatio || 1;
+    
+    canvas.style.position = 'fixed';
+    canvas.style.top = '0px';
+    canvas.style.left = '0px';
+    canvas.style.right = '0px';
+    canvas.style.bottom = '0px';
+    canvas.style.width = vw + 'px';
+    canvas.style.height = vh + 'px';
+    canvas.style.zIndex = '-1';
+    canvas.style.pointerEvents = 'none';
+    canvas.style.margin = '0';
+    canvas.style.padding = '0';
+    canvas.style.border = 'none';
+    canvas.style.display = 'block';
+    canvas.style.background = 'transparent';
+    
+    const displayWidth = Math.floor(vw * dpr);
+    const displayHeight = Math.floor(vh * dpr);
+    
+    canvas.width = displayWidth;
+    canvas.height = displayHeight;
+    
+    gl.viewport(0, 0, displayWidth, displayHeight);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const vertSrc = `
+    attribute vec2 a_position;
+    varying vec2 v_uv;
+    void main() {
+      v_uv = (a_position + 1.0) * 0.5;
+      gl_Position = vec4(a_position, 0, 1);
+    }
+  `;
+
+  const fragSrc = `
+    precision highp float;
+    #define BLOB_COUNT 12
+    varying vec2 v_uv;
+    uniform float u_time;
+    uniform vec2 u_resolution;
+    uniform vec3 u_colors[BLOB_COUNT];
+    uniform vec3 u_blobPos[BLOB_COUNT];
+    uniform vec3 u_blobVel[BLOB_COUNT];
+    
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    }
+    
+    float noise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+                 mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+    }
+    
+    float fbm(vec2 p) {
+      float value = 0.0;
+      float amplitude = 0.5;
+      float frequency = 1.0;
+      for (int i = 0; i < 4; i++) {
+        value += amplitude * noise(p * frequency);
+        amplitude *= 0.5;
+        frequency *= 2.0;
+      }
+      return value;
+    }
+    
+    void main() {
+      vec2 uv = v_uv * u_resolution;
+      float field = 0.0;
+      vec3 color = vec3(0.0);
+      float total = 0.0;
+      float depth = 0.0;
+      
+      for (int i = 0; i < BLOB_COUNT; i++) {
+        vec2 pos = u_blobPos[i].xy;
+        float r = u_blobPos[i].z;
+        float blobDepth = u_blobVel[i].z;
+        
+        float dx = uv.x - pos.x;
+        float dy = uv.y - pos.y;
+        float dist = sqrt(dx * dx + dy * dy);
+        
+        float depthFactor = 1.0 + blobDepth * 0.3;
+        float adjustedR = r * depthFactor;
+        float v = adjustedR * adjustedR / (dist * dist + 1.0);
+        
+        float surfaceTension = smoothstep(0.0, adjustedR * 0.3, dist) * smoothstep(adjustedR, adjustedR * 0.7, dist);
+        v *= (1.0 + surfaceTension * 0.2);
+        
+        field += v;
+        color += u_colors[i] * v;
+        total += v;
+        depth = max(depth, blobDepth * v);
+      }
+      
+      color = color / max(total, 0.001);
+      
+      float alpha = smoothstep(0.8, 1.8, field);
+      
+      float innerGlow = smoothstep(1.8, 2.5, field);
+      float depthGlow = smoothstep(0.0, 0.5, depth);
+      color = mix(color, color * 1.5, innerGlow * 0.2 * (1.0 + depthGlow * 0.3));
+      
+      float outerGlow = smoothstep(0.7, 1.1, field);
+      color = mix(color, color * 0.8, outerGlow * 0.2);
+      
+      vec2 detailUV = uv * 0.02 + u_time * 0.00005;
+      float surfaceDetail = fbm(detailUV) * 0.003;
+      color += vec3(surfaceDetail * 0.001);
+      
+      float shadow = smoothstep(0.0, 0.3, depth) * 0.35;
+      color *= (1.0 - shadow);
+      
+      float organicNoise = fbm(uv * 0.01 + u_time * 0.00002);
+      color += vec3(organicNoise * 0.0005);
+      
+      color = clamp(color, vec3(0.02, 0.02, 0.02), vec3(0.8, 0.8, 0.8));
+      
+      alpha = clamp(alpha, 0.0, 1.0);
+      
+      gl_FragColor = vec4(color, alpha * 0.95);
+    }
+  `;
+
+  function createShader(type, src) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, src);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      throw new Error(gl.getShaderInfoLog(shader));
+    }
+    return shader;
+  }
+
+  function createProgram(vs, fs) {
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(prog));
+    }
+    return prog;
+  }
+
+  const vertShader = createShader(gl.VERTEX_SHADER, vertSrc);
+  const fragShader = createShader(gl.FRAGMENT_SHADER, fragSrc);
+  const program = createProgram(vertShader, fragShader);
+  gl.useProgram(program);
+
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1, 1, -1, -1, 1,
+    -1, 1, 1, -1, 1, 1
+  ]), gl.STATIC_DRAW);
+  const posLoc = gl.getAttribLocation(program, 'a_position');
+  gl.enableVertexAttribArray(posLoc);
+  gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+  const u_time = gl.getUniformLocation(program, 'u_time');
+  const u_resolution = gl.getUniformLocation(program, 'u_resolution');
+  const u_colors = gl.getUniformLocation(program, 'u_colors');
+  const u_blobPos = gl.getUniformLocation(program, 'u_blobPos');
+  const u_blobVel = gl.getUniformLocation(program, 'u_blobVel');
+
+  const BLOB_COUNT = 12;
+  const baseColors = [
+    [1.0, 0.0, 1.0],
+    [1.0, 0.27, 0.0],
+    [0.0, 1.0, 1.0],
+    [1.0, 1.0, 0.0],
+    [1.0, 0.08, 0.58],
+    [0.0, 1.0, 0.5],
+    [0.54, 0.17, 0.89],
+    [1.0, 0.5, 0.0],
+    [0.5, 0.0, 1.0],
+    [0.0, 0.8, 1.0],
+    [1.0, 0.0, 0.5],
+    [0.0, 1.0, 0.0]
+  ];
+  
+  const blobs = [];
+  for (let i = 0; i < BLOB_COUNT; i++) {
+    blobs.push({
+      x: Math.random(),
+      y: -0.1 + Math.random() * 0.1,
+      vx: 0,
+      vy: 0,
+      radius: 0.06 + Math.random() * 0.1,
+      depth: Math.random() * 0.6 + 0.3,
+      mass: 0.5 + Math.random() * 0.8,
+      movePhase: Math.random() * Math.PI * 2,
+      pulsePhase: Math.random() * Math.PI * 2,
+      wobblePhase: Math.random() * Math.PI * 2,
+      morphPhase: Math.random() * Math.PI * 2,
+      startTime: 0,
+      lastUpdate: 0,
+      personality: Math.random()
+    });
+  }
+
+  let frameCount = 0;
+  const CAPTURE_FRAME = 120; // Capture after 2 seconds at 60fps
+
+  function animate() {
+    const t = performance.now() * 0.001;
+    const dt = Math.min(0.016, t - (blobs[0].lastUpdate || t));
+    
+    gl.uniform1f(u_time, t);
+    gl.uniform2f(u_resolution, canvas.width, canvas.height);
+    
+    const blobPos = [];
+    const blobVel = [];
+    
+    for (let i = 0; i < BLOB_COUNT; i++) {
+      const blob = blobs[i];
+      if (blob.startTime === 0) blob.startTime = t;
+      if (blob.lastUpdate === 0) blob.lastUpdate = t;
+      
+      const gravity = 0.000001 * blob.mass;
+      const drag = 0.9998;
+      const buoyancy = 0.0000003 * blob.mass;
+      
+      const organicForceX = Math.sin(t * 0.0002 + blob.movePhase + i) * 0.0000002;
+      const organicForceY = Math.cos(t * 0.00015 + blob.movePhase + i) * 0.0000001;
+      
+      blob.vy += gravity - buoyancy;
+      blob.vx += organicForceX;
+      blob.vy += organicForceY;
+      
+      blob.vx *= drag;
+      blob.vy *= drag;
+      
+      blob.x += blob.vx * dt * 1000;
+      blob.y += blob.vy * dt * 1000;
+      
+      if (blob.x < 0.1) {
+        blob.x = 0.1;
+        blob.vx *= -0.05;
+      } else if (blob.x > 0.9) {
+        blob.x = 0.9;
+        blob.vx *= -0.05;
+      }
+      
+      if (blob.y > 1.1) {
+        blob.y = -0.1 + Math.random() * 0.1;
+        blob.vy = 0;
+        blob.vx = 0;
+        blob.startTime = t;
+      }
+      
+      blob.depth += Math.sin(t * 0.0005 + i) * 0.000001;
+      blob.depth = Math.max(0.3, Math.min(1.0, blob.depth));
+      
+      const pulse = Math.sin(t * 0.0008 + blob.pulsePhase + i) * 0.0002;
+      const organicPulse = Math.cos(t * 0.0006 + i) * 0.0001;
+      const radius = blob.radius + pulse + organicPulse;
+      
+      blobPos.push(blob.x * canvas.width, blob.y * canvas.height, radius * Math.min(canvas.width, canvas.height));
+      blobVel.push(blob.vx * 100, blob.vy * 100, blob.depth);
+      
+      blob.lastUpdate = t;
+    }
+    
+    const colors = baseColors.map((c, i) => {
+      return [c[0], c[1], c[2]];
+    });
+    
+    gl.uniform3fv(u_colors, colors.flat());
+    gl.uniform3fv(u_blobPos, blobPos);
+    gl.uniform3fv(u_blobVel, blobVel);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    
+    frameCount++;
+    if (frameCount < CAPTURE_FRAME) {
+      requestAnimationFrame(animate);
+    } else {
+      // Signal that we're ready for capture
+      window.captureReady = true;
+    }
+  }
+
+  animate();
+})();
+    </script>
+</body>
+</html>

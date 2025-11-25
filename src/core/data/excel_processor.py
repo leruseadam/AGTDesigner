@@ -287,12 +287,35 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
                 minor_cannabinoid_from_name_mask
             )
             result[high_cbd_edible_mask] = 'CBD'
-            # Set remaining edibles with CBD to MIXED
-            remaining_edible_cbd = edible_cbd & ~high_cbd_edible_mask
-            result[remaining_edible_cbd] = 'MIXED'
+            # CRITICAL FIX: High CBD products should NEVER get MIXED - they should get CBD
+            # Check product type for high CBD
+            if 'Product Type*' in df.columns:
+                product_types = df['Product Type*'].astype(str).str.lower()
+                high_cbd_type_mask = product_types.str.contains('high cbd|highcbd', case=False, na=False)
+                # Assign CBD to high CBD edibles
+                high_cbd_edible_type = edible_cbd & high_cbd_type_mask
+                result[high_cbd_edible_type] = 'CBD'
+                # Set remaining edibles with CBD to MIXED (but NOT high CBD)
+                remaining_edible_cbd = edible_cbd & ~high_cbd_edible_mask & ~high_cbd_type_mask
+                result[remaining_edible_cbd] = 'MIXED'
+            else:
+                # Set remaining edibles with CBD to MIXED (but check for high CBD in name)
+                remaining_edible_cbd = edible_cbd & ~high_cbd_edible_mask
+                result[remaining_edible_cbd] = 'MIXED'
         else:
-            # If no product name column, default edibles with CBD to MIXED
-            result[edible_cbd] = 'MIXED'
+            # If no product name column, check product type for high CBD
+            if 'Product Type*' in df.columns:
+                product_types = df['Product Type*'].astype(str).str.lower()
+                high_cbd_type_mask = product_types.str.contains('high cbd|highcbd', case=False, na=False)
+                # Assign CBD to high CBD edibles
+                high_cbd_edible_type = edible_cbd & high_cbd_type_mask
+                result[high_cbd_edible_type] = 'CBD'
+                # Default other edibles with CBD to MIXED (but NOT high CBD)
+                remaining_edible_cbd = edible_cbd & ~high_cbd_type_mask
+                result[remaining_edible_cbd] = 'MIXED'
+            else:
+                # If no product name column, default edibles with CBD to MIXED
+                result[edible_cbd] = 'MIXED'
         
         # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
         paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
@@ -302,15 +325,41 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         mixed_mask = nonclassic_mask & (product_strain.str.contains('Mixed', case=False, na=False))
         result[mixed_mask] = 'MIXED'
         
-        # Default fallback for any remaining non-classic types
-        remaining_nonclassic_mask = nonclassic_mask & ~(cbd_detection_mask | paraphernalia_mask | mixed_mask)
+        # CRITICAL FIX: Check for high CBD products before assigning MIXED as default
+        high_cbd_default_mask = pd.Series([False] * len(df), index=df.index)
+        if 'Product Type*' in df.columns:
+            product_types = df['Product Type*'].astype(str).str.lower()
+            high_cbd_default_mask = product_types.str.contains('high cbd|highcbd', case=False, na=False)
+        if 'Product Name*' in df.columns:
+            product_names = df['Product Name*'].astype(str).str.lower()
+            high_cbd_default_mask = high_cbd_default_mask | product_names.str.contains('high cbd|highcbd', case=False, na=False)
+        
+        # Assign CBD to high CBD products
+        high_cbd_nonclassic = nonclassic_mask & high_cbd_default_mask
+        result[high_cbd_nonclassic] = 'CBD'
+        
+        # Default fallback for any remaining non-classic types (but NOT high CBD)
+        remaining_nonclassic_mask = nonclassic_mask & ~(cbd_detection_mask | paraphernalia_mask | mixed_mask | high_cbd_default_mask)
         
         # Only set default for empty lineages in remaining non-classic types
         remaining_empty_mask = remaining_nonclassic_mask & empty_lineage_mask
         result[remaining_empty_mask] = 'MIXED'
     else:
-        # Fallback if Product Strain column doesn't exist - only for empty lineages
-        nonclassic_default_mask = nonclassic_mask & empty_lineage_mask
+        # CRITICAL FIX: Check for high CBD products before assigning MIXED as fallback
+        high_cbd_fallback_mask = pd.Series([False] * len(df), index=df.index)
+        if 'Product Type*' in df.columns:
+            product_types = df['Product Type*'].astype(str).str.lower()
+            high_cbd_fallback_mask = product_types.str.contains('high cbd|highcbd', case=False, na=False)
+        if 'Product Name*' in df.columns:
+            product_names = df['Product Name*'].astype(str).str.lower()
+            high_cbd_fallback_mask = high_cbd_fallback_mask | product_names.str.contains('high cbd|highcbd', case=False, na=False)
+        
+        # Assign CBD to high CBD products
+        high_cbd_fallback = nonclassic_mask & high_cbd_fallback_mask & empty_lineage_mask
+        result[high_cbd_fallback] = 'CBD'
+        
+        # Fallback if Product Strain column doesn't exist - only for empty lineages (but NOT high CBD)
+        nonclassic_default_mask = nonclassic_mask & empty_lineage_mask & ~high_cbd_fallback_mask
         result[nonclassic_default_mask] = 'MIXED'
     
     return result
@@ -2163,9 +2212,27 @@ class ExcelProcessor:
                             self.df.loc[cbd_edible_empty, "Lineage"] = "CBD"
                             self.logger.info(f"Assigned CBD lineage to {cbd_edible_empty.sum()} CBD-focused edible products")
                         
-                        # All other edibles get MIXED lineage
-                        non_cbd_edible_empty = non_classic_empty_mask & edible_mask & ~cbd_edible_mask
+                        # CRITICAL FIX: Check for high CBD products before assigning MIXED
+                        product_type_col = self.df["Product Type*"].astype(str).str.lower() if "Product Type*" in self.df.columns else pd.Series("")
+                        product_name_col_for_high_cbd = self.df[product_name_col].astype(str).str.lower() if product_name_col else pd.Series("")
+                        high_cbd_mask_empty = (
+                            product_type_col.str.contains("high cbd|highcbd", case=False, na=False) |
+                            product_name_col_for_high_cbd.str.contains("high cbd|highcbd", case=False, na=False)
+                        )
+                        
+                        # Assign CBD to high CBD edibles with empty lineage
+                        high_cbd_edible_empty = non_classic_empty_mask & edible_mask & high_cbd_mask_empty
+                        if high_cbd_edible_empty.any():
+                            if "CBD" not in self.df["Lineage"].cat.categories:
+                                self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["CBD"])
+                            self.df.loc[high_cbd_edible_empty, "Lineage"] = "CBD"
+                            self.logger.info(f"Assigned CBD lineage to {high_cbd_edible_empty.sum()} high CBD edible products with empty lineage (preventing MIXED)")
+                        
+                        # All other edibles get MIXED lineage (but NOT high CBD products)
+                        non_cbd_edible_empty = non_classic_empty_mask & edible_mask & ~cbd_edible_mask & ~high_cbd_mask_empty
                         if non_cbd_edible_empty.any():
+                            if "MIXED" not in self.df["Lineage"].cat.categories:
+                                self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
                             self.df.loc[non_cbd_edible_empty, "Lineage"] = "MIXED"
                             self.logger.info(f"Assigned MIXED lineage to {non_cbd_edible_empty.sum()} edible products")
                     
@@ -2701,8 +2768,24 @@ class ExcelProcessor:
                         self.df.loc[combined_cbd_blend_mask, "Lineage"] = "CBD"
                         self.logger.info(f"Assigned CBD lineage to {combined_cbd_blend_mask.sum()} products with CBD Blend strain")
                     
-                    # Set edibles with CBD Blend but not explicitly CBD-focused to MIXED
-                    edible_cbd_blend_mixed = cbd_blend_mask & edible_mask & ~edible_cbd_blend_explicit
+                    # CRITICAL FIX: High CBD products should NEVER get MIXED - check for high CBD first
+                    product_type_col = self.df["Product Type*"].astype(str).str.lower() if "Product Type*" in self.df.columns else pd.Series("")
+                    product_name_col_for_high_cbd = self.df[product_name_col].astype(str).str.lower() if product_name_col else pd.Series("")
+                    high_cbd_mask_edible = (
+                        product_type_col.str.contains("high cbd|highcbd", case=False, na=False) |
+                        product_name_col_for_high_cbd.str.contains("high cbd|highcbd", case=False, na=False)
+                    )
+                    
+                    # Assign CBD to high CBD edibles
+                    high_cbd_edible = edible_mask & high_cbd_mask_edible
+                    if high_cbd_edible.any() and "Lineage" in self.df.columns:
+                        if "CBD" not in self.df["Lineage"].cat.categories:
+                            self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["CBD"])
+                        self.df.loc[high_cbd_edible, "Lineage"] = "CBD"
+                        self.logger.info(f"Assigned CBD lineage to {high_cbd_edible.sum()} high CBD edible products (preventing MIXED)")
+                    
+                    # Set edibles with CBD Blend but not explicitly CBD-focused to MIXED (but NOT high CBD products)
+                    edible_cbd_blend_mixed = cbd_blend_mask & edible_mask & ~edible_cbd_blend_explicit & ~high_cbd_mask_edible
                     if edible_cbd_blend_mixed.any() and "Lineage" in self.df.columns:
                         if "MIXED" not in self.df["Lineage"].cat.categories:
                             self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
@@ -2739,8 +2822,24 @@ class ExcelProcessor:
                     self.df.loc[combined_cbd_mask, "Lineage"] = "CBD"
                     self.logger.info(f"Assigned CBD lineage to {combined_cbd_mask.sum()} products with cannabinoid content")
                 
-                # Set edibles with cannabinoid content but not explicitly CBD-focused to MIXED
-                edible_cbd_mixed = cbd_mask & edible_mask & ~edible_cbd_explicit
+                # CRITICAL FIX: High CBD products should NEVER get MIXED - check for high CBD first
+                product_type_col = self.df["Product Type*"].astype(str).str.lower() if "Product Type*" in self.df.columns else pd.Series("")
+                product_name_col_for_high_cbd = self.df[product_name_col].astype(str).str.lower() if product_name_col else pd.Series("")
+                high_cbd_mask_cbd = (
+                    product_type_col.str.contains("high cbd|highcbd", case=False, na=False) |
+                    product_name_col_for_high_cbd.str.contains("high cbd|highcbd", case=False, na=False)
+                )
+                
+                # Assign CBD to high CBD edibles with cannabinoid content
+                high_cbd_edible_cbd = edible_mask & high_cbd_mask_cbd & cbd_mask
+                if high_cbd_edible_cbd.any() and "Lineage" in self.df.columns:
+                    if "CBD" not in self.df["Lineage"].cat.categories:
+                        self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["CBD"])
+                    self.df.loc[high_cbd_edible_cbd, "Lineage"] = "CBD"
+                    self.logger.info(f"Assigned CBD lineage to {high_cbd_edible_cbd.sum()} high CBD edible products with cannabinoid content (preventing MIXED)")
+                
+                # Set edibles with cannabinoid content but not explicitly CBD-focused to MIXED (but NOT high CBD products)
+                edible_cbd_mixed = cbd_mask & edible_mask & ~edible_cbd_explicit & ~high_cbd_mask_cbd
                 if edible_cbd_mixed.any() and "Lineage" in self.df.columns:
                     if "MIXED" not in self.df["Lineage"].cat.categories:
                         self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
@@ -3124,11 +3223,28 @@ class ExcelProcessor:
                     self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["CBD"])
                 self.df.loc[nonclassic_mask & is_cbd_blend, "Lineage"] = "CBD"
                 
-                # For all other non-classic types, set Lineage to 'MIXED' unless already 'CBD'
+                # CRITICAL FIX: Check for high CBD products before assigning MIXED
+                # High CBD products should NEVER get MIXED - they should get CBD
+                product_type_col = self.df["Product Type*"].astype(str).str.lower() if "Product Type*" in self.df.columns else pd.Series("")
+                product_name_col_for_high_cbd = self.df[product_name_col].astype(str).str.lower() if product_name_col else pd.Series("")
+                high_cbd_mask = (
+                    product_type_col.str.contains("high cbd|highcbd", case=False, na=False) |
+                    product_name_col_for_high_cbd.str.contains("high cbd|highcbd", case=False, na=False)
+                )
+                
+                # Assign CBD to high CBD products
+                if high_cbd_mask.any() and "Lineage" in self.df.columns:
+                    if "CBD" not in self.df["Lineage"].cat.categories:
+                        self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["CBD"])
+                    self.df.loc[nonclassic_mask & high_cbd_mask, "Lineage"] = "CBD"
+                    self.logger.info(f"Assigned CBD lineage to {high_cbd_mask.sum()} high CBD products (preventing MIXED)")
+                
+                # For all other non-classic types, set Lineage to 'MIXED' unless already 'CBD' or high CBD
                 if "MIXED" not in self.df["Lineage"].cat.categories:
                     self.df["Lineage"] = self.df["Lineage"].cat.add_categories(["MIXED"])
                 not_cbd = ~self.df["Lineage"].astype(str).str.upper().isin(["CBD"])
-                self.df.loc[nonclassic_mask & not_cbd, "Lineage"] = "MIXED"
+                not_high_cbd = ~high_cbd_mask
+                self.df.loc[nonclassic_mask & not_cbd & not_high_cbd, "Lineage"] = "MIXED"
                 
                 # Never allow 'HYBRID' for non-classic types
                 hybrid_mask = nonclassic_mask & (self.df["Lineage"].astype(str).str.upper() == "HYBRID")
@@ -3597,12 +3713,67 @@ class ExcelProcessor:
         # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
         sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
         
+        # CRITICAL FIX: Apply DOH and Product Type correction for High THC/CBD products AFTER database enrichment
+        # This ensures High THC/CBD products get correct DOH and Product Type even if database has wrong value
+        for tag in sorted_tags:
+            product_type_for_doh = str(tag.get('Product Type*', '') or tag.get('ProductType', '')).lower()
+            product_name_for_doh = str(tag.get('Product Name*', '') or tag.get('ProductName', '')).lower()
+            current_doh = str(tag.get('DOH', '')).upper() if tag.get('DOH') else ''
+            
+            # CRITICAL FIX: Correct Product Type for High THC/CBD products based on product name
+            has_high_thc = 'high thc' in product_name_for_doh or 'highthc' in product_name_for_doh
+            has_high_cbd = 'high cbd' in product_name_for_doh or 'highcbd' in product_name_for_doh
+            
+            if has_high_thc or has_high_cbd:
+                # Determine the base product type (edible, liquid, etc.)
+                if any(word in product_name_for_doh for word in ['edible', 'gummy', 'chocolate', 'cookie', 'brownie', 'candy', 'tablet', 'food']):
+                    if has_high_thc:
+                        tag['Product Type*'] = 'High THC Edible'
+                        tag['ProductType'] = 'High THC Edible'
+                    elif has_high_cbd:
+                        tag['Product Type*'] = 'High CBD Edible'
+                        tag['ProductType'] = 'High CBD Edible'
+                elif any(word in product_name_for_doh for word in ['tincture', 'oil', 'drops', 'liquid', 'drink', 'beverage']):
+                    if has_high_thc:
+                        tag['Product Type*'] = 'High THC Edible (Liquid)'
+                        tag['ProductType'] = 'High THC Edible (Liquid)'
+                    elif has_high_cbd:
+                        tag['Product Type*'] = 'High CBD Edible (Liquid)'
+                        tag['ProductType'] = 'High CBD Edible (Liquid)'
+                elif any(word in product_name_for_doh for word in ['flower', 'bud', 'nug', 'herb', 'cannabis']):
+                    if has_high_thc:
+                        tag['Product Type*'] = 'High THC Flower'
+                        tag['ProductType'] = 'High THC Flower'
+            
+            # Check product name first (works even if product type is "Unknown Type")
+            if 'high thc' in product_name_for_doh or 'highthc' in product_name_for_doh:
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+            elif 'high cbd' in product_name_for_doh or 'highcbd' in product_name_for_doh:
+                tag['DOH'] = 'CBD'
+                tag['DOH Compliant (Yes/No)'] = 'CBD'
+            # Check product type (handles "high thc solid edible - doh compliant" etc.)
+            elif 'high thc' in product_type_for_doh or 'highthc' in product_type_for_doh:
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+            elif 'high cbd' in product_type_for_doh or 'highcbd' in product_type_for_doh:
+                tag['DOH'] = 'CBD'
+                tag['DOH Compliant (Yes/No)'] = 'CBD'
+            # If DOH is currently "DOH" or "YES" and product type/name contains "high thc", update to "THC"
+            elif current_doh in ['DOH', 'YES', 'Y'] and ('high thc' in product_type_for_doh or 'highthc' in product_type_for_doh or 'high thc' in product_name_for_doh):
+                tag['DOH'] = 'THC'
+                tag['DOH Compliant (Yes/No)'] = 'THC'
+            # If DOH is currently "DOH" or "YES" and product type/name contains "high cbd", update to "CBD"
+            elif current_doh in ['DOH', 'YES', 'Y'] and ('high cbd' in product_type_for_doh or 'highcbd' in product_type_for_doh or 'high cbd' in product_name_for_doh):
+                tag['DOH'] = 'CBD'
+                tag['DOH Compliant (Yes/No)'] = 'CBD'
+        
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)
         cache_key_local = self._build_cache_key('available_tags', filters or {})
         self._store_cache_value(self._available_tags_cache, cache_key_local, cached_copy)
         
-        # Always return enriched tags (database values take precedence)
+        # Always return enriched tags (database values take precedence, but DOH is corrected for High THC/CBD)
         return self._clone_tag_results(sorted_tags)
 
     def select_tags(self, tags):
@@ -6126,9 +6297,13 @@ class ExcelProcessor:
         """Infer product type from product name using intelligent pattern matching."""
         name_lower = product_name.lower()
         
+        # CRITICAL FIX: Check for high THC/CBD indicators first to set proper product type
+        has_high_thc = 'high thc' in name_lower or 'highthc' in name_lower
+        has_high_cbd = 'high cbd' in name_lower or 'highcbd' in name_lower
+        
         # Flower types
         if any(word in name_lower for word in ['flower', 'bud', 'nug', 'herb', 'cannabis']):
-            return 'Flower'
+            return 'High THC Flower' if has_high_thc else 'Flower'
         
         # Pre-roll types
         if any(word in name_lower for word in ['pre-roll', 'preroll', 'joint', 'roll', 'cigarette']):
@@ -6142,13 +6317,23 @@ class ExcelProcessor:
         if any(word in name_lower for word in ['vape', 'cartridge', 'cart', 'pen', 'disposable']):
             return 'Vape Cartridge'
         
-        # Edible types
-        if any(word in name_lower for word in ['edible', 'gummy', 'chocolate', 'cookie', 'brownie', 'candy', 'food']):
-            return 'Edible (Solid)'
+        # Edible types - CRITICAL FIX: Check for high THC/CBD before returning generic type
+        if any(word in name_lower for word in ['edible', 'gummy', 'chocolate', 'cookie', 'brownie', 'candy', 'food', 'tablet']):
+            if has_high_thc:
+                return 'High THC Edible'
+            elif has_high_cbd:
+                return 'High CBD Edible'
+            else:
+                return 'Edible (Solid)'
         
-        # Liquid edible types
+        # Liquid edible types - CRITICAL FIX: Check for high THC/CBD before returning generic type
         if any(word in name_lower for word in ['tincture', 'oil', 'drops', 'liquid', 'drink', 'beverage']):
-            return 'Edible (Liquid)'
+            if has_high_thc:
+                return 'High THC Edible (Liquid)'
+            elif has_high_cbd:
+                return 'High CBD Edible (Liquid)'
+            else:
+                return 'Edible (Liquid)'
         
         # Topical types
         if any(word in name_lower for word in ['topical', 'cream', 'lotion', 'salve', 'balm', 'ointment']):
@@ -7717,6 +7902,32 @@ class ExcelProcessor:
             # This ensures lineage updates are reflected even when cache is used
             # Database lineage ALWAYS overrides cached/Excel lineage values
             enriched_cached_tags = self._enrich_tags_with_database_values(cached_tags)
+            
+            # CRITICAL FIX: Apply DOH correction for High THC/CBD products AFTER database enrichment
+            for tag in enriched_cached_tags:
+                product_type_for_doh = str(tag.get('Product Type*', '') or tag.get('ProductType', '')).lower()
+                product_name_for_doh = str(tag.get('Product Name*', '') or tag.get('ProductName', '')).lower()
+                current_doh = str(tag.get('DOH', '')).upper() if tag.get('DOH') else ''
+                
+                if 'high thc' in product_name_for_doh or 'highthc' in product_name_for_doh:
+                    tag['DOH'] = 'THC'
+                    tag['DOH Compliant (Yes/No)'] = 'THC'
+                elif 'high cbd' in product_name_for_doh or 'highcbd' in product_name_for_doh:
+                    tag['DOH'] = 'CBD'
+                    tag['DOH Compliant (Yes/No)'] = 'CBD'
+                elif 'high thc' in product_type_for_doh or 'highthc' in product_type_for_doh:
+                    tag['DOH'] = 'THC'
+                    tag['DOH Compliant (Yes/No)'] = 'THC'
+                elif 'high cbd' in product_type_for_doh or 'highcbd' in product_type_for_doh:
+                    tag['DOH'] = 'CBD'
+                    tag['DOH Compliant (Yes/No)'] = 'CBD'
+                elif current_doh in ['DOH', 'YES', 'Y'] and ('high thc' in product_type_for_doh or 'highthc' in product_type_for_doh or 'high thc' in product_name_for_doh):
+                    tag['DOH'] = 'THC'
+                    tag['DOH Compliant (Yes/No)'] = 'THC'
+                elif current_doh in ['DOH', 'YES', 'Y'] and ('high cbd' in product_type_for_doh or 'highcbd' in product_type_for_doh or 'high cbd' in product_name_for_doh):
+                    tag['DOH'] = 'CBD'
+                    tag['DOH Compliant (Yes/No)'] = 'CBD'
+            
             # CRITICAL: Update cache with enriched values so next request gets database lineage
             # This ensures database lineage persists in cache, not Excel lineage
             self._store_cache_value(self._available_tags_cache, cache_key, enriched_cached_tags)
@@ -7742,6 +7953,31 @@ class ExcelProcessor:
             # This ensures cached tags have database lineage, not Excel lineage
             # Database lineage ALWAYS overrides Excel lineage
             enriched_tags = self._enrich_tags_with_database_values(tag_list)
+            
+            # CRITICAL FIX: Apply DOH correction for High THC/CBD products AFTER database enrichment
+            for tag in enriched_tags:
+                product_type_for_doh = str(tag.get('Product Type*', '') or tag.get('ProductType', '')).lower()
+                product_name_for_doh = str(tag.get('Product Name*', '') or tag.get('ProductName', '')).lower()
+                current_doh = str(tag.get('DOH', '')).upper() if tag.get('DOH') else ''
+                
+                if 'high thc' in product_name_for_doh or 'highthc' in product_name_for_doh:
+                    tag['DOH'] = 'THC'
+                    tag['DOH Compliant (Yes/No)'] = 'THC'
+                elif 'high cbd' in product_name_for_doh or 'highcbd' in product_name_for_doh:
+                    tag['DOH'] = 'CBD'
+                    tag['DOH Compliant (Yes/No)'] = 'CBD'
+                elif 'high thc' in product_type_for_doh or 'highthc' in product_type_for_doh:
+                    tag['DOH'] = 'THC'
+                    tag['DOH Compliant (Yes/No)'] = 'THC'
+                elif 'high cbd' in product_type_for_doh or 'highcbd' in product_type_for_doh:
+                    tag['DOH'] = 'CBD'
+                    tag['DOH Compliant (Yes/No)'] = 'CBD'
+                elif current_doh in ['DOH', 'YES', 'Y'] and ('high thc' in product_type_for_doh or 'highthc' in product_type_for_doh or 'high thc' in product_name_for_doh):
+                    tag['DOH'] = 'THC'
+                    tag['DOH Compliant (Yes/No)'] = 'THC'
+                elif current_doh in ['DOH', 'YES', 'Y'] and ('high cbd' in product_type_for_doh or 'highcbd' in product_type_for_doh or 'high cbd' in product_name_for_doh):
+                    tag['DOH'] = 'CBD'
+                    tag['DOH Compliant (Yes/No)'] = 'CBD'
             
             # CRITICAL FIX: Verify all tags have database lineage fields after enrichment
             tags_with_db_lineage = sum(1 for tag in enriched_tags if tag.get('currentLineage') or tag.get('canonical_lineage'))

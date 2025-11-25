@@ -12,7 +12,10 @@
       "Bash(curl:*)",
       "Bash(lsof:*)",
       "Bash(kill:*)",
-      "Bash(node -c:*)"
+      "Bash(node -c:*)",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
