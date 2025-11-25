@@ -8412,7 +8412,13 @@ def get_available_tags():
 
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms, {updated} tags updated from database)")
-                
+
+                # CRITICAL FIX: Sort cached tags consistently to prevent reordering
+                try:
+                    cached_tags.sort(key=lambda x: str(x.get('Product Name*') or x.get('ProductName') or '').lower())
+                except Exception:
+                    pass
+
                 # CRITICAL FIX: Ensure ALL tags have database lineage fields set, even if they weren't in the batch query
                 # This handles cases where products weren't found in the initial batch but exist in the database
                 if lineage_alignment_needed and lineage_cache:
@@ -9391,15 +9397,23 @@ def get_available_tags():
         except Exception:
             pass
 
+        # CRITICAL FIX: Sort tags consistently to prevent reordering on refresh
+        # Sort by Product Name to maintain stable order across requests
+        try:
+            safe_all_tags.sort(key=lambda x: str(x.get('Product Name*') or x.get('ProductName') or '').lower())
+            logging.info("✅ Sorted tags by Product Name for consistent order")
+        except Exception as sort_err:
+            logging.warning(f"Could not sort tags: {sort_err}")
+
         # Return the combined tags in the format expected by frontend
         elapsed = (time.time() - start_time) * 1000
         logging.info(f"✅ Available tags request completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} tags")
-        
+
         if len(safe_all_tags) == 0:
             logging.warning("⚠️ WARNING: Returning empty tags array! prefer_db={}, database_tags_count={}".format(
                 prefer_db, len(database_tags) if 'database_tags' in locals() else 'unknown'
             ))
-        
+
         resp = jsonify({
             'tags': safe_all_tags,  # Frontend expects 'tags' property
             'total_count': len(safe_all_tags),
