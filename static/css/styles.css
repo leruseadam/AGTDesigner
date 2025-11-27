@@ -9081,7 +9081,11 @@ canvas#lava-lamp-canvas {
   /* Ensure consistent dropdown appearance across PC and Mac */
 
   /* Mac-like fast dropdown styling - minimal and native */
-  select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
+  /* EXCLUDE template dropdown - it has its own specific styling */
+  select:not(#templateSelect):not(#templateSelectModal),
+  .form-select:not(#templateSelect):not(#templateSelectModal),
+  .form-select-modern:not(#templateSelect):not(#templateSelectModal),
+  .lineage-dropdown, .lineage-dropdown-mini,
   .sticky-filter-bar select, .filter-bar select, .compact-filter,
   .strain-lineage-editor .form-select, .modal select {
     /* Minimal styling for Mac-like speed */
@@ -9099,9 +9103,10 @@ canvas#lava-lamp-canvas {
   }
 
   /* Ensure consistent arrow positioning and styling */
-  select:not(.lineage-dropdown):not(.lineage-dropdown-mini),
-  .form-select:not(.lineage-dropdown):not(.lineage-dropdown-mini),
-  .form-select-modern:not(.lineage-dropdown):not(.lineage-dropdown-mini),
+  /* EXCLUDE template dropdown - it has its own specific styling */
+  select:not(.lineage-dropdown):not(.lineage-dropdown-mini):not(#templateSelect):not(#templateSelectModal),
+  .form-select:not(.lineage-dropdown):not(.lineage-dropdown-mini):not(#templateSelect):not(#templateSelectModal),
+  .form-select-modern:not(.lineage-dropdown):not(.lineage-dropdown-mini):not(#templateSelect):not(#templateSelectModal),
   .sticky-filter-bar select, .filter-bar select, .compact-filter,
   .strain-lineage-editor .form-select, .modal select {
     /* Standard arrow for right-positioned dropdowns */
@@ -9159,9 +9164,13 @@ canvas#lava-lamp-canvas {
   }
 
   /* Platform-specific overrides for better consistency */
+  /* EXCLUDE template dropdown - it has its own specific styling */
   @media screen and (-webkit-min-device-pixel-ratio: 0) {
     /* WebKit browsers (Safari, Chrome) */
-    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini {
+    select:not(#templateSelect):not(#templateSelectModal),
+    .form-select:not(#templateSelect):not(#templateSelectModal),
+    .form-select-modern:not(#templateSelect):not(#templateSelectModal),
+    .lineage-dropdown, .lineage-dropdown-mini {
       -webkit-appearance: none !important;
       border-radius: inherit !important;
     }
@@ -9169,7 +9178,11 @@ canvas#lava-lamp-canvas {
 
   @media screen and (-moz-appearance: none) {
     /* Firefox */
-    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini {
+    /* EXCLUDE template dropdown - it has its own specific styling */
+    select:not(#templateSelect):not(#templateSelectModal),
+    .form-select:not(#templateSelect):not(#templateSelectModal),
+    .form-select-modern:not(#templateSelect):not(#templateSelectModal),
+    .lineage-dropdown, .lineage-dropdown-mini {
       -moz-appearance: none !important;
       border-radius: inherit !important;
     }
@@ -9178,7 +9191,11 @@ canvas#lava-lamp-canvas {
   /* PC/Windows-specific fixes */
   @media screen and (min-width: 1px) {
     /* Target Windows browsers specifically */
-    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
+    /* EXCLUDE template dropdown - it has its own specific styling */
+    select:not(#templateSelect):not(#templateSelectModal),
+    .form-select:not(#templateSelect):not(#templateSelectModal),
+    .form-select-modern:not(#templateSelect):not(#templateSelectModal),
+    .lineage-dropdown, .lineage-dropdown-mini,
     .sticky-filter-bar select, .filter-bar select, .compact-filter,
     .strain-lineage-editor .form-select, .modal select {
       /* Ensure Windows browsers use custom styling */
@@ -9201,9 +9218,13 @@ canvas#lava-lamp-canvas {
   }
 
   /* Mac-specific overrides to force custom styling */
+  /* EXCLUDE template dropdown - it has its own specific styling */
   @supports (-webkit-appearance: none) {
     /* Target Safari and Chrome on Mac */
-    select, .form-select, .form-select-modern, .lineage-dropdown, .lineage-dropdown-mini,
+    select:not(#templateSelect):not(#templateSelectModal),
+    .form-select:not(#templateSelect):not(#templateSelectModal),
+    .form-select-modern:not(#templateSelect):not(#templateSelectModal),
+    .lineage-dropdown, .lineage-dropdown-mini,
     .sticky-filter-bar select, .filter-bar select, .compact-filter,
     .strain-lineage-editor .form-select, .modal select {
       -webkit-appearance: none !important;
@@ -9235,7 +9256,10 @@ canvas#lava-lamp-canvas {
     display: none !important;
   }
   /* Force override any remaining Mac styling */
-  select:focus, .form-select:focus, .form-select-modern:focus,
+  /* EXCLUDE template dropdown - it has its own specific styling */
+  select:not(#templateSelect):not(#templateSelectModal):focus,
+  .form-select:not(#templateSelect):not(#templateSelectModal):focus,
+  .form-select-modern:not(#templateSelect):not(#templateSelectModal):focus,
   .lineage-dropdown:focus, .lineage-dropdown-mini:focus,
   .sticky-filter-bar select:focus, .filter-bar select:focus,
   .compact-filter:focus, .strain-lineage-editor .form-select:focus,
@@ -9247,7 +9271,10 @@ canvas#lava-lamp-canvas {
   }
 
   /* Ensure consistent focus states across platforms */
-  select:focus, .form-select:focus, .form-select-modern:focus,
+  /* EXCLUDE template dropdown - it has its own specific styling */
+  select:not(#templateSelect):not(#templateSelectModal):focus,
+  .form-select:not(#templateSelect):not(#templateSelectModal):focus,
+  .form-select-modern:not(#templateSelect):not(#templateSelectModal):focus,
   .lineage-dropdown:focus, .lineage-dropdown-mini:focus,
   .sticky-filter-bar select:focus, .filter-bar select:focus,
   .compact-filter:focus, .strain-lineage-editor .form-select:focus,
@@ -9257,7 +9284,10 @@ canvas#lava-lamp-canvas {
   }
 
   /* Mac-like fast hover states */
-  select:hover, .form-select:hover, .compact-filter:hover {
+  /* EXCLUDE template dropdown - it has its own specific styling */
+  select:not(#templateSelect):not(#templateSelectModal):hover,
+  .form-select:not(#templateSelect):not(#templateSelectModal):hover,
+  .compact-filter:hover {
     border-color: rgba(160, 132, 232, 0.5) !important;
     background: rgba(42, 32, 64, 0.95) !important;
   }
@@ -9304,11 +9334,12 @@ canvas#lava-lamp-canvas {
   }
 
   /* Mac-specific arrow overrides to force custom styling */
+  /* EXCLUDE template dropdown - it has its own specific styling */
   @supports (-webkit-appearance: none) {
-    /* Force our custom arrow on Mac for all dropdowns */
-    select:not(.lineage-dropdown):not(.lineage-dropdown-mini),
-    .form-select:not(.lineage-dropdown):not(.lineage-dropdown-mini),
-    .form-select-modern:not(.lineage-dropdown):not(.lineage-dropdown-mini),
+    /* Force our custom arrow on Mac for all dropdowns except template */
+    select:not(.lineage-dropdown):not(.lineage-dropdown-mini):not(#templateSelect):not(#templateSelectModal),
+    .form-select:not(.lineage-dropdown):not(.lineage-dropdown-mini):not(#templateSelect):not(#templateSelectModal),
+    .form-select-modern:not(.lineage-dropdown):not(.lineage-dropdown-mini):not(#templateSelect):not(#templateSelectModal),
     .sticky-filter-bar select, .filter-bar select, .compact-filter,
     .strain-lineage-editor .form-select, .modal select {
       /* Force our custom arrow on Mac */

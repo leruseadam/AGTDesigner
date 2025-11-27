@@ -1654,9 +1654,22 @@ class ExcelProcessor:
                     )
                 
                 # 6. Basic product strain handling
+                # CRITICAL FIX: Classic types should NEVER get 'Mixed' as product strain
                 if "Product Strain" not in df.columns:
                     df["Product Strain"] = ""
-                df["Product Strain"] = df["Product Strain"].fillna("Mixed")
+                
+                # Only set 'Mixed' for non-classic types with null/empty strain
+                # Classic types should remain empty (will be filled from database later)
+                from src.core.constants import CLASSIC_TYPES
+                if "Product Type*" in df.columns:
+                    product_types = df["Product Type*"].astype(str).str.strip().str.lower()
+                    is_classic = product_types.isin([ct.lower() for ct in CLASSIC_TYPES])
+                    # Only fillna for non-classic types
+                    non_classic_mask = ~is_classic
+                    df.loc[non_classic_mask, "Product Strain"] = df.loc[non_classic_mask, "Product Strain"].fillna("Mixed")
+                else:
+                    # If no Product Type column, fillna conservatively (shouldn't happen normally)
+                    df["Product Strain"] = df["Product Strain"].fillna("Mixed")
                 
                 # 7. Process THC/CBD values for database storage
                 if "THC test result" in df.columns:
@@ -2420,8 +2433,20 @@ class ExcelProcessor:
                 # Ensure Product Strain exists and is categorical
                 if "Product Strain" not in self.df.columns:
                     self.df["Product Strain"] = ""
-                # Fill null values before converting to categorical
-                self.df["Product Strain"] = self.df["Product Strain"].fillna("Mixed")
+                
+                # CRITICAL FIX: Only fill null values with 'Mixed' for non-classic types
+                # Classic types should remain empty (will be filled from database later)
+                from src.core.constants import CLASSIC_TYPES
+                if "Product Type*" in self.df.columns:
+                    product_types = self.df["Product Type*"].astype(str).str.strip().str.lower()
+                    is_classic = product_types.isin([ct.lower() for ct in CLASSIC_TYPES])
+                    # Only fillna for non-classic types
+                    non_classic_mask = ~is_classic
+                    self.df.loc[non_classic_mask, "Product Strain"] = self.df.loc[non_classic_mask, "Product Strain"].fillna("Mixed")
+                else:
+                    # If no Product Type column, fillna conservatively (shouldn't happen normally)
+                    self.df["Product Strain"] = self.df["Product Strain"].fillna("Mixed")
+                
                 # Don't convert to categorical yet - wait until after all Product Strain logic is complete
 
                 # Special case: paraphernalia gets Product Strain set to "Mixed" (not "Paraphernalia")

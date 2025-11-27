@@ -3800,10 +3800,26 @@ def apply_essential_processing(df):
             df.loc[empty_mask, 'Lineage'] = 'HYBRID'
         
         # Basic product strain processing
+        # CRITICAL FIX: Classic types should NEVER get 'Mixed' as product strain
+        # Only non-classic types should default to 'Mixed' when empty
         if 'Product Strain' in df.columns:
             df['Product Strain'] = df['Product Strain'].astype(str).str.strip()
             empty_strain = (df['Product Strain'] == '') | (df['Product Strain'] == 'NAN')
-            df.loc[empty_strain, 'Product Strain'] = 'Mixed'
+            
+            # Check if product type is classic
+            from src.core.constants import CLASSIC_TYPES
+            if 'Product Type*' in df.columns:
+                product_types = df['Product Type*'].astype(str).str.strip().str.lower()
+                is_classic = product_types.isin([ct.lower() for ct in CLASSIC_TYPES])
+                
+                # Only set 'Mixed' for non-classic types with empty strain
+                # Classic types should remain empty (will be filled from database later)
+                non_classic_empty_strain = empty_strain & ~is_classic
+                df.loc[non_classic_empty_strain, 'Product Strain'] = 'Mixed'
+            else:
+                # If no Product Type column, only set Mixed for empty strains (conservative approach)
+                # This shouldn't happen in normal operation, but handle gracefully
+                df.loc[empty_strain, 'Product Strain'] = 'Mixed'
         
         # Basic ratio processing
         if 'Ratio' in df.columns:
@@ -8194,14 +8210,14 @@ def get_available_tags():
                         # Prepare connection once
                         conn = product_db._get_connection()
                         cur = conn.cursor()
-                        # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
-                        # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
+                        # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
+                        # This ensures UI matches database method which uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
                         lineage_query_join_by_name = '''
                             SELECT 
-                                COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
                                 COALESCE(s.strain_name, p."Product Strain") AS current_strain
                             FROM products p
-                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                            LEFT JOIN strains s ON p.strain_id = s.id
                             WHERE p."Product Name*" = ? OR p.normalized_name = ?
                             ORDER BY p.id DESC
                             LIMIT 1
@@ -8256,12 +8272,12 @@ def get_available_tags():
                                 placeholders = ','.join(['?'] * len(all_search_names))
                                 batch_query = f'''
                                     SELECT DISTINCT
-                                        COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                        COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
                                         COALESCE(s.strain_name, p."Product Strain") AS current_strain,
                                         p."Product Name*" AS product_name,
                                         p.normalized_name AS normalized_name
                                     FROM products p
-                                    LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                    LEFT JOIN strains s ON p.strain_id = s.id
                                     WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                     ORDER BY p.id DESC
                                     LIMIT 1000
@@ -8452,9 +8468,19 @@ def get_available_tags():
                 }
                 # CRITICAL FIX: Clear lineage_update_timestamp only after successful lineage alignment
                 # This ensures subsequent requests still get fresh lineage until cache is rebuilt
-                if force_full_refresh and updated > 0:
-                    session['lineage_update_timestamp'] = 0
-                    logging.info("✅ Cleared lineage_update_timestamp after successful lineage alignment")
+                # IMPORTANT: Always clear timestamp if force_full_refresh is set, even if no updates
+                # This prevents infinite refresh loops while ensuring fresh data is shown
+                if force_full_refresh:
+                    if updated > 0:
+                        session['lineage_update_timestamp'] = 0
+                        logging.info("✅ Cleared lineage_update_timestamp after successful lineage alignment")
+                    else:
+                        # Even if no updates, clear timestamp after a delay to prevent infinite refresh
+                        # But keep it for a short time to ensure other requests also get fresh data
+                        current_ts = session.get('lineage_update_timestamp', 0)
+                        if current_ts and (time.time() - float(current_ts)) > 30:  # Clear after 30 seconds
+                            session['lineage_update_timestamp'] = 0
+                            logging.info("✅ Cleared lineage_update_timestamp after 30s (no updates but timestamp was set)")
                 return jsonify(response_payload)
         
         logging.info("🔄 Building tag list... (prefer_db={}, request_args={})".format(prefer_db, dict(request.args)))
@@ -8632,14 +8658,14 @@ def get_available_tags():
                                     raise RuntimeError("no-products-table")
                             except RuntimeError:
                                 raise
-                            # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
-                            # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
+                            # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
+                            # This ensures UI matches database method which uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
                             lineage_query_join_by_name = '''
                             SELECT 
-                                COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
                                 COALESCE(s.strain_name, p."Product Strain") AS current_strain
                             FROM products p
-                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                            LEFT JOIN strains s ON p.strain_id = s.id
                             WHERE p."Product Name*" = ? OR p.normalized_name = ?
                             ORDER BY p.id DESC
                             LIMIT 1
@@ -8692,12 +8718,12 @@ def get_available_tags():
                                     placeholders = ','.join(['?'] * len(all_search_names))
                                     batch_query = f'''
                                         SELECT DISTINCT
-                                            COALESCE(p."Lineage", s.canonical_lineage) AS current_lineage,
+                                            COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
                                             COALESCE(s.strain_name, p."Product Strain") AS current_strain,
                                             p."Product Name*" AS product_name,
                                             p.normalized_name AS normalized_name
                                         FROM products p
-                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                        LEFT JOIN strains s ON p.strain_id = s.id
                                         WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                         ORDER BY p.id DESC
                                     '''
@@ -8906,13 +8932,13 @@ def get_available_tags():
                                     # Filter to only columns we want, excluding internal ones
                                     columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
                                     
-                                    # CRITICAL FIX: Prefer products.Lineage (product-level, user-editable) over strains.canonical_lineage
-                                    # This ensures UI matches output generation which uses get_product_lineage() (reads products.Lineage)
+                                    # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
+                                    # This ensures UI matches database method which uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
                                     quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                                     query = f'''
-                                        SELECT {quoted_columns}, COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
+                                        SELECT {quoted_columns}, COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                         FROM products p
-                                        LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                        LEFT JOIN strains s ON p.strain_id = s.id
                                 ORDER BY p.id DESC
                                 LIMIT 2000
                                     '''
@@ -8972,13 +8998,13 @@ def get_available_tags():
                             quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                             
                             # PERFORMANCE: Use simpler query without strain join for faster loading
-                            # Try to join with strains table, but prefer products.Lineage over strains.canonical_lineage
+                            # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
                             # OPTIMIZATION: Reduce limit and skip expensive join initially
                             lineage_query_join_by_name = f'''
                                 SELECT {quoted_columns}, 
-                                       COALESCE(p."Lineage", s.canonical_lineage) AS preferred_lineage
+                                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                 FROM products p
-                                LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                                LEFT JOIN strains s ON p.strain_id = s.id
                                 ORDER BY p.id DESC
                                 LIMIT 2000
                             '''
@@ -9175,9 +9201,9 @@ def get_available_tags():
                             SELECT 
                                 p."Product Name*" AS product_name,
                                 p.normalized_name AS normalized_name,
-                                COALESCE(p."Lineage", s.canonical_lineage) AS lineage
+                                COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
                             FROM products p
-                            LEFT JOIN strains s ON TRIM(LOWER(s.strain_name)) = TRIM(LOWER(p."Product Strain"))
+                            LEFT JOIN strains s ON p.strain_id = s.id
                             WHERE p."Lineage" IS NOT NULL AND p."Lineage" != ''
                         '''
                         cur.execute(lineage_query)
@@ -9933,6 +9959,9 @@ def update_lineage():
         try:
             cache.clear()
             clear_available_tags_cache(reason="lineage_update")
+            # CRITICAL FIX: Set lineage_update_timestamp to force fresh lineage alignment in available-tags endpoint
+            session['lineage_update_timestamp'] = time.time()
+            logging.info("✅ Set lineage_update_timestamp to force fresh lineage alignment")
             # CRITICAL FIX: Clear Excel processor from both global and request context to force reload with fresh database lineage
             global _excel_processor
             if hasattr(g, 'excel_processor'):
@@ -9996,6 +10025,15 @@ def update_strain_lineage():
             
             result = cursor.fetchone()
             affected_product_count = result[0] if result else 0
+            
+            # CRITICAL FIX: Clear caches and set timestamp to force fresh lineage alignment
+            try:
+                cache.clear()
+                clear_available_tags_cache(reason="strain_lineage_update")
+                session['lineage_update_timestamp'] = time.time()
+                logging.info("✅ Cleared caches and set lineage_update_timestamp after strain lineage update")
+            except Exception as clear_err:
+                logging.warning(f"Could not clear caches: {clear_err}")
             
             return jsonify({
                 'success': True, 

@@ -3,7 +3,40 @@ from tkinter import ttk, filedialog, messagebox
 import pandas as pd
 from pathlib import Path
 import logging
+import os
+import platform
 from src.core.constants import PRODUCT_TYPE_EMOJIS
+
+def get_downloads_folder():
+    """Get the Downloads folder path that works cross-platform (Mac, Windows, Linux)."""
+    system = platform.system()
+    home = Path.home()
+    
+    if system == "Windows":
+        # On Windows, try multiple possible locations
+        # First try the standard Downloads folder
+        downloads = home / "Downloads"
+        if downloads.exists():
+            return str(downloads)
+        
+        # Try to get from environment variable (some Windows setups use this)
+        downloads_env = os.environ.get('USERPROFILE', '')
+        if downloads_env:
+            downloads = Path(downloads_env) / "Downloads"
+            if downloads.exists():
+                return str(downloads)
+        
+        # Fallback: try OneDrive Downloads if it exists
+        onedrive = home / "OneDrive" / "Downloads"
+        if onedrive.exists():
+            return str(onedrive)
+        
+        # Last resort: return the standard path even if it doesn't exist
+        # (Windows will create it or the dialog will handle it)
+        return str(home / "Downloads")
+    else:
+        # Mac and Linux: standard Downloads folder
+        return str(home / "Downloads")
 
 class FileUploadPanel(ttk.Frame):
     def __init__(self, parent, theme):
@@ -50,7 +83,9 @@ class FileUploadPanel(ttk.Frame):
         
     def on_upload(self):
         """Handle file upload"""
+        downloads_dir = get_downloads_folder()
         path = filedialog.askopenfilename(
+            initialdir=downloads_dir,
             filetypes=[("Excel Files", "*.xlsx"), ("CSV Files", "*.csv")]
         )
         if path:
