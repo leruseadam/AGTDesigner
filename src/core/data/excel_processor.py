@@ -3890,11 +3890,6 @@ class ExcelProcessor:
                             logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage confirmed from database: '{db_lineage}'")
                     else:
                         logger.warning(f"⚠️ EXCEL ENRICHMENT: No database lineage found for '{product_name}'")
-                        else:
-                            logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage confirmed from DB: '{db_lineage}'")
-                    else:
-                        # No database lineage found - log warning
-                        logger.warning(f"⚠️ EXCEL ENRICHMENT: Tag '{product_name}' has no lineage in database")
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
                         db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')
