@@ -4206,29 +4206,51 @@ class ProductDatabase:
             cursor = conn.cursor()
             current_date = datetime.now().isoformat()
             
+            # CRITICAL FIX: Try multiple matching strategies to ensure we find the product
+            rows_updated = 0
+            
             # Update by product name, vendor, and brand if provided
             if vendor and brand:
                 cursor.execute('''
                     UPDATE products
                     SET "Lineage" = ?
-                    WHERE "Product Name*" = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (new_lineage, product_name, vendor, brand))
-                logger.info(f"Updated lineage for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
+                    WHERE ("Product Name*" = ? OR ProductName = ? OR normalized_name = ?)
+                    AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+                ''', (new_lineage, product_name, product_name, normalized_name, vendor, brand))
+                rows_updated = cursor.rowcount
+                if rows_updated > 0:
+                    logger.info(f"Updated lineage for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
             else:
+                # Try exact match first
                 cursor.execute('''
                     UPDATE products
                     SET "Lineage" = ?
-                    WHERE "Product Name*" = ?
-                ''', (new_lineage, product_name))
-                logger.info(f"Updated lineage for product '{product_name}' to '{new_lineage}'")
+                    WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                ''', (new_lineage, product_name, product_name, normalized_name))
+                rows_updated = cursor.rowcount
+                
+                # If no exact match, try case-insensitive match
+                if rows_updated == 0:
+                    cursor.execute('''
+                        UPDATE products
+                        SET "Lineage" = ?
+                        WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
+                           OR TRIM(LOWER(ProductName)) = TRIM(LOWER(?))
+                           OR TRIM(LOWER(normalized_name)) = TRIM(LOWER(?))
+                    ''', (new_lineage, product_name, product_name, normalized_name))
+                    rows_updated = cursor.rowcount
+                
+                if rows_updated > 0:
+                    logger.info(f"Updated lineage for product '{product_name}' to '{new_lineage}' (matched {rows_updated} row(s))")
             
             conn.commit()
-            rows_updated = cursor.rowcount
             if rows_updated == 0:
                 logger.warning(f"No product found in database to update: '{product_name}' (vendor={vendor}, brand={brand})")
             return rows_updated > 0
         except Exception as e:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False 
 
     def get_product_lineage(self, product_name: str) -> Optional[str]:

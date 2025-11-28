@@ -3660,10 +3660,13 @@ class ExcelProcessor:
                 return
             
             # Batch query database for lineage
+            # CRITICAL: Always query database even if DataFrame seems up-to-date
+            # This ensures lineage changes from user updates are immediately reflected
             db_records = product_db.get_products_by_names(product_names)
             if not db_records:
-                logger.debug("No database records found for DataFrame lineage update")
-                return
+                logger.warning(f"⚠️ No database records found for DataFrame lineage update for {len(product_names)} products")
+                # Don't return - continue to update what we can find
+                db_records = []
             
             # Create lookup map by both exact name and normalized name
             lineage_map = {}
@@ -3715,18 +3718,27 @@ class ExcelProcessor:
                 
                 if db_lineage:
                     old_lineage = str(row.get('Lineage', '')).strip().upper()
+                    # CRITICAL: Always update DataFrame even if values appear to match
+                    # This ensures database lineage (which may have been updated) overwrites Excel lineage
+                    self.df.at[idx, 'Lineage'] = db_lineage
                     if old_lineage != db_lineage:
-                        self.df.at[idx, 'Lineage'] = db_lineage
                         updated_count += 1
-                        logger.debug(f"✅ DataFrame lineage update: '{excel_product_name}' - '{old_lineage}' → '{db_lineage}'")
+                        logger.info(f"✅ DataFrame lineage update: '{excel_product_name}' - '{old_lineage}' → '{db_lineage}'")
+                    else:
+                        # Still count as updated to ensure DataFrame is marked as changed
+                        updated_count += 1
+                        logger.debug(f"✅ DataFrame lineage confirmed: '{excel_product_name}' = '{db_lineage}'")
             
             if updated_count > 0:
-                logger.info(f"✅ Updated {updated_count} products in DataFrame with database lineage")
-                # Invalidate cache since DataFrame changed
+                logger.info(f"✅ Updated {updated_count} products in DataFrame with database lineage (out of {len(product_names)} total products, {len(db_records)} found in DB)")
+                # CRITICAL: Always invalidate cache after DataFrame lineage update
+                # This ensures fresh tags are built with updated lineage
                 self._invalidate_caches()
             else:
                 # GUARANTEED FIX: Even if no updates, log what we found for debugging
-                logger.info(f"✅ DataFrame lineage check complete: {len(product_names)} products checked, {len(db_records)} found in database, {len(lineage_map)} with lineage")
+                logger.warning(f"⚠️ DataFrame lineage check complete but NO updates: {len(product_names)} products checked, {len(db_records)} found in database, {len(lineage_map)} with lineage")
+                # CRITICAL: Still invalidate cache to ensure fresh data is used
+                self._invalidate_caches()
         except Exception as e:
             logger.error(f"❌ GUARANTEED FIX FAILED: Error updating DataFrame lineage from database: {e}")
             import traceback
