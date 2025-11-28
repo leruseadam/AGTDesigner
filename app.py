@@ -8076,8 +8076,20 @@ def get_available_tags():
             fast_load = False  # Disable fast_load when lineage was recently updated
             cached_tags = None  # CRITICAL: Bypass cache when lineage was updated to ensure fresh database values
             nocache = True  # Force fresh fetch
-            prefer_db = True  # CRITICAL: Force database query to ensure fresh lineage values
-            logging.info("✅ CRITICAL: Set prefer_db=True due to recent lineage updates to ensure database lineage is used")
+            prefer_db = False  # Don't set prefer_db - we still want Excel tags but with fresh database lineage
+            logging.info("✅ CRITICAL: Bypassing cache due to recent lineage updates - will load tags and apply GUARANTEED FIX for fresh database lineage")
+            
+            # CRITICAL: Clear the cache to ensure stale data isn't served
+            try:
+                session_file_path = session.get('file_path', '')
+                if session_file_path:
+                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                else:
+                    cache_key = get_session_cache_key('available_tags')
+                cache.delete(cache_key)
+                logging.info(f"✅ CRITICAL: Cleared cache key '{cache_key}' due to recent lineage updates")
+            except Exception as cache_clear_err:
+                logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
         if cached_tags and not nocache:
             # CRITICAL FIX: ALWAYS align lineage from database - database is the source of truth
@@ -8423,8 +8435,9 @@ def get_available_tags():
         # GUARANTEED FIX: ALWAYS query database for lineage for ALL tags, regardless of source
         # This ensures database lineage is ALWAYS used, never Excel/cached lineage
         # CRITICAL: This section MUST run on every tag load to ensure lineage persistence
+        # CRITICAL: This is THE source of truth - database lineage ALWAYS overrides everything else
         if all_tags:
-            logging.info(f"🔄 GUARANTEED FIX: Querying database for lineage for ALL {len(all_tags)} tags (lineage persistence fix)")
+            logging.info(f"🔄 GUARANTEED FIX: Querying database DIRECTLY for lineage for ALL {len(all_tags)} tags (lineage persistence fix - DATABASE IS SOURCE OF TRUTH)")
             try:
                 store_name = get_current_store_name()
                 if not store_name:
@@ -8432,6 +8445,7 @@ def get_available_tags():
                     raise ValueError("No store selected")
                 product_db = get_product_database(store_name)
                 if product_db:
+                    logging.info(f"🔍 GUARANTEED FIX: Using database at {getattr(product_db, 'db_path', 'unknown')} for store {store_name}")
                     # GUARANTEED: Query database for ALL product lineages using get_products_by_names
                     # This is the source of truth - always use database lineage over Excel/cache
                     try:
@@ -8473,24 +8487,48 @@ def get_available_tags():
                                             pass
                             
                             # GUARANTEED FIX: Update ALL tags with database lineage
+                            # CRITICAL: ALWAYS query database DIRECTLY FIRST for each tag - this ensures we get the LATEST database values
+                            # Don't rely on batch query map - it might have stale data. Direct query is THE source of truth.
                             updated_count = 0
                             for tag in all_tags:
                                 tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
                                 if not tag_name:
                                     continue
                                 
-                                # Try to find database lineage with multiple matching strategies
-                                db_lineage = lineage_map.get(tag_name)
+                                # CRITICAL FIX: Query database DIRECTLY FIRST - this ensures we ALWAYS get the latest values
+                                # This is THE source of truth - database always overrides cache/map/Excel
+                                db_lineage = None
+                                try:
+                                    # Query database directly for this specific product - this is the source of truth
+                                    direct_lineage = product_db.get_product_lineage(tag_name)
+                                    if direct_lineage:
+                                        db_lineage = str(direct_lineage).strip().upper()
+                                        logging.debug(f"✅ GUARANTEED FIX (direct query FIRST): '{tag_name}' → '{db_lineage}'")
+                                except Exception as direct_err:
+                                    logging.debug(f"Direct query failed for '{tag_name}': {direct_err}")
+                                
+                                # Fallback to batch query map if direct query didn't work
+                                if not db_lineage:
+                                    db_lineage = lineage_map.get(tag_name)
                                 
                                 # Try normalized name if exact match failed
                                 if not db_lineage:
                                     try:
                                         normalized_name = product_db._normalize_product_name(tag_name)
                                         db_lineage = lineage_map.get(normalized_name)
+                                        if not db_lineage:
+                                            # Try direct query with normalized name
+                                            try:
+                                                direct_lineage = product_db.get_product_lineage(normalized_name)
+                                                if direct_lineage:
+                                                    db_lineage = str(direct_lineage).strip().upper()
+                                                    logging.debug(f"✅ GUARANTEED FIX (normalized direct): '{tag_name}' → '{db_lineage}'")
+                                            except Exception:
+                                                pass
                                     except Exception:
                                         pass
                                 
-                                # Try case-insensitive match
+                                # Try case-insensitive match as last resort
                                 if not db_lineage:
                                     tag_name_lower = tag_name.lower()
                                     for db_name, db_lin in lineage_map.items():
@@ -8498,8 +8536,7 @@ def get_available_tags():
                                             db_lineage = db_lin
                                             break
                                 
-                                # CRITICAL: If no match in map, query database directly (final fallback)
-                                # ALWAYS try direct query as fallback - it's the most reliable method
+                                # If still no lineage found, try one more direct query
                                 if not db_lineage:
                                     try:
                                         direct_lineage = product_db.get_product_lineage(tag_name)
