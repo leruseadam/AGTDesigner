@@ -3,9 +3,9 @@
 
 let templatePreviewInitAttempts = 0;
 let templatePreviewInitialized = false;
+const MAX_INIT_ATTEMPTS = 2; // Reduced from 10 to avoid console spam
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('Template Preview Fix: DOM loaded');
     scheduleTemplatePreviewInit();
 });
 
@@ -19,8 +19,6 @@ function initializeTemplatePreview() {
     if (templatePreviewInitialized) {
         return;
     }
-
-    console.log('Template Preview Fix: Initializing...');
     
     // Get all the necessary elements
     const editTemplateModal = document.getElementById('editTemplateModal');
@@ -35,38 +33,21 @@ function initializeTemplatePreview() {
     const saveTemplateBtn = document.getElementById('saveTemplateBtn');
     const previewContainer = document.getElementById('templatePreviewModal');
     
-    console.log('Template Preview Fix: Elements found:', {
-        editTemplateModal: !!editTemplateModal,
-        templateSelectModal: !!templateSelectModal,
-        scaleInputModal: !!scaleInputModal,
-        fontSelectModal: !!fontSelectModal,
-        fontSizingModeModal: !!fontSizingModeModal,
-        fieldFontSizesSection: !!fieldFontSizesSection,
-        templateSelect: !!templateSelect,
-        scaleInput: !!scaleInput,
-        fontSelect: !!fontSelect,
-        saveTemplateBtn: !!saveTemplateBtn,
-        previewContainer: !!previewContainer
-    });
-    
+    // If the modal doesn't exist, exit gracefully without spamming console
     if (!editTemplateModal) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Edit Template modal not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
-        } else {
-            console.error('Template Preview Fix: Edit Template modal not found after multiple attempts. Preview will be disabled until modal becomes available.');
+        if (templatePreviewInitAttempts < MAX_INIT_ATTEMPTS) {
+            // Only retry once more, silently
+            scheduleTemplatePreviewInit(1000);
         }
+        // Exit silently if modal doesn't exist - it's not required for the app to function
         return;
     }
     
     if (!previewContainer) {
         templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts <= 10) {
-            console.warn(`Template Preview Fix: Preview container not found (attempt ${templatePreviewInitAttempts}/10) - retrying...`);
-            scheduleTemplatePreviewInit(600);
-        } else {
-            console.error('Template Preview Fix: Preview container not found after multiple attempts. Preview will be disabled until container becomes available.');
+        if (templatePreviewInitAttempts < MAX_INIT_ATTEMPTS) {
+            scheduleTemplatePreviewInit(1000);
         }
         return;
     }
@@ -75,10 +56,7 @@ function initializeTemplatePreview() {
     
     // Function to update the template preview
     function updateTemplatePreview() {
-        console.log('Template Preview Fix: updateTemplatePreview called');
-        
         if (!previewContainer) {
-            console.error('Template Preview Fix: Preview container not found in update function!');
             return;
         }
         
@@ -87,8 +65,6 @@ function initializeTemplatePreview() {
         const fontFamily = fontSelectModal ? fontSelectModal.value : 'Arial';
         const scale = scaleInputModal ? scaleInputModal.value : '1.0';
         const fontSizeMode = fontSizingModeModal ? fontSizingModeModal.value : 'auto';
-        
-        console.log('Template Preview Fix: Settings:', { templateType, fontFamily, scale, fontSizeMode });
         
         // Get font sizes for fixed mode
         let brandSize = 14;
@@ -120,15 +96,12 @@ function initializeTemplatePreview() {
             </div>
         `;
         
-        console.log('Template Preview Fix: Setting preview HTML');
         previewContainer.innerHTML = previewHtml;
-        console.log('Template Preview Fix: Preview updated successfully');
     }
     
     // Font sizing mode change handler
     if (fontSizingModeModal && fieldFontSizesSection) {
         fontSizingModeModal.addEventListener('change', function() {
-            console.log('Template Preview Fix: Font sizing mode changed to:', this.value);
             if (this.value === 'fixed') {
                 fieldFontSizesSection.style.display = 'block';
             } else {
@@ -156,8 +129,6 @@ function initializeTemplatePreview() {
     
     // When modal opens, sync values from main form and update preview
     editTemplateModal.addEventListener('show.bs.modal', function () {
-        console.log('Template Preview Fix: Modal opening...');
-        
         // Sync values from main form
         if (templateSelectModal && templateSelect) {
             templateSelectModal.value = templateSelect.value;
@@ -181,8 +152,6 @@ function initializeTemplatePreview() {
     // When save button is clicked, sync values back to main form
     if (saveTemplateBtn) {
         saveTemplateBtn.addEventListener('click', function () {
-            console.log('Template Preview Fix: Save button clicked');
-            
             if (templateSelect && templateSelectModal) {
                 templateSelect.value = templateSelectModal.value;
             }
@@ -235,9 +204,7 @@ function initializeTemplatePreview() {
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
-                    console.log('Template Preview Fix: Template settings saved to backend');
-                } else {
+                if (!data.success) {
                     console.warn('Template Preview Fix: Failed to save template settings to backend:', data.error);
                 }
             })
@@ -254,8 +221,6 @@ function initializeTemplatePreview() {
             // Show success message
             if (typeof showToast === 'function') {
                 showToast('Template settings saved successfully!', 'success');
-            } else {
-                console.log('Template Preview Fix: Template settings saved successfully!');
             }
         });
     }
@@ -269,16 +234,13 @@ function initializeTemplatePreview() {
             if (scaleInput) scaleInput.value = settings.scale || '1.0';
             if (fontSelect) fontSelect.value = settings.font || 'Arial';
         } catch (e) {
-            console.warn('Template Preview Fix: Failed to load saved template settings:', e);
+            // Silently fail if settings can't be loaded
         }
     }
-    
-    console.log('Template Preview Fix: Initialization complete');
 }
 
 // Make the function globally available for the manual refresh button
 window.updateTemplatePreview = function() {
-    console.log('Template Preview Fix: Manual refresh called');
     const previewContainer = document.getElementById('templatePreviewModal');
     if (previewContainer) {
         // Trigger the preview update

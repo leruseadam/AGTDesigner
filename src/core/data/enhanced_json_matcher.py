@@ -1053,7 +1053,30 @@ class EnhancedJSONMatcher:
     def _extract_json_price(self, json_data: list, product_dict: dict) -> str:
         """Extract price from JSON data for the matched product."""
         try:
-            # Find the matching JSON item for this product
+            # CRITICAL FIX: First check if we have a stored matched JSON item (more reliable)
+            matched_json_item = product_dict.get('_matched_json_item')
+            if matched_json_item:
+                # Extract price from the stored matched JSON item
+                price_candidates = [
+                    matched_json_item.get('line_price'),  # Cultivera format - check first
+                    matched_json_item.get('price'),
+                    matched_json_item.get('Price'),
+                    matched_json_item.get('retail_price'),
+                    matched_json_item.get('unit_price'),
+                    matched_json_item.get('sale_price'),
+                    matched_json_item.get('unit_cost'),
+                    matched_json_item.get('cost'),
+                    matched_json_item.get('Cost')
+                ]
+                
+                for price in price_candidates:
+                    if price is not None:
+                        price_str = str(price).strip()
+                        if price_str and price_str.lower() != 'none' and price_str not in ('0', '0.0', '0.00'):
+                            logging.info(f"💰 Using JSON price '{price_str}' from matched JSON item for '{product_dict.get('Product Name*', 'Unknown')}'")
+                            return price_str
+            
+            # Fallback: Find the matching JSON item for this product by name
             product_name = product_dict.get('Product Name*') or product_dict.get('ProductName') or ''
             
             for json_item in json_data:
@@ -1064,11 +1087,11 @@ class EnhancedJSONMatcher:
                 if (product_name.lower().strip() == json_name.lower().strip() or
                     json_name.lower().strip() in product_name.lower().strip() or
                     product_name.lower().strip() in json_name.lower().strip()):
-                    # Extract price from JSON item
+                    # Extract price from JSON item - prioritize line_price (Cultivera format)
                     price_candidates = [
+                        json_item.get('line_price'),  # Cultivera format - check first
                         json_item.get('price'),
                         json_item.get('Price'),
-                        json_item.get('line_price'),
                         json_item.get('retail_price'),
                         json_item.get('unit_price'),
                         json_item.get('sale_price'),
@@ -1091,9 +1114,28 @@ class EnhancedJSONMatcher:
             return None
 
     def _extract_json_weight(self, json_data: list, product_dict: dict) -> str:
-        """Extract weight from JSON data for the matched product."""
+        """Extract weight from JSON data for the matched product. Returns formatted weight with units."""
         try:
-            # Find the matching JSON item for this product
+            # CRITICAL FIX: First check if we have a stored matched JSON item (more reliable)
+            matched_json_item = product_dict.get('_matched_json_item')
+            if matched_json_item:
+                # Extract weight and units from the stored matched JSON item
+                # Prioritize unit_weight (Cultivera format)
+                weight_value = matched_json_item.get('unit_weight') or matched_json_item.get('weight')
+                units_value = matched_json_item.get('unit_weight_uom') or matched_json_item.get('uom') or matched_json_item.get('units') or 'g'
+                
+                if weight_value is not None:
+                    weight_str = str(weight_value).strip()
+                    if weight_str and weight_str.lower() != 'none' and weight_str not in ('0', '0.0', '0.00'):
+                        units_str = str(units_value).strip() if units_value else 'g'
+                        # Format as "weightunits" (no space per user preference)
+                        formatted_weight = f"{weight_str}{units_str}"
+                        logging.info(f"⚖️ Using JSON weight '{formatted_weight}' from matched JSON item for '{product_dict.get('Product Name*', 'Unknown')}'")
+                        # Also update Units field in product_dict
+                        product_dict['Units'] = units_str
+                        return formatted_weight
+            
+            # Fallback: Find the matching JSON item for this product by name
             product_name = product_dict.get('Product Name*') or product_dict.get('ProductName') or ''
             
             for json_item in json_data:
@@ -1104,10 +1146,23 @@ class EnhancedJSONMatcher:
                 if (product_name.lower().strip() == json_name.lower().strip() or
                     json_name.lower().strip() in product_name.lower().strip() or
                     product_name.lower().strip() in json_name.lower().strip()):
-                    # Extract weight from JSON item
+                    # Extract weight from JSON item - prioritize unit_weight (Cultivera format)
+                    weight_value = json_item.get('unit_weight') or json_item.get('weight')
+                    units_value = json_item.get('unit_weight_uom') or json_item.get('uom') or json_item.get('units') or 'g'
+                    
+                    if weight_value is not None:
+                        weight_str = str(weight_value).strip()
+                        if weight_str and weight_str.lower() != 'none' and weight_str not in ('0', '0.0', '0.00'):
+                            units_str = str(units_value).strip() if units_value else 'g'
+                            # Format as "weightunits" (no space per user preference)
+                            formatted_weight = f"{weight_str}{units_str}"
+                            logging.info(f"⚖️ Using JSON weight '{formatted_weight}' for '{product_name}'")
+                            # Also update Units field in product_dict
+                            product_dict['Units'] = units_str
+                            return formatted_weight
+                    
+                    # Fallback to other weight fields if unit_weight not found
                     weight_candidates = [
-                        json_item.get('weight'),
-                        json_item.get('Weight'),
                         json_item.get('weight_with_units'),
                         json_item.get('weight_units'),
                         json_item.get('size'),
@@ -1186,18 +1241,28 @@ class EnhancedJSONMatcher:
             merged_product = {}
             # Name
             merged_product['Product Name*'] = json_item.get('product_name') or json_item.get('inventory_name') or json_item.get('name') or ''
-            # Price
-            merged_product['Price'] = json_item.get('price') or json_item.get('retail_price') or json_item.get('unit_price') or json_item.get('sale_price') or ''
+            # Price - CRITICAL FIX: Prioritize line_price (Cultivera format)
+            merged_product['Price'] = json_item.get('line_price') or json_item.get('price') or json_item.get('retail_price') or json_item.get('unit_price') or json_item.get('sale_price') or ''
             # Type
             merged_product['Type'] = json_item.get('type') or json_item.get('category') or json_item.get('product_type') or ''
             # Lineage
             merged_product['Lineage'] = json_item.get('lineage') or json_item.get('strain') or ''
             # Vendor
             merged_product['Vendor'] = json_item.get('vendor') or json_item.get('brand') or ''
-            # Weight
-            merged_product['Weight*'] = json_item.get('weight') or json_item.get('Weight') or json_item.get('weight_with_units') or json_item.get('size') or ''
-            # Units
-            merged_product['Units'] = json_item.get('units') or json_item.get('WeightUnits') or json_item.get('weight_units') or ''
+            # Weight - CRITICAL FIX: Prioritize unit_weight (Cultivera format)
+            weight_value = json_item.get('unit_weight') or json_item.get('weight') or json_item.get('Weight') or json_item.get('size') or ''
+            merged_product['Weight*'] = weight_value
+            merged_product['Weight'] = weight_value
+            # Units - CRITICAL FIX: Prioritize unit_weight_uom (Cultivera format)
+            units_value = json_item.get('unit_weight_uom') or json_item.get('uom') or json_item.get('units') or json_item.get('WeightUnits') or json_item.get('weight_units') or 'g'
+            merged_product['Units'] = units_value
+            # Format weight with units (no space per user preference)
+            if weight_value and units_value:
+                merged_product['WeightUnits'] = f"{weight_value}{units_value}"
+                merged_product['WeightWithUnits'] = merged_product['WeightUnits']
+            else:
+                merged_product['WeightUnits'] = str(weight_value) if weight_value else ''
+                merged_product['WeightWithUnits'] = merged_product['WeightUnits']
             # Barcode
             merged_product['Barcode'] = json_item.get('barcode') or json_item.get('SKU') or ''
             # Category
@@ -1242,9 +1307,11 @@ class EnhancedJSONMatcher:
         json_item_name = json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN'
         db_priority_product['JSON_Item_Name'] = json_item_name
         db_priority_product['JSON_Fields_Used'] = 0  # No JSON fields used for data
-        db_priority_product['Default_Fields_Applied'] = filled_defaults
+        # CRITICAL FIX: Store the matched JSON item so we can extract price/weight from it later
+        # Store as a serializable dict (not the original object) to avoid serialization issues
+        db_priority_product['_matched_json_item'] = dict(json_item) if isinstance(json_item, dict) else json_item
             
-        logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f}, defaults applied: {filled_defaults})")
+        logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f})")
         return db_priority_product
 
     def _select_db_price(self, product: dict) -> str:
@@ -2167,11 +2234,30 @@ class EnhancedJSONMatcher:
                         # Only use JSON weight if database weight is missing
                         json_weight = self._extract_json_weight(json_data, hybrid_product)
                         if json_weight:
-                            hybrid_product['Weight*'] = json_weight
-                            hybrid_product['Weight'] = json_weight
-                            hybrid_product['WeightUnits'] = json_weight
-                            hybrid_product['WeightWithUnits'] = json_weight
-                            logging.info(f"✅ DEBUG: Using JSON weight: {json_weight}")
+                            # CRITICAL FIX: Parse weight and units properly
+                            # json_weight may be formatted as "3.5g" or we may have separate weight and units
+                            import re
+                            weight_match = re.match(r'^(\d+(?:\.\d+)?)([a-zA-Z]+)?$', str(json_weight).strip())
+                            if weight_match:
+                                weight_value = weight_match.group(1)
+                                units_value = weight_match.group(2) or hybrid_product.get('Units') or 'g'
+                            else:
+                                # If it doesn't match the pattern, try to extract just the numeric part
+                                weight_match = re.search(r'(\d+(?:\.\d+)?)', str(json_weight))
+                                if weight_match:
+                                    weight_value = weight_match.group(1)
+                                    units_value = hybrid_product.get('Units') or 'g'
+                                else:
+                                    # Fallback: use the whole string as weight
+                                    weight_value = str(json_weight).strip()
+                                    units_value = hybrid_product.get('Units') or 'g'
+                            
+                            hybrid_product['Weight*'] = weight_value
+                            hybrid_product['Weight'] = weight_value
+                            hybrid_product['Units'] = units_value
+                            hybrid_product['WeightUnits'] = f"{weight_value}{units_value}"
+                            hybrid_product['WeightWithUnits'] = hybrid_product['WeightUnits']
+                            logging.info(f"✅ DEBUG: Using JSON weight: {weight_value}{units_value}")
                         else:
                             # NO DEFAULT WEIGHT - leave empty if not found
                             hybrid_product['Weight*'] = ''
@@ -2214,6 +2300,8 @@ class EnhancedJSONMatcher:
                     
                     # Ensure Units prefer weight units over 'each'
                     hybrid_product['Units'] = self._select_units(hybrid_product)
+                    # CRITICAL FIX: Remove internal _matched_json_item field before returning (it's just for extraction)
+                    hybrid_product.pop('_matched_json_item', None)
                     hybrid_product = self._to_json_safe(hybrid_product)
                     matched_products.append(hybrid_product)
                     

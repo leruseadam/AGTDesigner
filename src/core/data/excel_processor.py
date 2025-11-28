@@ -4076,17 +4076,9 @@ class ExcelProcessor:
                 canonical_selected = fallback_selected
                 logger.debug(f"Fallback canonical selected tags: {canonical_selected}")
             
-            # CRITICAL FIX: If still no matches and we have JSON matched products, try direct matching
-            if not canonical_selected and self.df is not None and not self.df.empty and 'Source' in self.df.columns:
-                logger.warning("CRITICAL FIX: No matches found, trying direct matching for JSON products...")
-                json_matched_products = self.df[self.df['Source'] == 'JSON Match']
-                if not json_matched_products.empty:
-                    logger.info(f"CRITICAL FIX: Found {len(json_matched_products)} JSON matched products")
-                    direct_matches = []
-                    for tag in selected_tag_names:
-                        # Try exact match first
-                        exact_match = json_matched_products[json_matched_products[product_name_col] == tag]
-                        if not exact_match.empty:
+            # CRITICAL FIX: JSON tags work exactly like Excel tags - no special matching needed
+            # All tags are processed through the same pipeline
+            if not canonical_selected and self.df is not None and not self.df.empty:
                             direct_matches.append(tag)
                             logger.info(f"CRITICAL FIX: Direct match found for '{tag}'")
                         else:
@@ -4250,42 +4242,8 @@ class ExcelProcessor:
             filtered_df = self.df[self.df[product_name_col].isin(canonical_selected)]
             logger.info(f"CRITICAL FIX: Initial filtered_df has {len(filtered_df)} records")
             
-            # CRITICAL FIX: If we have JSON matched products, include them even if they don't match canonical names exactly
-            if 'Source' in self.df.columns:
-                json_matched_products = self.df[self.df['Source'] == 'JSON Match']
-                if not json_matched_products.empty:
-                    logger.info(f"CRITICAL FIX: Found {len(json_matched_products)} JSON matched products")
-                    logger.info(f"CRITICAL FIX: JSON product names: {json_matched_products[product_name_col].tolist()}")
-                    logger.info(f"CRITICAL FIX: Selected tag names: {selected_tag_names}")
-                    
-                    # Check which JSON products correspond to selected tags
-                    json_products_to_include = []
-                    for _, json_product in json_matched_products.iterrows():
-                        json_product_name = json_product.get(product_name_col, '')
-                        # Check if this JSON product corresponds to any selected tag
-                        for selected_tag in selected_tag_names:
-                            # Use fuzzy matching to see if this JSON product matches the selected tag
-                            if self._is_product_name_match(json_product_name, selected_tag):
-                                json_products_to_include.append(json_product_name)
-                                logger.info(f"CRITICAL FIX: Including JSON product '{json_product_name}' for selected tag '{selected_tag}'")
-                                break
-                    
-                    logger.info(f"CRITICAL FIX: JSON products to include: {json_products_to_include}")
-                    
-                    # Add JSON products that weren't already included
-                    if json_products_to_include:
-                        additional_json_df = json_matched_products[json_matched_products[product_name_col].isin(json_products_to_include)]
-                        if not additional_json_df.empty:
-                            # Remove duplicates if any JSON products were already included
-                            existing_names = set(filtered_df[product_name_col].tolist())
-                            new_json_df = additional_json_df[~additional_json_df[product_name_col].isin(existing_names)]
-                            if not new_json_df.empty:
-                                filtered_df = pd.concat([filtered_df, new_json_df], ignore_index=True)
-                                logger.info(f"CRITICAL FIX: Added {len(new_json_df)} additional JSON matched products to filtered results")
-                            else:
-                                logger.info(f"CRITICAL FIX: All JSON products were already included in filtered_df")
-                    else:
-                        logger.warning(f"CRITICAL FIX: No JSON products matched selected tags - this might be the issue!")
+            # CRITICAL FIX: JSON tags work exactly like Excel tags - no special inclusion needed
+            # All tags are processed through the same pipeline
             
             logger.info(f"CRITICAL FIX: Final filtered_df has {len(filtered_df)} records")
             
@@ -7268,57 +7226,14 @@ class ExcelProcessor:
                 logger.warning("No data to store - DataFrame is empty")
                 return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
             
-            # Filter out JSON matched tags
-            # JSON matched tags typically have 'Source': 'JSON Match' or similar indicators
+            # CRITICAL FIX: JSON tags work exactly like Excel tags - no exclusion from database storage
+            # All tags (including JSON) are processed the same way
             filtered_df = df.copy()
-            
-            # Remove rows that are JSON matched tags
-            json_match_indicators = [
-                'Source', 'ai_match_score', 'ai_confidence', 'ai_match_type',
-                'json_match_score', 'json_confidence', 'json_match_type'
-            ]
-            
-            # Check if any of these columns exist and contain JSON match data
-            json_match_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
-            
-            for col in json_match_indicators:
-                if col in filtered_df.columns:
-                    # Check for JSON match indicators in the column
-                    if col == 'Source':
-                        # Look for 'JSON Match' or similar in Source column
-                        json_match_mask |= filtered_df[col].astype(str).str.contains('JSON Match|AI Match|JSON|AI', case=False, na=False)
-                    else:
-                        # Look for non-null values in other JSON match columns
-                        json_match_mask |= filtered_df[col].notna()
-            
-            # Apply the filter to exclude JSON matched tags
-            original_count = len(filtered_df)
-            filtered_df = filtered_df[~json_match_mask]
-            filtered_count = len(filtered_df)
-            excluded_count = original_count - filtered_count
-            
-            logger.info(f"Filtered out {excluded_count} JSON matched tags, {filtered_count} rows remaining for database storage")
-            
-            if filtered_count == 0:
-                logger.warning("All data was JSON matched tags - nothing to store in database")
-                return {
-                    'stored': 0, 
-                    'updated': 0, 
-                    'errors': 0, 
-                    'excluded_json_matches': excluded_count,
-                    'message': f'All {excluded_count} rows were JSON matched tags - excluded from database storage'
-                }
             
             # Use the product database's store_excel_data method
             storage_result = product_db.store_excel_data(filtered_df, source_file)
             
-            # Add JSON match exclusion information to the result
-            storage_result['excluded_json_matches'] = excluded_count
-            storage_result['original_count'] = original_count
-            storage_result['filtered_count'] = filtered_count
-            
             logger.info(f"Database storage completed: {storage_result['message']}")
-            logger.info(f"Excluded {excluded_count} JSON matched tags from database storage")
             
             return storage_result
             

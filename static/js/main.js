@@ -7397,11 +7397,64 @@ const TagManager = {
                 return false;
             }
             
+            // CRITICAL FIX: Normalize tags to ensure database lineage is ALWAYS used
+            // This ensures TagManager state reflects database lineage, not Excel lineage
+            console.log(`🔄 Normalizing ${tags.length} tags to prioritize database lineage...`);
+            let normalizedCount = 0;
+            const normalizedTags = tags.map(tag => {
+                const tagName = tag['Product Name*'] || tag.ProductName || 'Unknown';
+                
+                // CRITICAL: ALWAYS prioritize database lineage fields over Excel Lineage
+                if (tag.canonical_lineage || tag.currentLineage) {
+                    const dbLineage = (tag.canonical_lineage || tag.currentLineage).toString().trim().toUpperCase();
+                    // Update Excel Lineage field to match database lineage for consistency
+                    if (tag.Lineage !== dbLineage) {
+                        console.log(`🔄 Normalizing "${tagName}": Excel Lineage="${tag.Lineage}" → Database Lineage="${dbLineage}"`);
+                        normalizedCount++;
+                    }
+                    tag.Lineage = dbLineage;
+                    tag.lineage = dbLineage.toLowerCase();
+                    // Ensure all database fields are set
+                    tag.currentLineage = dbLineage;
+                    tag.canonical_lineage = dbLineage;
+                } else {
+                    // No database lineage - log warning
+                    if (tag.Lineage && tag.Lineage !== 'MIXED') {
+                        console.warn(`⚠️ Tag "${tagName}" missing database lineage (canonical_lineage/currentLineage), using Excel Lineage: "${tag.Lineage}"`);
+                    }
+                }
+                return tag;
+            });
+            
+            if (normalizedCount > 0) {
+                console.log(`✅ Normalized ${normalizedCount} tags to use database lineage`);
+            }
+            
+            // Use normalized tags
+            tags = normalizedTags;
+            
             verboseLog(`Fetched ${tags.length} available tags`);
 
-            // Normalize lineage fields so UI consistently prefers database lineage (same pipeline as backend)
-            // CRITICAL: Prefer canonical_lineage/currentLineage (from DB) over Lineage to ensure UI matches database
-            tags = tags.map(tag => this._normalizeLineageFields(tag));
+            // CRITICAL FIX: Apply normalization function to ensure database lineage is ALWAYS used
+            // This ensures TagManager state reflects database lineage, not Excel lineage
+            console.log(`🔄 CRITICAL: Applying lineage normalization to ${tags.length} tags...`);
+            tags = tags.map(tag => this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag);
+            
+            // Debug: Log sample of normalized tags to verify database lineage is being used
+            const sampleTags = tags.slice(0, 5).map(t => {
+                const name = t['Product Name*'] || t.ProductName || 'Unknown';
+                return {
+                    name: name,
+                    canonical_lineage: t.canonical_lineage || 'NONE',
+                    currentLineage: t.currentLineage || 'NONE',
+                    Lineage: t.Lineage || 'NONE',
+                    hasDbLineage: !!(t.canonical_lineage || t.currentLineage)
+                };
+            });
+            console.log(`📋 CRITICAL: Normalized tags sample:`, sampleTags);
+            
+            const tagsWithDbLineage = tags.filter(t => t.canonical_lineage || t.currentLineage).length;
+            console.log(`📊 CRITICAL: ${tagsWithDbLineage}/${tags.length} tags have database lineage fields after normalization`);
             
             // CRITICAL FIX: Auto-refresh filters after tags are successfully loaded
             // This ensures filters are populated when data becomes available
@@ -7415,25 +7468,56 @@ const TagManager = {
                 }, 500);
             }
             
-            // Debug: Verify database lineage is being used
-            console.log('🔄 Normalized lineage data (database is source of truth):');
-            const lineageStats = { withCanonical: 0, withCurrent: 0, withLineage: 0, none: 0 };
+            // CRITICAL DEBUG: Verify database lineage fields are present
+            console.log('🔄 CRITICAL: Checking lineage fields in received tags:');
+            const lineageStats = { withCanonical: 0, withCurrent: 0, withLineageOnly: 0, none: 0 };
+            const missingDbLineage = [];
             tags.slice(0, 10).forEach(tag => {
                 const name = tag['Product Name*'] || tag.ProductName || 'Unknown';
                 const canonical = tag.canonical_lineage || 'NONE';
                 const current = tag.currentLineage || 'NONE';
-                const lineage = tag.Lineage || 'NONE';
-                if (tag.canonical_lineage) lineageStats.withCanonical++;
-                else if (tag.currentLineage) lineageStats.withCurrent++;
-                else if (tag.Lineage) lineageStats.withLineage++;
-                else lineageStats.none++;
-                console.log(`  ✓ ${name}: canonical=${canonical}, current=${current}, Lineage=${lineage}`);
+                const excelLineage = tag.Lineage || 'NONE';
+                
+                if (tag.canonical_lineage || tag.currentLineage) {
+                    if (tag.canonical_lineage) lineageStats.withCanonical++;
+                    if (tag.currentLineage) lineageStats.withCurrent++;
+                } else if (tag.Lineage) {
+                    lineageStats.withLineageOnly++;
+                    // CRITICAL: Tag has Excel Lineage but NO database lineage fields
+                    if (excelLineage !== 'NONE' && excelLineage !== 'MIXED') {
+                        missingDbLineage.push(name);
+                        console.warn(`⚠️ CRITICAL: Tag "${name}" has Excel Lineage="${excelLineage}" but NO database lineage fields (canonical_lineage/currentLineage)`);
+                    }
+                } else {
+                    lineageStats.none++;
+                }
+                console.log(`  ✓ ${name}: canonical_lineage=${canonical}, currentLineage=${current}, Excel Lineage=${excelLineage}`);
             });
-            console.log(`📊 Lineage source stats (first 10): canonical=${lineageStats.withCanonical}, current=${lineageStats.withCurrent}, Lineage=${lineageStats.withLineage}, none=${lineageStats.none}`);
+            console.log(`📊 CRITICAL Lineage stats (first 10): withCanonical=${lineageStats.withCanonical}, withCurrent=${lineageStats.withCurrent}, withLineageOnly=${lineageStats.withLineageOnly}, none=${lineageStats.none}`);
+            
+            if (missingDbLineage.length > 0) {
+                console.error(`❌ CRITICAL: ${missingDbLineage.length} tags missing database lineage fields:`, missingDbLineage);
+                console.error(`❌ CRITICAL: Backend is NOT sending database lineage fields (canonical_lineage/currentLineage) for these tags!`);
+            }
+            
+            // CRITICAL FIX: Ensure ALL tags in state have database lineage fields set
+            // This ensures TagManager state ALWAYS reflects database lineage, not Excel lineage
+            const stateTagsWithDbLineage = tags.map(tag => {
+                // If tag has database lineage, ensure ALL lineage fields match it
+                if (tag.canonical_lineage || tag.currentLineage) {
+                    const dbLineage = (tag.canonical_lineage || tag.currentLineage).toString().trim().toUpperCase();
+                    // Force ALL lineage fields to database value
+                    tag.Lineage = dbLineage;  // Overwrite Excel Lineage with database value
+                    tag.lineage = dbLineage.toLowerCase();
+                    tag.currentLineage = dbLineage;
+                    tag.canonical_lineage = dbLineage;
+                }
+                return tag;
+            });
             
             // Clear existing state and set new data
-            this.state.tags = [...tags];
-            this.state.originalTags = [...tags]; // Store original tags for validation
+            this.state.tags = [...stateTagsWithDbLineage];
+            this.state.originalTags = [...stateTagsWithDbLineage]; // Store original tags for validation
             this.state.hydratedFromCache = false;
             this.saveAvailableTagsToCache(tags);
             
