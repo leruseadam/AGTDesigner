@@ -271,9 +271,14 @@ class TagsTable {
       const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
+    
+    // CRITICAL: Escape tagName to prevent breaking inline handlers with quotes/special chars
+    const escapedTagName = (tagName || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    
     return `
       <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
-              onchange="TagsTable.handleLineageChange(this, '${tagName}')">
+              data-tag-name="${escapedTagName}"
+              onchange="TagsTable.handleLineageChange(this, '${escapedTagName}')">
         ${options}
       </select>
     `;
@@ -368,11 +373,37 @@ class TagsTable {
   }
 
   static async handleLineageChange(selectElement, tagName) {
-    const newLineage = selectElement.value;
-    const tagRow = selectElement.closest(".tag-row");
-    const oldLineage = tagRow?.dataset.lineage || selectElement.closest(".tag-item")?.dataset.lineage;
+    // CRITICAL: Log immediately at function start - no try/catch to ensure this always runs
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('🔄 [LINEAGE UPDATE] FUNCTION CALLED');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('Tag Name:', tagName);
+    console.log('Select Element:', selectElement);
+    console.log('Select Value:', selectElement?.value);
+    
+    try {
+      
+      if (!selectElement) {
+        console.error('❌ [LINEAGE UPDATE] Missing selectElement');
+        return;
+      }
+      
+      if (!tagName) {
+        console.error('❌ [LINEAGE UPDATE] Missing tagName');
+        tagName = selectElement.getAttribute('data-tag-name') || selectElement.closest('.tag-row')?.dataset?.tagName || 'Unknown';
+        console.log(`🔧 [LINEAGE UPDATE] Extracted tagName from DOM: ${tagName}`);
+      }
+      
+      const newLineage = selectElement.value;
+      if (!newLineage) {
+        console.error('❌ [LINEAGE UPDATE] No lineage value selected', { tagName, selectElementValue: selectElement.value });
+        return;
+      }
+      
+      const tagRow = selectElement.closest(".tag-row");
+      const oldLineage = tagRow?.dataset.lineage || selectElement.closest(".tag-item")?.dataset.lineage || selectElement.getAttribute('data-lineage');
 
-    console.log(`🔄 Updating lineage for ${tagName}: ${oldLineage} → ${newLineage}`);
+      console.log(`🔄 [LINEAGE UPDATE] Updating lineage for ${tagName}: ${oldLineage || 'undefined'} → ${newLineage}`);
 
     // CRITICAL FIX: Use debounced update to prevent database locks on rapid changes
     // Update UI immediately for responsiveness
@@ -418,9 +449,16 @@ class TagsTable {
         }
 
         const result = await response.json();
-        console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage} → ${newLineage})`);
+        if (result.success) {
+          console.log(`✅ Successfully updated lineage for ${tagName} (${oldLineage || 'undefined'} → ${newLineage})`);
+          console.log(`✅ Update result:`, result);
+        } else {
+          console.error(`❌ Lineage update failed for ${tagName}:`, result.error || 'Unknown error');
+          console.error(`❌ Full response:`, result);
+        }
       } catch (error) {
-        console.error('Error updating lineage:', error);
+        console.error(`❌ Error updating lineage for ${tagName}:`, error);
+        console.error(`❌ Error details:`, { message: error.message, stack: error.stack });
         // Revert the select element to the old value
         selectElement.value = oldLineage;
         selectElement.style.backgroundColor = '#f8d7da';
@@ -509,6 +547,28 @@ class TagsTable {
     setTimeout(() => {
       selectElement.style.backgroundColor = '';
     }, 500);
+    
+    console.log(`✅ handleLineageChange completed for ${tagName}`);
+  } catch (error) {
+    // CRITICAL: Catch any errors in the handler itself
+    console.error(`❌ CRITICAL ERROR in handleLineageChange for ${tagName}:`, error);
+    console.error(`❌ Error stack:`, error.stack);
+    
+    // Show error feedback to user
+    if (selectElement) {
+      selectElement.style.backgroundColor = '#f8d7da';
+      setTimeout(() => {
+        selectElement.style.backgroundColor = '';
+      }, 2000);
+    }
+    
+    // Show user-friendly error
+    if (typeof showToast === 'function') {
+      showToast(`Failed to update lineage: ${error.message}`, 'error');
+    } else {
+      alert(`Failed to update lineage: ${error.message}`);
+    }
+  }
   }
 
   static openLineageEditor(tagName, currentLineage) {
@@ -958,3 +1018,31 @@ document.addEventListener('DOMContentLoaded', () => {
     // REMOVE all JS that sets style.width, style.minWidth, style.maxWidth, style.fontSize, style.paddingLeft, style.paddingRight for lineage dropdowns
   });
 });
+
+// CRITICAL: Expose TagsTable globally so inline event handlers can access it
+// This ensures onchange="TagsTable.handleLineageChange(...)" works in HTML
+if (typeof window !== 'undefined') {
+  window.TagsTable = TagsTable;
+  // Also expose handleLineageChange directly for easier debugging
+  window.handleLineageChange = TagsTable.handleLineageChange.bind(TagsTable);
+  console.log('✅ TagsTable exposed globally on window object');
+  console.log('✅ TagsTable.handleLineageChange available:', typeof TagsTable.handleLineageChange);
+  
+  // CRITICAL: Add event delegation as fallback for lineage dropdowns
+  // This catches lineage changes even if inline handlers don't work
+  document.addEventListener('change', function(e) {
+    if (e.target && e.target.classList && e.target.classList.contains('lineage-dropdown')) {
+      const tagName = e.target.getAttribute('data-tag-name') || 
+                      e.target.closest('.tag-row')?.dataset?.tagName ||
+                      e.target.closest('.tag-item')?.dataset?.tagName;
+      
+      if (tagName) {
+        console.log('🔄 [EVENT DELEGATION] Caught lineage change via event delegation for:', tagName);
+        TagsTable.handleLineageChange(e.target, tagName);
+      } else {
+        console.warn('⚠️ [EVENT DELEGATION] Lineage dropdown changed but no tagName found');
+      }
+    }
+  });
+  console.log('✅ Event delegation added for lineage dropdowns');
+}
