@@ -9049,7 +9049,7 @@ def get_available_tags():
         except Exception as cache_error:
             logging.warning(f"Unable to persist available tags cache: {cache_error}")
         
-        # Debug summary: ensure DB-aligned fields present
+        # CRITICAL DEBUG: Verify database lineage fields are present in FINAL response
         try:
             sample = safe_all_tags[:5]
             dbg = [
@@ -9061,10 +9061,18 @@ def get_available_tags():
                 } for t in sample
             ]
             logging.info(f"LINEAGE UI DEBUG (final): samples={dbg}")
-            aligned_count = sum(1 for t in safe_all_tags if t.get('currentLineage'))
-            logging.info(f"LINEAGE UI DEBUG (final): aligned_count={aligned_count}/{len(safe_all_tags)}")
-        except Exception:
-            pass
+            aligned_count = sum(1 for t in safe_all_tags if t.get('currentLineage') or t.get('canonical_lineage'))
+            missing_count = len(safe_all_tags) - aligned_count
+            logging.info(f"LINEAGE UI DEBUG (final): aligned_count={aligned_count}/{len(safe_all_tags)}, missing={missing_count}")
+            
+            if missing_count > 0:
+                logging.error(f"❌ CRITICAL: {missing_count} tags are MISSING database lineage fields in FINAL response!")
+                missing_sample = [t.get('Product Name*') or t.get('ProductName') or 'Unknown' 
+                                 for t in safe_all_tags[:10] 
+                                 if not (t.get('currentLineage') or t.get('canonical_lineage'))]
+                logging.error(f"❌ Tags missing database lineage (sample): {missing_sample}")
+        except Exception as debug_err:
+            logging.error(f"Error in lineage debug: {debug_err}")
 
         # Return the combined tags in the format expected by frontend
         elapsed = (time.time() - start_time) * 1000
