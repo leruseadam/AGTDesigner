@@ -8191,10 +8191,16 @@ def get_available_tags():
             logging.info("✅ CRITICAL: Set prefer_db=True due to recent lineage updates to ensure database lineage is used")
         
         if cached_tags and not nocache:
-            # CRITICAL FIX: ALWAYS align lineage from database, even for fast_load
-            # Database lineage is the source of truth and must always be applied
-            lineage_alignment_needed = True  # Always align lineage to ensure UI matches database
-
+            # PERFORMANCE FIX: Skip lineage alignment when fast_load is enabled for instant loading
+            # Lineage alignment can be slow and should be deferred for initial loads
+            # Only align lineage if explicitly requested (fast_load=0) or if lineage was recently updated
+            lineage_alignment_needed = not fast_load or force_full_refresh
+            
+            if lineage_alignment_needed:
+                logging.info(f"🔄 Lineage alignment enabled: fast_load={fast_load}, force_full_refresh={force_full_refresh}")
+            else:
+                logging.info(f"⚡ Skipping lineage alignment for fast loading (fast_load={fast_load})")
+            
             # Lineage alignment needed - apply database lineage updates to cached tags
             # CRITICAL: This ensures existing database lineage values (from previous sessions/updates) are reflected in UI
             # Perform lineage alignment to assign/update lineage from database
@@ -8286,16 +8292,19 @@ def get_available_tags():
                                 '''
                                 # Add query timing to detect slow queries
                                 query_start = time.time()
-                                # PERFORMANCE: Skip lineage alignment if query takes too long
-                                # Target: <100ms for instant loading
+                                # PERFORMANCE: Add timeout to prevent slow queries from blocking response
+                                # Target: <200ms for fast loading, abort if >500ms
+                                MAX_QUERY_TIME = 0.5  # 500ms max query time
                                 try:
                                     cur.execute(batch_query, all_search_names + all_search_names)
                                     batch_results = cur.fetchall()
                                     
                                     query_duration = (time.time() - query_start) * 1000
-                                    # If query is too slow, skip lineage alignment next time by not updating cache
+                                    # If query is too slow, skip lineage alignment to keep response fast
                                     if query_duration > 500:
-                                        logging.warning(f"⚠️ Slow lineage query ({query_duration:.0f}ms) - cached tags will skip lineage alignment for faster loading")
+                                        logging.warning(f"⚠️ Slow lineage query ({query_duration:.0f}ms) - skipping lineage alignment for faster loading")
+                                        lineage_cache = {}  # Skip alignment on slow query
+                                        batch_results = []
                                     else:
                                         logging.debug(f"✅ Fast lineage query: {query_duration:.0f}ms, {len(batch_results)} rows")
                                 except Exception as query_err:
@@ -8429,7 +8438,10 @@ def get_available_tags():
                     updated = 0
 
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms, {updated} tags updated from database)")
+                if lineage_alignment_needed:
+                    logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms, {updated} tags updated from database)")
+                else:
+                    logging.info(f"⚡ FAST LOAD: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
                 
                 # CRITICAL FIX: Ensure ALL tags have database lineage fields set, even if they weren't in the batch query
                 # This handles cases where products weren't found in the initial batch but exist in the database
@@ -8614,6 +8626,16 @@ def get_available_tags():
                                             db_lineage = db_lin
                                             break
                                 
+                                # CRITICAL: If no match in map, query database directly (final fallback)
+                                if not db_lineage:
+                                    try:
+                                        direct_lineage = product_db.get_product_lineage(tag_name)
+                                        if direct_lineage:
+                                            db_lineage = str(direct_lineage).strip().upper()
+                                            logging.debug(f"✅ GUARANTEED FIX: Got lineage via direct query for '{tag_name}': '{db_lineage}'")
+                                    except Exception as direct_query_err:
+                                        logging.debug(f"Direct lineage query failed for '{tag_name}': {direct_query_err}")
+                                
                                 # GUARANTEED: If database has lineage, ALWAYS use it and override Excel/cached values
                                 # CRITICAL: This is the source of truth - always override any cached/Excel lineage
                                 if db_lineage:
@@ -8626,10 +8648,13 @@ def get_available_tags():
                                     tag['lineage'] = db_lineage.lower()
                                     updated_count += 1
                                     if old_lineage != db_lineage:
-                                        logging.info(f"🔄 GUARANTEED FIX: '{tag_name}' - '{old_lineage}' → '{db_lineage}' (LINEAGE PERSISTENCE)")
+                                        logging.info(f"🔄 GUARANTEED FIX (LINEAGE PERSISTENCE): '{tag_name}' - '{old_lineage}' → '{db_lineage}'")
                                     else:
                                         # Still log to confirm database lineage is being used
                                         logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed from database: '{db_lineage}'")
+                                else:
+                                    # Log warning if no database lineage found
+                                    logging.warning(f"⚠️ GUARANTEED FIX: No database lineage found for '{tag_name}' - using Excel/cached lineage")
                             
                             logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage")
                         else:

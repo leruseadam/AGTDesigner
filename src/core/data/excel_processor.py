@@ -3873,16 +3873,23 @@ class ExcelProcessor:
                     
                     # CRITICAL: Always update lineage from database, even if it appears to match
                     # This ensures fresh database values are always used, even after refresh
+                    # DATABASE LINEAGE IS THE SOURCE OF TRUTH - ALWAYS OVERRIDE EXCEL LINEAGE
                     if db_lineage:
                         old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
-                        # CRITICAL: Set ALL lineage fields to ensure frontend gets database lineage
+                        # CRITICAL: ALWAYS Set ALL lineage fields from database - this ensures persistence after refresh
+                        # Even if values appear to match, override them to ensure database values are used
                         tag['Lineage'] = db_lineage
                         tag['lineage'] = db_lineage.lower()
                         tag['canonical_lineage'] = db_lineage
                         tag['currentLineage'] = db_lineage
                         enriched_count += 1
                         if old_lineage != db_lineage:
-                            logger.info(f"🔄 EXCEL ENRICHMENT: Tag '{product_name}' lineage updated: '{old_lineage}' → '{db_lineage}'")
+                            logger.info(f"🔄 EXCEL ENRICHMENT (LINEAGE PERSISTENCE): Tag '{product_name}' lineage updated: '{old_lineage}' → '{db_lineage}'")
+                        else:
+                            # Still log to confirm database lineage is being applied (for debugging)
+                            logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage confirmed from database: '{db_lineage}'")
+                    else:
+                        logger.warning(f"⚠️ EXCEL ENRICHMENT: No database lineage found for '{product_name}'")
                         else:
                             logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage confirmed from DB: '{db_lineage}'")
                     else:
