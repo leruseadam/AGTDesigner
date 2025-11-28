@@ -8657,6 +8657,16 @@ def get_available_tags():
                                     logging.warning(f"⚠️ GUARANTEED FIX: No database lineage found for '{tag_name}' - using Excel/cached lineage")
                             
                             logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage")
+                            
+                            # CRITICAL: If some tags weren't updated, log which ones for debugging
+                            if updated_count < len(all_tags):
+                                missing_lineage = []
+                                for tag in all_tags:
+                                    tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                    if tag_name and not (tag.get('currentLineage') or tag.get('canonical_lineage')):
+                                        missing_lineage.append(tag_name)
+                                if missing_lineage:
+                                    logging.warning(f"⚠️ GUARANTEED FIX: {len(missing_lineage)} tags still missing database lineage: {missing_lineage[:5]}")
                         else:
                             logging.warning("⚠️ No product names found in tags for guaranteed lineage fix")
                     except Exception as db_query_err:
@@ -10005,27 +10015,62 @@ def update_lineage():
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
         
-        # Step 4: Verify the update actually worked
-        verified_lineage = product_db.get_product_lineage(tag_name)
-        if verified_lineage and str(verified_lineage).strip().upper() == str(new_lineage).strip().upper():
-            logging.info(f"✅ VERIFIED: Lineage update persisted correctly - '{tag_name}' now has lineage '{verified_lineage}'")
-        else:
-            logging.warning(f"⚠️ VERIFICATION FAILED: Expected '{new_lineage}', got '{verified_lineage}' for '{tag_name}'")
-            # Try one more time with direct update
+        # Step 4: Verify the update actually worked - CRITICAL for persistence
+        # Wait a tiny bit to ensure commit is fully flushed
+        import time
+        time.sleep(0.1)
+        
+        # Try multiple verification strategies
+        verified_lineage = None
+        verification_attempts = [
+            lambda: product_db.get_product_lineage(tag_name),
+            lambda: product_db.get_product_lineage(tag_name.strip()),
+        ]
+        
+        for attempt_num, verify_func in enumerate(verification_attempts, 1):
             try:
+                verified_lineage = verify_func()
+                if verified_lineage and str(verified_lineage).strip().upper() == str(new_lineage).strip().upper():
+                    logging.info(f"✅ VERIFIED (attempt {attempt_num}): Lineage update persisted correctly - '{tag_name}' now has lineage '{verified_lineage}'")
+                    break
+            except Exception as verify_err:
+                logging.debug(f"Verification attempt {attempt_num} failed: {verify_err}")
+        
+        if not verified_lineage or str(verified_lineage).strip().upper() != str(new_lineage).strip().upper():
+            logging.warning(f"⚠️ VERIFICATION FAILED: Expected '{new_lineage}', got '{verified_lineage}' for '{tag_name}'")
+            # CRITICAL: Try direct database query to see what's actually stored
+            try:
+                cursor.execute("""
+                    SELECT p."Lineage", s.sovereign_lineage, s.canonical_lineage,
+                           COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS effective_lineage
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
+                    WHERE p."Product Name*" = ? OR p.ProductName = ? OR p.normalized_name = ?
+                    ORDER BY p.id DESC
+                    LIMIT 1
+                """, (tag_name, tag_name, product_db._normalize_product_name(tag_name)))
+                db_row = cursor.fetchone()
+                if db_row:
+                    logging.info(f"🔍 DIRECT DB QUERY: product.Lineage='{db_row[0]}', strain.sovereign='{db_row[1]}', strain.canonical='{db_row[2]}', effective='{db_row[3]}'")
+                
+                # Force update one more time
                 cursor.execute("""
                     UPDATE products 
                     SET Lineage = ? 
-                    WHERE "Product Name*" = ? OR ProductName = ?
-                """, (new_lineage, tag_name, tag_name))
+                    WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                """, (new_lineage, tag_name, tag_name, product_db._normalize_product_name(tag_name)))
                 conn.commit()
+                time.sleep(0.1)  # Wait for commit
                 verified_lineage = product_db.get_product_lineage(tag_name)
-                logging.info(f"🔄 Retry update - verified lineage: '{verified_lineage}'")
+                logging.info(f"🔄 FORCE UPDATE RETRY - verified lineage: '{verified_lineage}'")
             except Exception as retry_err:
                 logging.error(f"❌ Retry update failed: {retry_err}")
+                import traceback
+                logging.error(traceback.format_exc())
 
         # CRITICAL FIX: Update DataFrame lineage IMMEDIATELY if Excel processor exists
         # This ensures the in-memory DataFrame has the updated lineage right away
+        # Also force update the specific product that was changed
         try:
             excel_processor = get_session_excel_processor()
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
@@ -10033,8 +10078,20 @@ def update_lineage():
                     logging.info("🔄 CRITICAL: Updating DataFrame lineage immediately after lineage update...")
                     excel_processor._update_dataframe_lineage_from_database()
                     logging.info("✅ CRITICAL: DataFrame lineage updated immediately")
+                
+                # CRITICAL: Also directly update the specific product in DataFrame to ensure it's updated
+                if 'Product Name*' in excel_processor.df.columns and 'Lineage' in excel_processor.df.columns:
+                    product_mask = excel_processor.df['Product Name*'] == tag_name
+                    if product_mask.any():
+                        excel_processor.df.loc[product_mask, 'Lineage'] = new_lineage
+                        logging.info(f"✅ CRITICAL: Directly updated DataFrame lineage for '{tag_name}' to '{new_lineage}'")
+                        excel_processor._invalidate_caches()  # Invalidate cache since DataFrame changed
+                    else:
+                        logging.warning(f"⚠️ Product '{tag_name}' not found in DataFrame for direct update")
         except Exception as df_update_err:
-            logging.warning(f"Could not update DataFrame lineage immediately: {df_update_err}")
+            logging.error(f"❌ CRITICAL FAILURE: Could not update DataFrame lineage immediately: {df_update_err}")
+            import traceback
+            logging.error(traceback.format_exc())
         
         # Clear caches AND Excel processor to force fresh data load
         try:
