@@ -2283,7 +2283,8 @@ const TagManager = {
             const productType = VALID_PRODUCT_TYPES.includes(normalizedProductType.toLowerCase())
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
               : 'Unknown Type';
-            const lineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED';
+            // CRITICAL FIX: Always prioritize database lineage fields (currentLineage/canonical_lineage) over Excel Lineage
+            const lineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
             // CRITICAL FIX: Ensure weightWithUnits is properly populated from multiple possible sources
             const weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
@@ -3199,14 +3200,27 @@ const TagManager = {
         verboseLog('Before update - this.state.tags length:', this.state.tags.length);
         verboseLog('Before update - this.state.originalTags length:', this.state.originalTags.length);
         
+        // CRITICAL FIX: Ensure all tags in state have database lineage fields prioritized
+        // This ensures TagManager always uses database lineage, not Excel lineage
+        const tagsWithDbLineage = tags.map(tag => {
+            // If tag has database lineage fields, ensure they're used and Excel Lineage is updated to match
+            if (tag.canonical_lineage || tag.currentLineage) {
+                const dbLineage = tag.canonical_lineage || tag.currentLineage;
+                // Update Excel Lineage field to match database lineage for consistency
+                tag.Lineage = dbLineage;
+                tag.lineage = dbLineage.toLowerCase();
+            }
+            return tag;
+        });
+        
         // Only update originalTags if we're not filtering (i.e., if filteredTags is null)
         // This preserves the original data for when filters are reset to "All"
         if (filteredTags === null) {
-            this.state.originalTags = [...tags];
+            this.state.originalTags = [...tagsWithDbLineage];
         }
         
         // Always update the current tags for display
-        this.state.tags = [...tags];
+        this.state.tags = [...tagsWithDbLineage];
         
         const shouldUseSimplified = !this.state.forceFullAvailableTagRender &&
             !this.state.isSearching &&
@@ -4244,20 +4258,34 @@ const TagManager = {
         // IMPORTANT: If database lineage exists (canonical_lineage or currentLineage), use it exclusively
         // NEVER use Excel Lineage (tag.Lineage) if database lineage is present
         // CRITICAL FIX: Always check database lineage FIRST, never use Excel Lineage when DB lineage exists
+        // CRITICAL FIX: ALWAYS check database fields FIRST - database is the source of truth
+        // NEVER use Excel Lineage if database lineage exists
         if (tag.canonical_lineage || tag.currentLineage) {
-            // Database lineage exists - use it (this is the source of truth)
+            // Database lineage exists - use it EXCLUSIVELY (this is the source of truth)
             lineage = tag.canonical_lineage || tag.currentLineage;
-            // CRITICAL: If Excel Lineage exists but differs, log a warning
+            // CRITICAL: Log when we're overriding Excel lineage with database lineage
             if (tag.Lineage && tag.Lineage.toUpperCase() !== lineage.toUpperCase()) {
-                console.warn(`⚠️ UI LINEAGE: Tag "${displayName}" has database lineage (${lineage}) but Excel Lineage (${tag.Lineage}) differs - using database`);
+                console.log(`🔄 TagManager: Using database lineage for "${displayName}": Excel="${tag.Lineage}" → DB="${lineage}"`);
+            }
+            // CRITICAL: Overwrite Excel Lineage in tag object to ensure consistency
+            if (tag.Lineage !== lineage) {
+                tag.Lineage = lineage;
+                tag.lineage = lineage.toLowerCase();
+                console.log(`✅ TagManager: Updated tag object for "${displayName}" - set Lineage to database value: "${lineage}"`);
             }
         } else {
             // CRITICAL: Only fallback to Excel Lineage if database lineage is completely missing
             // This should rarely happen if backend lineage alignment is working correctly
-            if (tag.Lineage || tag.lineage || tag['Lineage*']) {
-                console.warn(`⚠️ UI LINEAGE: Tag "${displayName}" missing database lineage (canonical_lineage/currentLineage), falling back to Excel Lineage: ${tag.Lineage || tag.lineage || tag['Lineage*']}`);
-            }
             lineage = tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
+            if (lineage && lineage !== 'MIXED') {
+                console.warn(`⚠️ TagManager: Tag "${displayName}" missing database lineage (canonical_lineage/currentLineage), using Excel Lineage: "${lineage}"`);
+                console.warn(`⚠️ TagManager: Tag object fields:`, {
+                    canonical_lineage: tag.canonical_lineage,
+                    currentLineage: tag.currentLineage,
+                    Lineage: tag.Lineage,
+                    lineage: tag.lineage
+                });
+            }
         }
         
         // Normalize lineage to uppercase for consistent matching
@@ -7253,12 +7281,10 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // OPTIMIZATION: Use fast_load parameter for initial load OR post-upload to skip slow lineage alignment
-            // This dramatically speeds up tag loading when cached data is available
-            const isInitialLoad = !this.state.tags || this.state.tags.length === 0;
-            // Also use fast_load after uploads (when called from refreshTagLists with force=true)
-            const isPostUpload = this._isPostUploadLoad || false;
-            const fastLoadParam = (isInitialLoad || isPostUpload) ? '&fast_load=1' : '';
+            // PERFORMANCE FIX: Always use fast_load=1 for instant tag loading
+            // This skips expensive lineage alignment on cached tags for faster response
+            // Lineage will still be aligned when needed, but cached tags return instantly
+            const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
             let response;
@@ -7274,19 +7300,13 @@ const TagManager = {
                     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
-                    // Always use prefer_db=1 to force database lineage alignment, even on cached tags
-                    // This ensures UI shows current database lineage values, including previously updated ones
-                    // CRITICAL: After Excel upload, always use nocache to force database lineage
-                    // This ensures UI shows database lineage, not Excel lineage from cache
+                    // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
                     const forceDbLineage = this._forceDatabaseLineage || false;
                     const useCache = retryCount === 0 && !forceDbLineage; // Don't use cache after upload
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    const preferDbParam = '&prefer_db=1';  // CRITICAL: Always use database for lineage accuracy
-                    // Note: prefer_db=1 forces lineage alignment even on cached tags, so lineage will be fresh
-                    // Use fast_load on first attempt for initial loads (lineage alignment still happens with prefer_db)
-                    const fastLoadParam = '&fast_load=1';
-                    const fastParam = (retryCount === 0 && (isInitialLoad || isPostUpload)) ? fastLoadParam : fastLoadParam;
-                    response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastParam}${preferDbParam}`, {
+                    // Only use prefer_db when forcing database lineage (after upload), otherwise let fast_load optimize
+                    const preferDbParam = forceDbLineage ? '&prefer_db=1' : '';
+                    response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`, {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
