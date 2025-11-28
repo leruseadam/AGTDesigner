@@ -9031,6 +9031,48 @@ def get_available_tags():
         logging.info(f"📊 LINEAGE VERIFICATION: {tags_with_db_lineage} tags with DB lineage, {tags_without_db_lineage} without DB lineage")
         logging.info(f"📊 LINEAGE SAMPLE: {sample_lineage_check}")
         
+        # CRITICAL: Final pass - ensure EVERY tag has database lineage fields before sending to frontend
+        # Query database directly for any tags missing database lineage fields
+        if all_tags:
+            # Get product_db if not already available
+            if 'product_db' not in locals() or product_db is None:
+                try:
+                    store_name = get_current_store_name()
+                    if store_name:
+                        product_db = get_product_database(store_name)
+                except Exception as db_err:
+                    logging.warning(f"Could not get product_db for final lineage check: {db_err}")
+                    product_db = None
+            
+            if product_db:
+                final_lineage_check_count = 0
+                for tag in all_tags:
+                    tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                    if not tag_name:
+                        continue
+                    
+                    # Check if tag has database lineage fields
+                    has_db_fields = tag.get('currentLineage') or tag.get('canonical_lineage')
+                    
+                    if not has_db_fields:
+                        # CRITICAL: Tag is missing database lineage - query database directly
+                        try:
+                            direct_db_lineage = product_db.get_product_lineage(tag_name)
+                            if direct_db_lineage:
+                                db_lineage_clean = str(direct_db_lineage).strip().upper()
+                                # Set ALL lineage fields to database value
+                                tag['currentLineage'] = db_lineage_clean
+                                tag['canonical_lineage'] = db_lineage_clean
+                                tag['Lineage'] = db_lineage_clean  # Overwrite Excel Lineage
+                                tag['lineage'] = db_lineage_clean.lower()
+                                final_lineage_check_count += 1
+                                logging.info(f"✅ FINAL CHECK: Set database lineage for '{tag_name}': '{db_lineage_clean}'")
+                        except Exception as final_check_err:
+                            logging.debug(f"Final lineage check failed for '{tag_name}': {final_check_err}")
+                
+                if final_lineage_check_count > 0:
+                    logging.info(f"✅ FINAL CHECK: Set database lineage on {final_lineage_check_count} tags that were missing it")
+        
         safe_all_tags = make_json_safe(all_tags)
         # Cache the results for faster subsequent requests (unless nocache requested)
         if safe_all_tags and not nocache:
