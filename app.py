@@ -8167,6 +8167,10 @@ def get_available_tags():
             cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
             cached_tags = cache.get(cache_key) if not prefer_db else None
         
+        # Initialize flags
+        all_tags = []  # Initialize all_tags before checking cache
+        skip_excel_loading = False  # Initialize flag to track if we should skip Excel loading
+        
         # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         # PERFORMANCE: Enable fast_load by default for better performance
@@ -8191,10 +8195,12 @@ def get_available_tags():
             logging.info("✅ CRITICAL: Set prefer_db=True due to recent lineage updates to ensure database lineage is used")
         
         if cached_tags and not nocache:
-            # PERFORMANCE FIX: Skip lineage alignment when fast_load is enabled for instant loading
-            # Lineage alignment can be slow and should be deferred for initial loads
-            # Only align lineage if explicitly requested (fast_load=0) or if lineage was recently updated
-            lineage_alignment_needed = not fast_load or force_full_refresh
+            # CRITICAL FIX: ALWAYS align lineage from database - database is the source of truth
+            # Even during fast_load, we MUST query database for lineage to ensure persistence
+            # Skip alignment ONLY if explicitly disabled AND no recent lineage updates
+            # But for lineage persistence, we always need database lineage
+            lineage_alignment_needed = True  # ALWAYS align lineage - database is source of truth
+            logging.info(f"🔄 CRITICAL: Lineage alignment ALWAYS enabled to ensure database lineage is used (fast_load={fast_load}, force_full_refresh={force_full_refresh})")
             
             if lineage_alignment_needed:
                 logging.info(f"🔄 Lineage alignment enabled: fast_load={fast_load}, force_full_refresh={force_full_refresh}")
@@ -8438,10 +8444,8 @@ def get_available_tags():
                     updated = 0
 
                 elapsed = (time.time() - start_time) * 1000
-                if lineage_alignment_needed:
-                    logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms, {updated} tags updated from database)")
-                else:
-                    logging.info(f"⚡ FAST LOAD: Using {len(cached_tags)} cached available tags without lineage alignment ({elapsed:.1f}ms)")
+                # CRITICAL: Always log lineage alignment status for debugging
+                logging.info(f"✅ Using {len(cached_tags)} cached available tags with lineage alignment ({elapsed:.1f}ms, {updated} tags updated from database)")
                 
                 # CRITICAL FIX: Ensure ALL tags have database lineage fields set, even if they weren't in the batch query
                 # This handles cases where products weren't found in the initial batch but exist in the database
@@ -8472,37 +8476,25 @@ def get_available_tags():
                         logging.info(f"🔄 FORCED LINEAGE UPDATE: Set database lineage fields on {force_updated} tags that were missing them")
                         updated += force_updated
                 
-                safe_cached_tags = make_json_safe(cached_tags)
-                response_payload = {
-                    'tags': safe_cached_tags,  # Frontend expects 'tags', not 'available_tags'
-                    'total_count': len(safe_cached_tags),
-                    'source': 'cache+db-lineage' if lineage_alignment_needed else 'cache',
-                    'lineage_aligned': updated > 0,  # Indicate if lineage was aligned
-                    'lineage_updates': updated  # Number of tags with updated lineage
-                }
-                # CRITICAL FIX: Clear lineage_update_timestamp only after successful lineage alignment
-                # This ensures subsequent requests still get fresh lineage until cache is rebuilt
-                # IMPORTANT: Always clear timestamp if force_full_refresh is set, even if no updates
-                # This prevents infinite refresh loops while ensuring fresh data is shown
-                if force_full_refresh:
-                    if updated > 0:
-                        session['lineage_update_timestamp'] = 0
-                        logging.info("✅ Cleared lineage_update_timestamp after successful lineage alignment")
-                    else:
-                        # Even if no updates, clear timestamp after a delay to prevent infinite refresh
-                        # But keep it for a short time to ensure other requests also get fresh data
-                        current_ts = session.get('lineage_update_timestamp', 0)
-                        if current_ts and (time.time() - float(current_ts)) > 30:  # Clear after 30 seconds
-                            session['lineage_update_timestamp'] = 0
-                            logging.info("✅ Cleared lineage_update_timestamp after 30s (no updates but timestamp was set)")
-                return jsonify(response_payload)
+                # CRITICAL: Don't return cached tags early - they need GUARANTEED FIX for database lineage
+                # Convert cached tags to list format for processing
+                all_tags = list(cached_tags)  # Use cached tags but continue to GUARANTEED FIX section
+                logging.info(f"🔄 CRITICAL: Using {len(all_tags)} cached tags, will apply GUARANTEED FIX for database lineage override")
+                
+                # Skip Excel loading since we have cached tags - set flag to skip Excel section
+                excel_processor = None
+                skip_excel_loading = True  # Flag to skip Excel loading
+        else:
+            # No cached tags - build from Excel or database
+            skip_excel_loading = False
+            logging.info("🔄 Building tag list... (prefer_db={}, request_args={})".format(prefer_db, dict(request.args)))
+            
+            # When prefer_db is set, skip Excel entirely and go straight to database
+            all_tags = []
+            excel_processor = None  # CRITICAL FIX: Initialize excel_processor to avoid UnboundLocalError
         
-        logging.info("🔄 Building tag list... (prefer_db={}, request_args={})".format(prefer_db, dict(request.args)))
-        
-        # When prefer_db is set, skip Excel entirely and go straight to database
-        all_tags = []
-        excel_processor = None  # CRITICAL FIX: Initialize excel_processor to avoid UnboundLocalError
-        if not prefer_db:
+        # Only build from Excel if we don't have cached tags and prefer_db is not set
+        if not skip_excel_loading and not prefer_db:
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
             excel_processor = get_session_excel_processor()
@@ -8521,22 +8513,17 @@ def get_available_tags():
                         logging.error(traceback.format_exc())
                         # Continue anyway - the guaranteed fix below will handle it
                 try:
-                    # PERFORMANCE: Skip enrichment when fast_load is enabled for faster tag loading
-                    if fast_load:
-                        original_enrich = getattr(excel_processor, '_skip_enrichment', False)
-                        excel_processor._skip_enrichment = True
-                        try:
-                            excel_tags = excel_processor.get_available_tags()
-                        finally:
-                            excel_processor._skip_enrichment = original_enrich
-                        logging.info(f"⚡ FAST LOAD: Excel processor returned {len(excel_tags)} tags (enrichment skipped)")
-                    else:
-                        excel_tags = excel_processor.get_available_tags()
-                        # CRITICAL FIX: Verify Excel tags have database lineage fields
-                        tags_with_db_lineage = sum(1 for tag in excel_tags if tag.get('currentLineage') or tag.get('canonical_lineage'))
-                        logging.info(f"✅ Excel processor returned {len(excel_tags)} tags ({tags_with_db_lineage} with DB lineage from enrichment)")
-                        if tags_with_db_lineage < len(excel_tags) * 0.5:  # Less than 50% have DB lineage
-                            logging.warning(f"⚠️ Only {tags_with_db_lineage}/{len(excel_tags)} Excel tags have database lineage - enrichment may have failed")
+                    # CRITICAL: ALWAYS use enrichment to get database lineage - NEVER skip it
+                    # Database lineage is the source of truth and must always be used for persistence
+                    # Even with fast_load, we MUST enrich with database lineage
+                    excel_tags = excel_processor.get_available_tags()
+                    
+                    # CRITICAL FIX: Verify Excel tags have database lineage fields
+                    tags_with_db_lineage = sum(1 for tag in excel_tags if tag.get('currentLineage') or tag.get('canonical_lineage'))
+                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags ({tags_with_db_lineage} with DB lineage from enrichment)")
+                    if tags_with_db_lineage < len(excel_tags) * 0.5:  # Less than 50% have DB lineage
+                        logging.warning(f"⚠️ Only {tags_with_db_lineage}/{len(excel_tags)} Excel tags have database lineage - enrichment may have failed")
+                    
                     all_tags.extend(excel_tags)
                 except Exception as e:
                     logging.warning(f"Excel processor error: {e}")
@@ -10081,13 +10068,27 @@ def update_lineage():
                 
                 # CRITICAL: Also directly update the specific product in DataFrame to ensure it's updated
                 if 'Product Name*' in excel_processor.df.columns and 'Lineage' in excel_processor.df.columns:
+                    # Try multiple matching strategies
                     product_mask = excel_processor.df['Product Name*'] == tag_name
+                    if not product_mask.any():
+                        # Try case-insensitive match
+                        product_mask = excel_processor.df['Product Name*'].str.upper().str.strip() == tag_name.upper().strip()
+                    if not product_mask.any():
+                        # Try with normalized names
+                        try:
+                            normalized_name = product_db._normalize_product_name(tag_name)
+                            if 'normalized_name' in excel_processor.df.columns:
+                                product_mask = excel_processor.df['normalized_name'] == normalized_name
+                        except Exception:
+                            pass
+                    
                     if product_mask.any():
                         excel_processor.df.loc[product_mask, 'Lineage'] = new_lineage
-                        logging.info(f"✅ CRITICAL: Directly updated DataFrame lineage for '{tag_name}' to '{new_lineage}'")
+                        updated_count = product_mask.sum()
+                        logging.info(f"✅ CRITICAL: Directly updated DataFrame lineage for '{tag_name}' to '{new_lineage}' ({updated_count} row(s))")
                         excel_processor._invalidate_caches()  # Invalidate cache since DataFrame changed
                     else:
-                        logging.warning(f"⚠️ Product '{tag_name}' not found in DataFrame for direct update")
+                        logging.warning(f"⚠️ Product '{tag_name}' not found in DataFrame for direct update (tried exact, case-insensitive, and normalized matches)")
         except Exception as df_update_err:
             logging.error(f"❌ CRITICAL FAILURE: Could not update DataFrame lineage immediately: {df_update_err}")
             import traceback
