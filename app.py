@@ -4140,25 +4140,16 @@ def process_excel_background(filename, temp_path):
             logging.info(f"[BG] DataFrame shape: {new_processor.df.shape if hasattr(new_processor.df, 'shape') else 'No DataFrame'}")
             logging.info(f"[BG] DataFrame columns: {list(new_processor.df.columns) if hasattr(new_processor.df, 'columns') else 'No columns'}")
             
-            # Check for JSON matched tags before storage
-            json_match_count = 0
-            if hasattr(new_processor.df, 'columns') and 'Source' in new_processor.df.columns:
-                json_match_mask = new_processor.df['Source'].astype(str).str.contains('JSON Match|AI Match|JSON|AI|Match|Generated', case=False, na=False)
-                json_match_count = json_match_mask.sum()
-                logging.info(f"[BG] Detected {json_match_count} JSON matched tags that will be excluded from database storage")
+            # CRITICAL FIX: JSON tags work exactly like Excel tags - no special exclusion from database storage
+            # All tags (including JSON) are processed the same way
             
             if hasattr(new_processor, '_store_upload_in_database'):
                 logging.info("[BG] Using ExcelProcessor _store_upload_in_database method")
                 storage_result = new_processor._store_upload_in_database(new_processor.df, temp_path)
                 logging.info(f"[BG] ✅ Database storage completed successfully: {storage_result}")
                 
-                # Log JSON match exclusion details
-                if 'excluded_json_matches' in storage_result:
-                    excluded_count = storage_result['excluded_json_matches']
-                    logging.info(f"[BG] ✅ Excluded {excluded_count} JSON matched tags from database storage")
-                    logging.info(f"[BG] ✅ Stored {storage_result.get('stored', 0)} products in database")
-                else:
-                    logging.warning("[BG] Storage result missing excluded_json_matches field")
+                # Log storage results
+                logging.info(f"[BG] ✅ Stored {storage_result.get('stored', 0)} products in database")
                     
             else:
                 logging.warning("[BG] ExcelProcessor does not have _store_upload_in_database method")
@@ -4175,13 +4166,8 @@ def process_excel_background(filename, temp_path):
                         storage_result = product_db.store_excel_data(new_processor.df, temp_path)
                         logging.info(f"[BG] ✅ Alternative database storage completed: {storage_result}")
                         
-                        # Log JSON match exclusion details
-                        if 'excluded_json_matches' in storage_result:
-                            excluded_count = storage_result['excluded_json_matches']
-                            logging.info(f"[BG] ✅ Excluded {excluded_count} JSON matched tags from database storage")
-                            logging.info(f"[BG] ✅ Stored {storage_result.get('stored', 0)} products in database")
-                        else:
-                            logging.warning("[BG] Storage result missing excluded_json_matches field")
+                        # Log storage results
+                        logging.info(f"[BG] ✅ Stored {storage_result.get('stored', 0)} products in database")
                             
                     else:
                         logging.warning("[BG] ProductDatabase does not have store_excel_data method")
@@ -6406,26 +6392,10 @@ def generate_labels():
         # TRACE: Check store after getting excel_processor
         logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
-        # CRITICAL DEBUG: Check if we have JSON matched products in the Excel DataFrame
-        if excel_processor.df is not None and 'Source' in excel_processor.df.columns:
-            json_count = len(excel_processor.df[excel_processor.df['Source'] == 'JSON Match'])
-            logging.info(f"🔍 DEBUG: Found {json_count} JSON matched products in Excel DataFrame")
-            if json_count > 0:
-                json_products = excel_processor.df[excel_processor.df['Source'] == 'JSON Match']
-                logging.info(f"🔍 DEBUG: JSON product names: {json_products['Product Name*'].tolist()[:10]}")
-        else:
-            logging.info(f"🔍 DEBUG: No JSON matched products found in Excel DataFrame")
         excel_processor.enable_product_db_integration(True)
 
-        # CRITICAL FIX: Preserve JSON matched products when reloading Excel data
-        json_matched_products = None
-        if excel_processor.df is not None and not excel_processor.df.empty:
-            # Check if there are JSON matched products in the current DataFrame
-            if 'Source' in excel_processor.df.columns:
-                json_mask = excel_processor.df['Source'].astype(str).str.contains('JSON Match', case=False, na=False)
-                if json_mask.any():
-                    json_matched_products = excel_processor.df[json_mask].copy()
-                    logging.info(f"CRITICAL FIX: Preserving {len(json_matched_products)} JSON matched products before reloading Excel data")
+        # CRITICAL FIX: JSON tags work exactly like Excel tags - no special preservation needed
+        # They're already in the DataFrame and will be handled the same way as Excel tags
         
         # TRACE: Check store before file loading
         logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
@@ -6452,93 +6422,8 @@ def generate_labels():
                 else:
                     logging.warning(f"⚠️ GENERATE: No default file found for store: {selected_store}")
         
-        # CRITICAL FIX: Restore JSON matched products after reloading Excel data
-        if json_matched_products is not None and excel_processor.df is not None:
-            # Check if JSON products are already in the DataFrame
-            if 'Source' in excel_processor.df.columns:
-                existing_json_mask = excel_processor.df['Source'].astype(str).str.contains('JSON Match', case=False, na=False)
-                if not existing_json_mask.any():
-                    # Add JSON matched products back to the DataFrame
-                    excel_processor.df = pd.concat([excel_processor.df, json_matched_products], ignore_index=True)
-                    logging.info(f"CRITICAL FIX: Restored {len(json_matched_products)} JSON matched products to Excel data")
-                else:
-                    logging.info(f"CRITICAL FIX: JSON matched products already present in Excel data")
-            else:
-                # Add Source column and JSON products
-                excel_processor.df['Source'] = 'Excel Import'
-                excel_processor.df = pd.concat([excel_processor.df, json_matched_products], ignore_index=True)
-                logging.info(f"CRITICAL FIX: Added Source column and restored {len(json_matched_products)} JSON matched products")
-        
-        # CRITICAL FIX: Fallback - restore JSON matched products from cache if not in Excel data
-        if excel_processor.df is not None and 'Source' in excel_processor.df.columns:
-            existing_json_mask = excel_processor.df['Source'].astype(str).str.contains('JSON Match', case=False, na=False)
-            if not existing_json_mask.any():
-                # Try to restore from cache
-                json_matched_cache_key = session.get('json_matched_cache_key')
-                if json_matched_cache_key:
-                    json_matched_tags = cache.get(json_matched_cache_key) or []
-                    if json_matched_tags:
-                        logging.info(f"CRITICAL FIX: Restoring {len(json_matched_tags)} JSON matched products from cache")
-                        try:
-                            # Convert JSON matched tags to DataFrame format
-                            json_df_data = []
-                            for tag in json_matched_tags:
-                                if isinstance(tag, dict):
-                                    # Create a row that matches Excel format using proper database values
-                                    # ENHANCED: Match by product name but use corresponding database values for all fields
-                                    
-                                    # Extract all database values from the matched record
-                                    db_description = tag.get('Description', '').strip()
-                                    db_product_name = tag.get('Product Name*', tag.get('ProductName', ''))
-                                    db_brand = tag.get('Product Brand', '')
-                                    db_product_type = tag.get('Product Type*', '')
-                                    db_vendor = tag.get('Vendor/Supplier*', '')
-                                    db_weight = tag.get('Weight*', '')
-                                    db_units = tag.get('Units', '')
-                                    db_price = tag.get('Price', '')
-                                    db_lineage = tag.get('Lineage', '')
-                                    db_strain = tag.get('Product Strain', '')
-                                    db_thc = tag.get('THC test result', '')
-                                    db_cbd = tag.get('CBD test result', '')
-                                    db_test_unit = tag.get('Test result unit (% or mg)', '')
-                                    db_quantity = tag.get('Quantity*', '')
-                                    db_doh = tag.get('DOH', '')
-                                    db_doh_compliant = tag.get('DOH Compliant (Yes/No)', '')
-                                    
-                                    # Use database description as primary name if available, otherwise use database product name
-                                    primary_name = db_description if db_description else db_product_name
-                                    
-                                    # Create row using proper database values from the matched record
-                                    row = {
-                                        'ProductName': primary_name,  # Use database description or product name
-                                        'Product Name*': primary_name,  # Use database description or product name
-                                        'Product Brand': db_brand,  # Use database brand value
-                                        'Product Type*': db_product_type,  # Use database product type
-                                        'Vendor/Supplier*': db_vendor,  # Use database vendor value
-                                        'Description': db_description or primary_name,  # Use database description
-                                        'Lineage': db_lineage,  # Use database lineage value
-                                        'THC test result': db_thc,  # Use database THC value
-                                        'CBD test result': db_cbd,  # Use database CBD value
-                                        'Test result unit (% or mg)': db_test_unit,  # Use database test unit
-                                        'Weight*': db_weight,  # Use database weight value
-                                        'Units': db_units,  # Use database units value
-                                        'Price': db_price,  # Use database price value
-                                        'Price* (Tier Name for Bulk)': db_price,  # Use database price value
-                                        'Quantity*': db_quantity,  # Use database quantity value
-                                        'Product Strain': db_strain,  # Use database strain value
-                                        'DOH': db_doh,  # Use database DOH value
-                                        'DOH Compliant (Yes/No)': db_doh_compliant,  # Use database DOH compliance value
-                                        'displayName': primary_name,
-                                        'Source': 'JSON Match with Database Values'  # Indicate this uses database values
-                                    }
-                                    json_df_data.append(row)
-                            
-                            if json_df_data:
-                                json_df = pd.DataFrame(json_df_data)
-                                excel_processor.df = pd.concat([excel_processor.df, json_df], ignore_index=True)
-                                logging.info(f"DATABASE PRIORITY: Successfully restored {len(json_df)} database-priority products from cache")
-                        except Exception as cache_error:
-                            logging.error(f"DATABASE PRIORITY: Error restoring database-priority products from cache: {cache_error}")
+        # CRITICAL FIX: JSON tags work exactly like Excel tags - no special restoration needed
+        # They're processed through the same pipeline as Excel tags
 
         # Check if we have data in Excel processor OR database
         has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
@@ -8614,19 +8499,30 @@ def get_available_tags():
                                             break
                                 
                                 # CRITICAL: If no match in map, query database directly (final fallback)
+                                # ALWAYS try direct query as fallback - it's the most reliable method
                                 if not db_lineage:
                                     try:
                                         direct_lineage = product_db.get_product_lineage(tag_name)
                                         if direct_lineage:
                                             db_lineage = str(direct_lineage).strip().upper()
-                                            logging.debug(f"✅ GUARANTEED FIX: Got lineage via direct query for '{tag_name}': '{db_lineage}'")
+                                            logging.info(f"✅ GUARANTEED FIX: Got lineage via direct query for '{tag_name}': '{db_lineage}'")
+                                        else:
+                                            # Try one more time with normalized name if direct query returned None
+                                            try:
+                                                normalized_name = product_db._normalize_product_name(tag_name)
+                                                direct_lineage = product_db.get_product_lineage(normalized_name)
+                                                if direct_lineage:
+                                                    db_lineage = str(direct_lineage).strip().upper()
+                                                    logging.info(f"✅ GUARANTEED FIX: Got lineage via normalized direct query for '{tag_name}' (norm: '{normalized_name}'): '{db_lineage}'")
+                                            except Exception:
+                                                pass
                                     except Exception as direct_query_err:
-                                        logging.debug(f"Direct lineage query failed for '{tag_name}': {direct_query_err}")
+                                        logging.warning(f"⚠️ Direct lineage query failed for '{tag_name}': {direct_query_err}")
                                 
                                 # GUARANTEED: If database has lineage, ALWAYS use it and override Excel/cached values
                                 # CRITICAL: This is the source of truth - always override any cached/Excel lineage
                                 if db_lineage:
-                                    old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
+                                    old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or tag.get('lineage', '')).strip().upper()
                                     # CRITICAL: ALWAYS set ALL lineage fields from database - this ensures persistence
                                     # Even if values appear to match, set them again to ensure database values are used
                                     tag['currentLineage'] = db_lineage
@@ -8635,15 +8531,57 @@ def get_available_tags():
                                     tag['lineage'] = db_lineage.lower()
                                     updated_count += 1
                                     if old_lineage != db_lineage:
-                                        logging.info(f"🔄 GUARANTEED FIX (LINEAGE PERSISTENCE): '{tag_name}' - '{old_lineage}' → '{db_lineage}'")
+                                        logging.info(f"🔄 GUARANTEED FIX (LINEAGE PERSISTENCE): '{tag_name}' - '{old_lineage}' → '{db_lineage}' (FRONTEND WILL SEE THIS)")
                                     else:
                                         # Still log to confirm database lineage is being used
-                                        logging.debug(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed from database: '{db_lineage}'")
+                                        logging.info(f"✅ GUARANTEED FIX: '{tag_name}' lineage confirmed from database: '{db_lineage}' (all fields set)")
                                 else:
-                                    # Log warning if no database lineage found
-                                    logging.warning(f"⚠️ GUARANTEED FIX: No database lineage found for '{tag_name}' - using Excel/cached lineage")
+                                    # Log warning if no database lineage found - this means persistence might fail
+                                    current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or 'MIXED').strip().upper()
+                                    logging.warning(f"⚠️ GUARANTEED FIX: No database lineage found for '{tag_name}' - using current: '{current_lineage}' (PERSISTENCE MAY FAIL)")
+                                    # CRITICAL: Even if no DB lineage found, ensure currentLineage/canonical_lineage fields exist
+                                    # This prevents frontend from falling back to Excel Lineage
+                                    if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
+                                        if current_lineage:
+                                            tag['currentLineage'] = current_lineage
+                                            tag['canonical_lineage'] = current_lineage
+                                            logging.info(f"🔧 GUARANTEED FIX: Set currentLineage/canonical_lineage to '{current_lineage}' for '{tag_name}' (no DB match)")
                             
                             logging.info(f"✅ GUARANTEED FIX: Updated {updated_count}/{len(all_tags)} tags with database lineage")
+                            
+                            # CRITICAL: Final verification - double-check all tags have database lineage fields set
+                            # This ensures frontend will use database lineage, not Excel lineage
+                            verification_count = 0
+                            for tag in all_tags:
+                                tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                if not tag_name:
+                                    continue
+                                
+                                # Verify database lineage fields are set
+                                has_db_fields = tag.get('currentLineage') or tag.get('canonical_lineage')
+                                if not has_db_fields:
+                                    # Try one more direct database query as final fallback
+                                    try:
+                                        final_lineage = product_db.get_product_lineage(tag_name)
+                                        if final_lineage:
+                                            final_lineage_clean = str(final_lineage).strip().upper()
+                                            tag['currentLineage'] = final_lineage_clean
+                                            tag['canonical_lineage'] = final_lineage_clean
+                                            tag['Lineage'] = final_lineage_clean
+                                            tag['lineage'] = final_lineage_clean.lower()
+                                            verification_count += 1
+                                            logging.info(f"✅ GUARANTEED FIX VERIFICATION: Set database lineage for '{tag_name}': '{final_lineage_clean}'")
+                                    except Exception as verify_err:
+                                        logging.debug(f"Verification query failed for '{tag_name}': {verify_err}")
+                            
+                            if verification_count > 0:
+                                logging.info(f"✅ GUARANTEED FIX VERIFICATION: Set database lineage on {verification_count} additional tags")
+                            
+                            # CRITICAL: Log final state of tags for debugging
+                            sample_tags = all_tags[:3]
+                            for tag in sample_tags:
+                                tag_name = tag.get('Product Name*') or tag.get('ProductName') or 'Unknown'
+                                logging.info(f"📋 GUARANTEED FIX FINAL: '{tag_name}' -> currentLineage='{tag.get('currentLineage')}', canonical_lineage='{tag.get('canonical_lineage')}', Lineage='{tag.get('Lineage')}'")
                             
                             # CRITICAL: If some tags weren't updated, log which ones for debugging
                             if updated_count < len(all_tags):
@@ -14226,7 +14164,10 @@ def json_match():
                 product.setdefault('ProductName', unique_name)
                 product.setdefault('displayName', unique_name)
                 product.setdefault('Description', unique_name)
-                product.setdefault('Source', product.get('Source') or 'JSON Match')
+                # CRITICAL FIX: JSON tags should work exactly like Excel tags - use same Source format
+                # Remove Source field entirely so they're treated identically to Excel tags
+                product.pop('Source', None)
+                product.pop('JSON_Source', None)
             return products
         
         matched_products = _normalize_json_product_names(matched_products)
@@ -14250,12 +14191,12 @@ def json_match():
                 # Convert matched products to DataFrame format
                 import pandas as pd
 
-                # CRITICAL: Keep 'Source' field so frontend can skip deduplication for JSON Match
-                # DO NOT remove Source - frontend needs it to preserve all 49 individual labels
-                # for product in matched_products:
-                #     if isinstance(product, dict):
-                #         product.pop('Source', None)
-                #         product.pop('JSON_Source', None)
+                # CRITICAL FIX: JSON tags should work exactly like Excel tags
+                # Remove any Source field so they're processed identically
+                for product in matched_products:
+                    if isinstance(product, dict):
+                        product.pop('Source', None)
+                        product.pop('JSON_Source', None)
 
                 # Create DataFrame from matched products
                 json_df = pd.DataFrame(matched_products)
