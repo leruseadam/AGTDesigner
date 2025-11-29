@@ -688,15 +688,35 @@ class TagsTable {
           // Close modal
           bootstrap.Modal.getInstance(document.getElementById('lineageEditorModal')).hide();
           
-          // Re-render using existing data and current filters to preserve selections and filters
+          // CRITICAL FIX: Don't re-render after lineage change - it clears selected tags
+          // Just update the specific tag's lineage in state and UI directly
           if (typeof TagManager !== 'undefined') {
             try {
-              console.log('Re-rendering tags locally after lineage change (preserve filters and selections)');
-              if (TagManager.updateFilterOptions) await TagManager.updateFilterOptions();
-              if (TagManager.applyFilters) TagManager.applyFilters();
-              console.log('Local re-render complete');
-            } catch (refreshError) {
-              console.warn('Local re-render after lineage change failed:', refreshError);
+              // Update the tag's lineage in state directly
+              const tagIndex = TagManager.state.originalTags.findIndex(t => (t['Product Name*'] || t.ProductName) === tagName);
+              if (tagIndex >= 0) {
+                TagManager.state.originalTags[tagIndex].Lineage = newLineage;
+                TagManager.state.originalTags[tagIndex].lineage = newLineage.toLowerCase();
+                TagManager.state.originalTags[tagIndex].currentLineage = newLineage;
+                TagManager.state.originalTags[tagIndex].canonical_lineage = newLineage;
+              }
+              
+              const currentTagIndex = TagManager.state.tags.findIndex(t => (t['Product Name*'] || t.ProductName) === tagName);
+              if (currentTagIndex >= 0) {
+                TagManager.state.tags[currentTagIndex].Lineage = newLineage;
+                TagManager.state.tags[currentTagIndex].lineage = newLineage.toLowerCase();
+                TagManager.state.tags[currentTagIndex].currentLineage = newLineage;
+                TagManager.state.tags[currentTagIndex].canonical_lineage = newLineage;
+              }
+              
+              // Update UI directly without re-rendering
+              if (typeof TagManager.updateTagLineageInUI === 'function') {
+                TagManager.updateTagLineageInUI(tagName, newLineage);
+              }
+              
+              console.log('✅ Updated lineage in state and UI (selected tags preserved)');
+            } catch (updateError) {
+              console.warn('Failed to update lineage in state:', updateError);
             }
           }
           

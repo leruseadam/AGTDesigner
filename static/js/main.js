@@ -5713,93 +5713,14 @@ const TagManager = {
                 console.warn('Failed to update similar lineages locally:', e);
             }
             
-            // CRITICAL FIX: Debounce backend refresh to prevent race conditions when multiple updates happen
-            // Update originalTags and refresh the UI to show the new lineage
-            // CRITICAL: Capture verifiedLineage and newLineage in closure to ensure they're accessible in setTimeout callback
-            const capturedVerifiedLineage = verifiedLineage;
-            const capturedNewLineage = newLineage;
-            if (!this._pendingLineageRefresh) {
-                this._pendingLineageRefresh = setTimeout(async () => {
-                    try {
-                        // Only refresh if we haven't had another update in the last 500ms
-                        verboseLog('🔄 Debounced backend refresh after lineage update(s)...');
-                        const freshTagsResponse = await fetch('/api/available-tags?nocache=1&prefer_db=1&t=' + Date.now());
-                        if (freshTagsResponse.ok) {
-                            const freshData = await freshTagsResponse.json();
-                            verboseLog(`✅ Refreshed ${freshData.tags?.length || 0} tags from backend after lineage update(s)`);
-                            
-                            // CRITICAL FIX: Update tags in originalTags and current tags to reflect new lineage
-                            // This ensures the UI shows the updated lineage values
-                            if (freshData.tags && freshData.tags.length > 0) {
-                                // Update only the changed tags in originalTags, preserve the rest
-                                const updatedTagNames = new Set(this._recentlyUpdatedLineages || []);
-                                let updatedCount = 0;
-                                
-                                freshData.tags.forEach(freshTag => {
-                                    const updatedTagName = freshTag['Product Name*'];
-                                    if (updatedTagName && updatedTagNames.has(updatedTagName)) {
-                                        // CRITICAL FIX: Define dbLineage at function scope so it's available throughout
-                                        // Always define it, even if it's undefined/null
-                                        const dbLineage = freshTag.Lineage || freshTag.currentLineage || freshTag.canonical_lineage || freshTag.lineage || null;
-                                        
-                                        // Use capturedVerifiedLineage or capturedNewLineage as fallback if dbLineage is not available
-                                        const lineageToUse = dbLineage || capturedVerifiedLineage || capturedNewLineage;
-                                        
-                                        // Update in originalTags
-                                        const existingIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === updatedTagName);
-                                        if (existingIndex >= 0) {
-                                            // Update the existing tag with fresh lineage data
-                                            if (lineageToUse) {
-                                                this.state.originalTags[existingIndex].Lineage = lineageToUse;
-                                                this.state.originalTags[existingIndex].lineage = lineageToUse;
-                                                this.state.originalTags[existingIndex].currentLineage = lineageToUse;
-                                                this.state.originalTags[existingIndex].canonical_lineage = lineageToUse;
-                                                updatedCount++;
-                                            }
-                                        }
-                                        
-                                        // Also update in current tags if visible
-                                        const currentIndex = this.state.tags.findIndex(t => t['Product Name*'] === updatedTagName);
-                                        if (currentIndex >= 0) {
-                                            if (lineageToUse) {
-                                                this.state.tags[currentIndex].Lineage = lineageToUse;
-                                                this.state.tags[currentIndex].lineage = lineageToUse;
-                                                this.state.tags[currentIndex].currentLineage = lineageToUse;
-                                                this.state.tags[currentIndex].canonical_lineage = lineageToUse;
-                                            }
-                                        }
-                                        
-                                        // Update UI element for this tag - always use a defined value
-                                        if (lineageToUse) {
-                                            this.updateTagLineageInUI(updatedTagName, lineageToUse);
-                                        }
-                                    }
-                                });
-                                
-                                verboseLog(`✅ Updated ${updatedCount} tags in originalTags with fresh lineage data (preserved ${this.state.originalTags.length - updatedCount} unchanged tags)`);
-                                
-                                // CRITICAL FIX: Update UI elements directly instead of re-applying filters
-                                // This avoids timer errors and is more efficient than full filter re-apply
-                                // The UI elements are already updated by updateTagLineageInUI() above
-                                if (updatedCount > 0) {
-                                    verboseLog(`✅ Updated ${updatedCount} UI elements with fresh lineage data`);
-                                }
-                                
-                                // Clear the recently updated list
-                                this._recentlyUpdatedLineages = [];
-                            }
-                        }
-                    } catch (refreshError) {
-                        // CRITICAL FIX: Better error logging to help diagnose issues
-                        console.error('❌ Could not refresh backend cache:', refreshError);
-                        if (refreshError.stack) {
-                            console.error('Error stack:', refreshError.stack);
-                        }
-                    } finally {
-                        this._pendingLineageRefresh = null;
-                    }
-                }, 500); // Debounce for 500ms to batch multiple updates
-            }
+            // CRITICAL FIX: Skip debounced backend refresh to prevent clearing selected tags
+            // We already update the UI directly with updateTagLineageInUI, so no refresh needed
+            // The state is already updated above, and the UI is updated immediately
+            // A full refresh would risk clearing selected tags, so we skip it entirely
+            verboseLog('✅ Lineage updated in state and UI - skipping backend refresh to preserve selected tags');
+            
+            // OLD CODE REMOVED: The debounced refresh was causing selected tags to be cleared
+            // We now rely on direct state/UI updates which are faster and safer
             
             // Track which tags were recently updated
             if (!this._recentlyUpdatedLineages) {
@@ -6664,10 +6585,42 @@ const TagManager = {
         // Update selectedTags set to match persistentSelectedTags
         this.state.selectedTags = new Set(this.state.persistentSelectedTags);
         
-        // If no tags found, check if we should clear persistentSelectedTags
+        // CRITICAL FIX: If no tag objects found but we have persistentSelectedTags, create minimal tag objects
+        // This ensures selected tags are displayed even if they're not yet in the tag maps
         if (fullTags.length === 0 && this.state.persistentSelectedTags.length > 0) {
-            // Don't clear immediately - tags might be loading
-            verboseLog('No tag objects found for persistentSelectedTags, but keeping selections');
+            verboseLog(`No tag objects found for ${this.state.persistentSelectedTags.length} selected tags, creating minimal tag objects`);
+            // Create minimal tag objects for selected tags that aren't found
+            fullTags = this.state.persistentSelectedTags.map(tagName => {
+                // Try one more time to find the tag with case-insensitive search
+                let foundTag = null;
+                for (const tag of [...this.state.tags, ...this.state.originalTags]) {
+                    if (tag && tag['Product Name*'] && tag['Product Name*'].toLowerCase() === tagName.toLowerCase()) {
+                        foundTag = tag;
+                        break;
+                    }
+                }
+                
+                if (!foundTag) {
+                    // Create minimal tag object so it can be displayed
+                    verboseLog(`Creating minimal tag object for "${tagName}"`);
+                    return {
+                        'Product Name*': tagName,
+                        'Product Brand': 'Unknown',
+                        'Vendor': 'Unknown',
+                        'Product Type*': 'Unknown',
+                        'Lineage': 'MIXED',
+                        'Source': 'Frontend Selection'
+                    };
+                }
+                return foundTag;
+            }).filter(Boolean);
+            
+            if (fullTags.length === 0) {
+                verboseLog('Still no tags after creating minimal objects, keeping selections in state');
+                // Don't return - keep selections in state even if we can't display them yet
+                this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+                return;
+            }
         } else if (fullTags.length === 0) {
             // Only clear if we truly have no selections
             verboseLog('No tags to display in selected tags');
@@ -7954,13 +7907,14 @@ const TagManager = {
             // CRITICAL FIX: Don't clear selected tags here - they've already been preserved and updated above
             // The code above (lines 7845-7877) already handles updating selected tags with database lineage
             // Clearing and restoring here was causing selections to disappear after first selection
-            // Just validate that selected tags still exist in the new tag list
+            // CRITICAL FIX: Don't filter out selected tags - preserve them even if temporarily not in available tags
+            // This prevents tags from disappearing during loading, updates, or when tags are temporarily unavailable
+            // The validateSelectedTags function will handle cleanup of truly invalid tags later
             if (this.state.persistentSelectedTags.length > 0) {
-                // Build a fast lookup map of product name -> true
-                const tagNameSet = new Set(tags.map(t => t['Product Name*']));
-                // Filter out any selected tags that no longer exist in the available tags
-                this.state.persistentSelectedTags = this.state.persistentSelectedTags.filter(tagName => tagNameSet.has(tagName));
-                // Update selectedTags set to match filtered persistentSelectedTags
+                // Don't filter here - preserve all selections
+                // Tags might be temporarily unavailable during updates but will come back
+                verboseLog(`Preserving ${this.state.persistentSelectedTags.length} selected tags during tag update`);
+                // Just update selectedTags set to match persistentSelectedTags
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
             }
             
