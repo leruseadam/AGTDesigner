@@ -373,6 +373,28 @@ class TagsTable {
   }
 
   static async handleLineageChange(selectElement, tagName) {
+    // CRITICAL FIX: Preserve selected tags IMMEDIATELY before anything else
+    const savedSelectedTags = typeof TagManager !== 'undefined' && TagManager.state ? 
+      [...(TagManager.state.persistentSelectedTags || [])] : [];
+    
+    // CRITICAL FIX: Declare restore interval in outer scope so it's accessible everywhere
+    let restoreInterval = null;
+    const restoreSelectedTags = () => {
+      if (savedSelectedTags.length > 0 && typeof TagManager !== 'undefined' && TagManager.state) {
+        const current = TagManager.state.persistentSelectedTags || [];
+        if (current.length !== savedSelectedTags.length || !savedSelectedTags.every(t => current.includes(t))) {
+          console.log('🔄 Restoring selected tags (they were cleared):', savedSelectedTags);
+          TagManager.state.persistentSelectedTags = savedSelectedTags;
+          TagManager.state.selectedTags = new Set(savedSelectedTags);
+          // Restore checkboxes
+          savedSelectedTags.forEach(tagName => {
+            const checkbox = document.querySelector(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+            if (checkbox && !checkbox.checked) checkbox.checked = true;
+          });
+        }
+      }
+    };
+    
     // CRITICAL: Log immediately at function start - no try/catch to ensure this always runs
     console.log('═══════════════════════════════════════════════════════════');
     console.log('🔄 [LINEAGE UPDATE] FUNCTION CALLED');
@@ -380,6 +402,11 @@ class TagsTable {
     console.log('Tag Name:', tagName);
     console.log('Select Element:', selectElement);
     console.log('Select Value:', selectElement?.value);
+    console.log('📌 Preserved selected tags:', savedSelectedTags.length);
+    
+    // Restore immediately and start periodic restore
+    restoreSelectedTags();
+    restoreInterval = setInterval(restoreSelectedTags, 500); // Check every 500ms
     
     try {
       
@@ -473,6 +500,9 @@ class TagsTable {
     // We update the state directly and then update the dropdowns, avoiding any full re-renders
     const updateLineageUI = async () => {
       try {
+        // CRITICAL FIX: Restore selected tags before checking update status
+        restoreSelectedTags();
+        
         // CRITICAL FIX: Check if lineage update is still pending before updating
         // If update is still processing, wait a bit longer
         if (typeof TagManager !== 'undefined' && TagManager._lineageUpdateProcessing) {
@@ -585,8 +615,19 @@ class TagsTable {
         } catch (lineageCheckErr) {
           console.warn('Could not verify lineage from database:', lineageCheckErr);
         }
+        
+        // CRITICAL FIX: Final restore and clear interval
+        restoreSelectedTags();
+        if (restoreInterval) {
+          clearInterval(restoreInterval);
+        }
       } catch (e) {
         console.warn('Background lineage update failed:', e);
+        // CRITICAL FIX: Restore on error too
+        restoreSelectedTags();
+        if (restoreInterval) {
+          clearInterval(restoreInterval);
+        }
       }
     };
     
@@ -598,11 +639,23 @@ class TagsTable {
       selectElement.style.backgroundColor = '';
     }, 500);
     
+    // CRITICAL FIX: Final restore and clear interval
+    if (restoreInterval) {
+      clearInterval(restoreInterval);
+    }
+    restoreSelectedTags();
+    
     console.log(`✅ handleLineageChange completed for ${tagName}`);
   } catch (error) {
     // CRITICAL: Catch any errors in the handler itself
     console.error(`❌ CRITICAL ERROR in handleLineageChange for ${tagName}:`, error);
     console.error(`❌ Error stack:`, error.stack);
+    
+    // CRITICAL FIX: Clear interval and restore selected tags even on error
+    if (restoreInterval) {
+      clearInterval(restoreInterval);
+    }
+    restoreSelectedTags();
     
     // Show error feedback to user
     if (selectElement) {
