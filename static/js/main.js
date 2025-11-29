@@ -10662,6 +10662,18 @@ const TagManager = {
             }
         });
         
+        // CRITICAL FIX: Also sync selected tag checkboxes with persistentSelectedTags state
+        // This prevents selected tags from being unchecked when available tags are re-rendered
+        const selectedCheckboxes = document.querySelectorAll('#selectedTags .tag-checkbox');
+        selectedCheckboxes.forEach(checkbox => {
+            const tagName = checkbox.value;
+            const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
+            if (checkbox.checked !== shouldBeChecked) {
+                checkbox.checked = shouldBeChecked;
+                verboseLog(`Synced selected tag checkbox for "${tagName}": ${shouldBeChecked}`);
+            }
+        });
+        
         // FIXED: Don't filter out hidden elements since we're not hiding any elements anymore
         const checkedCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox:checked');
         
