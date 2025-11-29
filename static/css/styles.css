@@ -5675,7 +5675,7 @@ canvas#lava-lamp-canvas {
     text-align: center !important;
     text-align-last: center !important;
     padding: 12px 40px 12px 40px !important; /* Symmetric padding for centered text */
-   font-size: 1.1em !important;
+    font-size: 0.95em !important; /* Reduced from 1.1em for better PC UI */
     font-weight: 700 !important;
     color: #e0d6f6 !important;
     background: rgba(34, 34, 51, 0.85) !important;
@@ -5721,6 +5721,7 @@ canvas#lava-lamp-canvas {
   #templateSelectModal option {
     color: #e0d6f6 !important;
     background: rgba(34, 34, 51, 0.95) !important;
+    font-size: 0.95em !important; /* Match select font size */
     font-weight: 500;
     text-align: center;
   }
