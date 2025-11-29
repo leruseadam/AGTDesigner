@@ -382,15 +382,52 @@ class TagsTable {
     const restoreSelectedTags = () => {
       if (savedSelectedTags.length > 0 && typeof TagManager !== 'undefined' && TagManager.state) {
         const current = TagManager.state.persistentSelectedTags || [];
-        if (current.length !== savedSelectedTags.length || !savedSelectedTags.every(t => current.includes(t))) {
-          console.log('🔄 Restoring selected tags (they were cleared):', savedSelectedTags);
+        const currentSet = new Set(current);
+        const savedSet = new Set(savedSelectedTags);
+        
+        // Check if any tags are missing
+        const missing = savedSelectedTags.filter(t => !currentSet.has(t));
+        if (missing.length > 0 || current.length !== savedSelectedTags.length) {
+          console.log('🔄 RESTORING selected tags (they were cleared):', {
+            saved: savedSelectedTags.length,
+            current: current.length,
+            missing: missing
+          });
           TagManager.state.persistentSelectedTags = savedSelectedTags;
           TagManager.state.selectedTags = new Set(savedSelectedTags);
-          // Restore checkboxes
+          
+          // Restore checkboxes in both available and selected tags
           savedSelectedTags.forEach(tagName => {
-            const checkbox = document.querySelector(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
-            if (checkbox && !checkbox.checked) checkbox.checked = true;
+            const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+            checkboxes.forEach(checkbox => {
+              if (!checkbox.checked) {
+                checkbox.checked = true;
+                // Trigger change event to update state
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            });
           });
+          
+          // Also restore selected tags display if it was cleared
+          const selectedContainer = document.getElementById('selectedTags');
+          if (selectedContainer && selectedContainer.children.length === 0 && savedSelectedTags.length > 0) {
+            console.log('🔄 Selected tags container was cleared, triggering restore...');
+            // Force updateSelectedTags to restore the display
+            if (typeof TagManager !== 'undefined' && typeof TagManager.updateSelectedTags === 'function') {
+              const tagObjects = savedSelectedTags.map(name => {
+                return TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
+                       TagManager.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
+                       null;
+              }).filter(Boolean);
+              if (tagObjects.length > 0) {
+                // Temporarily disable the block to allow restore
+                const wasBlocked = TagManager._lineageUpdateProcessing;
+                TagManager._lineageUpdateProcessing = false;
+                TagManager.updateSelectedTags(tagObjects);
+                TagManager._lineageUpdateProcessing = wasBlocked;
+              }
+            }
+          }
         }
       }
     };
@@ -402,11 +439,11 @@ class TagsTable {
     console.log('Tag Name:', tagName);
     console.log('Select Element:', selectElement);
     console.log('Select Value:', selectElement?.value);
-    console.log('📌 Preserved selected tags:', savedSelectedTags.length);
+    console.log('📌 Preserved selected tags:', savedSelectedTags.length, savedSelectedTags);
     
-    // Restore immediately and start periodic restore
+    // Restore immediately and start frequent periodic restore
     restoreSelectedTags();
-    restoreInterval = setInterval(restoreSelectedTags, 500); // Check every 500ms
+    restoreInterval = setInterval(restoreSelectedTags, 200); // Check every 200ms - very aggressive
     
     try {
       

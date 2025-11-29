@@ -6262,6 +6262,19 @@ const TagManager = {
     },
 
     updateSelectedTags(tags) {
+        // CRITICAL FIX: NEVER clear selected tags during lineage updates
+        // Check if we're in the middle of a lineage update
+        const isLineageUpdateActive = this._lineageUpdateProcessing || 
+                                      (this._lineageUpdatePending && this._lineageUpdatePending.size > 0);
+        
+        if (isLineageUpdateActive) {
+            console.log('🚫 BLOCKED updateSelectedTags during lineage update to preserve selected tags');
+            // If called with empty array during lineage update, ignore it completely
+            if (!tags || tags.length === 0) {
+                return;
+            }
+        }
+        
         // CRITICAL FIX: Removed console.time/timeEnd to prevent "Timer does not exist" errors
         // These were only for debugging and causing issues when called from lineage updates
         
