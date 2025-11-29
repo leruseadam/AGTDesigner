@@ -469,161 +469,128 @@ class TagsTable {
       }
     }
 
-    // CRITICAL FIX: Force refresh available tags with fresh lineage from database
-    // This ensures UI shows updated lineage values immediately
-    // IMPORTANT: Wait for debounced update to complete (500ms debounce + processing time)
-    // This prevents refresh from pulling stale data before the update commits
-    const refreshDelay = 2000; // Wait 2 seconds to ensure update completes and database commits
-    const performRefresh = async () => {
+    // CRITICAL FIX: Update lineage in state and UI without any refresh that could clear selected tags
+    // We update the state directly and then update the dropdowns, avoiding any full re-renders
+    const updateLineageUI = async () => {
       try {
-        // CRITICAL FIX: Check if lineage update is still pending before refreshing
+        // CRITICAL FIX: Check if lineage update is still pending before updating
         // If update is still processing, wait a bit longer
         if (typeof TagManager !== 'undefined' && TagManager._lineageUpdateProcessing) {
-          console.log('Lineage update still processing, waiting longer before refresh...');
-          setTimeout(performRefresh, 1000); // Wait another second
+          console.log('Lineage update still processing, waiting longer before updating UI...');
+          setTimeout(updateLineageUI, 1000); // Wait another second
           return;
         }
         
         // Also check if this specific tag's update is pending
         if (typeof TagManager !== 'undefined' && TagManager._lineageUpdatePending && TagManager._lineageUpdatePending.has(tagName)) {
-          console.log(`Lineage update for "${tagName}" still pending, waiting longer before refresh...`);
-          setTimeout(performRefresh, 1000); // Wait another second
+          console.log(`Lineage update for "${tagName}" still pending, waiting longer before updating UI...`);
+          setTimeout(updateLineageUI, 1000); // Wait another second
           return;
         }
         
-        // Call /api/available-tags with prefer_db and nocache to force database lineage alignment
-        const refreshResponse = await fetch(`/api/available-tags?nocache=1&prefer_db=1&t=${Date.now()}`);
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
-          if (refreshData.tags && typeof TagManager !== 'undefined' && TagManager.state) {
-            let needsRerender = false;
-            
-            // Update all tags in originalTags with fresh lineage from database
-            refreshData.tags.forEach(updatedTag => {
-              const tagNameToUpdate = updatedTag['Product Name*'] || updatedTag.ProductName;
-              if (!tagNameToUpdate || !TagManager.state.originalTags) return;
+        // CRITICAL FIX: Just update the specific tag's lineage in state and UI
+        // Don't fetch all tags - that could trigger a refresh that clears selected tags
+        // Instead, query just this one tag's lineage from the database
+        try {
+          const lineageCheckResponse = await fetch('/api/debug-product-lineage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product_names: [tagName]
+            })
+          });
+          
+          if (lineageCheckResponse.ok) {
+            const lineageData = await lineageCheckResponse.json();
+            const productData = (lineageData.results || lineageData.products || [])[0];
+            if (productData) {
+              const dbLineage = productData.effective_lineage || 
+                               productData.database_values?.products_table?.Lineage ||
+                               productData.database_values?.strains_table?.sovereign_lineage ||
+                               productData.database_values?.strains_table?.canonical_lineage;
               
-              const tagIndex = TagManager.state.originalTags.findIndex(t => 
-                (t['Product Name*'] === tagNameToUpdate) || (t.ProductName === tagNameToUpdate)
-              );
-              
-              if (tagIndex >= 0) {
-                const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage;
-                if (dbLineage) {
-                  const currentLineage = TagManager.state.originalTags[tagIndex].Lineage || 
-                                         TagManager.state.originalTags[tagIndex].currentLineage ||
-                                         TagManager.state.originalTags[tagIndex].canonical_lineage;
-                  
-                  // Update all lineage-related fields
-                  TagManager.state.originalTags[tagIndex].Lineage = dbLineage;
-                  TagManager.state.originalTags[tagIndex].lineage = dbLineage;
-                  TagManager.state.originalTags[tagIndex].currentLineage = dbLineage;
-                  TagManager.state.originalTags[tagIndex].canonical_lineage = dbLineage;
-                  
-                  // Also update in current tags list if present
-                  const currentTagIndex = TagManager.state.tags?.findIndex(t => 
-                    (t['Product Name*'] === tagNameToUpdate) || (t.ProductName === tagNameToUpdate)
+              if (dbLineage) {
+                const dbLineageClean = String(dbLineage).trim().toUpperCase();
+                
+                // Update state directly without triggering any re-renders
+                if (TagManager && TagManager.state) {
+                  // Update in originalTags
+                  const originalTagIndex = TagManager.state.originalTags.findIndex(t => 
+                    (t['Product Name*'] || t.ProductName) === tagName
                   );
-                  if (currentTagIndex >= 0 && TagManager.state.tags) {
-                    TagManager.state.tags[currentTagIndex].Lineage = dbLineage;
-                    TagManager.state.tags[currentTagIndex].lineage = dbLineage;
-                    TagManager.state.tags[currentTagIndex].currentLineage = dbLineage;
-                    TagManager.state.tags[currentTagIndex].canonical_lineage = dbLineage;
+                  if (originalTagIndex >= 0) {
+                    TagManager.state.originalTags[originalTagIndex].Lineage = dbLineageClean;
+                    TagManager.state.originalTags[originalTagIndex].lineage = dbLineageClean.toLowerCase();
+                    TagManager.state.originalTags[originalTagIndex].currentLineage = dbLineageClean;
+                    TagManager.state.originalTags[originalTagIndex].canonical_lineage = dbLineageClean;
                   }
                   
-                  if (currentLineage !== dbLineage) {
-                    needsRerender = true;
-                    console.log(`✅ Updated lineage for "${tagNameToUpdate}": ${currentLineage} → ${dbLineage}`);
+                  // Update in current tags
+                  const currentTagIndex = TagManager.state.tags.findIndex(t => 
+                    (t['Product Name*'] || t.ProductName) === tagName
+                  );
+                  if (currentTagIndex >= 0) {
+                    TagManager.state.tags[currentTagIndex].Lineage = dbLineageClean;
+                    TagManager.state.tags[currentTagIndex].lineage = dbLineageClean.toLowerCase();
+                    TagManager.state.tags[currentTagIndex].currentLineage = dbLineageClean;
+                    TagManager.state.tags[currentTagIndex].canonical_lineage = dbLineageClean;
                   }
                 }
-              }
-            });
-            
-            // CRITICAL FIX: Update lineage dropdowns directly without re-rendering everything
-            // This prevents selected tags from being cleared during refresh
-            if (needsRerender) {
-              console.log('🔄 Updating lineage dropdowns directly (preserving selected tags)...');
-              
-              // Update lineage dropdowns in available tags without re-rendering
-              refreshData.tags.forEach(updatedTag => {
-                const tagNameToUpdate = updatedTag['Product Name*'] || updatedTag.ProductName;
-                if (!tagNameToUpdate) return;
                 
-                const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage;
-                if (!dbLineage) return;
-                
-                // Find and update the lineage dropdown for this tag in the available tags container
-                const availableTagsContainer = document.getElementById('availableTags');
-                if (availableTagsContainer) {
-                  // Find the tag element by data attribute or by matching the product name
-                  const tagElements = availableTagsContainer.querySelectorAll('[data-tag-name], .tag-entry');
+                // Update dropdowns directly in DOM without any re-rendering
+                const updateLineageDropdown = (containerId) => {
+                  const container = document.getElementById(containerId);
+                  if (!container) return;
+                  
+                  // Find all tag elements
+                  const tagElements = container.querySelectorAll('.tag-entry, [data-tag-name]');
                   tagElements.forEach(tagElement => {
                     const elementTagName = tagElement.getAttribute('data-tag-name') || 
-                                          tagElement.querySelector('.tag-name')?.textContent?.trim();
-                    if (elementTagName === tagNameToUpdate) {
-                      const lineageSelect = tagElement.querySelector('.lineage-select, .lineage-dropdown');
-                      if (lineageSelect && lineageSelect.value !== dbLineage) {
-                        lineageSelect.value = dbLineage;
-                        // Update tag color if needed
-                        if (typeof TagManager !== 'undefined' && typeof TagManager.forceTagColorUpdate === 'function') {
-                          const tag = TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagNameToUpdate) ||
-                                     TagManager.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagNameToUpdate);
-                          if (tag) {
-                            TagManager.forceTagColorUpdate(tag, dbLineage);
-                          }
-                        }
-                      }
-                    }
-                  });
-                }
-                
-                // Also update lineage dropdowns in selected tags
-                const selectedTagsContainer = document.getElementById('selectedTags');
-                if (selectedTagsContainer) {
-                  const selectedTagElements = selectedTagsContainer.querySelectorAll('[data-tag-name], .tag-entry');
-                  selectedTagElements.forEach(tagElement => {
-                    const elementTagName = tagElement.getAttribute('data-tag-name') || 
-                                         tagElement.querySelector('.tag-name')?.textContent?.trim();
-                    if (elementTagName === tagNameToUpdate) {
-                      const lineageSelect = tagElement.querySelector('.lineage-select, .lineage-dropdown');
-                      if (lineageSelect && lineageSelect.value !== dbLineage) {
-                        // Mark as programmatic update to prevent change handler from firing
+                                          tagElement.querySelector('.tag-name, [data-product-name]')?.textContent?.trim() ||
+                                          tagElement.textContent?.match(/^[^-\n]+/)?.[0]?.trim();
+                    
+                    if (elementTagName && (elementTagName === tagName || elementTagName.includes(tagName) || tagName.includes(elementTagName))) {
+                      const lineageSelect = tagElement.querySelector('.lineage-select, .lineage-dropdown, select.lineage-select');
+                      if (lineageSelect && lineageSelect.value !== dbLineageClean) {
+                        // Mark as programmatic update to prevent change handler
                         lineageSelect._isProgrammaticUpdate = true;
-                        lineageSelect.value = dbLineage;
-                        // Update tag color if needed
+                        lineageSelect.value = dbLineageClean;
+                        
+                        // Update tag color if function exists
                         if (typeof TagManager !== 'undefined' && typeof TagManager.forceTagColorUpdate === 'function') {
-                          const tag = TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagNameToUpdate) ||
-                                     TagManager.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagNameToUpdate);
+                          const tag = TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName) ||
+                                     TagManager.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
                           if (tag) {
-                            TagManager.forceTagColorUpdate(tag, dbLineage);
+                            TagManager.forceTagColorUpdate(tag, dbLineageClean);
                           }
                         }
-                        // Clear the flag after a brief delay
+                        
+                        // Clear flag after delay
                         setTimeout(() => {
                           lineageSelect._isProgrammaticUpdate = false;
                         }, 100);
                       }
                     }
                   });
-                }
-              });
-              
-              console.log('✅ Lineage dropdowns updated directly (selected tags preserved)');
+                };
+                
+                // Update both available and selected tags containers
+                updateLineageDropdown('availableTags');
+                updateLineageDropdown('selectedTags');
+                
+                console.log(`✅ Updated lineage for "${tagName}" to ${dbLineageClean} (selected tags preserved)`);
+              }
             }
           }
-          console.log('✅ Backend cache refreshed with fresh lineage data');
-        }
-        
-        // Also call refreshBackendCache if available
-        if (typeof TagManager !== 'undefined' && typeof TagManager.refreshBackendCache === 'function') {
-          await TagManager.refreshBackendCache();
+        } catch (lineageCheckErr) {
+          console.warn('Could not verify lineage from database:', lineageCheckErr);
         }
       } catch (e) {
-        console.warn('Background cache refresh failed:', e);
+        console.warn('Background lineage update failed:', e);
       }
     };
     
-    setTimeout(performRefresh, refreshDelay);
+    setTimeout(updateLineageUI, 2000);
 
     // Show brief visual feedback
     selectElement.style.backgroundColor = '#d4edda';
