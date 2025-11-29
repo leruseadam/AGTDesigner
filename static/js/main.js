@@ -10684,8 +10684,7 @@ const TagManager = {
             selectAllAvailable.indeterminate = checkedCheckboxes.length > 0 && checkedCheckboxes.length < availableCheckboxes.length;
         }
         
-        // Update selected tags select all checkbox
-        const selectedCheckboxes = document.querySelectorAll('#selectedTags .tag-checkbox');
+        // Update selected tags select all checkbox (reuse selectedCheckboxes from above)
         const selectedChecked = document.querySelectorAll('#selectedTags .tag-checkbox:checked');
         const selectAllSelected = document.getElementById('selectAllSelected');
         
