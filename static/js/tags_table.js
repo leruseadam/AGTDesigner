@@ -539,38 +539,76 @@ class TagsTable {
               }
             });
             
-            // CRITICAL: Re-render available tags to show updated lineage dropdowns
-            // CRITICAL FIX: Preserve selected tags state before re-rendering
-            const savedSelections = [...TagManager.state.persistentSelectedTags];
-            if (needsRerender && typeof TagManager._updateAvailableTags === 'function') {
-              console.log('🔄 Re-rendering available tags with updated lineage values...');
-              TagManager._updateAvailableTags(TagManager.state.originalTags, TagManager.state.tags);
-              // CRITICAL FIX: Restore selected tags state after re-rendering
-              // This prevents selections from being lost when available tags are rebuilt
-              if (savedSelections.length > 0) {
-                TagManager.state.persistentSelectedTags = savedSelections;
-                TagManager.state.selectedTags = new Set(savedSelections);
-                // Sync checkboxes with preserved state
-                if (typeof TagManager.updateSelectAllCheckboxes === 'function') {
-                  TagManager.updateSelectAllCheckboxes();
+            // CRITICAL FIX: Update lineage dropdowns directly without re-rendering everything
+            // This prevents selected tags from being cleared during refresh
+            if (needsRerender) {
+              console.log('🔄 Updating lineage dropdowns directly (preserving selected tags)...');
+              
+              // Update lineage dropdowns in available tags without re-rendering
+              refreshData.tags.forEach(updatedTag => {
+                const tagNameToUpdate = updatedTag['Product Name*'] || updatedTag.ProductName;
+                if (!tagNameToUpdate) return;
+                
+                const dbLineage = updatedTag.Lineage || updatedTag.currentLineage || updatedTag.canonical_lineage;
+                if (!dbLineage) return;
+                
+                // Find and update the lineage dropdown for this tag in the available tags container
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                  // Find the tag element by data attribute or by matching the product name
+                  const tagElements = availableTagsContainer.querySelectorAll('[data-tag-name], .tag-entry');
+                  tagElements.forEach(tagElement => {
+                    const elementTagName = tagElement.getAttribute('data-tag-name') || 
+                                          tagElement.querySelector('.tag-name')?.textContent?.trim();
+                    if (elementTagName === tagNameToUpdate) {
+                      const lineageSelect = tagElement.querySelector('.lineage-select, .lineage-dropdown');
+                      if (lineageSelect && lineageSelect.value !== dbLineage) {
+                        lineageSelect.value = dbLineage;
+                        // Update tag color if needed
+                        if (typeof TagManager !== 'undefined' && typeof TagManager.forceTagColorUpdate === 'function') {
+                          const tag = TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagNameToUpdate) ||
+                                     TagManager.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagNameToUpdate);
+                          if (tag) {
+                            TagManager.forceTagColorUpdate(tag, dbLineage);
+                          }
+                        }
+                      }
+                    }
+                  });
                 }
-                // Update selected tags display to ensure they're still visible
-                const selectedTagObjects = savedSelections.map(name => {
-                  return TagManager.state.tags.find(t => t['Product Name*'] === name) ||
-                         TagManager.state.originalTags.find(t => t['Product Name*'] === name) ||
-                         null;
-                }).filter(Boolean);
-                if (selectedTagObjects.length > 0 && typeof TagManager.updateSelectedTags === 'function') {
-                  TagManager.updateSelectedTags(selectedTagObjects);
+                
+                // Also update lineage dropdowns in selected tags
+                const selectedTagsContainer = document.getElementById('selectedTags');
+                if (selectedTagsContainer) {
+                  const selectedTagElements = selectedTagsContainer.querySelectorAll('[data-tag-name], .tag-entry');
+                  selectedTagElements.forEach(tagElement => {
+                    const elementTagName = tagElement.getAttribute('data-tag-name') || 
+                                         tagElement.querySelector('.tag-name')?.textContent?.trim();
+                    if (elementTagName === tagNameToUpdate) {
+                      const lineageSelect = tagElement.querySelector('.lineage-select, .lineage-dropdown');
+                      if (lineageSelect && lineageSelect.value !== dbLineage) {
+                        // Mark as programmatic update to prevent change handler from firing
+                        lineageSelect._isProgrammaticUpdate = true;
+                        lineageSelect.value = dbLineage;
+                        // Update tag color if needed
+                        if (typeof TagManager !== 'undefined' && typeof TagManager.forceTagColorUpdate === 'function') {
+                          const tag = TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagNameToUpdate) ||
+                                     TagManager.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagNameToUpdate);
+                          if (tag) {
+                            TagManager.forceTagColorUpdate(tag, dbLineage);
+                          }
+                        }
+                        // Clear the flag after a brief delay
+                        setTimeout(() => {
+                          lineageSelect._isProgrammaticUpdate = false;
+                        }, 100);
+                      }
+                    }
+                  });
                 }
-              }
-            } else if (needsRerender && typeof TagManager.efficientlyUpdateAvailableTagsDisplay === 'function') {
-              console.log('🔄 Updating available tags display with updated lineage values...');
-              TagManager.efficientlyUpdateAvailableTagsDisplay();
-              // CRITICAL FIX: Sync checkboxes after efficient update
-              if (savedSelections.length > 0 && typeof TagManager.updateSelectAllCheckboxes === 'function') {
-                TagManager.updateSelectAllCheckboxes();
-              }
+              });
+              
+              console.log('✅ Lineage dropdowns updated directly (selected tags preserved)');
             }
           }
           console.log('✅ Backend cache refreshed with fresh lineage data');
