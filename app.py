@@ -8524,6 +8524,7 @@ def get_available_tags():
                             
                             # OPTIMIZED: Update tags using batch query results - much faster than individual queries
                             updated_count = 0
+                            tags_needing_individual_query_guaranteed = []  # Track tags that need individual queries
                             for tag in all_tags:
                                 tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
                                 if not tag_name:
@@ -8553,12 +8554,53 @@ def get_available_tags():
                                     tag['lineage'] = db_lineage.lower()
                                     updated_count += 1
                                 else:
-                                    # Ensure lineage fields exist even if no DB match
-                                    current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or 'MIXED').strip().upper()
-                                    if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
-                                        if current_lineage:
-                                            tag['currentLineage'] = current_lineage
-                                            tag['canonical_lineage'] = current_lineage
+                                    # CRITICAL FIX: If not found in batch, add to individual query list
+                                    # This handles products with name mismatches (e.g., apostrophe differences)
+                                    tags_needing_individual_query_guaranteed.append((tag, tag_name))
+                            
+                            # CRITICAL FIX: Do individual database queries for tags not found in batch query
+                            # This ensures products with name mismatches still get their database lineage
+                            if tags_needing_individual_query_guaranteed and product_db:
+                                logging.info(f"🔄 GUARANTEED FIX: Performing {len(tags_needing_individual_query_guaranteed)} individual lineage queries for tags not found in batch...")
+                                individual_updated = 0
+                                for tag, tag_name in tags_needing_individual_query_guaranteed:
+                                    try:
+                                        # Use get_product_lineage which handles normalization and case-insensitive matching
+                                        db_lineage = product_db.get_product_lineage(tag_name)
+                                        if db_lineage:
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                            
+                                            # Update all lineage fields
+                                            tag['currentLineage'] = db_lineage_clean
+                                            tag['canonical_lineage'] = db_lineage_clean
+                                            tag['Lineage'] = db_lineage_clean
+                                            tag['lineage'] = db_lineage_clean.lower()
+                                            
+                                            updated_count += 1
+                                            individual_updated += 1
+                                            if old_lineage != db_lineage_clean:
+                                                logging.info(f"🔄 GUARANTEED FIX (individual): '{tag_name}' - '{old_lineage}' → '{db_lineage_clean}'")
+                                            else:
+                                                logging.debug(f"✅ GUARANTEED FIX (individual): '{tag_name}' confirmed as '{db_lineage_clean}'")
+                                        else:
+                                            # Even if no DB lineage found, ensure fields are consistent
+                                            current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or 'MIXED').strip().upper()
+                                            if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
+                                                if current_lineage:
+                                                    tag['currentLineage'] = current_lineage
+                                                    tag['canonical_lineage'] = current_lineage
+                                    except Exception as individual_err:
+                                        logging.debug(f"GUARANTEED FIX individual query failed for '{tag_name}': {individual_err}")
+                                        # Even if query fails, ensure fields are consistent
+                                        current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or 'MIXED').strip().upper()
+                                        if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
+                                            if current_lineage:
+                                                tag['currentLineage'] = current_lineage
+                                                tag['canonical_lineage'] = current_lineage
+                                
+                                if individual_updated > 0:
+                                    logging.info(f"✅ GUARANTEED FIX: Updated {individual_updated} tags via individual queries")
                             
                             if updated_count > 0:
                                 logging.debug(f"✅ Updated {updated_count}/{len(all_tags)} tags with database lineage")
