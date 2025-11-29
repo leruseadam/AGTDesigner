@@ -8259,6 +8259,7 @@ def get_available_tags():
                         # Now apply lineage data to tags (fast - just dictionary lookups)
                         # CRITICAL FIX: Process ALL tags, not just those in the first batch
                         # If batch was limited, do individual lookups for remaining tags
+                        tags_needing_individual_query = []  # Track tags that need individual DB queries
                         for tag in cached_tags:
                             try:
                                 name = tag.get('Product Name*') or tag.get('ProductName') or ''
@@ -8267,33 +8268,100 @@ def get_available_tags():
                                 
                                 db_lin, db_strain = lineage_cache.get(name, (None, None))
                                 
-                                # PERFORMANCE: Skip individual lookups if batch query already processed
-                                # Individual queries are too slow - batch query should cover most cases
+                                # CRITICAL FIX: If not found in batch cache, add to list for individual query
+                                # This handles cases where product name doesn't match exactly (e.g., apostrophe differences)
+                                if not db_lin:
+                                    tags_needing_individual_query.append((tag, name))
+                                    continue
                                 
-                                if db_lin:
-                                    db_lin_clean = str(db_lin).strip().upper()
-                                    # CRITICAL: Always update ALL lineage fields, even if they match
-                                    # This ensures frontend gets fresh values even if cached had old lineage
-                                    old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                    
-                                    # CRITICAL FIX: Always update from database, even if values appear to match
-                                    # Database is the source of truth - always use database values
-                                    tag['currentLineage'] = db_lin_clean
-                                    tag['canonical_lineage'] = db_lin_clean
-                                    tag['Lineage'] = db_lin_clean
-                                    tag['lineage'] = db_lin_clean.lower()
-                                    
-                                    # Always count as updated to ensure frontend gets fresh data
-                                    updated += 1
-                                    if old_lineage != db_lin_clean:
-                                        logging.debug(f"🔄 Lineage updated (cache): '{name}' - '{old_lineage}' → '{db_lin_clean}'")
-                                else:
-                                    # Even if no DB lineage found, ensure fields are consistent
-                                    existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                    if existing_lineage:
-                                        tag['currentLineage'] = existing_lineage
-                                        tag['canonical_lineage'] = existing_lineage
-                                        tag['lineage'] = existing_lineage
+                                db_lin_clean = str(db_lin).strip().upper()
+                                # CRITICAL: Always update ALL lineage fields, even if they match
+                                # This ensures frontend gets fresh values even if cached had old lineage
+                                old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                
+                                # CRITICAL FIX: Always update from database, even if values appear to match
+                                # Database is the source of truth - always use database values
+                                tag['currentLineage'] = db_lin_clean
+                                tag['canonical_lineage'] = db_lin_clean
+                                tag['Lineage'] = db_lin_clean
+                                tag['lineage'] = db_lin_clean.lower()
+                                
+                                # Always count as updated to ensure frontend gets fresh data
+                                updated += 1
+                                if old_lineage != db_lin_clean:
+                                    logging.debug(f"🔄 Lineage updated (cache): '{name}' - '{old_lineage}' → '{db_lin_clean}'")
+                            except Exception as _loop_err:
+                                logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
+                        
+                        # CRITICAL FIX: Do individual database queries for tags not found in batch cache
+                        # This ensures products with name mismatches (e.g., apostrophe differences) still get updated lineage
+                        if tags_needing_individual_query and product_db:
+                            logging.info(f"🔄 Performing {len(tags_needing_individual_query)} individual lineage queries for tags not found in batch cache...")
+                            try:
+                                for tag, name in tags_needing_individual_query:
+                                    try:
+                                        # Use get_product_lineage which handles normalization and case-insensitive matching
+                                        db_lineage = product_db.get_product_lineage(name)
+                                        if db_lineage:
+                                            db_lin_clean = str(db_lineage).strip().upper()
+                                            old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                            
+                                            # Update all lineage fields
+                                            tag['currentLineage'] = db_lin_clean
+                                            tag['canonical_lineage'] = db_lin_clean
+                                            tag['Lineage'] = db_lin_clean
+                                            tag['lineage'] = db_lin_clean.lower()
+                                            
+                                            updated += 1
+                                            if old_lineage != db_lin_clean:
+                                                logging.info(f"🔄 Lineage updated (individual query): '{name}' - '{old_lineage}' → '{db_lin_clean}'")
+                                            else:
+                                                logging.debug(f"✅ Lineage confirmed (individual query): '{name}' = '{db_lin_clean}'")
+                                        else:
+                                            # Even if no DB lineage found, ensure fields are consistent
+                                            existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                            if existing_lineage:
+                                                tag['currentLineage'] = existing_lineage
+                                                tag['canonical_lineage'] = existing_lineage
+                                                tag['lineage'] = existing_lineage
+                                    except Exception as individual_err:
+                                        logging.debug(f"Individual lineage query failed for '{name}': {individual_err}")
+                                        # Even if query fails, ensure fields are consistent
+                                        existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                        if existing_lineage:
+                                            tag['currentLineage'] = existing_lineage
+                                            tag['canonical_lineage'] = existing_lineage
+                                            tag['lineage'] = existing_lineage
+                            except Exception as batch_individual_err:
+                                logging.warning(f"Individual lineage queries failed: {batch_individual_err}")
+                        
+                        # Apply strain updates for tags that were found in batch cache
+                        for tag in cached_tags:
+                            try:
+                                name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                if not name:
+                                    continue
+                                
+                                db_lin, db_strain = lineage_cache.get(name, (None, None))
+                                if not db_lin:
+                                    # Skip strain update if lineage wasn't in batch cache (already handled above)
+                                    continue
+                                
+                                # Handle strain (only if we have db_lin)
+                                clean_strain = str(db_strain).strip() if db_strain else ''
+                                db_lin_clean = str(db_lin).strip().upper()
+                                if db_lin and db_lin_clean:
+                                    if db_lin_clean in ('CBD', 'CBD_BLEND'):
+                                        clean_strain = 'CBD Blend'
+                                if not clean_strain:
+                                    existing_strain = str(tag.get('Product Strain') or tag.get('ProductStrain') or '').strip()
+                                    clean_strain = existing_strain
+                                if clean_strain:
+                                    tag['Product Strain'] = clean_strain
+                                    tag['ProductStrain'] = clean_strain
+                                    tag['productStrain'] = clean_strain
+                            except Exception as _strain_err:
+                                logging.debug(f"Strain update error for a tag: {_strain_err}")
                                 # Handle strain (only if we have db_lin)
                                 clean_strain = str(db_strain).strip() if db_strain else ''
                                 if db_lin and db_lin_clean:
