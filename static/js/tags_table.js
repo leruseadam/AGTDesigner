@@ -373,66 +373,16 @@ class TagsTable {
   }
 
   static async handleLineageChange(selectElement, tagName) {
+    // CRITICAL FIX: Set flag to prevent ANY clearing of selected tags
+    if (typeof TagManager !== 'undefined') {
+      TagManager._lineageUpdateInProgress = true;
+    }
+    
     // CRITICAL FIX: Preserve selected tags IMMEDIATELY before anything else
     const savedSelectedTags = typeof TagManager !== 'undefined' && TagManager.state ? 
       [...(TagManager.state.persistentSelectedTags || [])] : [];
     
-    // CRITICAL FIX: Declare restore interval in outer scope so it's accessible everywhere
-    let restoreInterval = null;
-    const restoreSelectedTags = () => {
-      if (savedSelectedTags.length > 0 && typeof TagManager !== 'undefined' && TagManager.state) {
-        const current = TagManager.state.persistentSelectedTags || [];
-        const currentSet = new Set(current);
-        const savedSet = new Set(savedSelectedTags);
-        
-        // Check if any tags are missing
-        const missing = savedSelectedTags.filter(t => !currentSet.has(t));
-        if (missing.length > 0 || current.length !== savedSelectedTags.length) {
-          console.log('🔄 RESTORING selected tags (they were cleared):', {
-            saved: savedSelectedTags.length,
-            current: current.length,
-            missing: missing
-          });
-          TagManager.state.persistentSelectedTags = savedSelectedTags;
-          TagManager.state.selectedTags = new Set(savedSelectedTags);
-          
-          // Restore checkboxes in both available and selected tags
-          savedSelectedTags.forEach(tagName => {
-            const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
-            checkboxes.forEach(checkbox => {
-              if (!checkbox.checked) {
-                checkbox.checked = true;
-                // Trigger change event to update state
-                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-            });
-          });
-          
-          // Also restore selected tags display if it was cleared
-          const selectedContainer = document.getElementById('selectedTags');
-          if (selectedContainer && selectedContainer.children.length === 0 && savedSelectedTags.length > 0) {
-            console.log('🔄 Selected tags container was cleared, triggering restore...');
-            // Force updateSelectedTags to restore the display
-            if (typeof TagManager !== 'undefined' && typeof TagManager.updateSelectedTags === 'function') {
-              const tagObjects = savedSelectedTags.map(name => {
-                return TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
-                       TagManager.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
-                       null;
-              }).filter(Boolean);
-              if (tagObjects.length > 0) {
-                // Temporarily disable the block to allow restore
-                const wasBlocked = TagManager._lineageUpdateProcessing;
-                TagManager._lineageUpdateProcessing = false;
-                TagManager.updateSelectedTags(tagObjects);
-                TagManager._lineageUpdateProcessing = wasBlocked;
-              }
-            }
-          }
-        }
-      }
-    };
-    
-    // CRITICAL: Log immediately at function start - no try/catch to ensure this always runs
+    // CRITICAL: Log immediately at function start
     console.log('═══════════════════════════════════════════════════════════');
     console.log('🔄 [LINEAGE UPDATE] FUNCTION CALLED');
     console.log('═══════════════════════════════════════════════════════════');
@@ -441,9 +391,55 @@ class TagsTable {
     console.log('Select Value:', selectElement?.value);
     console.log('📌 Preserved selected tags:', savedSelectedTags.length, savedSelectedTags);
     
-    // Restore immediately and start frequent periodic restore
-    restoreSelectedTags();
-    restoreInterval = setInterval(restoreSelectedTags, 200); // Check every 200ms - very aggressive
+    // CRITICAL FIX: Restore function that runs VERY aggressively
+    let restoreInterval = null;
+    const restoreSelectedTags = () => {
+      if (savedSelectedTags.length > 0 && typeof TagManager !== 'undefined' && TagManager.state) {
+        const current = TagManager.state.persistentSelectedTags || [];
+        const currentSet = new Set(current);
+        const savedSet = new Set(savedSelectedTags);
+        
+        // Check if tags are missing
+        const missing = savedSelectedTags.filter(t => !currentSet.has(t));
+        if (missing.length > 0 || current.length !== savedSelectedTags.length) {
+          console.log('🔄 RESTORING selected tags (missing:', missing.length, '):', savedSelectedTags);
+          
+          // Restore state
+          TagManager.state.persistentSelectedTags = [...savedSelectedTags];
+          TagManager.state.selectedTags = new Set(savedSelectedTags);
+          
+          // Restore checkboxes
+          savedSelectedTags.forEach(tagName => {
+            const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+            checkboxes.forEach(cb => {
+              if (!cb.checked) cb.checked = true;
+            });
+          });
+          
+          // Restore display if container is empty
+          const selectedContainer = document.getElementById('selectedTags');
+          if (selectedContainer && selectedContainer.children.length === 0 && savedSelectedTags.length > 0) {
+            // Find tag objects and restore display
+            const tagObjects = savedSelectedTags.map(name => {
+              return TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
+                     TagManager.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
+                     null;
+            }).filter(Boolean);
+            
+            if (tagObjects.length > 0 && typeof TagManager.updateSelectedTags === 'function') {
+              // Temporarily allow update to restore display
+              const wasBlocked = TagManager._lineageUpdateInProgress;
+              TagManager._lineageUpdateInProgress = false;
+              TagManager.updateSelectedTags(tagObjects);
+              TagManager._lineageUpdateInProgress = wasBlocked;
+            }
+          }
+        }
+      }
+    };
+    
+    // Start VERY aggressive restore - every 50ms
+    restoreInterval = setInterval(restoreSelectedTags, 50);
     
     try {
       
@@ -682,6 +678,14 @@ class TagsTable {
     }
     restoreSelectedTags();
     
+    // CRITICAL FIX: Clear the flag after a delay to allow any pending operations to complete
+    setTimeout(() => {
+      if (typeof TagManager !== 'undefined') {
+        TagManager._lineageUpdateInProgress = false;
+        console.log('✅ Cleared lineage update flag');
+      }
+    }, 3000); // Wait 3 seconds after update completes
+    
     console.log(`✅ handleLineageChange completed for ${tagName}`);
   } catch (error) {
     // CRITICAL: Catch any errors in the handler itself
@@ -693,6 +697,13 @@ class TagsTable {
       clearInterval(restoreInterval);
     }
     restoreSelectedTags();
+    
+    // CRITICAL FIX: Clear the flag on error too
+    setTimeout(() => {
+      if (typeof TagManager !== 'undefined') {
+        TagManager._lineageUpdateInProgress = false;
+      }
+    }, 1000);
     
     // Show error feedback to user
     if (selectElement) {

@@ -5476,6 +5476,7 @@ const TagManager = {
     _lineageUpdateTimeout: null,  // Single global timeout for all updates
     _lineageUpdateProcessing: false,  // Flag to prevent concurrent processing
     _lineageUpdatePending: new Set(),  // Track which tags have pending updates
+    _lineageUpdateInProgress: false,  // Flag to prevent clearing selected tags during lineage updates
     
     updateLineageOnBackendDebounced(tagName, newLineage) {
         // Store the latest lineage value for this tag (overwrites previous if same tag)
@@ -6264,14 +6265,30 @@ const TagManager = {
     updateSelectedTags(tags) {
         // CRITICAL FIX: NEVER clear selected tags during lineage updates
         // Check if we're in the middle of a lineage update
-        const isLineageUpdateActive = this._lineageUpdateProcessing || 
+        const isLineageUpdateActive = this._lineageUpdateInProgress || 
+                                      this._lineageUpdateProcessing || 
                                       (this._lineageUpdatePending && this._lineageUpdatePending.size > 0);
         
         if (isLineageUpdateActive) {
-            console.log('🚫 BLOCKED updateSelectedTags during lineage update to preserve selected tags');
             // If called with empty array during lineage update, ignore it completely
             if (!tags || tags.length === 0) {
+                console.log('🚫 BLOCKED updateSelectedTags([]) during lineage update - preserving selected tags');
                 return;
+            }
+            // If called with tags but we have existing selections, merge instead of replace
+            if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+                const existingSet = new Set(this.state.persistentSelectedTags);
+                const newTagNames = tags.map(t => t['Product Name*'] || t.ProductName).filter(Boolean);
+                const merged = [...new Set([...this.state.persistentSelectedTags, ...newTagNames])];
+                if (merged.length > this.state.persistentSelectedTags.length) {
+                    console.log('🔄 Merging tags during lineage update instead of replacing');
+                    tags = merged.map(name => {
+                        return tags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
+                               this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
+                               this.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
+                               null;
+                    }).filter(Boolean);
+                }
             }
         }
         
