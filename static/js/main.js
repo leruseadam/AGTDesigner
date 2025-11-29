@@ -2234,40 +2234,13 @@ const TagManager = {
         const vendorGroups = new Map();
         let skippedTags = 0;
         
-        // CRITICAL FIX: For JSON matched tags, skip deduplication entirely
-        // The backend already handles deduplication correctly, so we preserve all products
-        const seenProductKeys = new Set();
-        const uniqueTags = tags.filter(tag => {
-            // Check if this is a JSON matched product
-            const isJsonMatched = tag.Source && tag.Source.includes('JSON Match');
-            
-            if (isJsonMatched) {
-                // For JSON matched products, skip deduplication entirely
-                // The backend already ensures we have unique original JSON items
-                verboseLog(`✅ JSON MATCH: Preserving hierarchical organization for: ${tag['Product Name*'] || tag.ProductName || 'Unknown'}`);
-                verboseLog(`   Vendor: ${tag.vendor || tag['Vendor'] || tag['Vendor/Supplier*'] || 'Not Set'}`);
-                verboseLog(`   Brand: ${tag.productBrand || tag['Product Brand'] || tag.ProductBrand || 'Not Set'}`);
-                verboseLog(`   Type: ${tag.productType || tag['Product Type*'] || 'Not Set'}`);
-                verboseLog(`   Weight: ${tag.weightWithUnits || tag.weight || 'Not Set'}`);
-                return true;
-            } else {
-                // For regular products, use the existing deduplication logic
-                const productName = tag['Product Name*'] || tag.ProductName || tag.Description || '';
-                const vendor = tag.vendor || tag['Vendor'] || tag['Vendor/Supplier*'] || '';
-                const brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || '';
-                const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
-                
-                // Create a unique key that includes vendor/brand/weight to allow same product names with different weights
-                const productKey = `${productName}|${vendor}|${brand}|${weight}`;
-                
-                if (seenProductKeys.has(productKey)) {
-                    console.debug(`Skipping exact duplicate product in organizeBrandCategories: ${productKey}`);
-                    return false;
-                }
-                seenProductKeys.add(productKey);
-                return true;
-            }
-        });
+        // CRITICAL FIX: Never drop products here – the backend is the source of truth
+        // Previously, we attempted to deduplicate "duplicate" products based on
+        // productName|vendor|brand|weight. That caused legitimate products (for example,
+        // different DOH statuses or other attributes sharing those fields) to disappear
+        // from the UI. To guarantee that **all** products are visible in the selector,
+        // we now trust the backend and work with the full tag list.
+        const uniqueTags = tags;
         
         // Debug: Log the first few tags to see their structure
         if (uniqueTags.length > 0) {
