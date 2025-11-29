@@ -4079,24 +4079,28 @@ class ExcelProcessor:
             # CRITICAL FIX: JSON tags work exactly like Excel tags - no special matching needed
             # All tags are processed through the same pipeline
             if not canonical_selected and self.df is not None and not self.df.empty:
-                            direct_matches.append(tag)
-                            logger.info(f"CRITICAL FIX: Direct match found for '{tag}'")
-                        else:
-                            # Try case-insensitive match
-                            case_insensitive_match = json_matched_products[
-                                json_matched_products[product_name_col].str.lower() == tag.lower()
-                            ]
-                            if not case_insensitive_match.empty:
-                                direct_matches.append(tag)
-                                logger.info(f"CRITICAL FIX: Case-insensitive match found for '{tag}'")
-                            else:
-                                logger.warning(f"CRITICAL FIX: No direct match found for '{tag}'")
-                    
-                    if direct_matches:
-                        canonical_selected = direct_matches
-                        logger.info(f"CRITICAL FIX: Found {len(canonical_selected)} direct matches: {canonical_selected}")
+                direct_matches = []
+                for tag in selected_tag_names:
+                    # Try direct match first
+                    if tag in list(self.df[product_name_col]):
+                        direct_matches.append(tag)
+                        logger.info(f"CRITICAL FIX: Direct match found for '{tag}'")
                     else:
-                        logger.warning(f"CRITICAL FIX: No direct matches found for any of the {len(selected_tag_names)} selected tags")
+                        # Try case-insensitive match
+                        available_names = list(self.df[product_name_col])
+                        for name in available_names:
+                            if name.lower() == tag.lower():
+                                direct_matches.append(name)
+                                logger.info(f"CRITICAL FIX: Case-insensitive match found for '{tag}' -> '{name}'")
+                                break
+                        else:
+                            logger.warning(f"CRITICAL FIX: No direct match found for '{tag}'")
+                
+                if direct_matches:
+                    canonical_selected = direct_matches
+                    logger.info(f"CRITICAL FIX: Found {len(canonical_selected)} direct matches: {canonical_selected}")
+                else:
+                    logger.warning(f"CRITICAL FIX: No direct matches found for any of the {len(selected_tag_names)} selected tags")
             
             # CRITICAL FIX: If still no matches, try to get products from database directly
             if not canonical_selected:
