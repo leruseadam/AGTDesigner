@@ -2321,7 +2321,8 @@ const TagManager = {
                 }
             }
 
-            // Normalize the tag data
+            // Normalize the tag data (priceGroup is left on the object for analytics,
+            // but we no longer group or categorize by price in the UI)
             const normalizedTag = {
                 ...tag,
                 vendor: this.capitalizeVendorName((vendor || '').toString().trim()),
@@ -2379,37 +2380,23 @@ const TagManager = {
                 }
                 targetGroups = subcategoryGroups.get(normalizedTag.subcategory);
             } else {
-                // For non-subcategory products, check if we need to handle mixed structure
+                // For non-subcategory products, always treat the product type as a flat
+                // weight → products mapping (no price grouping)
                 let weightGroups = productTypeGroups.get(normalizedTag.productType);
-                if (weightGroups instanceof Map && weightGroups.size > 0) {
-                    // Check if first entry is a Map (subcategory structure) or Array (weight structure)
-                    const firstValue = Array.from(weightGroups.values())[0];
-                    if (firstValue instanceof Map) {
-                        // This product type already has subcategory structure, add to 'Other'
-                        if (!weightGroups.has('Other')) {
-                            weightGroups.set('Other', new Map());
-                        }
-                        targetGroups = weightGroups.get('Other');
-                    } else {
-                        // This is still weight structure
-                        targetGroups = weightGroups;
-                    }
-                } else {
-                    targetGroups = weightGroups;
+                if (!(weightGroups instanceof Map)) {
+                    weightGroups = new Map();
+                    productTypeGroups.set(normalizedTag.productType, weightGroups);
                 }
+                targetGroups = weightGroups;
             }
 
-            // Create weight group if it doesn't exist - use weightWithUnits as the key
+            // Create weight group if it doesn't exist - use weightWithUnits as the key,
+            // and store a simple array of products (no price-based structure)
             if (!targetGroups.has(normalizedTag.weightWithUnits)) {
-                targetGroups.set(normalizedTag.weightWithUnits, new Map());
+                targetGroups.set(normalizedTag.weightWithUnits, []);
             }
-            const priceGroups = targetGroups.get(normalizedTag.weightWithUnits);
-            
-            // Create price group if it doesn't exist
-            if (!priceGroups.has(normalizedTag.priceGroup)) {
-                priceGroups.set(normalizedTag.priceGroup, []);
-            }
-            priceGroups.get(normalizedTag.priceGroup).push(normalizedTag);
+            const productsAtWeight = targetGroups.get(normalizedTag.weightWithUnits);
+            productsAtWeight.push(normalizedTag);
         });
 
         if (skippedTags > 0) {
