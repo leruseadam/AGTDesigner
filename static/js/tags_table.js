@@ -471,8 +471,26 @@ class TagsTable {
 
     // CRITICAL FIX: Force refresh available tags with fresh lineage from database
     // This ensures UI shows updated lineage values immediately
-    setTimeout(async () => {
+    // IMPORTANT: Wait for debounced update to complete (500ms debounce + processing time)
+    // This prevents refresh from pulling stale data before the update commits
+    const refreshDelay = 2000; // Wait 2 seconds to ensure update completes and database commits
+    const performRefresh = async () => {
       try {
+        // CRITICAL FIX: Check if lineage update is still pending before refreshing
+        // If update is still processing, wait a bit longer
+        if (typeof TagManager !== 'undefined' && TagManager._lineageUpdateProcessing) {
+          console.log('Lineage update still processing, waiting longer before refresh...');
+          setTimeout(performRefresh, 1000); // Wait another second
+          return;
+        }
+        
+        // Also check if this specific tag's update is pending
+        if (typeof TagManager !== 'undefined' && TagManager._lineageUpdatePending && TagManager._lineageUpdatePending.has(tagName)) {
+          console.log(`Lineage update for "${tagName}" still pending, waiting longer before refresh...`);
+          setTimeout(performRefresh, 1000); // Wait another second
+          return;
+        }
+        
         // Call /api/available-tags with prefer_db and nocache to force database lineage alignment
         const refreshResponse = await fetch(`/api/available-tags?nocache=1&prefer_db=1&t=${Date.now()}`);
         if (refreshResponse.ok) {
@@ -522,12 +540,37 @@ class TagsTable {
             });
             
             // CRITICAL: Re-render available tags to show updated lineage dropdowns
+            // CRITICAL FIX: Preserve selected tags state before re-rendering
+            const savedSelections = [...TagManager.state.persistentSelectedTags];
             if (needsRerender && typeof TagManager._updateAvailableTags === 'function') {
               console.log('🔄 Re-rendering available tags with updated lineage values...');
               TagManager._updateAvailableTags(TagManager.state.originalTags, TagManager.state.tags);
+              // CRITICAL FIX: Restore selected tags state after re-rendering
+              // This prevents selections from being lost when available tags are rebuilt
+              if (savedSelections.length > 0) {
+                TagManager.state.persistentSelectedTags = savedSelections;
+                TagManager.state.selectedTags = new Set(savedSelections);
+                // Sync checkboxes with preserved state
+                if (typeof TagManager.updateSelectAllCheckboxes === 'function') {
+                  TagManager.updateSelectAllCheckboxes();
+                }
+                // Update selected tags display to ensure they're still visible
+                const selectedTagObjects = savedSelections.map(name => {
+                  return TagManager.state.tags.find(t => t['Product Name*'] === name) ||
+                         TagManager.state.originalTags.find(t => t['Product Name*'] === name) ||
+                         null;
+                }).filter(Boolean);
+                if (selectedTagObjects.length > 0 && typeof TagManager.updateSelectedTags === 'function') {
+                  TagManager.updateSelectedTags(selectedTagObjects);
+                }
+              }
             } else if (needsRerender && typeof TagManager.efficientlyUpdateAvailableTagsDisplay === 'function') {
               console.log('🔄 Updating available tags display with updated lineage values...');
               TagManager.efficientlyUpdateAvailableTagsDisplay();
+              // CRITICAL FIX: Sync checkboxes after efficient update
+              if (savedSelections.length > 0 && typeof TagManager.updateSelectAllCheckboxes === 'function') {
+                TagManager.updateSelectAllCheckboxes();
+              }
             }
           }
           console.log('✅ Backend cache refreshed with fresh lineage data');
@@ -540,7 +583,9 @@ class TagsTable {
       } catch (e) {
         console.warn('Background cache refresh failed:', e);
       }
-    }, 100);
+    };
+    
+    setTimeout(performRefresh, refreshDelay);
 
     // Show brief visual feedback
     selectElement.style.backgroundColor = '#d4edda';

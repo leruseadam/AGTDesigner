@@ -8295,8 +8295,27 @@ def get_available_tags():
                         
                         # CRITICAL FIX: Do individual database queries for tags not found in batch cache
                         # This ensures products with name mismatches (e.g., apostrophe differences) still get updated lineage
+                        # ALSO: If there was a recent lineage update, verify ALL tags with individual queries to catch stale batch cache data
+                        lineage_update_ts = session.get('lineage_update_timestamp')
+                        recent_lineage_update = False
+                        if lineage_update_ts:
+                            try:
+                                recent_lineage_update = (time.time() - float(lineage_update_ts)) < 600  # 10 minutes
+                            except Exception:
+                                recent_lineage_update = False
+                        
+                        # CRITICAL FIX: If recent lineage update, verify ALL tags with individual queries
+                        # This ensures we catch any stale batch cache data
+                        if recent_lineage_update:
+                            logging.info(f"🔄 Recent lineage update detected - verifying ALL {len(cached_tags)} tags with individual queries to catch stale batch cache data...")
+                            # Add all tags to individual query list to verify their lineage
+                            for tag in cached_tags:
+                                name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                if name and (tag, name) not in tags_needing_individual_query:
+                                    tags_needing_individual_query.append((tag, name))
+                        
                         if tags_needing_individual_query and product_db:
-                            logging.info(f"🔄 Performing {len(tags_needing_individual_query)} individual lineage queries for tags not found in batch cache...")
+                            logging.info(f"🔄 Performing {len(tags_needing_individual_query)} individual lineage queries for tags not found in batch cache or verification after recent update...")
                             try:
                                 for tag, name in tags_needing_individual_query:
                                     try:
