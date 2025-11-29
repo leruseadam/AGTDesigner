@@ -113,11 +113,17 @@ class DragAndDropManager {
         // Add drag handles
         this.addDragHandles(container);
         
-        console.log(`Setup drag zone for ${selector}`);
+        // Only log in debug mode
+        if (window.DEBUG_DRAG_DROP) {
+            console.log(`Setup drag zone for ${selector}`);
+        }
     }
     
     addDragHandles(container) {
-        console.log('Adding drag handles to container:', container);
+        // Only log in debug mode
+        if (window.DEBUG_DRAG_DROP) {
+            console.log('Adding drag handles to container:', container);
+        }
         
         // Check if we're in the middle of updating tags
         if (this.isUpdatingTags) {
@@ -128,7 +134,10 @@ class DragAndDropManager {
         // Remove existing handles
         const existingHandles = container.querySelectorAll('.drag-handle');
         existingHandles.forEach(handle => handle.remove());
-        console.log(`Removed ${existingHandles.length} existing drag handles`);
+        // Only log in debug mode if handles were removed
+        if (window.DEBUG_DRAG_DROP && existingHandles.length > 0) {
+            console.log(`Removed ${existingHandles.length} existing drag handles`);
+        }
         
         // Add handles to all tag rows (the actual draggable containers)
         const allTagRows = container.querySelectorAll('.tag-row');
@@ -149,7 +158,7 @@ class DragAndDropManager {
         tagRows.forEach((tagRow, index) => {
             // Skip if already has handle
             if (tagRow.querySelector('.drag-handle')) {
-                console.log(`Tag row ${index} already has drag handle, skipping`);
+                // Skip silently - no need to log
                 return;
             }
             
@@ -232,64 +241,76 @@ class DragAndDropManager {
             });
             
             tagRow.appendChild(dragHandle);
-            console.log(`Added drag handle to tag row ${index}: ${tagRow.textContent.trim().substring(0, 30)}...`);
             
-            // Verify the handle was added correctly
+            // Verify the handle was added correctly (only log errors)
             const addedHandle = tagRow.querySelector('.drag-handle');
-            if (addedHandle) {
-                console.log(`✓ Drag handle successfully added to tag row ${index}`);
-                const rect = addedHandle.getBoundingClientRect();
-                console.log(`  Handle position: left=${rect.left}, top=${rect.top}, width=${rect.width}, height=${rect.height}`);
-            } else {
+            if (!addedHandle) {
                 console.error(`✗ Failed to add drag handle to tag row ${index}`);
             }
         });
         
-        console.log(`Successfully added ${tagRows.length} drag handles`);
-        
-        // Final verification
+        // Final verification - only log summary, not per-row details
         const finalHandles = container.querySelectorAll('.drag-handle');
-        console.log(`Final count: ${finalHandles.length} drag handles in container`);
+        if (finalHandles.length !== tagRows.length) {
+            console.warn(`Drag handle count mismatch: expected ${tagRows.length}, found ${finalHandles.length}`);
+        } else {
+            // Only log summary in verbose mode (can be enabled via window.DEBUG_DRAG_DROP = true)
+            if (window.DEBUG_DRAG_DROP) {
+                console.log(`✓ Added ${finalHandles.length} drag handles`);
+            }
+        }
     }
 
     handleMouseDown(e) {
-        console.log('Mouse down event triggered:', e.target);
+        // Only log in debug mode
+        if (window.DEBUG_DRAG_DROP) {
+            console.log('Mouse down event triggered:', e.target);
+        }
         
         // Only handle left mouse button
         if (e.button !== 0) {
-            console.log('Not left mouse button, ignoring');
             return;
         }
         
         const tagRow = e.target.closest('.tag-row');
         if (!tagRow) {
-            console.log('No tag-row found, ignoring');
             return;
         }
         
         // Check if clicking on drag handle
         const isDragHandle = e.target.closest('.drag-handle');
         if (!isDragHandle) {
-            console.log('Not clicking on drag handle, ignoring');
             return;
         }
         
-        console.log('Drag handle clicked!');
+        // Only log in debug mode
+        if (window.DEBUG_DRAG_DROP) {
+            console.log('Drag handle clicked!');
+        }
         
         // Check if lineage updates are happening (but allow if already dragging)
         if (this.isLineageUpdating && !this.isDragging) {
-            console.log('New drag prevented - lineage update in progress');
+            // Only log in debug mode
+            if (window.DEBUG_DRAG_DROP) {
+                console.log('New drag prevented - lineage update in progress');
+            }
             return;
         }
         
         // Validate that the tag row has a valid checkbox before starting drag
         const checkbox = tagRow.querySelector('.tag-checkbox');
         if (!checkbox || !checkbox.value) {
-            console.log('Tag row has invalid checkbox, preventing drag');
+            // Only log in debug mode
+            if (window.DEBUG_DRAG_DROP) {
+                console.log('Tag row has invalid checkbox, preventing drag');
+            }
             return;
         }
         
-        console.log('Drag handle clicked for:', tagRow.textContent.trim());
+        // Only log in debug mode
+        if (window.DEBUG_DRAG_DROP) {
+            console.log('Drag handle clicked for:', tagRow.textContent.trim());
+        }
         
         // Prevent default behavior and stop propagation to prevent checkbox changes
         e.preventDefault();
@@ -298,7 +319,10 @@ class DragAndDropManager {
         
         // Store initial coordinates
         this.dragStartCoords = { x: e.clientX, y: e.clientY };
-        console.log('Drag start coordinates:', this.dragStartCoords);
+        // Only log in debug mode
+        if (window.DEBUG_DRAG_DROP) {
+            console.log('Drag start coordinates:', this.dragStartCoords);
+        }
         
         // Store original index and element reference
         const container = document.querySelector('#selectedTags');
@@ -353,7 +377,10 @@ class DragAndDropManager {
         document.addEventListener('mousemove', this.boundHandleMouseMove);
         document.addEventListener('mouseup', this.boundHandleMouseUp);
         
-        console.log('Drag started for:', tagRow.textContent.trim());
+        // Only log in debug mode
+        if (window.DEBUG_DRAG_DROP) {
+            console.log('Drag started for:', tagRow.textContent.trim());
+        }
     }
 
     getDraggableTagItems(container) {
@@ -986,11 +1013,17 @@ class DragAndDropManager {
         // which would require re-initializing the drag and drop manager
         document.addEventListener('updateSelectedTags', () => {
             this.isUpdatingTags = true;
-            console.log('updateSelectedTags event received, preventing reinitialization.');
+            // Only log in debug mode
+            if (window.DEBUG_DRAG_DROP) {
+                console.log('updateSelectedTags event received, preventing reinitialization.');
+            }
         });
                  document.addEventListener('updateSelectedTagsComplete', () => {
              this.isUpdatingTags = false;
-             console.log('updateSelectedTagsComplete event received, allowing reinitialization.');
+             // Only log in debug mode
+             if (window.DEBUG_DRAG_DROP) {
+                 console.log('updateSelectedTagsComplete event received, allowing reinitialization.');
+             }
              // Re-initialize after a short delay to ensure all elements are ready
              setTimeout(() => {
                  this.reinitializeTagDragAndDrop();

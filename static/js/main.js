@@ -3307,6 +3307,23 @@ const TagManager = {
                 // Update Excel Lineage field to match database lineage for consistency
                 tag.Lineage = dbLineage;
                 tag.lineage = dbLineage.toLowerCase();
+                // CRITICAL: Ensure database lineage fields are preserved (don't let them get lost)
+                if (!tag.canonical_lineage && tag.currentLineage) {
+                    tag.canonical_lineage = tag.currentLineage;
+                }
+                if (!tag.currentLineage && tag.canonical_lineage) {
+                    tag.currentLineage = tag.canonical_lineage;
+                }
+            } else {
+                // CRITICAL FIX: If database lineage fields are missing but Lineage exists, check if it's actually from database
+                // Sometimes backend sets Lineage but not canonical_lineage/currentLineage
+                // In that case, we should treat Lineage as database lineage if it was set by backend
+                // But we can't distinguish, so we'll log a warning for debugging
+                const tagName = tag['Product Name*'] || tag.ProductName || 'Unknown';
+                if (tag.Lineage && tag.Lineage !== 'MIXED' && tag.Lineage !== 'HYBRID') {
+                    // Log warning for tags that might have database lineage but missing fields
+                    console.warn(`⚠️ Tag "${tagName}" has Lineage="${tag.Lineage}" but missing canonical_lineage/currentLineage fields`);
+                }
             }
             return tag;
         });
@@ -4913,19 +4930,24 @@ const TagManager = {
         let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
         // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
-        if (tag.canonical_lineage || tag.currentLineage) {
+        // IMPORTANT: Check tag object DIRECTLY, not the lineage variable, to ensure we get the latest database values
+        const tagDbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+        if (tagDbLineage) {
             // Database lineage exists - use it exclusively, ignore Excel Lineage completely
-            const dbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
-            if (dbLineage) {
-                if (dbLineage !== normalizedLineage) {
-                    console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${dbLineage}`);
-                }
-                normalizedLineage = dbLineage;  // Force database lineage
+            if (tagDbLineage !== normalizedLineage) {
+                console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.canonical_lineage=${tag.canonical_lineage} or tag.currentLineage=${tag.currentLineage})`);
             }
+            normalizedLineage = tagDbLineage;  // Force database lineage
         } else {
             // No database lineage - log warning for debugging
-            if (isForSelectedTags && lineage !== 'MIXED') {
+            if (isForSelectedTags && normalizedLineage && normalizedLineage !== 'MIXED') {
                 console.warn(`⚠️ Selected tag "${displayName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
+                console.warn(`⚠️ Tag object lineage fields:`, {
+                    canonical_lineage: tag.canonical_lineage || 'MISSING',
+                    currentLineage: tag.currentLineage || 'MISSING',
+                    Lineage: tag.Lineage || 'MISSING',
+                    lineage: tag.lineage || 'MISSING'
+                });
             }
         }
         
@@ -6327,6 +6349,25 @@ const TagManager = {
             tags = [];
         }
         
+        // CRITICAL FIX: If called with empty array but we have persistentSelectedTags, preserve them
+        // This prevents selections from being cleared when updateSelectedTags([]) is called
+        if (tags.length === 0 && this.state.persistentSelectedTags.length > 0) {
+            verboseLog('updateSelectedTags called with empty array, but preserving persistentSelectedTags:', this.state.persistentSelectedTags);
+            // Rebuild tags from persistentSelectedTags instead of clearing
+            const tagsMap = new Map(this.state.tags.map(t => [t['Product Name*'], t]));
+            const originalTagsMap = new Map(this.state.originalTags.map(t => [t['Product Name*'], t]));
+            
+            tags = this.state.persistentSelectedTags.map(tagName => {
+                return tagsMap.get(tagName) || originalTagsMap.get(tagName) || null;
+            }).filter(Boolean);
+            
+            if (tags.length === 0) {
+                verboseLog('No tag objects found for persistentSelectedTags, but keeping selections in state');
+                // Don't clear - tags might be loading
+                return;
+            }
+        }
+        
         // Prevent updates during tag move operations to avoid race conditions
         if (this.isMovingTags) {
             verboseLog('Ignoring updateSelectedTags during tag move operation');
@@ -6574,35 +6615,64 @@ const TagManager = {
             });
         }
 
-        // Handle new tags being passed in (e.g., from JSON matching)
-        // Add new tags to persistentSelectedTags without clearing existing ones
+        // CRITICAL FIX: Use persistentSelectedTags as the source of truth, not the tags array passed in
+        // This prevents selection glitches where tags array might not match the actual selected state
+        // Build the tags array from persistentSelectedTags to ensure consistency
+        const persistentTagNames = [...this.state.persistentSelectedTags];
+        
+        // Handle new tags being passed in (e.g., from JSON matching) - add them to persistentSelectedTags
         if (tags.length > 0) {
-            verboseLog('Adding new tags to persistentSelectedTags:', tags);
+            verboseLog('Processing tags for updateSelectedTags:', tags.length);
             tags.forEach(tag => {
                 if (tag && tag['Product Name*']) {
-                    if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                        this.state.persistentSelectedTags.push(tag['Product Name*']);
+                    const tagName = tag['Product Name*'];
+                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                        this.state.persistentSelectedTags.push(tagName);
+                        if (!persistentTagNames.includes(tagName)) {
+                            persistentTagNames.push(tagName);
+                        }
                     }
                 }
             });
-            // Update the regular selectedTags set to match persistent ones
-            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
         }
-
-        // Use the tags and display in the same order as the available list for consistency
-        let fullTags = tags;
-        if (tags && tags.length > 0) {
-            verboseLog('Using tags for display (available list order):', tags);
-            // Keep selected tags in the same order as the available list for consistency
-            fullTags = [...tags];
-            // Keep selectedTags set in sync with persistent without reordering
-            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-        } else {
-            // If no backend tags, show empty selected tags list
-            verboseLog('No backend tags, showing empty selected tags list');
-            fullTags = [];
-            this.state.persistentSelectedTags = [];
-            this.state.selectedTags = new Set();
+        
+        // CRITICAL FIX: Build fullTags from persistentSelectedTags to ensure checkbox state matches
+        // Find tag objects for all persistentSelectedTags, preserving order
+        const tagsMap = new Map(tags.map(t => [t['Product Name*'], t]));
+        const originalTagsMap = new Map(this.state.originalTags.map(t => [t['Product Name*'], t]));
+        const stateTagsMap = new Map(this.state.tags.map(t => [t['Product Name*'], t]));
+        
+        // Build fullTags from persistentSelectedTags in order, using tags passed in or finding from state
+        let fullTags = persistentTagNames.map(tagName => {
+            // Try to find tag in the passed tags array first, then in state
+            return tagsMap.get(tagName) || 
+                   stateTagsMap.get(tagName) || 
+                   originalTagsMap.get(tagName) ||
+                   null;
+        }).filter(Boolean); // Remove any null entries
+        
+        // If we have fewer tags than persistentSelectedTags, log a warning
+        if (fullTags.length < this.state.persistentSelectedTags.length) {
+            const missing = this.state.persistentSelectedTags.filter(name => 
+                !tagsMap.has(name) && !stateTagsMap.has(name) && !originalTagsMap.has(name)
+            );
+            if (missing.length > 0) {
+                console.warn(`⚠️ Some selected tags not found in available tags:`, missing);
+            }
+        }
+        
+        // Update selectedTags set to match persistentSelectedTags
+        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+        
+        // If no tags found, check if we should clear persistentSelectedTags
+        if (fullTags.length === 0 && this.state.persistentSelectedTags.length > 0) {
+            // Don't clear immediately - tags might be loading
+            verboseLog('No tag objects found for persistentSelectedTags, but keeping selections');
+        } else if (fullTags.length === 0) {
+            // Only clear if we truly have no selections
+            verboseLog('No tags to display in selected tags');
+            this.updateTagCount('selected', 0);
+            return;
         }
         
         // CRITICAL: Before rendering, normalize all tags to ensure they have database lineage
@@ -7881,20 +7951,17 @@ const TagManager = {
             this._cachedFilterOptionsHash = null;
             this._cachedFilterOptionsTagsLength = null;
             
-            // Preserve selected tags if they exist and are valid (optimized)
-            const currentSelectedTags = [...this.state.persistentSelectedTags];
-            this.state.persistentSelectedTags = [];
-            this.state.selectedTags = new Set();
-
-            if (currentSelectedTags.length > 0) {
+            // CRITICAL FIX: Don't clear selected tags here - they've already been preserved and updated above
+            // The code above (lines 7845-7877) already handles updating selected tags with database lineage
+            // Clearing and restoring here was causing selections to disappear after first selection
+            // Just validate that selected tags still exist in the new tag list
+            if (this.state.persistentSelectedTags.length > 0) {
                 // Build a fast lookup map of product name -> true
                 const tagNameSet = new Set(tags.map(t => t['Product Name*']));
-                for (const tagName of currentSelectedTags) {
-                    if (tagNameSet.has(tagName)) {
-                        this.state.persistentSelectedTags.push(tagName);
-                        this.state.selectedTags.add(tagName);
-                    }
-                }
+                // Filter out any selected tags that no longer exist in the available tags
+                this.state.persistentSelectedTags = this.state.persistentSelectedTags.filter(tagName => tagNameSet.has(tagName));
+                // Update selectedTags set to match filtered persistentSelectedTags
+                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
             }
             
             this.validateSelectedTags();
@@ -8131,6 +8198,12 @@ const TagManager = {
     async fetchAndUpdateSelectedTags() {
         try {
             verboseLog('Fetching selected tags...');
+            
+            // CRITICAL FIX: Preserve local selections before fetching from backend
+            // This prevents selections from disappearing if backend hasn't saved them yet
+            const localSelections = [...this.state.persistentSelectedTags];
+            verboseLog('Local selections before fetch:', localSelections);
+            
             const timestamp = Date.now();
             const response = await fetch(`/api/selected-tags?t=${timestamp}`);
             if (!response.ok) {
@@ -8139,26 +8212,60 @@ const TagManager = {
             const selectedTags = await response.json();
             
             if (!selectedTags || !Array.isArray(selectedTags)) {
-                console.warn('No selected tags found - data may not be loaded yet');
-                this.updateSelectedTags([]);
+                console.warn('No selected tags found in backend - preserving local selections');
+                // CRITICAL FIX: Don't clear if we have local selections
+                if (localSelections.length > 0) {
+                    verboseLog('Preserving local selections:', localSelections);
+                    // Keep local selections and update display
+                    const localTagObjects = localSelections.map(name => {
+                        return this.state.tags.find(t => t['Product Name*'] === name) ||
+                               this.state.originalTags.find(t => t['Product Name*'] === name) ||
+                               null;
+                    }).filter(Boolean);
+                    
+                    if (localTagObjects.length > 0) {
+                        this.updateSelectedTags(localTagObjects);
+                    }
+                } else {
+                    // Only clear if we truly have no selections locally or in backend
+                    this.updateSelectedTags([]);
+                }
                 return true;
             }
             
-            verboseLog(`Fetched ${selectedTags.length} selected tags:`, selectedTags.map(tag => tag['Product Name*']));
+            verboseLog(`Fetched ${selectedTags.length} selected tags from backend:`, selectedTags.map(tag => tag['Product Name*']));
             
-            // Update persistentSelectedTags with the fetched tags from backend
-            verboseLog('Updating persistentSelectedTags with fetched tags:', selectedTags.map(tag => tag['Product Name*']));
-            this.state.persistentSelectedTags = selectedTags.map(tag => tag['Product Name*']);
+            // CRITICAL FIX: Merge backend selections with local selections instead of replacing
+            // This ensures selections don't disappear if backend is out of sync
+            const backendTagNames = selectedTags.map(tag => tag['Product Name*']);
+            const mergedSelections = [...new Set([...localSelections, ...backendTagNames])];
+            
+            verboseLog('Merged selections (local + backend):', mergedSelections);
+            
+            // Update persistentSelectedTags with merged selections
+            this.state.persistentSelectedTags = mergedSelections;
             // Save to localStorage for persistence
             this.saveSelectedTagsToStorage();
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-            verboseLog('persistentSelectedTags after update:', this.state.persistentSelectedTags);
-            verboseLog('selectedTags after update:', this.state.selectedTags);
+            verboseLog('persistentSelectedTags after merge:', this.state.persistentSelectedTags);
             
-            this.updateSelectedTags(selectedTags);
+            // Build tag objects for merged selections
+            const tagsMap = new Map(selectedTags.map(t => [t['Product Name*'], t]));
+            const stateTagsMap = new Map(this.state.tags.map(t => [t['Product Name*'], t]));
+            const originalTagsMap = new Map(this.state.originalTags.map(t => [t['Product Name*'], t]));
+            
+            const mergedTagObjects = mergedSelections.map(tagName => {
+                return tagsMap.get(tagName) || 
+                       stateTagsMap.get(tagName) || 
+                       originalTagsMap.get(tagName) ||
+                       null;
+            }).filter(Boolean);
+            
+            verboseLog('Merged tag objects:', mergedTagObjects.length);
+            this.updateSelectedTags(mergedTagObjects);
             
             // Ensure drag and drop is working after fetching tags
-            if (window.dragAndDropManager && selectedTags.length > 0) {
+            if (window.dragAndDropManager && mergedTagObjects.length > 0) {
                 setTimeout(() => {
                     verboseLog('Reinitializing drag and drop after fetchAndUpdateSelectedTags');
                     window.dragAndDropManager.reinitializeTagDragAndDrop();
@@ -8168,7 +8275,23 @@ const TagManager = {
             return true;
         } catch (error) {
             console.error('Error fetching selected tags:', error);
-            this.updateSelectedTags([]);
+            // CRITICAL FIX: Don't clear selections on error - preserve local selections
+            const localSelections = [...this.state.persistentSelectedTags];
+            if (localSelections.length > 0) {
+                verboseLog('Error fetching selected tags, preserving local selections:', localSelections);
+                const localTagObjects = localSelections.map(name => {
+                    return this.state.tags.find(t => t['Product Name*'] === name) ||
+                           this.state.originalTags.find(t => t['Product Name*'] === name) ||
+                           null;
+                }).filter(Boolean);
+                
+                if (localTagObjects.length > 0) {
+                    this.updateSelectedTags(localTagObjects);
+                }
+            } else {
+                // Only clear if we have no local selections
+                this.updateSelectedTags([]);
+            }
             return false;
         }
     },
@@ -10818,13 +10941,23 @@ const TagManager = {
                     }
                 } catch (tagsError) {
                     if (attempt === maxRetries - 1) {
-                        // Last attempt failed
-                        console.warn('⚠️ Failed to load tags after all retries, will reload page:', tagsError);
-                        // Fallback: reload page if all attempts fail
-                        setTimeout(() => {
-                            verboseLog('🔄 Reloading page as fallback...');
-                            window.location.reload();
-                        }, 500);
+                        // Last attempt failed - try using the standard tag loading method instead of reloading
+                        console.warn('⚠️ Failed to load tags after all retries, trying standard method:', tagsError);
+                        // Use the existing fetchAndUpdateAvailableTags which has better error handling
+                        // This avoids unnecessary page reloads that cause glitches
+                        try {
+                            await this.fetchAndUpdateAvailableTags();
+                            tagsLoaded = true;
+                            verboseLog('✅ Tags loaded using standard method');
+                        } catch (fallbackError) {
+                            console.error('⚠️ Standard tag loading also failed:', fallbackError);
+                            // Only reload as absolute last resort, and show user-friendly message first
+                            this.updateUploadUI('Tags are loading slowly. The page will refresh in a moment...', 'warning');
+                            setTimeout(() => {
+                                verboseLog('🔄 Reloading page as last resort...');
+                                window.location.reload();
+                            }, 3000); // Give user time to see the message
+                        }
                         return;
                     }
                     // Continue to next retry
@@ -10832,12 +10965,22 @@ const TagManager = {
                 }
             }
             
-            // If we get here, tags didn't load after all retries - reload page as fallback
+            // If we get here, tags didn't load after all retries - try standard method instead of reloading
             if (!tagsLoaded) {
-                setTimeout(() => {
-                    verboseLog('🔄 Reloading page to show new data...');
-                    window.location.reload();
-                }, 500);
+                console.warn('⚠️ Tags not loaded after retries, trying standard method...');
+                try {
+                    await this.fetchAndUpdateAvailableTags();
+                    tagsLoaded = true;
+                    verboseLog('✅ Tags loaded using standard method');
+                } catch (fallbackError) {
+                    console.error('⚠️ Standard tag loading failed:', fallbackError);
+                    // Only reload as absolute last resort
+                    this.updateUploadUI('Tags are loading slowly. The page will refresh in a moment...', 'warning');
+                    setTimeout(() => {
+                        verboseLog('🔄 Reloading page as last resort...');
+                        window.location.reload();
+                    }, 3000); // Give user time to see the message
+                }
             }
             
             return; // Success!

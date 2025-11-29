@@ -238,8 +238,21 @@ async function handleFiles(files) {
                   .finally(() => console.timeEnd('post-upload-refresh-async'))
                   .catch(err => {
                     console.error('Async refreshTagLists failed', err);
-                    // Last resort fallback
-                    window.location.reload();
+                    // Try individual fetches as fallback instead of reloading
+                    console.warn('Trying individual tag fetches as fallback...');
+                    Promise.allSettled([
+                      TagManager.fetchAndUpdateAvailableTags?.() || Promise.resolve(),
+                      TagManager.fetchAndUpdateSelectedTags?.() || Promise.resolve(),
+                      TagManager.fetchAndPopulateFilters?.() || Promise.resolve()
+                    ]).then(() => {
+                      console.log('✅ Fallback tag loading completed');
+                    }).catch(fallbackErr => {
+                      console.error('All tag loading methods failed, reloading as last resort', fallbackErr);
+                      // Only reload as absolute last resort after all methods fail
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 2000);
+                    });
                   });
               } else {
                 // Fallback individual fetches without await
@@ -249,11 +262,36 @@ async function handleFiles(files) {
               }
             }, 0);
           } catch (e) {
-            console.error('Post-upload async refresh setup failed, reloading', e);
-            window.location.reload();
+            console.error('Post-upload async refresh setup failed', e);
+            // Try to load tags individually instead of reloading immediately
+            console.warn('Trying individual tag fetches as fallback...');
+            Promise.allSettled([
+              TagManager?.fetchAndUpdateAvailableTags?.() || Promise.resolve(),
+              TagManager?.fetchAndUpdateSelectedTags?.() || Promise.resolve(),
+              TagManager?.fetchAndPopulateFilters?.() || Promise.resolve()
+            ]).then(() => {
+              console.log('✅ Fallback tag loading completed');
+            }).catch(fallbackErr => {
+              console.error('All tag loading methods failed, reloading as last resort', fallbackErr);
+              setTimeout(() => {
+                window.location.reload();
+              }, 2000);
+            });
           }
         } else {
-          window.location.reload();
+          // TagManager not available - try to wait a bit and retry before reloading
+          console.warn('TagManager not available, waiting before reload...');
+          setTimeout(() => {
+            if (typeof TagManager !== 'undefined') {
+              console.log('TagManager now available, loading tags...');
+              TagManager.fetchAndUpdateAvailableTags?.();
+              TagManager.fetchAndUpdateSelectedTags?.();
+              TagManager.fetchAndPopulateFilters?.();
+            } else {
+              console.warn('TagManager still not available, reloading as last resort');
+              window.location.reload();
+            }
+          }, 2000);
         }
         
         // Add animation class to file path container
