@@ -8099,6 +8099,18 @@ def get_available_tags():
             lineage_alignment_needed = True  # ALWAYS align lineage - database is source of truth
             logging.info(f"🔄 CRITICAL: Lineage alignment ALWAYS enabled to ensure database lineage is used (fast_load={fast_load}, force_full_refresh={force_full_refresh})")
             
+            # CRITICAL FIX: Also update Excel processor DataFrame lineage if it exists
+            # This ensures the DataFrame is in sync with database before tags are loaded
+            try:
+                excel_processor = get_session_excel_processor()
+                if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+                    if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                        logging.info("🔄 CRITICAL: Updating DataFrame lineage from database for cached tags...")
+                        excel_processor._update_dataframe_lineage_from_database()
+                        logging.info("✅ CRITICAL: DataFrame lineage updated for cached tags")
+            except Exception as df_update_err:
+                logging.warning(f"Could not update DataFrame lineage for cached tags: {df_update_err}")
+            
             if lineage_alignment_needed:
                 logging.info(f"🔄 Lineage alignment enabled: fast_load={fast_load}, force_full_refresh={force_full_refresh}")
             else:
@@ -8368,6 +8380,10 @@ def get_available_tags():
                         logging.info("🔄 CRITICAL FIX: ALWAYS updating DataFrame lineage from database before loading tags...")
                         excel_processor._update_dataframe_lineage_from_database()
                         logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database")
+                        # CRITICAL: Invalidate caches after DataFrame update to force fresh tag loading
+                        if hasattr(excel_processor, '_invalidate_caches'):
+                            excel_processor._invalidate_caches()
+                            logging.info("✅ CRITICAL FIX: Invalidated caches after DataFrame lineage update")
                     except Exception as df_update_err:
                         logging.error(f"❌ CRITICAL FAILURE: Could not update DataFrame lineage from database: {df_update_err}")
                         import traceback

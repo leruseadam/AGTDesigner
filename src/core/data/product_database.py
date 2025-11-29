@@ -1737,57 +1737,80 @@ class ProductDatabase:
                     # Track this product to prevent duplicates within the same upload
                     self._current_upload_products.add(duplicate_key)
                     
-                    # CRITICAL FIX: Preserve existing database lineage if Excel lineage is empty
+                    # CRITICAL FIX: Preserve existing database lineage if it was manually updated
                     # Check if this product already exists in database and has lineage
                     preserved_db_lineage = None
                     excel_lineage = product_data.get('Lineage', '').strip() if product_data.get('Lineage') else ''
+                    excel_lineage_clean = excel_lineage.upper() if excel_lineage else ''
                     
-                    # Only check database if Excel lineage is empty - this is the key preservation point
-                    if not excel_lineage or excel_lineage in ['', 'nan', 'none', 'null', 'None', 'NaN']:
-                        conn_check = self._get_connection()
-                        cursor_check = conn_check.cursor()
-                        
-                        # Try multiple lookup strategies to find existing product
-                        normalized_name = self._normalize_product_name(product_name)
-                        vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
-                        
-                        # Strategy 1: Exact normalized name + vendor match
+                    # Always check database for existing lineage to preserve manually updated values
+                    # This ensures lineage changes persist even after Excel file reload
+                    conn_check = self._get_connection()
+                    cursor_check = conn_check.cursor()
+                    
+                    # Try multiple lookup strategies to find existing product
+                    normalized_name = self._normalize_product_name(product_name)
+                    vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
+                    
+                    # Strategy 1: Exact normalized name + vendor match
+                    cursor_check.execute('''
+                        SELECT "Lineage", s.sovereign_lineage, s.canonical_lineage
+                        FROM products p
+                        LEFT JOIN strains s ON p.strain_id = s.id
+                        WHERE p.normalized_name = ? AND TRIM(p."Vendor/Supplier*") = ?
+                        LIMIT 1
+                    ''', (normalized_name, vendor))
+                    existing_lineage_result = cursor_check.fetchone()
+                    
+                    # Strategy 2: If no match, try by product name directly (case-insensitive)
+                    if not existing_lineage_result or not existing_lineage_result[0]:
                         cursor_check.execute('''
-                            SELECT "Lineage" FROM products 
-                            WHERE normalized_name = ? AND TRIM("Vendor/Supplier*") = ?
+                            SELECT p."Lineage", s.sovereign_lineage, s.canonical_lineage
+                            FROM products p
+                            LEFT JOIN strains s ON p.strain_id = s.id
+                            WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?)) 
+                              AND TRIM(p."Vendor/Supplier*") = ?
                             LIMIT 1
-                        ''', (normalized_name, vendor))
+                        ''', (product_name, vendor))
                         existing_lineage_result = cursor_check.fetchone()
-                        
-                        # Strategy 2: If no match, try by product name directly (case-insensitive)
-                        if not existing_lineage_result or not existing_lineage_result[0]:
-                            cursor_check.execute('''
-                                SELECT "Lineage" FROM products 
-                                WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?)) 
-                                  AND TRIM("Vendor/Supplier*") = ?
-                                LIMIT 1
-                            ''', (product_name, vendor))
-                            existing_lineage_result = cursor_check.fetchone()
-                        
-                        # Strategy 3: If still no match, try without vendor requirement
-                        if not existing_lineage_result or not existing_lineage_result[0]:
-                            cursor_check.execute('''
-                                SELECT "Lineage" FROM products 
-                                WHERE normalized_name = ?
-                                ORDER BY updated_at DESC
-                                LIMIT 1
-                            ''', (normalized_name,))
-                            existing_lineage_result = cursor_check.fetchone()
-                        
-                        if existing_lineage_result and existing_lineage_result[0]:
-                            db_lineage = str(existing_lineage_result[0]).strip()
-                            if db_lineage and db_lineage not in ['', 'nan', 'none', 'null', 'None', 'NaN']:
+                    
+                    # Strategy 3: If still no match, try without vendor requirement
+                    if not existing_lineage_result or not existing_lineage_result[0]:
+                        cursor_check.execute('''
+                            SELECT p."Lineage", s.sovereign_lineage, s.canonical_lineage
+                            FROM products p
+                            LEFT JOIN strains s ON p.strain_id = s.id
+                            WHERE p.normalized_name = ?
+                            ORDER BY p.updated_at DESC
+                            LIMIT 1
+                        ''', (normalized_name,))
+                        existing_lineage_result = cursor_check.fetchone()
+                    
+                    if existing_lineage_result:
+                        # Get lineage from product or strain (prioritize strain lineage as it's manually updated)
+                        db_lineage = (
+                            existing_lineage_result[1] or  # sovereign_lineage (manually updated)
+                            existing_lineage_result[2] or  # canonical_lineage (manually updated)
+                            existing_lineage_result[0]     # product Lineage
+                        )
+                        if db_lineage:
+                            db_lineage = str(db_lineage).strip()
+                            db_lineage_clean = db_lineage.upper()
+                            
+                            # Preserve database lineage if:
+                            # 1. Excel lineage is empty, OR
+                            # 2. Database lineage is different from Excel (was manually updated)
+                            if (not excel_lineage_clean or excel_lineage_clean in ['', 'NAN', 'NONE', 'NULL']) or \
+                               (db_lineage_clean != excel_lineage_clean and db_lineage_clean):
                                 preserved_db_lineage = db_lineage
-                                logger.info(f"✅ LINEAGE PRESERVATION: Found existing database lineage '{db_lineage}' for product '{product_name}' - will preserve (Excel had empty lineage)")
-                        else:
-                            logger.debug(f"⚠️ No existing lineage found in database for product '{product_name}' (Excel also has empty lineage)")
-                        
-                        cursor_check.close()
+                                if not excel_lineage_clean:
+                                    logger.info(f"✅ LINEAGE PRESERVATION: Found existing database lineage '{db_lineage}' for product '{product_name}' - will preserve (Excel had empty lineage)")
+                                else:
+                                    logger.info(f"✅ LINEAGE PRESERVATION: Preserving manually updated database lineage '{db_lineage}' for product '{product_name}' (Excel had '{excel_lineage}', database has '{db_lineage}')")
+                    else:
+                        logger.debug(f"⚠️ No existing lineage found in database for product '{product_name}'")
+                    
+                    cursor_check.close()
                     
                     # Comprehensive smart normalization before storing in database
                     try:
@@ -1804,12 +1827,11 @@ class ProductDatabase:
                         except Exception as e2:
                             logger.warning(f"Fallback weight normalization also failed for {product_name}: {e2}")
                     
-                    # CRITICAL: Restore preserved database lineage AFTER normalization (normalization might have cleared it)
+                    # CRITICAL: Restore preserved database lineage AFTER normalization
+                    # Always use preserved lineage if it exists (it was manually updated and should take precedence)
                     if preserved_db_lineage:
-                        final_excel_lineage = product_data.get('Lineage', '').strip() if product_data.get('Lineage') else ''
-                        if not final_excel_lineage or final_excel_lineage in ['', 'nan', 'none', 'null', 'None', 'NaN']:
-                            product_data['Lineage'] = preserved_db_lineage
-                            logger.info(f"✅ RESTORED preserved database lineage '{preserved_db_lineage}' for product '{product_name}' after normalization")
+                        product_data['Lineage'] = preserved_db_lineage
+                        logger.info(f"✅ RESTORED preserved database lineage '{preserved_db_lineage}' for product '{product_name}' (overriding Excel lineage '{excel_lineage}')")
                     
                     # Store the product in database
                     # Get the count before to determine if it's new or updated

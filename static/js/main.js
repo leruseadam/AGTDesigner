@@ -10541,7 +10541,19 @@ const TagManager = {
         } catch (error) {
             console.error('⚡ Lightning upload error:', error);
             this.hideExcelLoadingSplash();
-            this.updateUploadUI('Upload failed: ' + error.message, 'error');
+            
+            // Check for SSL/TLS errors
+            let errorMessage = error.message;
+            if (error.message && (
+                error.message.includes('SSL') || 
+                error.message.includes('TLS') || 
+                error.message.includes('ERR_SSL') ||
+                error.message.includes('BAD_RECORD_MAC')
+            )) {
+                errorMessage = 'SSL connection error. Please check your internet connection and try again. If the problem persists, contact support.';
+            }
+            
+            this.updateUploadUI('Upload failed: ' + errorMessage, 'error');
             return;
         }
     },
@@ -10573,7 +10585,19 @@ const TagManager = {
             }
         } catch (error) {
             console.error('Fallback upload error:', error);
-            this.updateUploadUI('Upload failed: ' + error.message, 'error');
+            
+            // Check for SSL/TLS errors
+            let errorMessage = error.message;
+            if (error.message && (
+                error.message.includes('SSL') || 
+                error.message.includes('TLS') || 
+                error.message.includes('ERR_SSL') ||
+                error.message.includes('BAD_RECORD_MAC')
+            )) {
+                errorMessage = 'SSL connection error. Please check your internet connection and try again. If the problem persists, contact support.';
+            }
+            
+            this.updateUploadUI('Upload failed: ' + errorMessage, 'error');
             return false;
         }
     },

@@ -20,6 +20,14 @@ function initializeTemplatePreview() {
         return;
     }
     
+    // Check if we've exceeded max attempts
+    if (templatePreviewInitAttempts >= MAX_INIT_ATTEMPTS) {
+        // Already tried enough times, stop trying
+        return;
+    }
+    
+    templatePreviewInitAttempts += 1;
+    
     // Get all the necessary elements
     const editTemplateModal = document.getElementById('editTemplateModal');
     const templateSelectModal = document.getElementById('templateSelectModal');
@@ -34,21 +42,12 @@ function initializeTemplatePreview() {
     const previewContainer = document.getElementById('templatePreviewModal');
     
     // If the modal doesn't exist, exit gracefully without spamming console
-    if (!editTemplateModal) {
-        templatePreviewInitAttempts += 1;
+    if (!editTemplateModal || !previewContainer) {
         if (templatePreviewInitAttempts < MAX_INIT_ATTEMPTS) {
             // Only retry once more, silently
             scheduleTemplatePreviewInit(1000);
         }
         // Exit silently if modal doesn't exist - it's not required for the app to function
-        return;
-    }
-    
-    if (!previewContainer) {
-        templatePreviewInitAttempts += 1;
-        if (templatePreviewInitAttempts < MAX_INIT_ATTEMPTS) {
-            scheduleTemplatePreviewInit(1000);
-        }
         return;
     }
     
