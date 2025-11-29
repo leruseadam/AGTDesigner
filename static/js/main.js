@@ -3153,99 +3153,24 @@ const TagManager = {
                             weightContent.className = 'weight-content';
                             weightSection.appendChild(weightContent);
 
-                            // Handle price groups - check if priceGroups is a Map (new structure) or Array (old structure)
+                            // Flatten price groups back to a single weight list (no price headers)
+                            let allTagsForWeight = [];
                             if (priceGroups instanceof Map) {
-                                const sortedPriceGroups = Array.from(priceGroups.entries())
-                                    .sort(([a], [b]) => {
-                                        if (a === 'No Price') return -1;
-                                        if (b === 'No Price') return 1;
-                                        return a.localeCompare(b);
-                                    });
-                                
-                                sortedPriceGroups.forEach(([priceGroup, tagArray]) => {
-                                    const priceSection = document.createElement('div');
-                                    priceSection.className = 'price-section ms-3 mb-1';
-                                    
-                                    const priceHeader = document.createElement('div');
-                                    priceHeader.className = 'price-header mb-1 d-flex align-items-center cursor-pointer';
-                                    priceHeader.addEventListener('click', (e) => {
-                                        if (e.target.type === 'checkbox') return;
-                                        const priceContent = priceSection.querySelector('.price-content');
-                                        const isCollapsed = priceContent.classList.contains('collapsed');
-                                        priceContent.classList.toggle('collapsed', !isCollapsed);
-                                        priceHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                                    });
-                                    
-                                    const priceCheckbox = document.createElement('input');
-                                    priceCheckbox.type = 'checkbox';
-                                    priceCheckbox.className = 'select-all-checkbox me-2';
-                                    priceCheckbox.addEventListener('change', (e) => {
-                                        if (this.state.isClearing) return;
-                                        const savedScroll = this._saveAvailableScrollPosition();
-                                        const isChecked = e.target.checked;
-                                        const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
-                                        checkboxes.forEach(checkbox => {
-                                            if (!checkbox.classList.contains('tag-checkbox')) {
-                                                checkbox.checked = isChecked;
-                                                return;
-                                            }
-                                            
-                                            checkbox.checked = isChecked;
-                                            const tagName = checkbox.value;
-                                            const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                            if (tag) {
-                                                if (isChecked) {
-                                                    if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                        this.state.persistentSelectedTags.push(tagName);
-                                                    }
-                                                } else {
-                                                    const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                                    if (index > -1) {
-                                                        this.state.persistentSelectedTags.splice(index, 1);
-                                                    }
-                                                }
-                                            }
-                                        });
-                                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                        const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                            this.state.tags.find(t => t['Product Name*'] === name)
-                                        ).filter(Boolean);
-                                        this.updateSelectedTags(selectedTagObjects);
-                                        this.efficientlyUpdateAvailableTagsDisplay();
-                                        requestAnimationFrame(() => {
-                                            this._restoreAvailableScrollPosition(savedScroll);
-                                        });
-                                    });
-                                    
-                                    priceHeader.appendChild(priceCheckbox);
-                                    priceHeader.appendChild(document.createTextNode(priceGroup));
-                                    const priceCollapseIcon = document.createElement('span');
-                                    priceCollapseIcon.className = 'collapse-icon ms-auto';
-                                    priceCollapseIcon.textContent = '▼';
-                                    priceHeader.appendChild(priceCollapseIcon);
-                                    weightContent.appendChild(priceSection);
-                                    priceSection.appendChild(priceHeader);
-                                    
-                                    const priceContent = document.createElement('div');
-                                    priceContent.className = 'price-content';
-                                    priceSection.appendChild(priceContent);
-                                    
-                                    const sortedTags = [...tagArray].sort((a, b) => {
-                                        const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                                        const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                                        return aName.localeCompare(bName);
-                                    });
-                                    this._renderTagsInBatches(sortedTags, priceContent);
+                                priceGroups.forEach(tagArray => {
+                                    if (Array.isArray(tagArray)) {
+                                        allTagsForWeight = allTagsForWeight.concat(tagArray);
+                                    }
                                 });
-                            } else {
-                                // Old structure: backward compatibility
-                                const sortedTags = [...(Array.isArray(priceGroups) ? priceGroups : [])].sort((a, b) => {
-                                    const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                                    const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                                    return aName.localeCompare(bName);
-                                });
-                                this._renderTagsInBatches(sortedTags, weightContent);
+                            } else if (Array.isArray(priceGroups)) {
+                                allTagsForWeight = priceGroups;
                             }
+
+                            const sortedTags = [...allTagsForWeight].sort((a, b) => {
+                                const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                                const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                                return aName.localeCompare(bName);
+                            });
+                            this._renderTagsInBatches(sortedTags, weightContent);
 
                             productTypeContent.appendChild(weightSection);
                         });

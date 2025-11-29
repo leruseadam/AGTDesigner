@@ -9779,7 +9779,13 @@ def update_lineage():
             clear_available_tags_cache(reason="lineage_update")
             # CRITICAL FIX: Set lineage_update_timestamp to force fresh lineage alignment in available-tags endpoint
             session['lineage_update_timestamp'] = time.time()
-            logging.info("✅ Set lineage_update_timestamp to force fresh lineage alignment")
+            # Ensure the modified timestamp is persisted across workers (PythonAnywhere multi-worker fix)
+            try:
+                session.modified = True
+            except Exception:
+                # Fallback: Flask normally tracks modifications automatically, so this is just extra safety
+                pass
+            logging.info("✅ Set lineage_update_timestamp to force fresh lineage alignment (session marked modified)")
             # CRITICAL FIX: Clear Excel processor from both global and request context to force reload with fresh database lineage
             global _excel_processor
             if hasattr(g, 'excel_processor'):
