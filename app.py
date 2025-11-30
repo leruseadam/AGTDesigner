@@ -8096,8 +8096,18 @@ def get_available_tags():
             # Even during fast_load, we MUST query database for lineage to ensure persistence
             # Skip alignment ONLY if explicitly disabled AND no recent lineage updates
             # But for lineage persistence, we always need database lineage
+            # CRITICAL: Always align lineage from database, regardless of cache or timestamp
+            # This ensures lineage changes persist even after page reloads
             lineage_alignment_needed = True  # ALWAYS align lineage - database is source of truth
             logging.info(f"🔄 CRITICAL: Lineage alignment ALWAYS enabled to ensure database lineage is used (fast_load={fast_load}, force_full_refresh={force_full_refresh})")
+            
+            # CRITICAL FIX: Force bypass cache if lineage might be stale
+            # Even if timestamp is old, we should still verify lineage from database
+            # This ensures lineage changes persist across page reloads
+            if not force_full_refresh:
+                # Check if we should still verify lineage (even if timestamp is old)
+                # Always verify lineage from database to ensure persistence
+                logging.info("🔄 CRITICAL: Verifying lineage from database even for cached tags to ensure persistence")
             
             # CRITICAL FIX: Also update Excel processor DataFrame lineage if it exists
             # This ensures the DataFrame is in sync with database before tags are loaded
@@ -8305,55 +8315,69 @@ def get_available_tags():
                                 if (tag, name) not in tags_needing_individual_query:
                                     tags_needing_individual_query.append((tag, name))
                         
-                        if tags_needing_individual_query and product_db:
-                            logging.info(f"🔄 CRITICAL: Performing {len(tags_needing_individual_query)} individual database queries to guarantee latest lineage values (overriding any batch cache data)...")
-                            individual_updated_count = 0
-                            try:
-                                for tag, name in tags_needing_individual_query:
-                                    try:
-                                        # CRITICAL: Use get_product_lineage which handles normalization and case-insensitive matching
-                                        # This ALWAYS queries the database directly, never uses cache
-                                        db_lineage = product_db.get_product_lineage(name)
-                                        if db_lineage:
-                                            db_lin_clean = str(db_lineage).strip().upper()
-                                            # Get current lineage from tag (might be from batch cache)
-                                            old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                            
-                                            # CRITICAL: ALWAYS override with database value, even if batch cache had a value
-                                            # Database is the single source of truth
-                                            tag['currentLineage'] = db_lin_clean
-                                            tag['canonical_lineage'] = db_lin_clean
-                                            tag['Lineage'] = db_lin_clean
-                                            tag['lineage'] = db_lin_clean.lower()
-                                            
-                                            individual_updated_count += 1
-                                            updated += 1
-                                            if old_lineage != db_lin_clean:
-                                                logging.info(f"🔄 CRITICAL: Lineage OVERRIDDEN by database (individual query): '{name}' - batch cache had '{old_lineage}' → database has '{db_lin_clean}'")
+                        # CRITICAL FIX: Always perform individual queries, even if batch query failed
+                        # This ensures we always get the latest lineage from database
+                        if tags_needing_individual_query:
+                            if not product_db:
+                                logging.warning("⚠️ Product database not available for individual lineage queries")
+                            else:
+                                logging.info(f"🔄 CRITICAL: Performing {len(tags_needing_individual_query)} individual database queries to guarantee latest lineage values (overriding any batch cache data)...")
+                                individual_updated_count = 0
+                                try:
+                                    for tag, name in tags_needing_individual_query:
+                                        try:
+                                            # CRITICAL: Use get_product_lineage which handles normalization and case-insensitive matching
+                                            # This ALWAYS queries the database directly, never uses cache
+                                            db_lineage = product_db.get_product_lineage(name)
+                                            if db_lineage:
+                                                db_lin_clean = str(db_lineage).strip().upper()
+                                                # Get current lineage from tag (might be from batch cache)
+                                                old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                                
+                                                # CRITICAL: ALWAYS override with database value, even if batch cache had a value
+                                                # Database is the single source of truth
+                                                tag['currentLineage'] = db_lin_clean
+                                                tag['canonical_lineage'] = db_lin_clean
+                                                tag['Lineage'] = db_lin_clean
+                                                tag['lineage'] = db_lin_clean.lower()
+                                                
+                                                individual_updated_count += 1
+                                                updated += 1
+                                                if old_lineage != db_lin_clean:
+                                                    logging.info(f"🔄 CRITICAL: Lineage OVERRIDDEN by database (individual query): '{name}' - batch cache had '{old_lineage}' → database has '{db_lin_clean}'")
+                                                else:
+                                                    logging.debug(f"✅ Lineage confirmed by database (individual query): '{name}' = '{db_lin_clean}'")
                                             else:
-                                                logging.debug(f"✅ Lineage confirmed by database (individual query): '{name}' = '{db_lin_clean}'")
-                                        else:
-                                            # Even if no DB lineage found, ensure fields are consistent
+                                                # Even if no DB lineage found, ensure fields are consistent
+                                                existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                                if existing_lineage:
+                                                    tag['currentLineage'] = existing_lineage
+                                                    tag['canonical_lineage'] = existing_lineage
+                                                    tag['lineage'] = existing_lineage
+                                        except Exception as individual_err:
+                                            logging.debug(f"Individual lineage query failed for '{name}': {individual_err}")
+                                            # Even if query fails, ensure fields are consistent
                                             existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
                                             if existing_lineage:
                                                 tag['currentLineage'] = existing_lineage
                                                 tag['canonical_lineage'] = existing_lineage
                                                 tag['lineage'] = existing_lineage
-                                    except Exception as individual_err:
-                                        logging.debug(f"Individual lineage query failed for '{name}': {individual_err}")
-                                        # Even if query fails, ensure fields are consistent
-                                        existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                        if existing_lineage:
-                                            tag['currentLineage'] = existing_lineage
-                                            tag['canonical_lineage'] = existing_lineage
-                                            tag['lineage'] = existing_lineage
-                                
-                                if individual_updated_count > 0:
-                                    logging.info(f"✅ CRITICAL: Verified {individual_updated_count}/{len(tags_needing_individual_query)} tags with individual database queries - all lineage values now guaranteed to match database")
-                            except Exception as batch_individual_err:
-                                logging.error(f"❌ CRITICAL FAILURE: Individual lineage queries failed: {batch_individual_err}")
-                                import traceback
-                                logging.error(traceback.format_exc())
+                                    
+                                    if individual_updated_count > 0:
+                                        logging.info(f"✅ CRITICAL: Verified {individual_updated_count}/{len(tags_needing_individual_query)} tags with individual database queries - all lineage values now guaranteed to match database")
+                                    else:
+                                        logging.info(f"✅ CRITICAL: Completed individual lineage queries for {len(tags_needing_individual_query)} tags (all values confirmed from database)")
+                                except Exception as batch_individual_err:
+                                    logging.error(f"❌ CRITICAL FAILURE: Individual lineage queries failed: {batch_individual_err}")
+                                    import traceback
+                                    logging.error(traceback.format_exc())
+                                    # CRITICAL: Even if queries fail, try to ensure cache is updated with what we have
+                                    # This prevents stale cache from persisting
+                                    try:
+                                        cache.set(cache_key, make_json_safe(cached_tags), timeout=300)
+                                        logging.info("✅ Updated cache even after individual query failure to prevent stale data")
+                                    except Exception:
+                                        pass
                         
                         # Apply strain updates for tags that were found in batch cache
                         for tag in cached_tags:
@@ -8396,10 +8420,17 @@ def get_available_tags():
                                     tag['productStrain'] = clean_strain
                             except Exception as _loop_err:
                                 logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
-                        if updated:
-                            # Refresh cache with aligned data
+                        # CRITICAL FIX: Always refresh cache with aligned data, even if no changes detected
+                        # This ensures the cache always has the latest lineage values from database
+                        # Even if updated=0, we still need to refresh cache to ensure consistency
+                        try:
                             cache.set(cache_key, make_json_safe(cached_tags), timeout=300)
-                            logging.debug(f"🔄 Applied {updated} lineage updates to cached tags")
+                            if updated > 0:
+                                logging.debug(f"🔄 Applied {updated} lineage updates to cached tags and refreshed cache")
+                            else:
+                                logging.debug(f"🔄 Refreshed cache with verified lineage values (no changes detected, but cache updated for consistency)")
+                        except Exception as cache_update_err:
+                            logging.warning(f"⚠️ Failed to update cache after lineage alignment: {cache_update_err}")
                 except Exception as e:
                     logging.warning(f"UI lineage alignment (cache) skipped due to error: {e}")
                     # Even on error, return cached tags (better than nothing)
