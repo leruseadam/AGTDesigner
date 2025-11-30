@@ -1057,6 +1057,14 @@ const TagManager = {
                 this._updateAvailableTags(cachedTags, null);
                 console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
                 
+                // CRITICAL FIX: Always refresh lineage from database even when using cache
+                // This ensures lineage changes persist after page reload
+                this._refreshLineageFromDatabase(cachedTags).then(() => {
+                    console.log('✅ Lineage refreshed from database after cache hydration');
+                }).catch(err => {
+                    console.warn('⚠️ Failed to refresh lineage after cache hydration:', err);
+                });
+                
                 // Hide splash immediately when rendering from cache
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
@@ -1069,6 +1077,87 @@ const TagManager = {
             return true;
         }
         return false;
+    },
+
+    // Helper method to refresh lineage from database
+    async _refreshLineageFromDatabase(tags) {
+        const timestamp = Date.now();
+        try {
+            // Force fresh lineage fetch by bypassing cache and requesting database lineage
+            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&fast_load=0`, {
+                signal: AbortSignal.timeout(30000) // 30 second timeout
+            });
+            if (lineageResponse.ok) {
+                const lineageData = await lineageResponse.json();
+                const freshTags = lineageData.tags || lineageData;
+                if (Array.isArray(freshTags) && freshTags.length > 0) {
+                    // Build lineage map from fresh database data
+                    const lineageMap = new Map();
+                    freshTags.forEach(tag => {
+                        const name = tag['Product Name*'] || tag.ProductName;
+                        if (name) {
+                            const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage;
+                            if (dbLineage) {
+                                lineageMap.set(name, dbLineage.toString().trim().toUpperCase());
+                            }
+                        }
+                    });
+                    
+                    // Update tags with fresh lineage
+                    let updatedCount = 0;
+                    const tagsToUpdate = tags || this.state.tags;
+                    tagsToUpdate.forEach(tag => {
+                        const name = tag['Product Name*'] || tag.ProductName;
+                        if (name && lineageMap.has(name)) {
+                            const dbLineage = lineageMap.get(name);
+                            const oldLineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || '').toString().trim().toUpperCase();
+                            if (oldLineage !== dbLineage) {
+                                tag.canonical_lineage = dbLineage;
+                                tag.currentLineage = dbLineage;
+                                tag.Lineage = dbLineage;
+                                tag.lineage = dbLineage.toLowerCase();
+                                updatedCount++;
+                                console.log(`🔄 Updated lineage for "${name}": "${oldLineage}" → "${dbLineage}"`);
+                            } else {
+                                // Ensure fields are set even if values match
+                                tag.canonical_lineage = dbLineage;
+                                tag.currentLineage = dbLineage;
+                                tag.Lineage = dbLineage;
+                                tag.lineage = dbLineage.toLowerCase();
+                            }
+                        }
+                    });
+                    
+                    // Also update originalTags
+                    if (this.state.originalTags) {
+                        this.state.originalTags.forEach(tag => {
+                            const name = tag['Product Name*'] || tag.ProductName;
+                            if (name && lineageMap.has(name)) {
+                                const dbLineage = lineageMap.get(name);
+                                tag.canonical_lineage = dbLineage;
+                                tag.currentLineage = dbLineage;
+                                tag.Lineage = dbLineage;
+                                tag.lineage = dbLineage.toLowerCase();
+                            }
+                        });
+                    }
+                    
+                    // Update state
+                    this.state.tags = [...tagsToUpdate];
+                    
+                    if (updatedCount > 0) {
+                        console.log(`✅ Refreshed lineage for ${updatedCount} tags from database`);
+                        // Re-render with updated lineage
+                        this._updateAvailableTags(this.state.tags, null);
+                    } else {
+                        console.log(`✅ Lineage already up-to-date (verified ${freshTags.length} tags)`);
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to refresh lineage from database:', error);
+            throw error;
+        }
     },
 
     resetSearchInputs() {
@@ -5666,6 +5755,13 @@ const TagManager = {
             verboseLog(`   - Excel updated: ${responseData.excel_updated || 0} products`);
             verboseLog(`   - Verification: ${responseData.verification_passed ? 'PASSED' : 'FAILED'}`);
 
+            // CRITICAL FIX: Clear frontend cache after successful lineage update
+            // This ensures that on page reload, fresh lineage data is fetched from database
+            if (responseData.db_updated > 0 || responseData.excel_updated > 0) {
+                this.clearAvailableTagsCache();
+                console.log('🗑️ Cleared frontend cache after lineage update to ensure fresh data on reload');
+            }
+
             // CRITICAL FIX: Use verified lineage from response (may be normalized differently)
             const verifiedLineage = responseData.new_lineage || newLineage;
             
@@ -7563,8 +7659,15 @@ const TagManager = {
             console.log('=== fetchAndUpdateAvailableTags START ===');
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
-                console.log('✅ Tags rendered instantly from cache - skipping loader');
-                // Cache hydration already handled rendering, skip loader
+                console.log('✅ Tags rendered instantly from cache - fetching fresh lineage from database');
+                // CRITICAL FIX: Even when using cache, fetch fresh lineage from database to ensure persistence
+                // This ensures lineage changes persist after page reload
+                try {
+                    await this._refreshLineageFromDatabase(this.state.tags);
+                } catch (lineageError) {
+                    console.warn('⚠️ Failed to refresh lineage from database (using cached values):', lineageError);
+                    // Continue with cached tags even if lineage refresh fails
+                }
                 return true;
             }
             
