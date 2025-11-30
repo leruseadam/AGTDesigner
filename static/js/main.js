@@ -1043,6 +1043,20 @@ const TagManager = {
         if (this.state.hydratedFromCache) {
             return false;
         }
+        
+        // CRITICAL FIX: On page reload, check if we recently updated lineage
+        // If so, skip cache to ensure we get fresh lineage data from database
+        const recentLineageUpdate = sessionStorage.getItem('lastLineageUpdateTime');
+        if (recentLineageUpdate) {
+            const timeSinceUpdate = Date.now() - parseInt(recentLineageUpdate, 10);
+            // If lineage was updated within last 2 minutes, skip cache to get fresh data
+            if (timeSinceUpdate < 120000) {
+                console.log('🔄 Recent lineage update detected, skipping cache to fetch fresh data...');
+                sessionStorage.removeItem('lastLineageUpdateTime'); // Clear after use
+                return false; // Force fresh fetch
+            }
+        }
+        
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
             console.log(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
@@ -5568,6 +5582,11 @@ const TagManager = {
     _lineageUpdateInProgress: false,  // Flag to prevent clearing selected tags during lineage updates
     
     updateLineageOnBackendDebounced(tagName, newLineage) {
+        // CRITICAL FIX: Track pending lineage updates for reload protection
+        if (!this._lineageUpdatePending) {
+            this._lineageUpdatePending = new Set();
+        }
+        this._lineageUpdatePending.add(tagName);
         // Store the latest lineage value for this tag (overwrites previous if same tag)
         this._lineageUpdateQueue[tagName] = newLineage;
         this._lineageUpdatePending.add(tagName);
@@ -5759,6 +5778,8 @@ const TagManager = {
             // This ensures that on page reload, fresh lineage data is fetched from database
             if (responseData.db_updated > 0 || responseData.excel_updated > 0) {
                 this.clearAvailableTagsCache();
+                // Store timestamp of lineage update to skip cache on next page load
+                sessionStorage.setItem('lastLineageUpdateTime', Date.now().toString());
                 console.log('🗑️ Cleared frontend cache after lineage update to ensure fresh data on reload');
             }
 
@@ -5826,6 +5847,17 @@ const TagManager = {
             if (!this._recentlyUpdatedLineages.includes(tagName)) {
                 this._recentlyUpdatedLineages.push(tagName);
             }
+            
+            // CRITICAL FIX: Mark this lineage update as completed for reload protection
+            if (this._lineageUpdatePending) {
+                this._lineageUpdatePending.delete(tagName);
+            }
+            
+            // CRITICAL FIX: Store completion timestamp to ensure database has time to flush
+            if (!this._lineageUpdateCompletions) {
+                this._lineageUpdateCompletions = new Map();
+            }
+            this._lineageUpdateCompletions.set(tagName, Date.now());
 
             // CRITICAL FIX: Update selected tags locally without backend fetch
             // This ensures the selected tags dropdowns reflect the current lineage values
@@ -8640,6 +8672,14 @@ const TagManager = {
             console.log('📝 Container ready for tags');
         }
         
+        // CRITICAL FIX: Initialize lineage update tracking
+        this._lineageUpdatePending = new Set();
+        this._lineageUpdateCompletions = new Map();
+        this._lineageUpdateProcessing = false;
+        
+        // CRITICAL FIX: Prevent page reload until lineage updates complete
+        this._setupLineageUpdateReloadProtection();
+        
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
         
@@ -8756,6 +8796,66 @@ const TagManager = {
                 }
             }, 20000); // 20 second emergency timeout
         });
+    },
+
+    // CRITICAL FIX: Setup reload protection to wait for pending lineage updates
+    _setupLineageUpdateReloadProtection() {
+        // Intercept page reload attempts
+        const originalReload = window.location.reload.bind(window.location);
+        window.location.reload = (force) => {
+            this._waitForPendingLineageUpdates().then(() => {
+                console.log('✅ All lineage updates completed, proceeding with reload...');
+                originalReload(force);
+            }).catch((error) => {
+                console.warn('⚠️ Error waiting for lineage updates, reloading anyway:', error);
+                originalReload(force);
+            });
+        };
+        
+        // Add beforeunload handler to warn if updates are pending
+        window.addEventListener('beforeunload', (event) => {
+            if (this._hasPendingLineageUpdates()) {
+                const message = 'Lineage updates are in progress. Reloading now may cause changes to be lost.';
+                event.preventDefault();
+                event.returnValue = message;
+                return message;
+            }
+        });
+        
+        console.log('🛡️ Lineage update reload protection enabled');
+    },
+
+    // Check if there are pending lineage updates
+    _hasPendingLineageUpdates() {
+        return (this._lineageUpdatePending && this._lineageUpdatePending.size > 0) ||
+               (this._lineageUpdateProcessing === true);
+    },
+
+    // Wait for all pending lineage updates to complete
+    async _waitForPendingLineageUpdates(maxWaitMs = 5000) {
+        const startTime = Date.now();
+        
+        while (this._hasPendingLineageUpdates() && (Date.now() - startTime) < maxWaitMs) {
+            console.log(`⏳ Waiting for lineage updates to complete... (pending: ${this._lineageUpdatePending?.size || 0}, processing: ${this._lineageUpdateProcessing})`);
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        // Additional wait to ensure database commits are flushed (backend waits 0.1s + verification time)
+        if (this._lineageUpdateCompletions && this._lineageUpdateCompletions.size > 0) {
+            const lastCompletion = Math.max(...Array.from(this._lineageUpdateCompletions.values()));
+            const timeSinceLastCompletion = Date.now() - lastCompletion;
+            const additionalWait = Math.max(0, 500 - timeSinceLastCompletion); // Wait at least 500ms after last completion
+            if (additionalWait > 0) {
+                console.log(`⏳ Waiting ${additionalWait}ms for database commits to flush...`);
+                await new Promise(resolve => setTimeout(resolve, additionalWait));
+            }
+        }
+        
+        if (this._hasPendingLineageUpdates()) {
+            console.warn('⚠️ Still have pending lineage updates after waiting, proceeding anyway');
+        } else {
+            console.log('✅ All lineage updates completed');
+        }
     },
 
     // Show a simple loading indicator
