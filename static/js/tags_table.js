@@ -134,11 +134,40 @@ function createTagRow(tag) {
     }
     
     const brand = tag['Product Brand'] || tag.Brand || '';
-    const type = tag['Product Type*'] || tag.Type || '';
+    
+    // Extract weight units from multiple possible sources
+    let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+                           tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '').toString().trim();
+    
+    // Format weight to remove .0 decimals (e.g., "1.0g" -> "1g", but "1.5g" stays "1.5g")
+    if (weightWithUnits) {
+        // Match pattern: number with optional decimal, followed by unit
+        const weightMatch = weightWithUnits.match(/^([\d.]+)([a-zA-Z]+.*)$/);
+        if (weightMatch) {
+            const weightValue = weightMatch[1];
+            const unit = weightMatch[2];
+            // Try to parse as float
+            const weightFloat = parseFloat(weightValue);
+            if (!isNaN(weightFloat)) {
+                if (weightFloat % 1 === 0) {
+                    // It's a whole number, remove decimal point (e.g., "1.0" -> "1")
+                    weightWithUnits = `${Math.round(weightFloat)}${unit}`;
+                } else {
+                    // It's a decimal number, remove trailing zeros (e.g., "1.50" -> "1.5", "1.0" -> "1")
+                    // Convert to string and remove trailing zeros and decimal point if needed
+                    let formatted = weightFloat.toString();
+                    formatted = formatted.replace(/\.0+$/, ''); // Remove .0, .00, etc.
+                    formatted = formatted.replace(/(\.\d*?)0+$/, '$1'); // Remove trailing zeros after decimal
+                    formatted = formatted.replace(/\.$/, ''); // Remove trailing decimal point
+                    weightWithUnits = `${formatted}${unit}`;
+                }
+            }
+        }
+    }
 
     return `
         <tr class="tag-row" data-tag-name="${tagName}" data-lineage="${lineage}" data-doh="${dohStatus}">
-            <td class="align-middle">${tagName}</td>
+            <td class="align-middle tag-name-cell">${tagName}</td>
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
@@ -180,7 +209,7 @@ function createTagRow(tag) {
                 </div>
             </td>
             <td class="align-middle">${brand}</td>
-            <td class="align-middle">${type}</td>
+            <td class="align-middle">${weightWithUnits || ''}</td>
         </tr>
     `;
 }
@@ -1017,11 +1046,11 @@ class TagsTable {
           <table class="table table-hover">
               <thead>
                   <tr>
-                      <th>Name</th>
+                      <th class="tag-name-header">Name</th>
                       <th>Lineage</th>
                       <th>DOH</th>
                       <th>${brandHeaderText}</th>
-                      <th>Type</th>
+                      <th>Weight</th>
                       <th></th>
                   </tr>
               </thead>

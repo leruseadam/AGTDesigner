@@ -4597,6 +4597,13 @@ const TagManager = {
           // The lineage-based CSS will handle the proper colors
         }
         
+        // Highlight items with 5 or more units
+        const units = tag.Units || tag['Units'] || tag.units || 0;
+        const unitsNum = parseInt(units, 10) || 0;
+        if (unitsNum >= 5) {
+          tagElement.classList.add('high-units');
+        }
+        
         // Set data-lineage attribute for CSS coloring on both row and tagElement
         // CRITICAL FIX: For JSON matched tags, prioritize the Lineage field from the matched database data
         let lineage;
@@ -8529,9 +8536,14 @@ const TagManager = {
         const retryDelay = 500; // 0.5s between retries instead of 2s
         
         try {
-            // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
+            // PERFORMANCE OPTIMIZATION: Only force refresh if explicitly needed (e.g., after file upload)
+            // Otherwise, use cache to speed up filter population
+            const forceRefresh = this._forceFilterRefresh || false;
+            this._forceFilterRefresh = false; // Reset flag after use
+            
             const timestamp = Date.now();
-            const response = await fetch(`/api/filter-options?refresh=true&t=${timestamp}`, {
+            const refreshParam = forceRefresh ? '&refresh=true' : '';
+            const response = await fetch(`/api/filter-options?t=${timestamp}${refreshParam}`, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -8684,6 +8696,8 @@ const TagManager = {
             // Small delay to ensure Excel processor is ready
             await new Promise(resolve => setTimeout(resolve, 200));
             
+            // PERFORMANCE: Force filter refresh after file upload to ensure fresh data
+            this._forceFilterRefresh = true;
             // Now fetch filters with retry mechanism
             await this.fetchAndPopulateFilters();
             
