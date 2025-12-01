@@ -8683,12 +8683,11 @@ def get_available_tags():
                 excel_processor = None
             
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-                # CRITICAL FIX: ALWAYS update DataFrame lineage from database BEFORE loading tags
-                # This ensures lineage changes persist after page refresh
-                # This is MANDATORY - never skip this step
-                if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                # PERFORMANCE: Skip expensive DataFrame lineage update when fast_load is enabled
+                # This dramatically speeds up tag loading after upload
+                if not fast_load and hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
                     try:
-                        logging.info("🔄 CRITICAL FIX: ALWAYS updating DataFrame lineage from database before loading tags...")
+                        logging.info("🔄 CRITICAL FIX: Updating DataFrame lineage from database before loading tags...")
                         excel_processor._update_dataframe_lineage_from_database()
                         logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database")
                         # CRITICAL: Invalidate caches after DataFrame update to force fresh tag loading
@@ -8700,6 +8699,8 @@ def get_available_tags():
                         import traceback
                         logging.error(traceback.format_exc())
                         # Continue anyway - the guaranteed fix below will handle it
+                elif fast_load:
+                    logging.info("⚡ Fast load enabled - skipping DataFrame lineage update for speed")
                 try:
                     # CRITICAL: ALWAYS use enrichment to get database lineage - NEVER skip it
                     # Database lineage is the source of truth and must always be used for persistence

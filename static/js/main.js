@@ -7725,7 +7725,9 @@ const TagManager = {
         } catch (error) {
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
-            const fallbackLoaded = await this._fallbackToLiteAvailableTags(error, savedScroll);
+            // CRITICAL FIX: savedScroll may not be defined if error occurs early - save it now if needed
+            const savedScrollForFallback = typeof savedScroll !== 'undefined' ? savedScroll : this._saveAvailableScrollPosition();
+            const fallbackLoaded = await this._fallbackToLiteAvailableTags(error, savedScrollForFallback);
             if (fallbackLoaded) {
                 verboseLog('✅ Fallback lite tags loaded successfully');
                 return true;
