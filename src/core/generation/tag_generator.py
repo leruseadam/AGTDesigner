@@ -131,7 +131,8 @@ def get_template_path(template_type):
         'vertical': 'vertical.docx',
         'mini': 'mini.docx',
         'double': 'double.docx',
-        'inventory': 'inventory.docx'
+        'inventory': 'inventory.docx',
+        'preroll': 'preroll.docx'
     }
 
     # Validate template type
@@ -890,6 +891,10 @@ def process_chunk(args):
         local_template_buffer = base_template
         num_labels = 20  # Use standard 4x5 grid
         logger.info(f"🔧 MINI TEMPLATE EXPANSION: Using standard template expansion")
+    elif orientation == "preroll":
+        local_template_buffer = base_template
+        num_labels = 20  # Use standard 4x5 grid (same as mini)
+        logger.info(f"🔧 PREROLL TEMPLATE EXPANSION: Using standard 4x5 expansion (same as mini)")
     elif orientation == "double":
         local_template_buffer = base_template
         num_labels = 12  # Use standard 4x3 grid
@@ -902,7 +907,7 @@ def process_chunk(args):
         logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic expansion for {num_labels} labels")
     tpl = DocxTemplate(local_template_buffer)
     context = {}
-    image_width = Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12)
+    image_width = Mm(8) if orientation == "mini" or orientation == "preroll" else Mm(9 if orientation == 'vertical' else 12)
     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")

@@ -1429,15 +1429,24 @@ class ProductDatabase:
                 print(f"🔍 DEBUG: Filtered out blank product names - Processing {len(filtered_df)} valid rows")
             
             # Process each row in the filtered DataFrame
+            # OPTIMIZATION: Use itertuples() instead of iterrows() for 10-100x speedup
             print(f"🔍 DEBUG: Starting to process {len(filtered_df)} rows for database storage")
-            for index, row in filtered_df.iterrows():
+            total_rows = len(filtered_df)
+            
+            # Create column index mapping for faster access
+            col_index_map = {col: idx for idx, col in enumerate(filtered_df.columns)}
+            
+            for row_idx, row_tuple in enumerate(filtered_df.itertuples(index=False)):
                 try:
-                    if index % 100 == 0:  # Log every 100 rows
-                        print(f"🔍 DEBUG: Processing row {index}/{len(filtered_df)}")
-                    # Convert row to dictionary and handle NaN values
+                    if row_idx % 100 == 0:  # Log every 100 rows
+                        print(f"🔍 DEBUG: Processing row {row_idx}/{total_rows}")
+                    
+                    # Convert row tuple to dictionary and handle NaN values
+                    # itertuples() returns a namedtuple, access by index
                     row_dict = {}
                     for col in filtered_df.columns:
-                        value = row[col]
+                        col_idx = col_index_map[col]
+                        value = row_tuple[col_idx]
                         if pd.isna(value):
                             row_dict[col] = None
                         else:
@@ -1449,7 +1458,7 @@ class ProductDatabase:
                     excel_units = row_dict.get('Units', row_dict.get('Weight Unit*', row_dict.get('Weight Unit* (grams/gm or ounces/oz)', '')))
                     
                     # Log first few weight extractions for debugging
-                    if index < 5:  # Log first 5 products
+                    if row_idx < 5:  # Log first 5 products
                         product_name_for_log = row_dict.get('Product Name*', 'Unknown')
                         logger.info(f"[WEIGHT DEBUG] Product: '{product_name_for_log}' | Excel Weight: '{excel_weight}' | Excel Units: '{excel_units}'")
                     
@@ -1459,18 +1468,18 @@ class ProductDatabase:
                         weight_value = str(excel_weight).strip()
                     else:
                         weight_value = '1'  # Numeric value only as fallback
-                        if index < 5:
+                        if row_idx < 5:
                             logger.warning(f"[WEIGHT DEBUG] Using fallback weight '1' for product '{row_dict.get('Product Name*', 'Unknown')}' (original: '{excel_weight}')")
                     
                     if excel_units is not None and str(excel_units).strip() not in ['', 'nan', 'none', 'null', 'NaN', 'None']:
                         units_value = str(excel_units).strip()
                     else:
                         units_value = 'g'  # Default unit as fallback
-                        if index < 5:
+                        if row_idx < 5:
                             logger.warning(f"[WEIGHT DEBUG] Using fallback units 'g' for product '{row_dict.get('Product Name*', 'Unknown')}' (original: '{excel_units}')")
                     
                     # Final debug log
-                    if index < 5:
+                    if row_idx < 5:
                         logger.info(f"[WEIGHT DEBUG] Final values - Weight: '{weight_value}' | Units: '{units_value}'")
                     
                     # CRITICAL FIX: Ensure CBD Blend products get CBD lineage
@@ -1704,12 +1713,12 @@ class ProductDatabase:
                     
                     # Enhanced validation: Skip blank or invalid entries
                     if not product_name or str(product_name).strip() == '' or str(product_name).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {index + 1}: Skipping blank/invalid product name: '{product_name}'")
+                        logger.warning(f"Row {row_idx + 1}: Skipping blank/invalid product name: '{product_name}'")
                         continue
                     
                     # Skip rows with only whitespace or special characters
                     if str(product_name).strip() == '' or len(str(product_name).strip()) < 2:
-                        logger.warning(f"Row {index + 1}: Skipping product name too short or only whitespace: '{product_name}'")
+                        logger.warning(f"Row {row_idx + 1}: Skipping product name too short or only whitespace: '{product_name}'")
                         continue
                     
                     # Update the product data with the found name
@@ -1720,18 +1729,18 @@ class ProductDatabase:
                     product_type = product_data.get('Product Type*', '').strip()
                     
                     if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing vendor information")
+                        logger.warning(f"Row {row_idx + 1}: Skipping product '{product_name}' - missing vendor information")
                         continue
                     
                     if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing product type")
+                        logger.warning(f"Row {row_idx + 1}: Skipping product '{product_name}' - missing product type")
                         continue
                     
                     # Skip duplicate entries within the same upload (same name + vendor + type combination)
                     duplicate_key = f"{product_name}|{vendor}|{product_type}"
                     if duplicate_key in self._current_upload_products:
                         skipped_duplicates += 1
-                        logger.warning(f"Row {index + 1}: Skipping duplicate product '{product_name}' from same vendor '{vendor}' and type '{product_type}'")
+                        logger.warning(f"Row {row_idx + 1}: Skipping duplicate product '{product_name}' from same vendor '{vendor}' and type '{product_type}'")
                         continue
                     
                     # Track this product to prevent duplicates within the same upload
@@ -1853,16 +1862,16 @@ class ProductDatabase:
                     elif product_id is None:
                         # Product was skipped as duplicate
                         skipped_duplicates += 1
-                        logger.info(f"Row {index + 1}: Skipped duplicate product '{product_name}'")
+                        logger.info(f"Row {row_idx + 1}: Skipped duplicate product '{product_name}'")
                         continue
                     else:
                         error_count += 1
-                        errors.append(f"Row {index + 1}: Failed to store product")
+                        errors.append(f"Row {row_idx + 1}: Failed to store product")
                         
                 except Exception as row_error:
                     error_count += 1
-                    errors.append(f"Row {index + 1}: {str(row_error)}")
-                    logger.error(f"Error processing row {index + 1}: {row_error}")
+                    errors.append(f"Row {row_idx + 1}: {str(row_error)}")
+                    logger.error(f"Error processing row {row_idx + 1}: {row_error}")
                     continue
             
             # Calculate excluded counts

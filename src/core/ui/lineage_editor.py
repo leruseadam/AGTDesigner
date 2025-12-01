@@ -194,7 +194,19 @@ class LineageEditor:
             self.popup_vars[name] = var
 
             # Only show unique, abbreviated options (CBD and CBD_BLEND as one)
+            # CRITICAL: Exclude MIXED for classic types - MIXED is only for non-classic types
+            from ..constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES
+            is_classic_type = prod_type.lower() in [ct.lower() for ct in CLASSIC_TYPES]
+            
+            if is_classic_type:
+                # For classic types, only show valid classic lineages (exclude MIXED and PARAPHERNALIA)
+                lineage_keys = [k for k in self.LINEAGE_MAP.keys() 
+                               if k != "CBD_BLEND" and k != "MIXED" and k != "PARAPHERNALIA"
+                               and k.upper() in VALID_CLASSIC_LINEAGES]
+            else:
+                # For non-classic types, show all lineages including MIXED
             lineage_keys = [k for k in self.LINEAGE_MAP.keys() if k != "CBD_BLEND"]
+            
             abbr_values = [self.ABBREVIATED_LINEAGE.get(k, k) for k in lineage_keys]
             combo = ttk.Combobox(
                 row,
@@ -274,7 +286,8 @@ class LineageEditor:
                 from app import save_shared_data
                 save_shared_data(df2)
             except Exception as e:
-                # Warning: Could not save shared data from LineageEditor: {e}
+                # Warning: Could not save shared data from LineageEditor
+                pass
             self._background_save(df2)
         else:
             self.popup.destroy()

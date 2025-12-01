@@ -79,7 +79,8 @@ def get_font_scheme(template_type, base_size=12):
         'mini': {"base_size": base_size - 2, "min_size": 6, "max_length": 15},
         'horizontal': {"base_size": base_size + 1, "min_size": 7, "max_length": 20},
         'double': {"base_size": base_size - 1, "min_size": 8, "max_length": 30},
-        'inventory': {"base_size": base_size, "min_size": 8, "max_length": 40}  # Inventory slips can handle longer text
+        'inventory': {"base_size": base_size, "min_size": 8, "max_length": 40},  # Inventory slips can handle longer text
+        'preroll': {"base_size": base_size - 2, "min_size": 6, "max_length": 15}  # Preroll template uses mini font scheme
     }
     return {
         field: {**schemes.get(template_type, schemes['default'])}
@@ -97,6 +98,7 @@ class TemplateProcessor:
             'inventory': 'inventory.docx',
             'horizontal': 'horizontal.docx',
             'vertical': 'vertical.docx',
+            'preroll': 'preroll.docx',
         }
         filename = template_map.get(self.template_type, 'horizontal.docx')
         template_path = base_dir / filename
@@ -155,6 +157,10 @@ class TemplateProcessor:
             self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
+        elif self.template_type == 'preroll':
+            self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page (same as mini)
+            if not IS_PYTHONANYWHERE:
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for preroll template")
         elif self.template_type == 'double':
             self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page
             if not IS_PYTHONANYWHERE:
@@ -202,6 +208,8 @@ class TemplateProcessor:
                 required_labels = 12  # 4x3 grid
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
+            elif self.template_type == 'preroll':
+                required_labels = 20  # 4x5 grid (same as mini)
             else:
                 required_labels = 9   # 3x3 grid
             
@@ -219,6 +227,10 @@ class TemplateProcessor:
                 elif self.template_type == 'double':
                     self.logger.info("Calling 4x3 expansion method")
                     return self._expand_template_to_4x3_fixed_double()
+                elif self.template_type == 'preroll':
+                    # Preroll uses 4x5 grid like mini template
+                    self.logger.info("Calling 4x5 expansion method for preroll template")
+                    return self._expand_template_to_4x5_fixed_scaled()
                 else:
                     # horizontal and vertical templates expand to 3x3 grid
                     self.logger.info(f"Calling 3x3 expansion method for template type: '{self.template_type}'")
@@ -1015,7 +1027,16 @@ class TemplateProcessor:
                     # Single chunk - process normally
                     self.chunk_count = 1
                     self.logger.info(f"🔍 LABEL RENDER: Processing single chunk containing {len(records)} record(s)")
-                    documents.append(self._process_chunk(records))
+                    try:
+                        chunk_doc = self._process_chunk(records)
+                        if chunk_doc is not None:
+                            documents.append(chunk_doc)
+                        else:
+                            self.logger.error("Single chunk processing returned None")
+                    except Exception as e:
+                        self.logger.error(f"Error processing single chunk: {e}")
+                        self.logger.error(traceback.format_exc())
+                        # Don't add None to documents - let it fail gracefully
             
             if not documents: 
                 return None
@@ -1116,6 +1137,17 @@ class TemplateProcessor:
             
             # Build context for each record in the chunk
             context = {}
+            
+            # Determine required label count based on template type
+            if self.template_type == 'mini' or self.template_type == 'preroll':
+                required_labels = 20  # Fixed grid: 4x5 = 20 labels
+            elif self.template_type == 'double':
+                required_labels = 12  # Fixed grid: 3x4 = 12 labels
+            elif self.template_type == 'inventory':
+                required_labels = 4   # Fixed grid: 2x2 = 4 labels
+            else:
+                required_labels = len(chunk)  # Dynamic templates use actual chunk size
+            
             for i, record in enumerate(chunk):
                 # Set current record for brand centering logic
                 self.current_record = record
@@ -1131,9 +1163,18 @@ class TemplateProcessor:
                 # Debug logging to check field values and order
                 product_name = record.get('ProductName', 'Unknown')
                 self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
-            # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
-            # This saves printer ink by not generating empty cells
-            self.logger.info(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
+            
+            # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
+            # to prevent Jinja template errors when template references missing labels
+            if self.template_type in ['mini', 'preroll', 'double', 'inventory']:
+                empty_label_context = self._get_empty_label_context()
+                for i in range(len(chunk) + 1, required_labels + 1):
+                    context[f'Label{i}'] = empty_label_context
+                self.logger.info(f"🔧 FIXED GRID: Created {len(chunk)} product labels + {required_labels - len(chunk)} empty labels = {required_labels} total for {self.template_type} template")
+            else:
+                # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
+                # This saves printer ink by not generating empty cells
+                self.logger.info(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
@@ -1150,14 +1191,11 @@ class TemplateProcessor:
                 self._remove_unmerged_placeholders(rendered_doc, len(chunk))
                 
             except Exception as render_error:
-                self.logger.warning(f"DocxTemplate render failed: {render_error}, using manual replacement")
-                # Only use manual replacement as a fallback when DocxTemplate fails
-                buffer = BytesIO()
-                doc.save(buffer)
-                buffer.seek(0)
-                rendered_doc = Document(buffer)
-                self._manual_replace_placeholders(rendered_doc, context)
-                return rendered_doc
+                self.logger.error(f"DocxTemplate render failed: {render_error}")
+                self.logger.error(f"Context keys: {list(context.keys())}")
+                self.logger.error(f"Chunk size: {len(chunk)}, Template type: {self.template_type}")
+                # Re-raise the error so it can be handled upstream
+                raise
             
             # CRITICAL FIX: Ensure all tables have proper tblGrid elements before processing
             self._ensure_table_grids_exist(rendered_doc)
@@ -1328,6 +1366,55 @@ class TemplateProcessor:
         
         return context
 
+    def _get_empty_label_context(self):
+        """Create an empty label context dictionary with all required fields set to empty strings."""
+        return {
+            'Description': '',
+            'WeightUnits': '',
+            'ProductBrand': '',
+            'Price': '',
+            'Lineage': '',
+            'DOH': '',
+            'Ratio_or_THC_CBD': '',
+            'THC_CBD': '',
+            'THC': '',
+            'CBD': '',
+            'Ratio': '',
+            'ProductName': '',
+            'ProductStrain': '',
+            'ProductVendor': '',
+            'DescAndWeight': '',
+            'JointRatio': '',
+            'ProductType': '',
+            # Marker fields for template processing
+            'ProductStrain_START': 'PRODUCTSTRAIN_START',
+            'ProductStrain_END': 'PRODUCTSTRAIN_END',
+            'Lineage_START': 'LINEAGE_START',
+            'Lineage_END': 'LINEAGE_END',
+            'ProductBrand_START': 'PRODUCTBRAND_START',
+            'ProductBrand_END': 'PRODUCTBRAND_END',
+            'ProductVendor_START': 'PRODUCTVENDOR_START',
+            'ProductVendor_END': 'PRODUCTVENDOR_END',
+            'DescAndWeight_START': 'DESC_START',
+            'DescAndWeight_END': 'DESC_END',
+            'Ratio_or_THC_CBD_START': 'THC_CBD_START',
+            'Ratio_or_THC_CBD_END': 'THC_CBD_END',
+            'Price_START': 'PRICE_START',
+            'Price_END': 'PRICE_END',
+            'WeightUnits_START': 'WEIGHTUNITS_START',
+            'WeightUnits_END': 'WEIGHTUNITS_END',
+            'Ratio_START': 'RATIO_START',
+            'Ratio_END': 'RATIO_END',
+            'JointRatio_START': 'JOINT_RATIO_START',
+            'JointRatio_END': 'JOINT_RATIO_END',
+            'THC_START': 'THC_START',
+            'THC_END': 'THC_END',
+            'CBD_START': 'CBD_START',
+            'CBD_END': 'CBD_END',
+            # QR code field (empty for blank labels)
+            'QR': '',
+        }
+    
     def _build_label_context(self, record, doc, product_brand_cache=None):
         """Ultra-optimized label context building for maximum performance."""
         if product_brand_cache is None:
@@ -1339,6 +1426,21 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
+        
+        # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
+        if self.template_type == 'preroll':
+            group_id = record.get('_group_id')
+            if group_id:
+                group_info = record.get('_group_info')
+                if group_info and isinstance(group_info, dict):
+                    group_display_name = group_info.get('display_name', '')
+                    if group_display_name:
+                        # Override ProductName, Product Name*, and Description immediately
+                        label_context['ProductName'] = group_display_name
+                        label_context['Product Name*'] = group_display_name
+                        label_context['Description'] = group_display_name
+                        self.logger.info(f"PREROLL GROUP OVERRIDE: Set ProductName/Description to '{group_display_name}' (group_id: {group_id})")
+        
         has_cbd_blend_strain = False
         cbd_signal_tokens = ['CBD', 'CBG', 'CBN', 'CBC']
 
@@ -1574,97 +1676,131 @@ class TemplateProcessor:
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
 
         # Use DescAndWeight from record if it exists, otherwise construct it
-        if 'DescAndWeight' in label_context and label_context['DescAndWeight']:
-            # DescAndWeight is already set correctly in the record, use it as-is
-            desc_and_weight = label_context['DescAndWeight']
-            if not is_already_wrapped(desc_and_weight, 'DESC'):
-                label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
-        else:
-            # Fallback: construct DescAndWeight from Description and WeightUnits
-            desc = label_context.get('Description', '') or ''
-            weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
-            
-            # DEBUG: Log the values being processed
-            self.logger.info(f"🔍 DESCANDWEIGHT DEBUG: Product '{record.get('ProductName', 'N/A')}' - Description: '{desc}', WeightUnits: '{weight}'")
-            
-            # Ultra-fast string operations
-            if desc.endswith('- '):
-                desc = desc[:-2]
-            if weight.startswith('- '):
-                weight = weight[2:]
-            
-            # DEBUG: Log all record keys and values to see what we're working with
-            self.logger.info(f"🔍 RECORD KEYS: {list(record.keys())}")
-            for key, value in record.items():
-                if 'weight' in key.lower() or 'units' in key.lower():
-                    self.logger.info(f"🔍 {key}: '{value}'")
-            
-            # CRITICAL FIX: Horizontal template uses DescAndWeight placeholder, not separate WeightUnits
-            # Add weight to description for the {{Label1.DescAndWeight}} placeholder
-            product_name_display = (
-                label_context.get('ProductName') or
-                record.get('ProductName') or
-                record.get('Product Name*', '')
-            )
-            
-            if self.template_type == 'double':
-                primary_text = (product_name_display or desc or '').strip()
-                self.logger.info(f"🔍 DOUBLE TEMPLATE DESC: Using primary text '{primary_text}'")
-                label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
-            else:
-                # Check if WeightUnits already contains the complete weight+units
-                weight_units = record.get("WeightUnits", "")
-                if weight_units and weight_units.strip():
-                    # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
-                    clean_weight = weight_units.strip()
-                    
-                    # CRITICAL FIX: Clean weight duplication patterns directly in template processor
-                    # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
-                    decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
-                    match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
-                    if match1:
-                        clean_weight = f"{match1.group(1)}{match1.group(2)}"
-                        self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+        # PREROLL TEMPLATE: Check for group name FIRST before doing anything else
+        if self.template_type == 'preroll':
+            group_id = record.get('_group_id')
+            if group_id:
+                group_info = record.get('_group_info')
+                if group_info and isinstance(group_info, dict):
+                    group_display_name = group_info.get('display_name', '')
+                    if group_display_name:
+                        # Force DescAndWeight to use group name ONLY (no weight, no individual product info)
+                        label_context['DescAndWeight'] = wrap_with_marker(group_display_name, 'DESC')
+                        self.logger.info(f"PREROLL GROUP: Set DescAndWeight to group name '{group_display_name}' (group_id: {group_id})")
+                        # Skip all DescAndWeight construction below - we're done
+                        # Continue to QR code generation
                     else:
-                        # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
-                        integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
-                        match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
-                        if match2:
-                            clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
-                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                        else:
-                            # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
-                            mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
-                            match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
-                            if match3:
-                                clean_weight = f"{match3.group(1)}{match3.group(2)}"
-                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                    
-                    # Keep weight on the same line as description with non-breaking space
-                    desc_and_weight = f"{desc} -\u00A0{clean_weight}"
-                    self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
+                        self.logger.warning(f"PREROLL: Group info missing display_name for group_id: {group_id}")
                 else:
-                    # Fallback to constructing from Weight* + Units
-                    weight_value = record.get("Weight*", "")
-                    units_value = record.get("Units", "")
-                    
-                    if not weight_value:
-                        weight_value = record.get("Weight", "")
-                    if not units_value:
-                        units_value = record.get("Units", "")
-                    
-                    self.logger.info(f"🔍 FALLBACK WEIGHT VALUES: Weight*='{weight_value}', Units='{units_value}'")
-                    
-                    if weight_value and units_value:
-                        clean_weight = f"{weight_value}{units_value}"
-                        desc_and_weight = f"{desc} -\u00A0{clean_weight}"
-                        self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
-                    else:
-                        desc_and_weight = desc
-                        self.logger.info(f"🔍 NO WEIGHT AVAILABLE: Weight*='{weight_value}', Units='{units_value}' -> '{desc_and_weight}'")
+                    self.logger.warning(f"PREROLL: No group_info found for group_id: {group_id}")
+            else:
+                self.logger.warning(f"PREROLL: No _group_id found in record - grouping may have failed")
+        
+        # For non-preroll or preroll without group, use normal DescAndWeight logic
+        # Check if we already set DescAndWeight for preroll group (skip if so)
+        if not (self.template_type == 'preroll' and record.get('_group_id') and label_context.get('DescAndWeight')):
+            if 'DescAndWeight' in label_context and label_context['DescAndWeight']:
+                # DescAndWeight is already set correctly in the record, use it as-is
+                desc_and_weight = label_context['DescAndWeight']
+                if not is_already_wrapped(desc_and_weight, 'DESC'):
+                    label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
+                # Skip the rest of DescAndWeight processing since it's already set
+            else:
+                # Fallback: construct DescAndWeight from Description and WeightUnits
+                desc = label_context.get('Description', '') or ''
+                weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
                 
-                self.logger.info(f"🔍 DESCANDWEIGHT RESULT: '{desc_and_weight}'")
-                label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
+                # DEBUG: Log the values being processed
+                self.logger.info(f"🔍 DESCANDWEIGHT DEBUG: Product '{record.get('ProductName', 'N/A')}' - Description: '{desc}', WeightUnits: '{weight}'")
+                
+                # Ultra-fast string operations
+                if desc.endswith('- '):
+                    desc = desc[:-2]
+                if weight.startswith('- '):
+                    weight = weight[2:]
+                
+                # DEBUG: Log all record keys and values to see what we're working with
+                self.logger.info(f"🔍 RECORD KEYS: {list(record.keys())}")
+                for key, value in record.items():
+                    if 'weight' in key.lower() or 'units' in key.lower():
+                        self.logger.info(f"🔍 {key}: '{value}'")
+                
+                # CRITICAL FIX: Horizontal template uses DescAndWeight placeholder, not separate WeightUnits
+                # Add weight to description for the {{Label1.DescAndWeight}} placeholder
+                product_name_display = (
+                    label_context.get('ProductName') or
+                    record.get('ProductName') or
+                    record.get('Product Name*', '')
+                )
+                
+                if self.template_type == 'double':
+                    primary_text = (product_name_display or desc or '').strip()
+                    self.logger.info(f"🔍 DOUBLE TEMPLATE DESC: Using primary text '{primary_text}'")
+                    label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
+                elif self.template_type == 'preroll':
+                    # PREROLL TEMPLATE: Use group display name ONLY (no weight, no individual product details)
+                    # Check if we already set DescAndWeight for grouped preroll (above)
+                    if not (record.get('_group_id') and label_context.get('DescAndWeight')):
+                        # Use description (should be group name if grouping worked) or product_name_display as fallback
+                        primary_text = (desc or product_name_display or '').strip()
+                        self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' (no weight)")
+                        label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
+                    else:
+                        self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Already set to group name, skipping reconstruction")
+                else:
+                    # Check if WeightUnits already contains the complete weight+units
+                    weight_units = record.get("WeightUnits", "")
+                    if weight_units and weight_units.strip():
+                        # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
+                        clean_weight = weight_units.strip()
+                        
+                        # CRITICAL FIX: Clean weight duplication patterns directly in template processor
+                        # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
+                        decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
+                        match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
+                        if match1:
+                            clean_weight = f"{match1.group(1)}{match1.group(2)}"
+                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                        else:
+                            # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
+                            integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
+                            match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
+                            if match2:
+                                clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
+                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                            else:
+                                # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
+                                mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
+                                match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
+                                if match3:
+                                    clean_weight = f"{match3.group(1)}{match3.group(2)}"
+                                    self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                        
+                        # Keep weight on the same line as description with non-breaking space
+                        desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                        self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
+                    else:
+                        # Fallback to constructing from Weight* + Units
+                        weight_value = record.get("Weight*", "")
+                        units_value = record.get("Units", "")
+                        
+                        if not weight_value:
+                            weight_value = record.get("Weight", "")
+                        if not units_value:
+                            units_value = record.get("Units", "")
+                        
+                        self.logger.info(f"🔍 FALLBACK WEIGHT VALUES: Weight*='{weight_value}', Units='{units_value}'")
+                        
+                        if weight_value and units_value:
+                            clean_weight = f"{weight_value}{units_value}"
+                            desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                            self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
+                        else:
+                            desc_and_weight = desc
+                            self.logger.info(f"🔍 NO WEIGHT AVAILABLE: Weight*='{weight_value}', Units='{units_value}' -> '{desc_and_weight}'")
+                    
+                    self.logger.info(f"🔍 DESCANDWEIGHT RESULT: '{desc_and_weight}'")
+                    label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
 
         # Fast DOH image processing - only if needed
         # IMPORTANT: Only use the canonical DOH field for image decisions
@@ -1905,7 +2041,7 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Classic types should NOT have ProductBrand for most templates
             # However, mini templates still display brand in dedicated cells
-            if self.template_type == 'mini':
+            if self.template_type == 'mini' or self.template_type == 'preroll':
                 if product_brand:
                     classic_brand_text = str(product_brand).strip().upper()
                     # Ensure markers are applied consistently for downstream formatting
@@ -1916,14 +2052,16 @@ class TemplateProcessor:
                         plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND_CENTER')
                     label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
                     label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
+                    template_name = 'PREROLL' if self.template_type == 'preroll' else 'MINI'
                     self.logger.info(
-                        f"🎯 MINI CLASSIC BRAND: Preserving ProductBrand '{classic_brand_text}' for classic type '{product_type}'"
+                        f"🎯 {template_name} CLASSIC BRAND: Preserving ProductBrand '{classic_brand_text}' for classic type '{product_type}'"
                     )
                 else:
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
+                    template_name = 'PREROLL' if self.template_type == 'preroll' else 'MINI'
                     self.logger.info(
-                        f"🎯 MINI CLASSIC BRAND: No brand available to preserve for classic type '{product_type}'"
+                        f"🎯 {template_name} CLASSIC BRAND: No brand available to preserve for classic type '{product_type}'"
                     )
             else:
                 label_context['ProductBrand'] = ""
@@ -2052,6 +2190,18 @@ class TemplateProcessor:
                     label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
                     label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
                     self.logger.info(f"🎯 MINI TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for mini template")
+                elif self.template_type == 'preroll':
+                    # For preroll template, use same ProductBrand handling as mini template
+                    # Preroll templates need brand information in multiple fields just like mini
+                    plain_brand = brand_center_text
+                    if is_already_wrapped(plain_brand, 'PRODUCTBRAND'):
+                        plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND')
+                    elif is_already_wrapped(plain_brand, 'PRODUCTBRAND_CENTER'):
+                        plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND_CENTER')
+                    label_context['Lineage'] = brand_center_text
+                    label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
+                    label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
+                    self.logger.info(f"🎯 PREROLL TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for preroll template")
                 elif self.template_type == 'double':
                     # For double template, use brand text as-is with markers for downstream formatting
                     final_brand_text = str(brand_center_text).strip().upper()
@@ -2383,6 +2533,30 @@ class TemplateProcessor:
         # Fast description processing
         if label_context.get('Description'):
             label_context['Description'] = self.fix_hyphen_spacing(label_context['Description'])
+            
+            # PREROLL TEMPLATE: Truncate description to universal format
+            # Example: "Super Sour Diesel Infused Pre‑Roll ‑ 1g" -> " Infused Pre‑Roll ‑ 1g"
+            if self.template_type == 'preroll':
+                description = label_context['Description']
+                # Find common preroll patterns and extract the universal part
+                # Look for patterns like "Infused Pre‑Roll", "Pre‑Roll", etc. followed by weight
+                # Pattern to match: [anything] + [Infused]? + Pre[- ]?Roll + [anything with weight]
+                # Note: 're' module is already imported at the top of this file
+                preroll_patterns = [
+                    r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)',
+                    r'(.+?)(Pre[-‑ ]?Roll.*)',
+                ]
+                for pattern in preroll_patterns:
+                    match = re.search(pattern, description, re.IGNORECASE)
+                    if match:
+                        # Extract the universal part (everything after the strain name)
+                        universal_desc = match.group(2).strip()
+                        # Ensure it starts with a space if there was a strain name
+                        if not universal_desc.startswith(' '):
+                            universal_desc = ' ' + universal_desc
+                        label_context['Description'] = universal_desc
+                        self.logger.info(f"PREROLL DESC TRUNCATE: '{description}' -> '{universal_desc}'")
+                        break
 
         # CRITICAL FIX: Apply non-breaking hyphens to ProductName to prevent "Pre-Roll" splitting
         if label_context.get('ProductName'):
@@ -2471,13 +2645,72 @@ class TemplateProcessor:
                 product_vendor = ''
             label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
 
-        # Generate QR code for Product Name
+        # Generate QR code - special handling for preroll template
         product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
         if product_name and str(product_name).strip():
-            qr_code = self._generate_qr_code(product_name, doc)
+            # For preroll template, generate URL to preroll items page
+            # For all other templates, use product name as before
+            if self.template_type == 'preroll':
+                # Generate group-specific URL pointing to preroll items page for this product group
+                # CRITICAL FIX: Use group_key (includes vendor) instead of just group_id
+                # This ensures each vendor gets their own QR code that shows only their products
+                group_key = label_context.get('_group_key') or record.get('_group_key')
+                group_id = label_context.get('_group_id') or record.get('_group_id', 'other')
+                
+                # Extract vendor from record for vendor-specific filtering
+                vendor = (
+                    label_context.get('Vendor') or 
+                    label_context.get('Vendor/Supplier*') or
+                    record.get('Vendor') or 
+                    record.get('Vendor/Supplier*') or 
+                    record.get('Vendor/Supplier', '') or
+                    ''
+                )
+                vendor_clean = str(vendor).strip()
+                
+                # Always use production domain for QR codes - never use localhost
+                # QR codes need to work for customers, so they must point to production
+                import os
+                
+                # Check if we're on PythonAnywhere (production)
+                is_production = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
+                
+                # Always use production URL for QR codes regardless of environment
+                # QR codes are printed and distributed, so they must work from anywhere
+                base_url = 'https://www.agtpricetags.com'
+                
+                # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
+                # Format: /preroll-items/{group_id}?vendor={vendor}
+                # This allows the route to filter products by vendor
+                if vendor_clean:
+                    # URL encode vendor to handle special characters
+                    from urllib.parse import quote
+                    vendor_encoded = quote(vendor_clean)
+                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
+                else:
+                    # Fallback to group_id only if no vendor (backward compatibility)
+                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
+                
+                # Final safety check: verify URL doesn't contain localhost
+                if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
+                    # Force production URL
+                    if vendor_clean:
+                        from urllib.parse import quote
+                        vendor_encoded = quote(vendor_clean)
+                        qr_url = f"https://www.agtpricetags.com/preroll-items/{group_id}?vendor={vendor_encoded}"
+                    else:
+                        qr_url = f"https://www.agtpricetags.com/preroll-items/{group_id}"
+                    self.logger.warning(f"QR URL contained localhost, forced to production: {qr_url}")
+                
+                self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
+                qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
+            else:
+                # All other templates: use product name as before
+                qr_code = self._generate_qr_code(product_name, doc)
+            
             if qr_code:
                 label_context['QR'] = qr_code
-                self.logger.debug(f"Generated QR code for product: '{product_name}'")
+                self.logger.debug(f"Generated QR code for template '{self.template_type}': '{product_name if self.template_type != 'preroll' else qr_url}'")
             else:
                 label_context['QR'] = ''
                 self.logger.warning(f"Failed to generate QR code for product: '{product_name}'")
@@ -2505,15 +2738,36 @@ class TemplateProcessor:
 
         return label_context
 
-    def _generate_qr_code(self, product_name, doc):
-        """Generate QR code for the given product name and return as InlineImage."""
+    def _generate_qr_code(self, product_name, doc, is_url=False):
+        """Generate QR code for the given product name (or URL for preroll template) and return as InlineImage."""
         try:
             if not product_name or str(product_name).strip() == '':
-                self.logger.warning("Empty product name provided for QR code generation")
+                self.logger.warning("Empty product name/URL provided for QR code generation")
                 return None
             
-            # Clean the product name
+            # Clean the product name or URL
             clean_name = str(product_name).strip()
+            
+            # For preroll URLs, ensure it's an absolute URL if possible
+            if is_url and not clean_name.startswith('http'):
+                # Make it an absolute URL using environment variable or request context
+                try:
+                    import os
+                    base_url = os.environ.get('FLASK_BASE_URL', 'https://www.agtpricetags.com')
+                    if not base_url.startswith('http'):
+                        base_url = f'https://{base_url}'
+                    clean_name = f"{base_url.rstrip('/')}{clean_name}"
+                    self.logger.debug(f"Converted relative URL to absolute: {clean_name}")
+                except Exception as e:
+                    # If we can't get base URL, try request context as last resort
+                    try:
+                        from flask import request
+                        if hasattr(request, 'host_url'):
+                            clean_name = request.host_url.rstrip('/') + clean_name
+                    except Exception:
+                        # If all else fails, log warning but keep relative URL
+                        self.logger.warning(f"Could not convert relative URL to absolute: {clean_name}")
+                        pass
             
             # Create QR code instance
             qr = qrcode.QRCode(
@@ -2661,6 +2915,38 @@ class TemplateProcessor:
             except Exception as e:
                 self.logger.warning(f"Mini template processing failed: {e}")
                 # Continue processing even if mini-specific steps fail
+        
+        # Enhanced preroll template processing (same as mini, but uses its own font sizing config)
+        if self.template_type == 'preroll':
+            try:
+                self.logger.info("Processing preroll template with enhanced design preservation")
+                
+                # Add markers for proper processing (same as mini)
+                self._add_weight_units_markers(doc)
+                self._add_brand_markers(doc)
+                
+                # Ensure proper brand centering for preroll templates (same as mini)
+                self._ensure_mini_template_brand_centering(doc)
+                
+                # CRITICAL FIX: Skip blank cell clearing for dynamic templates
+                # The dynamic template creation already handles empty cells properly
+                self.logger.info("Skipping blank cell clearing for dynamic preroll template")
+                
+                # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells (same as mini)
+                for table in doc.tables:
+                    enforce_fixed_cell_dimensions(table, 'preroll')
+                    self.logger.info("Applied fixed cell dimensions to preroll template table")
+                
+                # CRITICAL: Enhanced table expansion prevention for preroll template (same as mini)
+                doc = prevent_table_expansion_enhanced(doc, 'preroll')
+                self.logger.info("Applied enhanced table expansion prevention to preroll template")
+                
+                # Apply preroll template specific font sizing (uses preroll config, not mini)
+                self._apply_mini_template_font_sizing(doc)  # This method now uses self.template_type
+                    
+            except Exception as e:
+                self.logger.warning(f"Preroll template processing failed: {e}")
+                # Continue processing even if preroll-specific steps fail
 
         # ProductStrain in Brand cells fix
         try:
@@ -3565,7 +3851,8 @@ class TemplateProcessor:
         try:
             from src.core.generation.unified_font_sizing import get_font_size
             
-            template_orientation = self.template_type if self.template_type in {'vertical', 'double'} else 'vertical'
+            # Use template_type directly as orientation - supports all template types including preroll, mini, etc.
+            template_orientation = self.template_type
 
             for table in doc.tables:
                 for row in table.rows:
@@ -5470,7 +5757,7 @@ class TemplateProcessor:
 
     def _add_brand_markers(self, doc):
         """
-        Add PRODUCTBRAND_CENTER markers around brand content for mini templates.
+        Add PRODUCTBRAND_CENTER markers around brand content for mini and preroll templates.
         This allows the post-processing to find and apply the correct font sizing.
         """
         try:
@@ -5492,13 +5779,14 @@ class TemplateProcessor:
             else:
                 self.logger.debug(f"No current_product_type available")
             
-            # For mini templates, always add brand markers regardless of product type
+            # For mini and preroll templates, always add brand markers regardless of product type
             # For other templates, skip brand marker addition for classic types (they should show lineage instead of brand)
-            if self.template_type != 'mini' and is_classic_type:
+            if self.template_type not in ['mini', 'preroll'] and is_classic_type:
                 self.logger.debug(f"Skipping brand marker addition for classic type: {current_product_type}")
                 return
             
-            self.logger.debug(f"Processing brand markers for {'mini template' if self.template_type == 'mini' else f'non-classic type: {current_product_type}'}")
+            template_name = 'mini/preroll template' if self.template_type in ['mini', 'preroll'] else f'non-classic type: {current_product_type}'
+            self.logger.debug(f"Processing brand markers for {template_name}")
             
             for table in doc.tables:
                 # Validate table structure before processing
@@ -6129,19 +6417,19 @@ class TemplateProcessor:
                                     # Identify the marker type from the text content for proper font sizing
                                     marker_type = self._identify_marker_type(run.text)
                                     
-                                    # Get appropriate font size for mini template using proper field type
+                                    # Get appropriate font size using template_type (supports mini and preroll)
                                     font_size = get_font_size_by_marker(
                                         run.text, 
                                         marker_type, 
-                                        template_type='mini', 
+                                        template_type=self.template_type,  # Use actual template_type (mini or preroll)
                                         scale_factor=self.scale_factor
                                     )
                                     set_run_font_size(run, font_size)
                                     
-            self.logger.info("Applied mini template specific font sizing with proper field type identification")
+            self.logger.info(f"Applied {self.template_type} template specific font sizing with proper field type identification")
             
         except Exception as e:
-            self.logger.warning(f"Error applying mini template font sizing: {e}")
+            self.logger.warning(f"Error applying {self.template_type} template font sizing: {e}")
 
     def _format_mini_template_text(self, text):
         """Format text for mini template to prevent improper line breaks."""

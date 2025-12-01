@@ -1,11 +1,31 @@
 // WebGL Shader-Based Lava Lamp Metaballs - Enhanced Realistic 3D
 (function() {
   const canvas = document.getElementById('lava-lamp-canvas');
+  const placeholder = document.getElementById('lava-background-placeholder');
+  
+  // CRITICAL FIX: Show canvas immediately when WebGL is ready, hide placeholder
+  function showCanvas() {
+    if (canvas) {
+      canvas.style.opacity = '1';
+    }
+    if (placeholder) {
+      placeholder.style.opacity = '0';
+      placeholder.style.transition = 'opacity 0.5s ease-out';
+      setTimeout(() => {
+        if (placeholder) placeholder.style.display = 'none';
+      }, 500);
+    }
+  }
+  
   let gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
   if (!gl) {
-    canvas.style.display = 'none';
+    if (canvas) canvas.style.display = 'none';
+    // Keep placeholder visible if WebGL fails
     return;
   }
+  
+  // Show canvas as soon as WebGL context is available
+  showCanvas();
 
   function resize() {
     // Get actual viewport dimensions
@@ -350,5 +370,12 @@
     return [r, g, b];
   }
 
+  // CRITICAL FIX: Ensure canvas is visible before starting animation
+  // Force show canvas if not already visible
+  if (canvas && canvas.style.opacity !== '1') {
+    showCanvas();
+  }
+  
+  // Start animation immediately
   animate();
 })();

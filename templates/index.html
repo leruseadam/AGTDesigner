@@ -132,12 +132,37 @@
             console.log('✅ Clearing STORE_MODAL_BLOCKING flag');
             window.STORE_MODAL_BLOCKING = false;
             
-            // CRITICAL FIX: After store is selected, initialize TagManager if it hasn't been initialized
-            if (window.TagManager && typeof window.TagManager.init === 'function') {
-              console.log('🔄 Store selected - initializing TagManager...');
+            // CRITICAL FIX: After store is selected, wait for full TagManager and initialize
+            console.log('🔄 Store selected - checking TagManager availability...');
+            
+            // Reset the wait counter and restart waiting if TagManager isn't fully loaded
+            if (!window.TagManager || typeof window.TagManager.createTagElement !== 'function') {
+              console.log('⏳ TagManager not fully loaded yet, restarting wait...');
+              if (typeof window.waitForTagManagerAndInit === 'function') {
+                // Reset counter and restart
+                window.tagManagerInitAttempts = 0;
+                window.waitForTagManagerAndInit();
+              } else {
+                // Fallback: try again after a delay
+                setTimeout(() => {
+                  if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+                    console.log('✅ TagManager now available after store selection!');
+                    if (typeof window.initializeTagManagerSafely === 'function') {
+                      window.initializeTagManagerSafely();
+                    }
+                  } else {
+                    console.error('❌ TagManager still not available after store selection');
+                  }
+                }, 500);
+              }
+            } else {
+              // TagManager is fully loaded, initialize it
+              console.log('✅ TagManager fully loaded - initializing...');
               setTimeout(() => {
                 try {
-                  TagManager.init();
+                  if (typeof window.initializeTagManagerSafely === 'function') {
+                    window.initializeTagManagerSafely();
+                  }
                 } catch (initError) {
                   console.error('❌ Error initializing TagManager after store selection:', initError);
                 }
@@ -4425,6 +4450,16 @@
       z-index: -1;
       transition: background 2s ease;
     }
+    
+    /* CRITICAL FIX: Immediate lava background placeholder animation */
+    @keyframes lava-placeholder-fade {
+      0%, 100% {
+        background-position: 0% 50%;
+      }
+      50% {
+        background-position: 100% 50%;
+      }
+    }
     /* Enhanced Filter Bar Styling */
     .enhanced-filter-bar {
       background: linear-gradient(135deg, rgba(45, 34, 58, 0.98) 0%, rgba(60, 45, 75, 0.95) 100%);
@@ -4436,9 +4471,9 @@
       display: flex !important;
       flex-direction: column !important;
       align-items: flex-start !important;
-      flex: 1 1 0 !important; /* Grow to fill available space */
+      flex: 1 1 auto !important; /* Allow growth to fit content */
       min-width: 140px !important;
-      max-width: none !important;
+      max-width: none !important; /* Allow expansion to fit content */
     }
     
     /* Force filter row to allow compact layout */
@@ -4477,11 +4512,14 @@
       padding: 12px 20px !important; /* EXTRA padding */
       width: 100% !important;
       min-width: 250px !important; /* EVEN WIDER - 250px! */
-      max-width: 300px !important;
+      max-width: none !important; /* Allow expansion to fit content */
       border-radius: 10px !important;
       min-height: 50px !important; /* TALLER - 50px! */
       box-shadow: 0 6px 20px rgba(255, 0, 0, 0.5) !important; /* RED GLOW TO CONFIRM */
       transition: all 0.2s ease !important;
+      overflow: visible !important; /* Prevent text truncation */
+      text-overflow: clip !important; /* Don't use ellipsis */
+      white-space: nowrap !important; /* Keep text on one line */
     }
     
     /* Override any Bootstrap or other framework constraints */
@@ -4496,13 +4534,16 @@
     #highCbdFilter {
       min-width: 140px !important;
       width: 100% !important; /* Fill parent container */
-      max-width: 100% !important;
+      max-width: none !important; /* Allow expansion to fit content */
       min-height: 60px !important;
       border: 3px solid rgba(0, 212, 170, 0.8) !important;
       font-size: 16px !important;
       padding: 1rem 1.25rem !important;
       line-height: 1.5 !important;
       box-sizing: border-box !important;
+      overflow: visible !important; /* Prevent text truncation */
+      text-overflow: clip !important; /* Don't use ellipsis */
+      white-space: nowrap !important; /* Keep text on one line */
     }
     
     .filter-select:hover {
@@ -4538,19 +4579,34 @@
       padding: 0 !important;
     }
 
-    /* Application Loading Splash Screen */
+    /* Application Loading Splash Screen - CRITICAL FIX: Use lava background */
     .app-loading-splash {
       position: fixed;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      background: transparent; /* CRITICAL FIX: Transparent to show lava background */
       z-index: 9999;
       display: flex;
       justify-content: center;
       align-items: center;
       transition: opacity 0.5s ease-out;
+    }
+    
+    /* CRITICAL FIX: Add lava background behind app loading splash */
+    .app-loading-splash::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: -1;
+      background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
+      background-size: 400% 400%;
+      animation: lava-placeholder-fade 3s ease-in-out infinite;
+      pointer-events: none;
     }
 
     .app-loading-splash.fade-out {
@@ -5104,7 +5160,11 @@
   </div>
 
   <!-- Lava Lamp Canvas - Full Screen Background with FORCED STYLING -->
-  <canvas id="lava-lamp-canvas" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; z-index: -1 !important; pointer-events: none !important; display: block !important; background: transparent !important; max-width: none !important; max-height: none !important; min-width: 100% !important; min-height: 100% !important; transform: none !important; object-fit: cover !important;"></canvas>
+  <!-- CRITICAL FIX: Show immediate placeholder background while WebGL loads -->
+  <div id="lava-background-placeholder" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; z-index: -1 !important; pointer-events: none !important; background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%) !important; background-size: 400% 400% !important; animation: lava-placeholder-fade 3s ease-in-out infinite !important;"></div>
+  <canvas id="lava-lamp-canvas" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; z-index: -1 !important; pointer-events: none !important; display: block !important; background: transparent !important; max-width: none !important; max-height: none !important; min-width: 100% !important; min-height: 100% !important; transform: none !important; object-fit: cover !important; opacity: 0 !important; transition: opacity 0.5s ease-in !important;"></canvas>
+  <!-- CRITICAL FIX: Load lava-lamp.js immediately after canvas element (async for non-blocking) -->
+  <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}" async></script>
 
   <!-- Main Content (hidden until store is selected) - JavaScript controls visibility -->
   <div class="main-content" id="mainContent">
@@ -5247,37 +5307,37 @@
                   
                   <!-- Filter Dropdowns Row - Left Aligned, Fits Within Container -->
                   <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="margin-left: 0.5rem;">
-                    <div class="filter-group" style="min-width: 0 !important;">
+                    <div class="filter-group">
                       <label for="vendorFilter" class="filter-label">VENDOR</label>
-                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important;">
+                    <div class="filter-group">
                       <label for="brandFilter" class="filter-label">BRAND</label>
-                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important;">
+                    <div class="filter-group">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
-                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important;">
+                    <div class="filter-group">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
-                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important;">
+                    <div class="filter-group">
                       <label for="weightFilter" class="filter-label">WEIGHT</label>
                       <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important;">
+                    <div class="filter-group">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
                       <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
                         <option value="All">All</option>
@@ -5287,7 +5347,7 @@
                         <option value="Unknown">Unknown</option>
                       </select>
                     </div>
-                    <div class="filter-group" style="min-width: 0 !important;">
+                    <div class="filter-group">
                       <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
                       <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
                         <option value="All">All</option>
@@ -5353,6 +5413,7 @@
                   <option value="mini">Mini</option>
                   <option value="double">Double</option>
                   <option value="inventory">Inventory</option>
+                  <option value="preroll">Preroll</option>
                 </select>
 
                 <button id="generateBtn" class="btn-generate-themed mt-2 w-100" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="max-width: 100% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important;">
@@ -7062,13 +7123,69 @@
   <!-- ⚡ PERFORMANCE: Fast page load optimization -->
   <script src="{{ url_for('static', filename='js/fast-page-load.js') }}?v={{ cache_bust }}"></script>
   
+  <!-- CRITICAL: Load main.js with error handling -->
+  <script>
+    // Track main.js loading state BEFORE loading script
+    window.mainJsLoaded = false;
+    window.mainJsError = null;
+    
+    // Add global error handler to catch JavaScript errors in main.js (set up BEFORE script loads)
+    const originalErrorHandler = window.onerror;
+    window.addEventListener('error', function(e) {
+      if (e.filename && e.filename.includes('main.js')) {
+        window.mainJsError = e.message || 'JavaScript error in main.js';
+        console.error('❌ CRITICAL: JavaScript error in main.js:', e.message);
+        console.error('❌ Error at line:', e.lineno, 'column:', e.colno);
+        console.error('❌ Full error:', e.error);
+        if (e.error && e.error.stack) {
+          console.error('❌ Stack trace:', e.error.stack);
+        }
+      }
+    }, true);
+  </script>
+  
+  <!-- Load main.js synchronously (blocking) to ensure it executes before subsequent scripts -->
   <script src="{{ url_for('static', filename='js/main.js') }}?v={{ cache_bust }}"></script>
+  
+  <script>
+    // Mark as loaded immediately after script tag (synchronous scripts execute immediately)
+    window.mainJsLoaded = true;
+    console.log('✅ main.js script tag executed');
+    
+    // Check TagManager immediately after script loads (synchronous execution)
+    (function checkTagManager() {
+      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+        console.log('✅ TagManager is available immediately after main.js execution');
+        console.log('✅ TagManager methods confirmed:', {
+          createTagElement: typeof window.TagManager.createTagElement === 'function',
+          init: typeof window.TagManager.init === 'function',
+          uploadFile: typeof window.TagManager.uploadFile === 'function'
+        });
+      } else {
+        console.error('❌ CRITICAL: TagManager not available after main.js execution');
+        console.error('❌ TagManager exists:', !!window.TagManager);
+        if (window.TagManager) {
+          console.error('❌ TagManager type:', typeof window.TagManager);
+          console.error('❌ TagManager has createTagElement:', typeof window.TagManager.createTagElement);
+          console.error('❌ TagManager keys (first 20):', Object.keys(window.TagManager).slice(0, 20));
+          console.error('❌ This suggests main.js executed but TagManager was not assigned to window.TagManager');
+        } else {
+          console.error('❌ TagManager is completely undefined');
+          console.error('❌ This suggests main.js either:');
+          console.error('   1. Failed to load (check Network tab)');
+          console.error('   2. Has a JavaScript error preventing execution (check Console for red errors)');
+          console.error('   3. TagManager object was never created or assigned');
+        }
+        window.mainJsError = 'TagManager not available after main.js execution';
+      }
+    })();
+  </script>
   
   <!-- ⚡ PERFORMANCE: Defer non-critical scripts -->
   <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}?v={{ cache_bust }}" defer></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/drag-and-drop-manager.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}" defer></script>
+  <!-- lava-lamp.js is now loaded inline immediately after canvas element for fastest appearance -->
   <script src="{{ url_for('static', filename='js/debug_advanced_features.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/fix_template_preview.js') }}" defer></script>
   <script>
@@ -7144,16 +7261,31 @@
 
     // RELIABLE TAG MANAGER INITIALIZATION
     // Wait for main.js to fully load before initializing
-    let tagManagerInitAttempts = 0;
-    const MAX_INIT_ATTEMPTS = 50; // 5 seconds max (50 * 100ms)
+    // Make these globally accessible so store selection handler can restart the wait
+    window.tagManagerInitAttempts = 0;
+    window.MAX_TAG_MANAGER_INIT_ATTEMPTS = 50; // 5 seconds max (50 * 100ms)
     
     function waitForTagManagerAndInit() {
-      tagManagerInitAttempts++;
+      window.tagManagerInitAttempts = (window.tagManagerInitAttempts || 0) + 1;
+      
+      // Early exit if we know main.js failed to load
+      if (window.mainJsError) {
+        console.error('❌ main.js failed to load:', window.mainJsError);
+        console.error('❌ Cannot continue - main.js is required for the application to work');
+        return;
+      }
       
       // Check if full TagManager from main.js is loaded
       // The full TagManager has the createTagElement method
       if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
         console.log('✅ Full TagManager from main.js is loaded! Initializing...');
+        
+        // Also try to initialize file upload now that TagManager is available
+        if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+          console.log('🔄 TagManager loaded - retrying file upload initialization...');
+          window.fileUploadInitAttempts = 0; // Reset counter
+          setTimeout(window.initializeFileUpload, 200);
+        }
         
         // Wait for DOM and store, then init
         if (document.readyState === 'loading') {
@@ -7163,19 +7295,50 @@
         } else {
           initializeTagManagerSafely();
         }
-      } else if (tagManagerInitAttempts < MAX_INIT_ATTEMPTS) {
+      } else if (window.tagManagerInitAttempts < window.MAX_TAG_MANAGER_INIT_ATTEMPTS) {
         // Keep waiting for main.js to load
-        console.log(`⏳ Waiting for main.js TagManager... attempt ${tagManagerInitAttempts}`);
+        // Only log every 10th attempt to reduce console spam
+        if (window.tagManagerInitAttempts % 10 === 0 || window.tagManagerInitAttempts <= 5) {
+          console.log(`⏳ Waiting for main.js TagManager... attempt ${window.tagManagerInitAttempts}/${window.MAX_TAG_MANAGER_INIT_ATTEMPTS}`);
+        }
         setTimeout(waitForTagManagerAndInit, 100);
       } else {
         // Fallback: something went wrong with main.js loading
         console.error('❌ Failed to load full TagManager from main.js after 5 seconds');
         console.error('❌ This will cause tags to not load properly. Check browser console for script errors.');
         
+        // Diagnostic information
+        console.error('=== DIAGNOSTICS ===');
+        console.error('Script Loading:');
+        console.error('  - main.js loaded:', window.mainJsLoaded || false);
+        console.error('  - main.js error:', window.mainJsError || 'None detected');
+        console.error('TagManager Status:');
+        console.error('  - window.TagManager exists:', !!window.TagManager);
+        if (window.TagManager) {
+          console.error('  - TagManager.createTagElement exists:', typeof window.TagManager.createTagElement === 'function');
+          console.error('  - TagManager.init exists:', typeof window.TagManager.init === 'function');
+          console.error('  - TagManager.uploadFile exists:', typeof window.TagManager.uploadFile === 'function');
+          console.error('  - TagManager keys (first 10):', Object.keys(window.TagManager).slice(0, 10));
+        } else {
+          console.error('  - TagManager is completely missing - main.js may have a JavaScript error');
+        }
+        console.error('Troubleshooting:');
+        console.error('  1. Check Network tab - is main.js returning 200 OK?');
+        console.error('  2. Check Console tab - are there red JavaScript errors?');
+        console.error('  3. Check if main.js file exists at: /static/js/main.js');
+        console.error('  4. Try hard refresh (Ctrl+Shift+R or Cmd+Shift+R)');
+        
         // Try to initialize anyway as last resort
         if (window.TagManager && typeof window.TagManager.init === 'function') {
           console.log('⚠️ Attempting to initialize with available TagManager...');
           initializeTagManagerSafely();
+        } else if (window.mainJsError) {
+          console.error('❌ Cannot initialize - main.js failed to load:', window.mainJsError);
+        } else if (!window.mainJsLoaded) {
+          console.error('❌ Cannot initialize - main.js script never finished loading');
+        } else {
+          console.error('❌ Cannot initialize - main.js loaded but TagManager is not available');
+          console.error('❌ This suggests a JavaScript error in main.js prevented TagManager from being created');
         }
       }
     }
@@ -7212,8 +7375,22 @@
       }
     }
     
+    // Make waitForTagManagerAndInit globally accessible
+    window.waitForTagManagerAndInit = waitForTagManagerAndInit;
+    window.initializeTagManagerSafely = initializeTagManagerSafely;
+    
     // Start waiting for TagManager to load
-    waitForTagManagerAndInit();
+    // Since main.js now loads synchronously, it should be available, but we'll wait just in case
+    // Give it a small delay to ensure script execution completes
+    setTimeout(() => {
+      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+        console.log('✅ TagManager available immediately, initializing...');
+        initializeTagManagerSafely();
+      } else {
+        console.log('⏳ TagManager not immediately available, starting wait...');
+        waitForTagManagerAndInit();
+      }
+    }, 100);
     
     // Additional DOM-ready setup
     document.addEventListener('DOMContentLoaded', function() {
@@ -7346,22 +7523,38 @@
       
       // File upload functionality - FIXED for PythonAnywhere
       // Wait for TagManager to be fully loaded before attaching listener
-      let fileUploadInitAttempts = 0;
-      const MAX_FILE_UPLOAD_ATTEMPTS = 50; // 5 seconds max (50 * 100ms)
+      window.fileUploadInitAttempts = 0;
+      window.MAX_FILE_UPLOAD_ATTEMPTS = 50; // 5 seconds max (50 * 100ms)
+      window.fileUploadInitialized = false; // Flag to prevent multiple initializations
       
       function initializeFileUpload() {
-        fileUploadInitAttempts++;
+        // Prevent multiple simultaneous calls
+        if (window.fileUploadInitialized) {
+          return;
+        }
+        
+        window.fileUploadInitAttempts = (window.fileUploadInitAttempts || 0) + 1;
         const fileInput = document.getElementById('fileInput');
         if (!fileInput) {
-          console.error('fileInput element not found');
+          // If element not found and we haven't exceeded attempts, retry
+          if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
+            setTimeout(initializeFileUpload, 100);
+          } else {
+            console.error('fileInput element not found after maximum attempts');
+          }
           return;
         }
         
         // Check if TagManager and uploadFile method are available
         if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
           console.log('✓ TagManager ready, attaching file upload listener');
+          window.fileUploadInitialized = true; // Mark as initialized to prevent retries
           
-          fileInput.addEventListener('change', function(e) {
+          // Remove any existing listeners to prevent duplicates
+          const newFileInput = fileInput.cloneNode(true);
+          fileInput.parentNode.replaceChild(newFileInput, fileInput);
+          
+          newFileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
               console.log('File selected:', file.name);
@@ -7373,17 +7566,121 @@
               }
             }
           });
-        } else if (fileUploadInitAttempts < MAX_FILE_UPLOAD_ATTEMPTS) {
-          console.warn('TagManager not ready yet, retrying in 100ms...');
+        } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
+          // Only log every 10th attempt to reduce console spam
+          if (window.fileUploadInitAttempts % 10 === 0) {
+            console.warn(`TagManager not ready yet, retrying... (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS})`);
+          }
           // Retry after a short delay
           setTimeout(initializeFileUpload, 100);
         } else {
           console.error('❌ Failed to initialize file upload after 5 seconds. TagManager may not be loaded.');
+          console.error('❌ TagManager available:', !!window.TagManager);
+          console.error('❌ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
+          // Don't set fileUploadInitialized to true so it can be retried later if TagManager loads
         }
       }
       
+      // Make function globally accessible so it can be called after TagManager loads
+      window.initializeFileUpload = initializeFileUpload;
+      
       // Initialize file upload with retry mechanism
-      initializeFileUpload();
+      // Delay initial call slightly to let DOM settle
+      setTimeout(initializeFileUpload, 100);
+      
+      // CRITICAL FIX: Preserve uploaded filename on page reload
+      // Store the uploaded filename from template before any JavaScript clears it
+      var uploadedFilenameFromTemplate = null;
+      var fileInfoText = document.getElementById('fileInfoText');
+      if (fileInfoText) {
+        var currentText = fileInfoText.textContent.trim();
+        // If the template rendered an uploaded filename (not "No file uploaded"), preserve it
+        if (currentText && currentText !== 'No file uploaded') {
+          uploadedFilenameFromTemplate = currentText;
+          
+          // Ensure the upload UI elements are visible
+          var leftSection = document.querySelector('.left-section');
+          var filterBar = document.querySelector('.enhanced-filter-bar');
+          var uploadButton = document.getElementById('uploadTriggerBtn');
+          var fileInput = document.getElementById('fileInput');
+          
+          if (leftSection) {
+            leftSection.style.display = '';
+            leftSection.style.visibility = 'visible';
+          }
+          if (filterBar) {
+            filterBar.style.display = '';
+            filterBar.style.visibility = 'visible';
+          }
+          if (uploadButton) {
+            uploadButton.style.display = '';
+            uploadButton.style.visibility = 'visible';
+          }
+          // fileInput should remain display:none (it's triggered by button)
+        }
+      }
+      
+      // Preserve the uploaded filename after TagManager loads
+      function preserveUploadedFilename() {
+        if (uploadedFilenameFromTemplate && fileInfoText) {
+          // Restore the filename if it was cleared
+          var currentText = fileInfoText.textContent.trim();
+          if (!currentText || currentText === 'No file uploaded') {
+            fileInfoText.textContent = uploadedFilenameFromTemplate;
+          }
+          
+          // Update via TagManager if available to ensure consistency
+          if (window.TagManager && typeof window.TagManager.updateUploadUI === 'function') {
+            window.TagManager.updateUploadUI(uploadedFilenameFromTemplate, 'File loaded', 'success');
+          }
+          
+          // Ensure UI remains visible
+          var leftSection = document.querySelector('.left-section');
+          var filterBar = document.querySelector('.enhanced-filter-bar');
+          if (leftSection) {
+            leftSection.style.display = '';
+            leftSection.style.visibility = 'visible';
+          }
+          if (filterBar) {
+            filterBar.style.display = '';
+            filterBar.style.visibility = 'visible';
+          }
+        }
+      }
+      
+      // Run immediately and also after a short delay to catch any late-clearing
+      preserveUploadedFilename();
+      setTimeout(preserveUploadedFilename, 500);
+      setTimeout(preserveUploadedFilename, 1500);
+      
+      // Also run when TagManager becomes available
+      if (window.TagManager) {
+        preserveUploadedFilename();
+      } else {
+        var checkTagManager = setInterval(function() {
+          if (window.TagManager) {
+            clearInterval(checkTagManager);
+            preserveUploadedFilename();
+          }
+        }, 100);
+        // Stop checking after 5 seconds
+        setTimeout(function() {
+          clearInterval(checkTagManager);
+        }, 5000);
+      }
+      
+      // Final safety check: Ensure upload UI is visible after everything loads
+      window.addEventListener('load', function() {
+        if (uploadedFilenameFromTemplate) {
+          preserveUploadedFilename();
+          // Double-check that upload UI elements are visible
+          var filterBarContainer = document.querySelector('[data-container-type="filter"]');
+          if (filterBarContainer) {
+            filterBarContainer.style.display = '';
+            filterBarContainer.style.visibility = 'visible';
+          }
+        }
+      });
       
       // On page load, show default file if present
       var initialData = document.getElementById('initialData');
@@ -7412,28 +7709,12 @@
       }
     });
 
-    // Psychedelic morphing background animation
+    // CRITICAL FIX: Disabled fallback morphing background - lava background placeholder handles it now
+    // The placeholder div shows immediately and the WebGL canvas takes over when ready
+    // This prevents competing background animations
     document.addEventListener('DOMContentLoaded', function() {
-      const colors = [
-        'linear-gradient(-45deg, #23192b, #8b5cf6, #43e97b, #a084e8)',
-        'linear-gradient(-45deg, #8b5cf6, #43e97b, #a084e8, #ED4123)',
-        'linear-gradient(-45deg, #43e97b, #a084e8, #ED4123, #23192b)',
-        'linear-gradient(-45deg, #a084e8, #ED4123, #23192b, #8b5cf6)',
-        'linear-gradient(-45deg, #ED4123, #23192b, #8b5cf6, #43e97b)',
-        'linear-gradient(-45deg, #23192b, #43e97b, #a084e8, #8b5cf6)'
-      ];
-      
-      let currentColor = 0;
-      
-      function morphBackground() {
-        document.body.style.background = colors[currentColor];
-        document.body.style.backgroundSize = '300% 300%';
-        currentColor = (currentColor + 1) % colors.length;
-      }
-      
-      // Start the animation
-      morphBackground();
-      setInterval(morphBackground, 15000); // Change every 15 seconds for calmer transitions
+      // No longer needed - lava background placeholder shows immediately
+      // and WebGL canvas handles the animation when ready
     });
 
     // Database functions

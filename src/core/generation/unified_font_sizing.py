@@ -72,13 +72,28 @@ def _load_font_sizing_config():
                     'description': [(10, 36), (20, 34), (25, 32), (30, 28), (35, 27), (40, 26), (45, 24), (50, 22), (70, 21), (100, 20), (120, 18), (float('inf'), 16)],
                     'brand': [(20, 18), (40, 16), (120, 14), (140, 12), (160, 10), (float('inf'), 10)],
                     'price': [(5, 40), (10, 38), (20, 36), (80, 20), (float('inf'), 18)],
-                    'lineage': [(10, 20), (20, 18), (30, 16), (80, 12), (60, 10), (float('inf'), 10)],
+                    'lineage': [(10, 20), (80, 18), (60, 10), (float('inf'), 10)],
                     'ratio': [(10, 14), (20, 12), (30, 10), (40, 9), (50, 8), (60, 7), (70, 6), (float('inf'), 5)],
                     'thc_cbd': [(10, 14), (float('inf'), 14)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'vendor': [(10, 10), (20, 9), (40, 8), (70, 7), (float('inf'), 6)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for horizontal template  
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
+                },
+                'preroll': {
+                    # Preroll template: Copy all settings from mini template (identical font sizing)
+                    'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
+                    'brand': [(5, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
+                    'price': [(1, 18), (2, 16), (float('inf'), 14)],
+                    'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
+                    'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
+                    'thc_cbd': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
+                    'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
+                    'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
+                    'doh': [(5, 12), (10, 11), (float('inf'), 10)],
+                    'vendor': [(5, 6), (10, 5), (15, 4), (20, 3), (float('inf'), 2)],
+                    'qr': [(float('inf'), 24)],  # QR codes: Small size for preroll template (same as mini)
+                    'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 }
             }
         }
@@ -113,7 +128,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     Args:
         text: The text to size
         field_type: Type of field ('description', 'brand', 'price', 'lineage', 'ratio', 'thc_cbd', 'strain', 'weight', 'doh', 'default')
-        orientation: Template orientation ('mini', 'vertical', 'horizontal')
+        orientation: Template orientation ('mini', 'preroll', 'vertical', 'horizontal', 'double')
         scale_factor: Scaling factor for the font size
         complexity_type: Type of complexity calculation ('standard', 'description', 'mini')
     
@@ -247,7 +262,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         return Pt(fallback_size)
     
     # Calculate text complexity
-    if field_type.lower() == 'brand' and orientation.lower() in ('mini', 'double'):
+    if field_type.lower() == 'brand' and orientation.lower() in ('mini', 'preroll', 'double'):
         comp = _brand_letter_count(text)
         logger.debug(f"Brand complexity override (letter count): text='{text}', letters={comp}, orientation={orientation}")
     else:

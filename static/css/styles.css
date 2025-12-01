@@ -4019,20 +4019,45 @@ canvas#lava-lamp-canvas {
     font-size: 1em;
   }
   
-  /* Generation splash modal */
+  /* CRITICAL FIX: Lava background placeholder animation for splash screens */
+  @keyframes lava-placeholder-fade {
+    0%, 100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  /* Generation splash modal - CRITICAL FIX: Use lava background */
   .generation-splash-modal {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    background: transparent; /* CRITICAL FIX: Transparent to show lava background */
     display: none;
     z-index: 9999;
     justify-content: center;
     align-items: center;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+  }
+  
+  /* CRITICAL FIX: Add lava background behind generation splash modal */
+  .generation-splash-modal::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
+    background-size: 400% 400%;
+    animation: lava-placeholder-fade 3s ease-in-out infinite;
+    pointer-events: none;
   }
 
   .generation-splash-modal[style*="display: flex"],
@@ -6088,21 +6113,36 @@ canvas#lava-lamp-canvas {
     pointer-events: none !important; /* Disable click blocking */
   }
 
-  /* Excel Loading Splash Screen */
+  /* Excel Loading Splash Screen - CRITICAL FIX: Use lava background */
   .excel-loading-splash {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: transparent; /* CRITICAL FIX: Transparent to show lava background */
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
     z-index: 9999;
     display: flex;
     justify-content: center;
     align-items: center;
     animation: fadeIn 0.3s ease-in-out;
+  }
+  
+  /* CRITICAL FIX: Add lava background canvas behind splash screen */
+  .excel-loading-splash::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
+    background-size: 400% 400%;
+    animation: lava-placeholder-fade 3s ease-in-out infinite;
+    pointer-events: none;
   }
 
   .excel-loading-container {
@@ -6511,9 +6551,9 @@ canvas#lava-lamp-canvas {
     min-width: 140px !important; /* Minimum width to fit "All" text and arrow */
     white-space: nowrap !important; /* Prevent text wrapping */
     overflow: visible !important; /* Allow dropdown to expand */
-    text-overflow: clip !important;
+    text-overflow: clip !important; /* Don't truncate text */
     width: 100% !important;
-    max-width: 100% !important;
+    max-width: none !important; /* Allow expansion to fit content */
     flex: 1 1 auto !important; /* Flex grow and shrink */
     box-sizing: border-box !important;
     font-size: 0.85rem !important; /* Reduced font size */
@@ -6720,8 +6760,8 @@ canvas#lava-lamp-canvas {
     border-radius: 12px !important; /* Slightly smaller than parent */
     border: 1px solid rgba(160, 132, 232, 0.15) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
-    flex: 1 1 0 !important; /* Equal flex distribution */
-    min-width: 0 !important; /* Allow shrinking */
+    flex: 1 1 auto !important; /* Allow growth to fit content */
+    min-width: 140px !important; /* Prevent shrinking below content size */
     max-width: none !important; /* Remove max-width constraints */
   }
 
@@ -9739,7 +9779,7 @@ html, body {
 
 @media (min-width: 1400px) {
   .filter-row {
-    grid-template-columns: repeat(7, minmax(140px, 1fr));
+    /* Flexbox handles equal widths automatically */
   }
 }
 
@@ -9753,8 +9793,10 @@ html, body {
   flex-direction: column;
   gap: 0.5rem;
   min-height: 75px;
-  min-width: 0;
-  max-width: 100%;
+  width: 160px !important; /* Fixed equal width for all filters */
+  min-width: 160px !important; /* Prevent shrinking below fixed width */
+  max-width: 160px !important; /* Prevent expanding beyond fixed width */
+  flex: 0 0 160px !important; /* Don't grow or shrink - fixed size */
 }
 
 .filter-group .filter-label {
@@ -9770,6 +9812,24 @@ html, body {
   padding: 0.85rem 2.5rem 0.85rem 0.85rem !important;
   font-size: 0.95rem !important;
   line-height: 1.5 !important;
+  overflow: hidden !important; /* Hide overflow for clean appearance */
+  text-overflow: ellipsis !important; /* Show ellipsis for long text */
+  white-space: nowrap !important; /* Keep text on one line */
+  width: 100% !important; /* Fill the filter group container */
+  min-width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important; /* Include padding in width */
+}
+
+/* Filter selects use fixed width from .filter-group - no need for individual overrides */
+
+/* Override any max-width restrictions on filter bar selects */
+.filter-bar select,
+.filter-bar .form-select {
+  max-width: none !important; /* Remove max-width restrictions */
+  min-width: fit-content !important; /* Allow expansion for long text */
+  overflow: visible !important;
+  text-overflow: clip !important;
 }
 
 /* Compact filter selects */

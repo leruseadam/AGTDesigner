@@ -172,7 +172,31 @@ class GenerationSplash {
                 display: flex;
                 justify-content: center;
                 align-items: center;
-                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+                background: transparent; /* CRITICAL FIX: Transparent to show lava background */
+            }
+            
+            /* CRITICAL FIX: Add lava background behind generation splash modal */
+            @keyframes lava-placeholder-fade {
+                0%, 100% {
+                    background-position: 0% 50%;
+                }
+                50% {
+                    background-position: 100% 50%;
+                }
+            }
+            
+            .generation-splash-modal::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: -1;
+                background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
+                background-size: 400% 400%;
+                animation: lava-placeholder-fade 3s ease-in-out infinite;
+                pointer-events: none;
             }
             
             .generation-splash-backdrop {

@@ -11,7 +11,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from typing import List, Dict, Set, Optional, Tuple, Any
 from decimal import Decimal, InvalidOperation
-from .field_mapping import get_canonical_field
+from .field_mapping import get_canonical_field, get_all_aliases, FIELD_ALIASES
 import pandas as pd
 from .product_database import ProductDatabase
 from .ai_product_matcher import AIProductMatcher
@@ -541,6 +541,44 @@ def extract_vendor_info(json_data):
     
     return vendor
 
+def _extract_field_from_json_item_comprehensive(json_item: dict, canonical_field_name: str) -> Optional[str]:
+    """Extract a field from JSON item using all possible aliases from field mapping."""
+    if not json_item or not canonical_field_name:
+        return None
+    
+    # Get all aliases for this canonical field
+    aliases = get_all_aliases(canonical_field_name)
+    
+    # Also check common variations that might not be in the mapping
+    if canonical_field_name == "Price* (Tier Name for Bulk)":
+        aliases.extend(['retail_price', 'unit_price', 'sale_price', 'unit_cost', 'cost', 'Cost'])
+    elif canonical_field_name == "Weight*":
+        aliases.extend(['weight_with_units', 'weight_units', 'size', 'Size', 'quantity', 'Quantity'])
+    
+    # Try all aliases (case-insensitive check for keys)
+    json_item_lower = {k.lower(): k for k in json_item.keys()}  # Map lowercase -> original key
+    
+    for alias in aliases:
+        # Check exact match first (case-sensitive)
+        if alias in json_item:
+            value = json_item[alias]
+            if value is not None:
+                value_str = str(value).strip()
+                if value_str and value_str.lower() not in ('none', '', '0', '0.0', '0.00'):
+                    return value_str
+        
+        # Check case-insensitive match
+        alias_lower = alias.lower()
+        if alias_lower in json_item_lower:
+            original_key = json_item_lower[alias_lower]
+            value = json_item[original_key]
+            if value is not None:
+                value_str = str(value).strip()
+                if value_str and value_str.lower() not in ('none', '', '0', '0.0', '0.00'):
+                    return value_str
+    
+    return None
+
 # Main function: Process manifest JSON and return list of product dicts
 # Each dict contains all relevant DB fields, including cannabinoids/COA
 
@@ -991,7 +1029,62 @@ class JSONMatcher:
                     best_score = score
                     best_match = candidate
 
+            # CRITICAL FIX: If vendor was specified, prioritize matches from that vendor
+            # Only use matches from different vendors if no good match found from the specified vendor
             if best_match and best_score >= 65:
+                if vendor and vendor_filters:
+                    # Check if the best match is from the specified vendor
+                    match_vendor = str(best_match.get('Vendor/Supplier*') or best_match.get('Vendor', '') or '').lower().strip()
+                    vendor_matched = False
+                    for vendor_filter in vendor_filters:
+                        if vendor_filter in match_vendor or match_vendor in vendor_filter:
+                            vendor_matched = True
+                            break
+                    
+                    # If vendor doesn't match, look for a better match from the correct vendor
+                    if not vendor_matched:
+                        logging.info(f"⚠️ Best match found from different vendor ({match_vendor}), searching for matches from specified vendor ({vendor})")
+                        vendor_specific_matches = [c for c in candidates if any(
+                            vf in str(c.get('Vendor/Supplier*') or c.get('Vendor', '') or '').lower() 
+                            for vf in vendor_filters
+                        )]
+                        
+                        if vendor_specific_matches:
+                            # Find best match from correct vendor
+                            best_vendor_match = None
+                            best_vendor_score = 0
+                            for candidate in vendor_specific_matches:
+                                candidate_name = str(candidate.get('Product Name*') or candidate.get('product_name') or '').strip()
+                                if not candidate_name:
+                                    continue
+                                
+                                score = similarity_func(product_name.lower(), candidate_name.lower())
+                                
+                                if item_weight is not None:
+                                    candidate_weight = parse_weight(candidate.get('Weight*') or candidate.get('weight'))
+                                    if candidate_weight is not None:
+                                        diff = abs(candidate_weight - item_weight)
+                                        weight_tolerance = max(0.1, item_weight * 0.25)
+                                        if diff > weight_tolerance:
+                                            score -= min(30, int(diff * 10))
+                                
+                                if strain:
+                                    candidate_strain = str(candidate.get('Product Strain') or candidate.get('product_strain') or '').lower()
+                                    if candidate_strain and strain.lower() in candidate_strain:
+                                        score += 5
+                                
+                                if score > best_vendor_score:
+                                    best_vendor_score = score
+                                    best_vendor_match = candidate
+                            
+                            # Use vendor-specific match if it's reasonably good (score >= 50)
+                            if best_vendor_match and best_vendor_score >= 50:
+                                logging.info(f"✅ Found better match from correct vendor (score: {best_vendor_score} vs {best_score})")
+                                best_vendor_match['_similarity_score'] = best_vendor_score
+                                return best_vendor_match
+                            else:
+                                logging.info(f"⚠️ No good match from correct vendor (best score: {best_vendor_score}), using cross-vendor match")
+                
                 best_match['_similarity_score'] = best_score
                 return best_match
         except Exception as e:
@@ -3187,35 +3280,38 @@ class JSONMatcher:
             
             # CRITICAL FIX: Prioritize database price, then JSON price, never use fallback
             # Database prices are more reliable than JSON prices
-            excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or ''
-            # Only use JSON price if database price is missing
+            excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or safe_row_get(excel_row, 'Price* (Tier Name for Bulk)') or ''
+            # Only use JSON price if database price is missing - use comprehensive field extraction
             if not excel_price or excel_price in ('0', '0.0', '0.00', ''):
-                if json_item and json_item.get("line_price"):
-                    excel_price = str(json_item.get("line_price", "")).strip()
-                elif json_item and json_item.get("price"):
-                    excel_price = str(json_item.get("price", "")).strip()
+                if json_item:
+                    excel_price = _extract_field_from_json_item_comprehensive(json_item, "Price* (Tier Name for Bulk)") or ''
                 else:
                     excel_price = ''  # NO DEFAULT PRICE - leave empty if not found
             
             # CRITICAL FIX: Prioritize database weight, then JSON weight, never use fallback
             # Database weights are more reliable than JSON weights
             excel_weight = safe_row_get(excel_row, 'Weight*') or safe_row_get(excel_row, 'Weight') or ''
-            # Only use JSON weight if database weight is missing
+            # Only use JSON weight if database weight is missing - use comprehensive field extraction
             if not excel_weight or excel_weight in ('0', '0.0', '0.00', ''):
-                if json_item and json_item.get("unit_weight"):
-                    excel_weight = str(json_item.get("unit_weight", "")).strip()
-                elif json_item and json_item.get("weight"):
-                    excel_weight = str(json_item.get("weight", "")).strip()
+                if json_item:
+                    excel_weight = _extract_field_from_json_item_comprehensive(json_item, "Weight*") or ''
                 else:
                     excel_weight = ''  # NO DEFAULT WEIGHT - leave empty if not found
             
-            # Get units with JSON override and fallback
-            if json_item and json_item.get("unit_weight_uom"):
-                excel_units = str(json_item.get("unit_weight_uom", "")).strip()
-            elif json_item and json_item.get("uom"):
-                excel_units = str(json_item.get("uom", "")).strip()
-            else:
-                excel_units = safe_row_get(excel_row, 'Units') or 'g'
+            # Get units with JSON override and fallback - use comprehensive field extraction
+            excel_units = safe_row_get(excel_row, 'Units') or safe_row_get(excel_row, 'Weight Unit* (grams/gm or ounces/oz)') or 'g'
+            if json_item:
+                json_units = _extract_field_from_json_item_comprehensive(json_item, "Weight Unit* (grams/gm or ounces/oz)")
+                if json_units:
+                    excel_units = str(json_units).strip()
+                else:
+                    # Try alternative unit fields
+                    if json_item.get("unit_weight_uom"):
+                        excel_units = str(json_item.get("unit_weight_uom", "")).strip()
+                    elif json_item.get("uom"):
+                        excel_units = str(json_item.get("uom", "")).strip()
+            if not excel_units:
+                excel_units = 'g'
             
             # Standardize description format for database-matched products
             # Ensure format matches fallback products: "Product Name - Xg"
@@ -3247,6 +3343,7 @@ class JSONMatcher:
                 'Weight Value + Unit': self._format_weight_label(excel_weight, excel_units) if excel_weight else '',
                 'Price*': excel_price,  # Use the improved price extraction
                 'Price': excel_price,
+                'Price* (Tier Name for Bulk)': excel_price,  # Set all price field variations
                 'Cost*': safe_row_get(excel_row, 'Cost*'),
                 'THC test result': safe_row_get(excel_row, 'THC test result'),
                 'CBD test result': safe_row_get(excel_row, 'CBD test result'),
@@ -8642,19 +8739,29 @@ class JSONMatcher:
                           transform_sku_to_readable_name(raw_name) or # Transform SKU to readable
                           raw_name)  # Raw name as fallback
             
-            vendor = (product.get('Vendor', '') or 
+            # CRITICAL FIX: Prioritize vendor/brand from JSON item to preserve correct vendor associations
+            # JSON source data should take precedence over database match vendor/brand
+            vendor = (extract_vendor_info(item) or  # Extract vendor from JSON item first
+                     global_vendor or  # Then use global vendor from document
+                     item.get('vendor', '') or
+                     item.get('supplier_name', '') or
+                     item.get('brand', '') or  # Brand can sometimes be vendor
+                     product.get('Vendor', '') or  # Fallback to database product vendor
                      product.get('Vendor/Supplier*', '') or 
-                     product.get('vendor', '') or 
-                     global_vendor)
+                     product.get('vendor', ''))
             
-            # Try multiple brand field variations - ensure we always get a brand
-            brand = (product.get('Product Brand', '') or 
+            # CRITICAL FIX: Prioritize brand from JSON item to preserve correct brand associations
+            # JSON source data should take precedence over database match brand
+            brand = (item.get('brand', '') or  # JSON brand first
+                    item.get('vendor', '') or  # JSON vendor can be brand
+                    item.get('supplier_name', '') or
+                    extract_vendor_info(item) or  # Extract from JSON if brand not directly available
+                    global_vendor or  # Global vendor as fallback
+                    product.get('Product Brand', '') or  # Then database product brand
                     product.get('ProductBrand', '') or 
                     product.get('Brand', '') or 
                     product.get('brand', '') or
                     product.get('vendor', '') or
-                    item.get('brand', '') or
-                    item.get('vendor', '') or
                     'CERES')  # Always default to CERES for Ceres products
             
             # Try multiple product type field variations

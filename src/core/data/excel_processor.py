@@ -3268,7 +3268,7 @@ class ExcelProcessor:
         self.logger.debug(f"apply_filters received filters: {filters}")
         filtered_df = self.df.copy()
         column_mapping = {
-            'vendor': 'Vendor',
+            'vendor': 'Vendor',  # Will be handled specially to check multiple column names
             'brand': 'Product Brand',
             'productType': 'Product Type*',
             'lineage': 'Lineage',
@@ -3289,6 +3289,20 @@ class ExcelProcessor:
                         filtered_df = filtered_df[
                             ~filtered_df['Product Type*'].astype(str).str.lower().str.strip().str.startswith('high cbd')
                         ]
+                elif filter_key == 'vendor':
+                    # CRITICAL FIX: Check all possible vendor column names
+                    vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
+                    vendor_col = None
+                    for vcol in vendor_cols:
+                        if vcol in filtered_df.columns:
+                            vendor_col = vcol
+                            break
+                    if vendor_col:
+                        filtered_df = filtered_df[
+                            filtered_df[vendor_col].astype(str).str.lower().str.strip() == value.lower().strip()
+                        ]
+                    else:
+                        self.logger.warning(f"⚠️ Vendor filter applied but no vendor column found. Available columns: {list(filtered_df.columns)}")
                 else:
                     column = column_mapping.get(filter_key)
                     if column and column in filtered_df.columns:
@@ -3324,7 +3338,22 @@ class ExcelProcessor:
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
-                        if (('trade sample' in v_lower and 'not for sale' in v_lower) or 'deactivated' in v_lower):
+                        v_original = v.strip()
+                        
+                        # Check against EXCLUDED_PRODUCT_TYPES constant (exact match, case-insensitive)
+                        is_excluded = any(
+                            excluded.lower() == v_lower 
+                            for excluded in EXCLUDED_PRODUCT_TYPES
+                        )
+                        
+                        # Also check for patterns (trade sample, deactivated)
+                        has_excluded_pattern = (
+                            ('trade sample' in v_lower and 'not for sale' in v_lower) or 
+                            'deactivated' in v_lower or
+                            any(pattern.lower() in v_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)
+                        )
+                        
+                        if is_excluded or has_excluded_pattern:
                             continue
                         filtered_values.append(v)
                     values = filtered_values
@@ -3344,11 +3373,21 @@ class ExcelProcessor:
         tags = []
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
         
+        # Track filtering statistics for debugging
+        filter_stats = {
+            'duplicates': 0,
+            'invalid_weight': 0,
+            'excluded_type': 0,
+            'excluded_pattern': 0,
+            'total_processed': 0
+        }
+        
         # PERFORMANCE FIX: Use to_dict('records') which is much faster than iterrows()
         # This converts the DataFrame to a list of dicts, which is 5-10x faster
         rows_dict = filtered_df.to_dict('records')
         
         for row in rows_dict:
+            filter_stats['total_processed'] += 1
             # Get quantity from various possible column names
             quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
             
@@ -3399,15 +3438,18 @@ class ExcelProcessor:
             tertiary_key = f"{product_name}|{vendor_value}"
             
             # Check for duplicates using multiple strategies
+            # CRITICAL FIX: Only use primary_key for duplicate detection - different weights = different products
+            # Products with same name but different weights should be separate tags (e.g., "1g" vs "3.5g")
             is_duplicate = False
             duplicate_reason = ""
             
             if primary_key in seen_product_keys:
                 is_duplicate = True
                 duplicate_reason = "exact match (name+vendor+brand+weight)"
-            elif secondary_key in seen_product_keys:
-                is_duplicate = True
-                duplicate_reason = "same product with different weight"
+            # REMOVED: secondary_key check - products with different weights should NOT be considered duplicates
+            # elif secondary_key in seen_product_keys:
+            #     is_duplicate = True
+            #     duplicate_reason = "same product with different weight"
             elif tertiary_key in seen_product_keys:
                 # Only flag as duplicate if the weight difference is small (likely same product)
                 existing_weight = None
@@ -3431,6 +3473,7 @@ class ExcelProcessor:
                         pass
             
             if is_duplicate:
+                filter_stats['duplicates'] += 1
                 logger.info(f"🔄 ENHANCED DEDUPLICATION: Skipping duplicate product '{product_name}' - {duplicate_reason}")
                 continue
             
@@ -3511,7 +3554,7 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'Lineage': safe_get_value(row.get('Lineage', '')),  # Don't default to MIXED - will be set from database
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
@@ -3538,7 +3581,7 @@ class ExcelProcessor:
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
                 'productBrand': safe_get_value(row.get('Product Brand', '')),
-                'lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'lineage': safe_get_value(row.get('Lineage', '')),  # Don't default to MIXED - will be set from database
                 'productType': safe_get_value(row.get('Product Type*', '')),
                 'weight': safe_get_value(raw_weight),
                 'weightWithUnits': safe_get_value(weight_with_units),
@@ -3560,20 +3603,55 @@ class ExcelProcessor:
             
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
+            # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
+            # These fields are required by the UI code to display lineage correctly
+            lineage_upper = str(lineage).strip().upper() if lineage else ''
+            tag['currentLineage'] = lineage_upper
+            tag['canonical_lineage'] = lineage_upper
 
             # Filter out samples and invalid products
+            # CRITICAL FIX: Make filtering more specific to avoid false positives
             product_name_lower = product_name.lower()
             product_type_lower = product_type.lower()
-            if (
-                weight == '-1g' or  # Invalid weight
-                'trade sample' in product_type_lower or  # Filter any trade sample product types
-                'sample' in product_name_lower or  # Filter products with "Sample" in name
-                'trade sample' in product_name_lower or  # Filter products with "Trade Sample" in name
-                any(pattern.lower() in product_name_lower for pattern in EXCLUDED_PRODUCT_PATTERNS) or  # Filter based on excluded patterns
-                any(pattern.lower() in product_type_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)  # Filter product types based on excluded patterns
-            ):
+            
+            # Check for invalid weight
+            if weight == '-1g':
+                filter_stats['invalid_weight'] += 1
+                logger.debug(f"Filtering out product with invalid weight: {product_name}")
+                continue
+            
+            # Check for excluded product types (exact match or contains)
+            if any(excluded_type.lower() in product_type_lower for excluded_type in EXCLUDED_PRODUCT_TYPES):
+                filter_stats['excluded_type'] += 1
+                logger.debug(f"Filtering out product with excluded type '{product_type}': {product_name}")
+                continue
+            
+            # Check for excluded patterns in product name (more specific matching)
+            # Only filter if the pattern appears as a standalone word or at the start
+            name_should_be_excluded = False
+            for pattern in EXCLUDED_PRODUCT_PATTERNS:
+                pattern_lower = pattern.lower()
+                # Check if pattern appears at start of name or as standalone word
+                if (product_name_lower.startswith(pattern_lower) or 
+                    f' {pattern_lower} ' in f' {product_name_lower} ' or
+                    product_name_lower.endswith(f' {pattern_lower}')):
+                    name_should_be_excluded = True
+                    filter_stats['excluded_pattern'] += 1
+                    logger.debug(f"Filtering out product matching pattern '{pattern}': {product_name}")
+                    break
+            
+            if name_should_be_excluded:
                 continue  # Skip this tag
+            
             tags.append(tag)
+        
+        # Log filtering statistics
+        total_filtered = (filter_stats['duplicates'] + filter_stats['invalid_weight'] + 
+                         filter_stats['excluded_type'] + filter_stats['excluded_pattern'])
+        logger.info(f"📊 TAG FILTERING STATS: Processed {filter_stats['total_processed']} rows, "
+                   f"created {len(tags)} tags, filtered {total_filtered} items "
+                   f"(duplicates: {filter_stats['duplicates']}, invalid_weight: {filter_stats['invalid_weight']}, "
+                   f"excluded_type: {filter_stats['excluded_type']}, excluded_pattern: {filter_stats['excluded_pattern']})")
         
         # Sort tags by vendor first, then by brand, then by weight
         def sort_key(tag):
@@ -3583,7 +3661,7 @@ class ExcelProcessor:
             return (vendor, brand, weight)
         
         sorted_tags = sorted(tags, key=sort_key)
-        logger.info(f"get_available_tags: Returning {len(sorted_tags)} tags (removed {len(filtered_df) - len(sorted_tags)} duplicates)")
+        logger.info(f"get_available_tags: Returning {len(sorted_tags)} tags (removed {len(filtered_df) - len(sorted_tags)} items)")
         
         # Log enhanced deduplication summary
         total_processed = len(sorted_tags)
@@ -3747,6 +3825,11 @@ class ExcelProcessor:
     
     def _enrich_tags_with_database_values(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Enrich tags with current database values (lineage, DOH, etc.) to reflect latest updates."""
+        # PERFORMANCE: Skip enrichment if flag is set (for fast loading)
+        if getattr(self, '_skip_enrichment', False):
+            logger.info("⚡ Skipping database enrichment for fast tag loading")
+            return tags
+        
         try:
             # Try to get the product database using lazy import to avoid circular dependencies
             product_db = None
@@ -3843,33 +3926,75 @@ class ExcelProcessor:
                 if not db_record:
                     try:
                         db_lineage_from_method = product_db.get_product_lineage(product_name)
-                        if db_lineage_from_method:
+                        if db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
                             db_lineage_clean = str(db_lineage_from_method).strip().upper()
+                            
+                            # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
+                            if db_lineage_clean == 'THC':
+                                db_lineage_clean = 'MIXED'
+                            
+                            # CRITICAL: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+                            # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
+                            product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
+                            from src.core.constants import CLASSIC_TYPES
+                            is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                            if is_classic_type and (db_lineage_clean == 'MIXED' or db_lineage_clean == 'THC'):
+                                db_lineage_clean = 'HYBRID'
+                                logger.debug(f"🔄 CRITICAL: Changed MIXED/THC to HYBRID for classic type '{product_name}' (type: '{product_type}')")
+                            
                             old_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
+                            # CRITICAL: ALWAYS override with database lineage - database is source of truth
+                            tag['Lineage'] = db_lineage_clean
+                            tag['lineage'] = db_lineage_clean.lower()
+                            tag['canonical_lineage'] = db_lineage_clean
+                            tag['currentLineage'] = db_lineage_clean
+                            enriched_count += 1
                             if old_lineage != db_lineage_clean:
-                                tag['Lineage'] = db_lineage_clean
-                                tag['lineage'] = db_lineage_clean.lower()
-                                tag['canonical_lineage'] = db_lineage_clean
-                                tag['currentLineage'] = db_lineage_clean
-                                enriched_count += 1
                                 logger.info(f"🔄 EXCEL ENRICHMENT (get_product_lineage): Tag '{product_name}' lineage updated: '{old_lineage}' → '{db_lineage_clean}'")
+                            else:
+                                logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage confirmed from database: '{db_lineage_clean}'")
                             enriched_tags.append(tag)
                             continue
                     except Exception as lineage_method_error:
                         logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
                 
                 if db_record:
-                    # Update tag with database values (database takes precedence)
-                    # Only update fields that are commonly changed in database (lineage, DOH, etc.)
-                    # CRITICAL FIX: Use same lineage priority as main endpoint - prefer currentLineage/canonical_lineage, then Lineage
-                    # Database lineage is ALWAYS the source of truth - override Excel lineage
-                    db_lineage = None
-                    if db_record.get('currentLineage'):
-                        db_lineage = str(db_record.get('currentLineage', '')).strip().upper()
-                    elif db_record.get('canonical_lineage'):
-                        db_lineage = str(db_record.get('canonical_lineage', '')).strip().upper()
-                    elif db_record.get('Lineage'):
-                        db_lineage = str(db_record.get('Lineage', '')).strip().upper()
+                    # CRITICAL: Use get_product_lineage() for EXACT same method as output generation
+                    # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                    db_lineage_from_method = None
+                    try:
+                        if product_db:
+                            db_lineage_from_method = product_db.get_product_lineage(product_name)
+                    except Exception as method_err:
+                        logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {method_err}")
+                    
+                    # Use get_product_lineage() result if available (same as output generation)
+                    if db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
+                        db_lineage = str(db_lineage_from_method).strip().upper()
+                    else:
+                        # Fallback to db_record fields if get_product_lineage didn't work
+                        if db_record.get('currentLineage'):
+                            db_lineage = str(db_record.get('currentLineage', '')).strip().upper()
+                        elif db_record.get('canonical_lineage'):
+                            db_lineage = str(db_record.get('canonical_lineage', '')).strip().upper()
+                        elif db_record.get('Lineage'):
+                            db_lineage = str(db_record.get('Lineage', '')).strip().upper()
+                        else:
+                            db_lineage = None
+                    
+                    # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
+                    if db_lineage and str(db_lineage).strip().upper() == 'THC':
+                        db_lineage = 'MIXED'
+                    
+                    # CRITICAL: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+                    # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
+                    if db_lineage:
+                        product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
+                        from src.core.constants import CLASSIC_TYPES
+                        is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                        if is_classic_type and (db_lineage == 'MIXED' or str(db_lineage).strip().upper() == 'THC'):
+                            db_lineage = 'HYBRID'
+                            logger.debug(f"🔄 CRITICAL: Changed MIXED/THC to HYBRID for classic type '{product_name}' (type: '{product_type}')")
                     
                     # CRITICAL: Always update lineage from database, even if it appears to match
                     # This ensures fresh database values are always used, even after refresh
@@ -3889,7 +4014,31 @@ class ExcelProcessor:
                             # Still log to confirm database lineage is being applied (for debugging)
                             logger.debug(f"✅ EXCEL ENRICHMENT: Tag '{product_name}' lineage confirmed from database: '{db_lineage}'")
                     else:
-                        logger.warning(f"⚠️ EXCEL ENRICHMENT: No database lineage found for '{product_name}'")
+                        logger.warning(f"⚠️ EXCEL ENRICHMENT: No database lineage found for '{product_name}' (db_record exists but no lineage field)")
+                        # CRITICAL FIX: Even if db_record exists but has no lineage, ensure we set lineage from Excel
+                        # and convert MIXED to HYBRID for classic types
+                        excel_lineage = str(tag.get('Lineage', '') or tag.get('lineage', '')).strip().upper()
+                        product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
+                        from src.core.constants import CLASSIC_TYPES
+                        is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                        
+                        if excel_lineage and excel_lineage not in ['', 'NAN', 'NONE']:
+                            # Convert MIXED/THC to HYBRID for classic types
+                            if is_classic_type and (excel_lineage == 'MIXED' or excel_lineage == 'THC'):
+                                excel_lineage = 'HYBRID'
+                            tag['currentLineage'] = excel_lineage
+                            tag['canonical_lineage'] = excel_lineage
+                            tag['Lineage'] = excel_lineage
+                            tag['lineage'] = excel_lineage.lower()
+                            logger.debug(f"✅ EXCEL ENRICHMENT: Set lineage from Excel (no DB lineage): '{product_name}' = '{excel_lineage}'")
+                        else:
+                            # Default based on product type
+                            default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
+                            tag['currentLineage'] = default_lineage
+                            tag['canonical_lineage'] = default_lineage
+                            tag['Lineage'] = default_lineage
+                            tag['lineage'] = default_lineage.lower()
+                            logger.debug(f"✅ EXCEL ENRICHMENT: Set default lineage (no DB/Excel lineage): '{product_name}' = '{default_lineage}'")
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
                         db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')
@@ -3908,8 +4057,36 @@ class ExcelProcessor:
                         tag['CBD test result'] = db_record.get('CBD test result')
                         tag['CBD'] = db_record.get('CBD test result')
                 else:
-                    # Tag not found in database - log warning
-                    logger.debug(f"⚠️ EXCEL ENRICHMENT: Tag '{product_name}' not found in database")
+                    # Tag not found in database - ensure lineage fields are set from Excel Lineage
+                    # CRITICAL FIX: Always set currentLineage and canonical_lineage even if not in database
+                    # This ensures UI can find lineage even when database lookup fails
+                    excel_lineage = str(tag.get('Lineage', '') or tag.get('lineage', '')).strip().upper()
+                    product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
+                    from src.core.constants import CLASSIC_TYPES
+                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                    
+                    if excel_lineage and excel_lineage not in ['', 'NAN', 'NONE']:
+                        # CRITICAL FIX: Convert MIXED/THC to HYBRID for classic types BEFORE setting fields
+                        if is_classic_type and (excel_lineage == 'MIXED' or excel_lineage == 'THC'):
+                            excel_lineage = 'HYBRID'
+                            logger.debug(f"🔄 EXCEL ENRICHMENT: Converted MIXED/THC to HYBRID for classic type '{product_name}' (not in DB)")
+                        # CRITICAL: Set all lineage fields from Excel Lineage to ensure UI consistency
+                        tag['currentLineage'] = excel_lineage
+                        tag['canonical_lineage'] = excel_lineage
+                        tag['Lineage'] = excel_lineage
+                        tag['lineage'] = excel_lineage.lower()
+                        logger.debug(f"✅ EXCEL ENRICHMENT: Set lineage fields from Excel for '{product_name}': '{excel_lineage}' (not found in DB)")
+                    else:
+                        # If Excel Lineage is also missing, set default based on product type
+                        default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
+                        tag['currentLineage'] = default_lineage
+                        tag['canonical_lineage'] = default_lineage
+                        tag['Lineage'] = default_lineage
+                        tag['lineage'] = default_lineage.lower()
+                        logger.debug(f"✅ EXCEL ENRICHMENT: Set default lineage for '{product_name}': '{default_lineage}' (not found in DB, no Excel lineage)")
+                    
+                    # CRITICAL: Log why product wasn't found for debugging
+                    logger.warning(f"⚠️ EXCEL ENRICHMENT: Tag '{product_name}' not found in database. Tried: exact match, normalized match, base name match, get_product_lineage. Using Excel/default lineage.")
                 
                 enriched_tags.append(tag)
             
@@ -4139,11 +4316,15 @@ class ExcelProcessor:
                                             'Product Strain': product.get('Product Strain', ''),
                                             'Lineage': db_lineage_clean,  # Use database lineage (includes sovereign_lineage priority)
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
-                                            'Price': product.get('Price', ''),  # Database uses 'Price' field
-                                            'Price*': product.get('Price', ''),  # Also set Price* for compatibility
-                                            'Weight*': product.get('Weight*', ''),
+                                            'Price': product.get('Price', '') or product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),  # Check all price field variations
+                                            'Price*': product.get('Price*', '') or product.get('Price', '') or product.get('Price* (Tier Name for Bulk)', ''),  # Also set Price* for compatibility
+                                            'Price* (Tier Name for Bulk)': product.get('Price* (Tier Name for Bulk)', '') or product.get('Price*', '') or product.get('Price', ''),  # Set all price field variations
+                                            'Weight*': product.get('Weight*', '') or product.get('Weight', '') or product.get('unit_weight', ''),
+                                            'Weight': product.get('Weight', '') or product.get('Weight*', '') or product.get('unit_weight', ''),
                                             'Quantity*': product.get('Quantity*', '1'),
                                             'Units': product.get('Units', 'g'),
+                                            'WeightUnits': f"{product.get('Weight*', '')}{product.get('Units', 'g')}" if product.get('Weight*') else '',
+                                            'CombinedWeight': f"{product.get('Weight*', '')}{product.get('Units', 'g')}" if product.get('Weight*') else '',
                                             'THC test result': product.get('THC test result', ''),
                                             'CBD test result': product.get('CBD test result', ''),
                                             'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
@@ -4203,11 +4384,15 @@ class ExcelProcessor:
                                             'Product Strain': product.get('Product Strain', ''),
                                             'Lineage': db_lineage_clean,  # Use database lineage (includes sovereign_lineage priority)
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
-                                            'Price': product.get('Price', ''),  # Database uses 'Price' field
-                                            'Price*': product.get('Price', ''),  # Also set Price* for compatibility
-                                            'Weight*': product.get('Weight*', ''),
+                                            'Price': product.get('Price', '') or product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),  # Check all price field variations
+                                            'Price*': product.get('Price*', '') or product.get('Price', '') or product.get('Price* (Tier Name for Bulk)', ''),  # Also set Price* for compatibility
+                                            'Price* (Tier Name for Bulk)': product.get('Price* (Tier Name for Bulk)', '') or product.get('Price*', '') or product.get('Price', ''),  # Set all price field variations
+                                            'Weight*': product.get('Weight*', '') or product.get('Weight', '') or product.get('unit_weight', ''),
+                                            'Weight': product.get('Weight', '') or product.get('Weight*', '') or product.get('unit_weight', ''),
                                             'Quantity*': product.get('Quantity*', '1'),
                                             'Units': product.get('Units', 'g'),
+                                            'WeightUnits': f"{product.get('Weight*', '')}{product.get('Units', 'g')}" if product.get('Weight*') else '',
+                                            'CombinedWeight': f"{product.get('Weight*', '')}{product.get('Units', 'g')}" if product.get('Weight*') else '',
                                             'THC test result': product.get('THC test result', ''),
                                             'CBD test result': product.get('CBD test result', ''),
                                             'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
@@ -4254,6 +4439,45 @@ class ExcelProcessor:
             # Convert to list of dictionaries
             records = filtered_df.to_dict('records')
             logger.debug(f"Converted to {len(records)} records")
+            
+            # CRITICAL FIX: Normalize Price and Weight fields in all records to ensure generation compatibility
+            for record in records:
+                # Ensure Price* is set if Price exists, and check all price field variations
+                price_value = (record.get('Price*') or 
+                              record.get('Price') or 
+                              record.get('Price* (Tier Name for Bulk)') or 
+                              record.get('line_price') or 
+                              record.get('price') or '')
+                if price_value:
+                    # Set all price field variations
+                    record['Price'] = str(price_value).strip()
+                    record['Price*'] = record['Price']
+                    record['Price* (Tier Name for Bulk)'] = record['Price']
+                
+                # Ensure Weight* is set if Weight exists, and check all weight field variations
+                weight_value = (record.get('Weight*') or 
+                               record.get('Weight') or 
+                               record.get('unit_weight') or 
+                               record.get('weight') or '')
+                if weight_value:
+                    # Set all weight field variations
+                    record['Weight*'] = str(weight_value).strip()
+                    record['Weight'] = record['Weight*']
+                
+                # Ensure Units is set properly
+                units_value = (record.get('Units') or 
+                              record.get('Weight Unit* (grams/gm or ounces/oz)') or 
+                              record.get('unit_weight_uom') or 
+                              record.get('uom') or 'g')
+                record['Units'] = str(units_value).strip() if units_value else 'g'
+                
+                # Ensure WeightUnits/CombinedWeight is set if weight and units are available
+                if record.get('Weight*') and record.get('Units'):
+                    combined_weight = f"{record['Weight*']}{record['Units']}"
+                    if not record.get('WeightUnits'):
+                        record['WeightUnits'] = combined_weight
+                    if not record.get('CombinedWeight'):
+                        record['CombinedWeight'] = combined_weight
             
             # Sort records by lineage order, then by the order they appear in selected_tags
             lineage_order = [
@@ -5218,7 +5442,8 @@ class ExcelProcessor:
         return result
 
     def get_dynamic_filter_options(self, current_filters: Dict[str, str]) -> Dict[str, list]:
-        if self.df is None:
+        # CRITICAL FIX: Check if df attribute exists before accessing it
+        if not hasattr(self, 'df') or self.df is None:
             # Return empty options if no data is loaded
             return {
                 "vendor": [],
@@ -5236,7 +5461,7 @@ class ExcelProcessor:
             return self._clone_filter_options(cached_options)
         df = self.df.copy()
         filter_map = {
-            "vendor": "Vendor",
+            "vendor": "Vendor",  # Will be handled specially to check multiple column names
             "brand": "Product Brand",
             "productType": "Product Type*",
             "lineage": "Lineage",
@@ -5257,14 +5482,117 @@ class ExcelProcessor:
                 if key == filter_key:
                     continue  # Skip filtering by itself
                 if value and value != "All":
-                    filter_col = filter_map.get(key)
-                    if filter_col and filter_col in temp_df.columns:
-                        temp_df = temp_df[
-                            temp_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
-                        ]
+                    # CRITICAL FIX: Handle vendor filter specially to check multiple column names
+                    if key == "vendor":
+                        vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
+                        vendor_col = None
+                        for vcol in vendor_cols:
+                            if vcol in temp_df.columns:
+                                vendor_col = vcol
+                                break
+                        if vendor_col:
+                            temp_df = temp_df[
+                                temp_df[vendor_col].astype(str).str.lower().str.strip() == value.lower().strip()
+                            ]
+                    else:
+                        filter_col = filter_map.get(key)
+                        if filter_col and filter_col in temp_df.columns:
+                            temp_df = temp_df[
+                                temp_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
+                            ]
+            # CRITICAL FIX: Handle vendor filter specially to check multiple column names
+            if filter_key == "vendor":
+                # Check all possible vendor column names (same logic as get_available_tags)
+                vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
+                vendor_col = None
+                for vcol in vendor_cols:
+                    if vcol in temp_df.columns:
+                        vendor_col = vcol
+                        break
+                
+                if vendor_col:
+                    # Get unique vendor values from the found column
+                    values = temp_df[vendor_col].dropna().unique().tolist()
+                    values = [str(v).strip() for v in values if str(v).strip() and str(v).lower() not in ['nan', 'none', '']]
+                    # Remove duplicates and sort
+                    values = list(set(values))
+                    values.sort()
+                    options[filter_key] = clean_list(values)
+                    self.logger.info(f"✅ Vendor filter options: Found {len(values)} unique vendors from column '{vendor_col}'")
+                else:
+                    # No vendor column found
+                    options[filter_key] = []
+                    self.logger.warning("⚠️ No vendor column found in DataFrame. Available columns: " + str(list(temp_df.columns)))
             # Get unique values for this filter type
-            if col in temp_df.columns:
-                if filter_key == "weight":
+            elif col in temp_df.columns:
+                # CRITICAL FIX: Fetch lineage values from database for filtered products
+                # Get the filtered product names first, then query database for their actual lineage values
+                # This ensures filter dropdown shows actual database values while respecting current filters
+                if filter_key == "lineage":
+                    try:
+                        # Get product names from filtered DataFrame (already has filters applied)
+                        product_name_col = None
+                        for col_name in ['Product Name*', 'ProductName', 'Product Name']:
+                            if col_name in temp_df.columns:
+                                product_name_col = col_name
+                                break
+                        
+                        if product_name_col and not temp_df.empty:
+                            product_names = temp_df[product_name_col].dropna().unique().tolist()
+                            product_names = [str(name).strip() for name in product_names if name and str(name).strip()]
+                            
+                            if product_names:
+                                from .product_database import ProductDatabase
+                                product_db = ProductDatabase(store_name=self._store_name)
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
+                                
+                                # Query database for lineage values of these specific filtered products
+                                # Use COALESCE to match get_product_lineage logic: sovereign > canonical > products.Lineage
+                                # Handle large lists by querying in batches if needed (SQLite limit ~999 params)
+                                MAX_PARAMS = 500  # Leave room for duplicates
+                                db_lineages = set()
+                                
+                                for i in range(0, len(product_names), MAX_PARAMS):
+                                    batch = product_names[i:i+MAX_PARAMS]
+                                    placeholders = ','.join(['?'] * len(batch))
+                                    query = f'''
+                                        SELECT DISTINCT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                                        FROM products p
+                                        LEFT JOIN strains s ON p.strain_id = s.id
+                                        WHERE (p."Product Name*" IN ({placeholders}) OR p.ProductName IN ({placeholders}))
+                                          AND COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL
+                                          AND COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
+                                    '''
+                                    
+                                    cursor.execute(query, batch + batch)
+                                    batch_lineages = [str(row[0]).strip() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
+                                    db_lineages.update(batch_lineages)
+                                
+                                db_lineages = sorted(list(db_lineages))
+                                
+                                if db_lineages:
+                                    values = db_lineages
+                                    self.logger.info(f"✅ Lineage filter options from database for {len(product_names)} filtered products: {len(values)} unique values")
+                                else:
+                                    # Fallback to Excel values if no database matches
+                                    values = temp_df[col].dropna().unique().tolist()
+                                    values = [str(v) for v in values if str(v).strip()]
+                                    self.logger.warning(f"⚠️ No database lineages found for filtered products, using Excel: {len(values)} values")
+                            else:
+                                # No products in filtered DataFrame
+                                values = temp_df[col].dropna().unique().tolist()
+                                values = [str(v) for v in values if str(v).strip()]
+                        else:
+                            # No product name column or empty DataFrame, use Excel values
+                            values = temp_df[col].dropna().unique().tolist()
+                            values = [str(v) for v in values if str(v).strip()]
+                    except Exception as db_err:
+                        # Fallback to Excel on error
+                        self.logger.warning(f"⚠️ Error fetching lineage from database, using Excel: {db_err}")
+                        values = temp_df[col].dropna().unique().tolist()
+                        values = [str(v) for v in values if str(v).strip()]
+                elif filter_key == "weight":
                     # For weight, use the properly formatted weight with units
                     values = []
                     for _, row in temp_df.iterrows():
@@ -5299,8 +5627,24 @@ class ExcelProcessor:
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
-                        if ("trade sample" in v_lower or "deactivated" in v_lower):
+                        v_original = v.strip()
+                        
+                        # Check against EXCLUDED_PRODUCT_TYPES constant (exact match, case-insensitive)
+                        is_excluded = any(
+                            excluded.lower() == v_lower 
+                            for excluded in EXCLUDED_PRODUCT_TYPES
+                        )
+                        
+                        # Also check for patterns (trade sample, deactivated)
+                        has_excluded_pattern = (
+                            "trade sample" in v_lower or 
+                            "deactivated" in v_lower or
+                            any(pattern.lower() in v_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)
+                        )
+                        
+                        if is_excluded or has_excluded_pattern:
                             continue
+                        
                         # Apply product type normalization (same as TYPE_OVERRIDES)
                         normalized_v = TYPE_OVERRIDES.get(v_lower, v)
                         filtered_values.append(normalized_v)
@@ -8011,10 +8355,27 @@ class ExcelProcessor:
             # Get price value - use the actual column name from Excel file
             price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
             
-            # CRITICAL FIX: ALWAYS use database lineage if available, NEVER use Excel file lineage
-            # Database is the source of truth - Excel file lineage is outdated
+            # CRITICAL FIX: ALWAYS use get_product_lineage() for EXACT same method as output generation
+            # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
             db_lineage = None
-            if db_lineage_map:
+            try:
+                import sys
+                if 'app' in sys.modules:
+                    app_module = sys.modules['app']
+                    if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                        store_name = app_module.get_current_store_name()
+                        product_db = app_module.get_product_database(store_name) if store_name else None
+                        if product_db:
+                            # CRITICAL: Use get_product_lineage() - same method as output generation
+                            db_lineage_from_method = product_db.get_product_lineage(product_name)
+                            if db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
+                                db_lineage = str(db_lineage_from_method).strip().upper()
+                                logger.debug(f"✅ GUARANTEED FIX (get_product_lineage): '{product_name}' = '{db_lineage}'")
+            except Exception as lineage_method_err:
+                logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_err}")
+            
+            # Fallback to batch query map if get_product_lineage didn't find it
+            if not db_lineage and db_lineage_map:
                 # Try exact match first
                 db_lineage = db_lineage_map.get(product_name)
                 if db_lineage:
@@ -8048,19 +8409,25 @@ class ExcelProcessor:
             # GUARANTEED FIX: ALWAYS use database lineage if available, NEVER use Excel file lineage
             # Database is the source of truth - Excel file lineage is outdated
             if db_lineage:
+                # CRITICAL: Use database lineage directly - respect database values
+                # Don't convert or modify - database is the source of truth
                 final_lineage = db_lineage
-                logger.debug(f"✅ GUARANTEED FIX: Using database lineage for '{product_name}': '{db_lineage}'")
+                logger.debug(f"✅ Using database lineage for '{product_name}': '{final_lineage}'")
             else:
                 # Fallback to Excel/inference only if database doesn't have it
                 existing_lineage = str(row.get('Lineage', '') or '').strip().upper()
+                
+                # Use Excel lineage as-is - don't convert
                 if existing_lineage and existing_lineage in VALID_LINEAGES:
                     final_lineage = existing_lineage
-                    logger.debug(f"⚠️ GUARANTEED FIX: Using Excel lineage for '{product_name}': '{existing_lineage}' (not in database)")
+                    logger.debug(f"Using Excel lineage for '{product_name}': '{existing_lineage}' (not in database)")
                 else:
-                    # No valid lineage column - infer from product name and type
+                    # No valid lineage - use default based on product type
                     product_type_for_inference = safe_get_value(row.get('Product Type*', ''))
-                    final_lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
-                    logger.debug(f"⚠️ GUARANTEED FIX: Using inferred lineage for '{product_name}': '{final_lineage}' (not in database or Excel)")
+                    default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
+                    inferred = self._infer_lineage_from_name(product_name, product_type_for_inference)
+                    final_lineage = inferred if inferred else default_lineage
+                    logger.debug(f"Using inferred/default lineage for '{product_name}': '{final_lineage}' (not in database or Excel)")
             
             tag = {
                 'Product Name*': product_name,
@@ -8071,6 +8438,8 @@ class ExcelProcessor:
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
                 'Lineage': final_lineage,  # GUARANTEED FIX: Use database lineage, not Excel
+                'currentLineage': final_lineage,  # CRITICAL: Set all lineage fields for consistency
+                'canonical_lineage': final_lineage,  # CRITICAL: Set all lineage fields for consistency
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
