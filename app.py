@@ -20908,6 +20908,27 @@ def display_preroll_items(group_id):
             if preroll_items:
                 group_display_name = f"{group_display_name} - {vendor_filter}"
         
+        # CRITICAL FIX: Filter items by allowed brands if configured
+        # This ensures only products from allowed brands are shown in QR code pages
+        if preroll_items:
+            from src.core.constants import PREROLL_ALLOWED_BRANDS
+            if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
+                original_count = len(preroll_items)
+                allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
+                
+                filtered_items = []
+                for item in preroll_items:
+                    item_brand = str(item.get('brand', '')).strip()
+                    item_brand_lower = item_brand.lower().strip()
+                    
+                    if item_brand_lower in allowed_brands_lower:
+                        filtered_items.append(item)
+                    else:
+                        logging.debug(f"PREROLL ROUTE BRAND FILTER: Excluding item '{item.get('product_name', 'Unknown')}' with brand '{item_brand}' (not in allowed brands)")
+                
+                preroll_items = filtered_items
+                logging.info(f"PREROLL ROUTE: Filtered {original_count} items to {len(preroll_items)} items based on allowed brands: {PREROLL_ALLOWED_BRANDS}")
+        
         if not preroll_items:
             # Return error page if items not found
             return f"""

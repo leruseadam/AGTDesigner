@@ -84,7 +84,7 @@ def _load_font_sizing_config():
                     # Preroll template: Copy all settings from mini template (identical font sizing)
                     'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
                     'brand': [(5, 9), (20, 8), (30, 6.5), (float('inf'), 6)],
-                    'price': [(1, 18), (2, 16), (float('inf'), 14)],
+                    'price': [(1, 22), (2, 20), (float('inf'), 18)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
                     'thc_cbd': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
@@ -92,7 +92,7 @@ def _load_font_sizing_config():
                     'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
                     'doh': [(5, 12), (10, 11), (float('inf'), 10)],
                     'vendor': [(5, 6), (10, 5), (15, 4), (20, 3), (float('inf'), 2)],
-                    'qr': [(float('inf'), 26)],  # QR codes: Small size for preroll template (same as mini)
+                    'qr': [(float('inf'), 30)],  # QR codes: Small size for preroll template (same as mini)
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 }
             }
