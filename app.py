@@ -40,8 +40,28 @@ from src.core.generation.fast_generation import (
     optimize_records_for_generation,
     update_generation_stats
 )
-from src.core.generation.preroll_tag_generator import generate_preroll_tags, identify_preroll_product_group
-from src.core.generation.preroll_product_list import generate_preroll_product_list
+# CRITICAL FIX: Make preroll imports optional to prevent startup errors if files don't exist
+try:
+    from src.core.generation.preroll_tag_generator import generate_preroll_tags, identify_preroll_product_group
+except ImportError as preroll_import_error:
+    logging.warning(f"Could not import preroll_tag_generator: {preroll_import_error}")
+    # Define fallback functions
+    def generate_preroll_tags(records, cache):
+        logging.warning("generate_preroll_tags called but module not available - returning records unchanged")
+        return records
+    
+    def identify_preroll_product_group(description: str, product_name: str = '') -> dict:
+        logging.warning("identify_preroll_product_group called but module not available - returning default group")
+        return {'group_id': 'default', 'display_name': 'Preroll Items', 'category': 'Prerolls'}
+
+try:
+    from src.core.generation.preroll_product_list import generate_preroll_product_list
+except ImportError as preroll_list_error:
+    logging.warning(f"Could not import preroll_product_list: {preroll_list_error}")
+    # Define fallback function
+    def generate_preroll_product_list(records, cache):
+        logging.warning("generate_preroll_product_list called but module not available - returning None")
+        return None
 
 # Performance optimizations - Import response caching utilities
 # These decorators provide response caching, compression, and cache invalidation
