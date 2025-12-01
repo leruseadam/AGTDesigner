@@ -255,6 +255,36 @@ class TagsTable {
     const brand = tag['Product Brand'] || tag.Brand || '';
     const vendor = tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || tag['Supplier'] || tag['Vendor*'] || tag['Supplier*'] || '';
     const type = tag['Product Type*'] || tag.Type || '';
+    // Extract weight units from multiple possible sources
+    let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+                           tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '').toString().trim();
+    
+    // Format weight to remove .0 decimals (e.g., "1.0g" -> "1g", but "1.5g" stays "1.5g")
+    if (weightWithUnits) {
+        // Match pattern: number with optional decimal, followed by unit
+        const weightMatch = weightWithUnits.match(/^([\d.]+)([a-zA-Z]+.*)$/);
+        if (weightMatch) {
+            const weightValue = weightMatch[1];
+            const unit = weightMatch[2];
+            // Try to parse as float
+            const weightFloat = parseFloat(weightValue);
+            if (!isNaN(weightFloat)) {
+                if (weightFloat % 1 === 0) {
+                    // It's a whole number, remove decimal point (e.g., "1.0" -> "1")
+                    weightWithUnits = `${Math.round(weightFloat)}${unit}`;
+                } else {
+                    // It's a decimal number, remove trailing zeros (e.g., "1.50" -> "1.5", "1.0" -> "1")
+                    // Convert to string and remove trailing zeros and decimal point if needed
+                    let formatted = weightFloat.toString();
+                    formatted = formatted.replace(/\.0+$/, ''); // Remove .0, .00, etc.
+                    formatted = formatted.replace(/(\.\d*?)0+$/, '$1'); // Remove trailing zeros after decimal
+                    formatted = formatted.replace(/\.$/, ''); // Remove trailing decimal point
+                    weightWithUnits = `${formatted}${unit}`;
+                }
+            }
+        }
+    }
+    
     const safeTagName = tagName.replace(/"/g, '&quot;');
     const safeId = `tag_${safeTagName.replace(/[^a-zA-Z0-9]/g, '_')}`;
     
@@ -387,7 +417,7 @@ class TagsTable {
               ${dohDropdownOptions}
             </select>
           </div>
-          <small class="text-muted d-block mt-1">${brand}${vendor ? ` (${vendor})` : ''} | ${type} | DOH: ${dohStatus}</small>
+          <small class="text-muted d-block mt-1">${brand}${vendor ? ` (${vendor})` : ''} | ${type}${weightWithUnits ? ` | ${weightWithUnits}` : ''} | DOH: ${dohStatus}</small>
         </div>
       </div>
     `;

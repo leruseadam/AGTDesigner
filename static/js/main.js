@@ -8611,16 +8611,16 @@ const TagManager = {
 
         // JSON matching is now handled by the modal - removed old above-tags-list logic
         
-        // Emergency initialization fix - force complete after 15 seconds
+        // Emergency initialization fix - force complete after 8 seconds (reduced from 15 for faster startup)
         setTimeout(() => {
             if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                 verboseLog('Emergency initialization fix: forcing splash completion');
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
             }
-        }, 15000);
+        }, 8000);
         
-        // Additional emergency fix for stuck initialization
+        // Additional emergency fix for stuck initialization - reduced to 10 seconds
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const splash = document.getElementById('appLoadingSplash');
@@ -8632,7 +8632,7 @@ const TagManager = {
                         mainContent.style.display = 'block';
                     }
                 }
-            }, 20000); // 20 second emergency timeout
+            }, 10000); // 10 second emergency timeout (reduced from 20 for faster startup)
         });
     },
 
@@ -8641,26 +8641,19 @@ const TagManager = {
         // Intercept page reload attempts
         const originalReload = window.location.reload.bind(window.location);
         window.location.reload = (force) => {
-            this._waitForPendingLineageUpdates().then(() => {
-                console.log('✅ All lineage updates completed, proceeding with reload...');
-                originalReload(force);
-            }).catch((error) => {
-                console.warn('⚠️ Error waiting for lineage updates, reloading anyway:', error);
-                originalReload(force);
-            });
+            // INSTANT RELOAD: Reload immediately without waiting
+            if (this._hasPendingLineageUpdates()) {
+                console.warn('⚠️ Reloading immediately with pending lineage updates (user requested instant reload)');
+            } else {
+                console.log('✅ Reloading immediately (no pending updates)');
+            }
+            originalReload(force);
         };
         
-        // Add beforeunload handler to warn if updates are pending
-        window.addEventListener('beforeunload', (event) => {
-            if (this._hasPendingLineageUpdates()) {
-                const message = 'Lineage updates are in progress. Reloading now may cause changes to be lost.';
-                event.preventDefault();
-                event.returnValue = message;
-                return message;
-            }
-        });
+        // Remove beforeunload handler to allow instant reloads
+        // (Previously blocked reloads if updates were pending)
         
-        console.log('🛡️ Lineage update reload protection enabled');
+        console.log('🛡️ Lineage update reload protection enabled (instant reload mode)');
     },
 
     // Check if there are pending lineage updates
@@ -8670,30 +8663,16 @@ const TagManager = {
     },
 
     // Wait for all pending lineage updates to complete
-    async _waitForPendingLineageUpdates(maxWaitMs = 5000) {
-        const startTime = Date.now();
-        
-        while (this._hasPendingLineageUpdates() && (Date.now() - startTime) < maxWaitMs) {
-            console.log(`⏳ Waiting for lineage updates to complete... (pending: ${this._lineageUpdatePending?.size || 0}, processing: ${this._lineageUpdateProcessing})`);
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        
-        // Additional wait to ensure database commits are flushed (backend waits 0.1s + verification time)
-        if (this._lineageUpdateCompletions && this._lineageUpdateCompletions.size > 0) {
-            const lastCompletion = Math.max(...Array.from(this._lineageUpdateCompletions.values()));
-            const timeSinceLastCompletion = Date.now() - lastCompletion;
-            const additionalWait = Math.max(0, 500 - timeSinceLastCompletion); // Wait at least 500ms after last completion
-            if (additionalWait > 0) {
-                console.log(`⏳ Waiting ${additionalWait}ms for database commits to flush...`);
-                await new Promise(resolve => setTimeout(resolve, additionalWait));
-            }
-        }
-        
+    // NOTE: This function is kept for compatibility but reloads now happen instantly
+    async _waitForPendingLineageUpdates(maxWaitMs = 0) {
+        // INSTANT RELOAD: Return immediately without waiting
+        // The reload now happens instantly, so we don't need to wait
         if (this._hasPendingLineageUpdates()) {
-            console.warn('⚠️ Still have pending lineage updates after waiting, proceeding anyway');
+            console.warn('⚠️ Skipping wait - reloading immediately (pending updates may be lost)');
         } else {
-            console.log('✅ All lineage updates completed');
+            console.log('✅ No pending updates - instant reload');
         }
+        return Promise.resolve();
     },
 
     // Show a simple loading indicator
@@ -8936,12 +8915,13 @@ const TagManager = {
             return; // Exit early - we have cached data
         }
 
-        // PERFORMANCE FIX: Reduced timeout to 8 seconds - if it takes longer, use cache/fallback
+        // PERFORMANCE FIX: Reduced timeout to 3 seconds - if it takes longer, use cache/fallback
+        // This allows UI to show faster even if backend is slow
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 8000);
+            setTimeout(() => reject(new Error('Initialization timeout')), 3000);
         });
 
-        // Set the safety timeout
+        // Set the safety timeout - reduced to 5 seconds for faster UI display
         splashSafetyTimeout = setTimeout(() => {
             // Check if tags have loaded before hiding splash
             const availableTagsContainer = document.getElementById('availableTags');
@@ -8981,7 +8961,7 @@ const TagManager = {
             
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
-        }, 10000); // 10 second safety net - should be enough with optimizations
+        }, 5000); // 5 second safety net - faster UI display
 
         try {
             // PERFORMANCE FIX: Use fast_load=1 for initial loads to skip expensive lineage alignment

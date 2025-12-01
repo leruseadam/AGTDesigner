@@ -91,7 +91,7 @@ except ImportError as e:
             return f  # Return function unchanged (no invalidation)
         return decorator
 # Startup Performance Optimization
-# DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
+DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs - ENABLED for faster initialization
 
 # PythonAnywhere Performance Optimization
 PYTHONANYWHERE_OPTIMIZATION = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
@@ -1521,9 +1521,11 @@ def get_product_database(store_name=None):
         if getattr(_product_database, 'db_path', db_path) != db_path:
             logging.warning(f"ProductDatabase db_path mismatch: {_product_database.db_path} != {db_path}")
         logging.info(f"✅ ProductDatabase created with db_path: {_product_database.db_path}")
-        _product_database.init_database()
+        # PERFORMANCE: Lazy initialize database - only init when actually needed (on first query)
+        # This speeds up app startup significantly
+        # _product_database.init_database()  # Deferred until first use
         if os.path.exists(db_path):
-            logging.info(f"✅ ProductDatabase loaded for store '{effective_store}' at: {db_path}")
+            logging.info(f"✅ ProductDatabase loaded for store '{effective_store}' at: {db_path} (lazy init enabled)")
 
     return _product_database
 
@@ -16368,9 +16370,10 @@ def get_initial_data():
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
         # PERFORMANCE: Check fast_load flag FIRST before any expensive operations
-        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
-        if request.args.get('fast_load') not in ('0', 'false', 'False'):
-            fast_load = True  # Default to fast loading
+        # Default to fast loading for faster initialization - only disable if explicitly requested
+        fast_load = request.args.get('fast_load') not in ('0', 'false', 'False')
+        if request.args.get('fast_load') in ('1', 'true', 'True'):
+            fast_load = True  # Explicitly enabled
         
         # PERFORMANCE: For fast_load, check cache and session BEFORE loading any files
         if fast_load:
