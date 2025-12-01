@@ -1324,7 +1324,10 @@ def get_excel_processor():
                         # OPTIMIZATION: Skip default file loading on startup for faster app loading
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
                             # Try to load the default file for the selected store
-                            selected_store = get_current_store_name() if has_store_selection() else None
+                            # CRITICAL FIX: Use allow_fallback=True to ensure we get a store even if not explicitly selected
+                            # This allows default file loading to work even when store selection hasn't happened yet
+                            # Always use fallback for default file loading to ensure it works on startup
+                            selected_store = get_current_store_name(allow_fallback=True)
                             logging.info(f"🔍 TRACE get_excel_processor: Current store = {selected_store}")
                             default_file = get_default_upload_file(selected_store)
                             logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file}")
@@ -2116,7 +2119,9 @@ def initialize_excel_processor():
         
         # Only load default file if no session file was found/loaded
         from src.core.data.excel_processor import get_default_upload_file
-        selected_store = get_current_store_name() if has_store_selection() else None
+        # CRITICAL FIX: Use allow_fallback=True for default file loading on startup
+        # This ensures default file loads even if store hasn't been selected yet
+        selected_store = get_current_store_name(allow_fallback=True)
         default_file = get_default_upload_file(selected_store)
         
         if default_file and os.path.exists(default_file):
@@ -8710,51 +8715,53 @@ def get_available_tags():
         # Database lineage is the source of truth and overrides Excel/cached lineage
         if all_tags:
             try:
-                store_name = get_current_store_name()
+                store_name = get_current_store_name(allow_fallback=True)  # Use fallback to ensure we have a store
                 if not store_name:
-                    raise ValueError("No store selected")
-                product_db = get_product_database(store_name)
-                if product_db:
-                    # Get all product names from tags
-                    product_names = []
-                    for tag in all_tags:
-                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                        if name:
-                            product_names.append(name)
-                    
-                    if product_names:
-                        try:
-                            # PERFORMANCE: Single batch query instead of individual queries
-                            db_records = product_db.get_products_by_names(product_names)
-                            
-                            # PERFORMANCE: Build lineage map and normalized map in single pass
-                            lineage_map = {}
-                            normalized_to_lineage = {}
-                            for db_record in db_records:
-                                db_product_name = db_record.get('Product Name*', '')
-                                if db_product_name:
-                                    db_lineage = (
-                                        db_record.get('currentLineage') or
-                                        db_record.get('canonical_lineage') or
-                                        db_record.get('Lineage')
-                                    )
-                                    if db_lineage:
-                                        db_lineage_clean = str(db_lineage).strip().upper()
-                                        lineage_map[db_product_name] = db_lineage_clean
-                                        try:
-                                            normalized_name = product_db._normalize_product_name(db_product_name)
-                                            if normalized_name:
-                                                normalized_to_lineage[normalized_name] = db_lineage_clean
-                                        except Exception:
-                                            pass
-                            
-                            # OPTIMIZED: Update tags using batch query results - much faster than individual queries
-                            updated_count = 0
-                            tags_needing_individual_query_guaranteed = []  # Track tags that need individual queries
-                            for tag in all_tags:
-                                tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                if not tag_name:
-                                    continue
+                    logging.warning("No store selected and fallback failed - skipping database lineage query")
+                    # Continue without database lineage - tags will still work
+                else:
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        # Get all product names from tags
+                        product_names = []
+                        for tag in all_tags:
+                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            if name:
+                                product_names.append(name)
+                        
+                        if product_names:
+                            try:
+                                # PERFORMANCE: Single batch query instead of individual queries
+                                db_records = product_db.get_products_by_names(product_names)
+                                
+                                # PERFORMANCE: Build lineage map and normalized map in single pass
+                                lineage_map = {}
+                                normalized_to_lineage = {}
+                                for db_record in db_records:
+                                    db_product_name = db_record.get('Product Name*', '')
+                                    if db_product_name:
+                                        db_lineage = (
+                                            db_record.get('currentLineage') or
+                                            db_record.get('canonical_lineage') or
+                                            db_record.get('Lineage')
+                                        )
+                                        if db_lineage:
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            lineage_map[db_product_name] = db_lineage_clean
+                                            try:
+                                                normalized_name = product_db._normalize_product_name(db_product_name)
+                                                if normalized_name:
+                                                    normalized_to_lineage[normalized_name] = db_lineage_clean
+                                            except Exception:
+                                                pass
+                                
+                                # OPTIMIZED: Update tags using batch query results - much faster than individual queries
+                                updated_count = 0
+                                tags_needing_individual_query_guaranteed = []  # Track tags that need individual queries
+                                for tag in all_tags:
+                                    tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                    if not tag_name:
+                                        continue
                                 
                                 # Fast lookup: try exact match first, then normalized, then case-insensitive
                                 db_lineage = lineage_map.get(tag_name)
@@ -8783,78 +8790,78 @@ def get_available_tags():
                                     # CRITICAL FIX: If not found in batch, add to individual query list
                                     # This handles products with name mismatches (e.g., apostrophe differences)
                                     tags_needing_individual_query_guaranteed.append((tag, tag_name))
-                            
-                            # CRITICAL FIX: ALWAYS verify ALL tags with individual database queries
-                            # This is the ONLY way to guarantee we get the latest database lineage values
-                            # Batch queries can return stale data, so we must verify every single tag individually
-                            logging.info(f"🔄 CRITICAL GUARANTEED FIX: Verifying ALL {len(all_tags)} tags with individual database queries to guarantee latest lineage values...")
-                            # Add ALL tags to individual query list to verify their lineage from database
-                            for tag in all_tags:
-                                tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                if tag_name:
-                                    # Always verify with individual query - don't trust batch query
-                                    if (tag, tag_name) not in tags_needing_individual_query_guaranteed:
-                                        tags_needing_individual_query_guaranteed.append((tag, tag_name))
-                            
-                            if tags_needing_individual_query_guaranteed and product_db:
-                                logging.info(f"🔄 CRITICAL GUARANTEED FIX: Performing {len(tags_needing_individual_query_guaranteed)} individual database queries to guarantee latest lineage values (overriding any batch query data)...")
-                                individual_updated = 0
-                                for tag, tag_name in tags_needing_individual_query_guaranteed:
-                                    try:
-                                        # CRITICAL: Use get_product_lineage which handles normalization and case-insensitive matching
-                                        # This ALWAYS queries the database directly, never uses cache
-                                        db_lineage = product_db.get_product_lineage(tag_name)
-                                        if db_lineage:
-                                            db_lineage_clean = str(db_lineage).strip().upper()
-                                            
-                                            # CRITICAL: Use database lineage directly - respect database values
-                                            # Don't convert or modify - database is the source of truth
-                                            old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                            
-                                            # CRITICAL: ALWAYS override with database value - database is the source of truth
-                                            tag['currentLineage'] = db_lineage_clean
-                                            tag['canonical_lineage'] = db_lineage_clean
-                                            tag['Lineage'] = db_lineage_clean
-                                            tag['lineage'] = db_lineage_clean.lower()
-                                            
-                                            updated_count += 1
-                                            individual_updated += 1
-                                            if old_lineage != db_lineage_clean:
-                                                logging.info(f"🔄 CRITICAL GUARANTEED FIX: Lineage OVERRIDDEN by database (individual query): '{tag_name}' - batch query had '{old_lineage}' → database has '{db_lineage_clean}'")
+                                
+                                # CRITICAL FIX: ALWAYS verify ALL tags with individual database queries
+                                # This is the ONLY way to guarantee we get the latest database lineage values
+                                # Batch queries can return stale data, so we must verify every single tag individually
+                                logging.info(f"🔄 CRITICAL GUARANTEED FIX: Verifying ALL {len(all_tags)} tags with individual database queries to guarantee latest lineage values...")
+                                # Add ALL tags to individual query list to verify their lineage from database
+                                for tag in all_tags:
+                                    tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                    if tag_name:
+                                        # Always verify with individual query - don't trust batch query
+                                        if (tag, tag_name) not in tags_needing_individual_query_guaranteed:
+                                            tags_needing_individual_query_guaranteed.append((tag, tag_name))
+                                
+                                if tags_needing_individual_query_guaranteed and product_db:
+                                    logging.info(f"🔄 CRITICAL GUARANTEED FIX: Performing {len(tags_needing_individual_query_guaranteed)} individual database queries to guarantee latest lineage values (overriding any batch query data)...")
+                                    individual_updated = 0
+                                    for tag, tag_name in tags_needing_individual_query_guaranteed:
+                                        try:
+                                            # CRITICAL: Use get_product_lineage which handles normalization and case-insensitive matching
+                                            # This ALWAYS queries the database directly, never uses cache
+                                            db_lineage = product_db.get_product_lineage(tag_name)
+                                            if db_lineage:
+                                                db_lineage_clean = str(db_lineage).strip().upper()
+                                                
+                                                # CRITICAL: Use database lineage directly - respect database values
+                                                # Don't convert or modify - database is the source of truth
+                                                old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                                
+                                                # CRITICAL: ALWAYS override with database value - database is the source of truth
+                                                tag['currentLineage'] = db_lineage_clean
+                                                tag['canonical_lineage'] = db_lineage_clean
+                                                tag['Lineage'] = db_lineage_clean
+                                                tag['lineage'] = db_lineage_clean.lower()
+                                                
+                                                updated_count += 1
+                                                individual_updated += 1
+                                                if old_lineage != db_lineage_clean:
+                                                    logging.info(f"🔄 CRITICAL GUARANTEED FIX: Lineage OVERRIDDEN by database (individual query): '{tag_name}' - batch query had '{old_lineage}' → database has '{db_lineage_clean}'")
+                                                else:
+                                                    logging.debug(f"✅ GUARANTEED FIX: Lineage confirmed by database (individual query): '{tag_name}' = '{db_lineage_clean}'")
                                             else:
-                                                logging.debug(f"✅ GUARANTEED FIX: Lineage confirmed by database (individual query): '{tag_name}' = '{db_lineage_clean}'")
-                                        else:
-                                            # Even if no DB lineage found, ensure fields are consistent
+                                                # Even if no DB lineage found, ensure fields are consistent
+                                                # CRITICAL: Classic types should NOT default to MIXED
+                                                product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
+                                                from src.core.constants import CLASSIC_TYPES
+                                                is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                                default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
+                                                current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
+                                                
+                                                # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
+                                                if current_lineage == 'THC':
+                                                    current_lineage = 'MIXED'
+                                                
+                                                # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID
+                                                # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
+                                                if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
+                                                    current_lineage = 'HYBRID'
+                                                
+                                                # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
+                                                # Even if one exists, ensure both are set to the same value
+                                                if current_lineage:
+                                                    tag['currentLineage'] = current_lineage
+                                                    tag['canonical_lineage'] = current_lineage
+                                                    tag['Lineage'] = current_lineage
+                                                    tag['lineage'] = current_lineage.lower()
+                                        except Exception as individual_err:
+                                            logging.debug(f"GUARANTEED FIX individual query failed for '{tag_name}': {individual_err}")
+                                            # Even if query fails, ensure fields are consistent
                                             # CRITICAL: Classic types should NOT default to MIXED
                                             product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
                                             from src.core.constants import CLASSIC_TYPES
                                             is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
-                                            default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
-                                            current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
-                                            
-                                            # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
-                                            if current_lineage == 'THC':
-                                                current_lineage = 'MIXED'
-                                            
-                                            # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID
-                                            # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
-                                            if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
-                                                current_lineage = 'HYBRID'
-                                            
-                                            # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
-                                            # Even if one exists, ensure both are set to the same value
-                                            if current_lineage:
-                                                tag['currentLineage'] = current_lineage
-                                                tag['canonical_lineage'] = current_lineage
-                                                tag['Lineage'] = current_lineage
-                                                tag['lineage'] = current_lineage.lower()
-                                    except Exception as individual_err:
-                                        logging.debug(f"GUARANTEED FIX individual query failed for '{tag_name}': {individual_err}")
-                                        # Even if query fails, ensure fields are consistent
-                                        # CRITICAL: Classic types should NOT default to MIXED
-                                        product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
-                                        from src.core.constants import CLASSIC_TYPES
-                                        is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
                                         default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                         current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
                                         
@@ -8870,16 +8877,16 @@ def get_available_tags():
                                             if current_lineage:
                                                 tag['currentLineage'] = current_lineage
                                                 tag['canonical_lineage'] = current_lineage
+                                    
+                                    if individual_updated > 0:
+                                        logging.info(f"✅ CRITICAL GUARANTEED FIX: Verified {individual_updated}/{len(tags_needing_individual_query_guaranteed)} tags with individual database queries - all lineage values now guaranteed to match database")
                                 
-                                if individual_updated > 0:
-                                    logging.info(f"✅ CRITICAL GUARANTEED FIX: Verified {individual_updated}/{len(tags_needing_individual_query_guaranteed)} tags with individual database queries - all lineage values now guaranteed to match database")
-                            
-                            if updated_count > 0:
-                                logging.debug(f"✅ Updated {updated_count}/{len(all_tags)} tags with database lineage")
-                        except Exception as db_query_err:
-                            logging.debug(f"Database lineage query failed: {db_query_err}")
-                else:
-                    logging.debug("No product database available for lineage alignment")
+                                if updated_count > 0:
+                                    logging.debug(f"✅ Updated {updated_count}/{len(all_tags)} tags with database lineage")
+                            except Exception as db_query_err:
+                                logging.debug(f"Database lineage query failed: {db_query_err}")
+                    else:
+                        logging.debug("No product database available for lineage alignment")
             except Exception as e:
                 logging.debug(f"Lineage alignment failed: {e}")
         
