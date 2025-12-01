@@ -2653,6 +2653,7 @@ class TemplateProcessor:
 
         # Generate QR code - special handling for preroll template
         product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
+        qr_url_for_log = None  # Initialize for logging
         if product_name and str(product_name).strip():
             # For preroll template, generate URL to preroll items page
             # For all other templates, use product name as before
@@ -2684,15 +2685,9 @@ class TemplateProcessor:
                 except Exception:
                     base_url = ''
 
-                # If host_url is unavailable (very unusual), allow an override via env;
-                # otherwise, skip generating a QR for this record.
+                # If host_url is unavailable (very unusual), allow an override via env
                 if not base_url:
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
-                if not base_url:
-                    self.logger.warning("PREROLL QR: No base URL available; skipping QR generation for this label")
-                    qr_code = None
-                    label_context['QR'] = ''
-                    return label_context
                 
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
@@ -2701,15 +2696,23 @@ class TemplateProcessor:
                     # URL encode vendor to handle special characters
                     from urllib.parse import quote
                     vendor_encoded = quote(vendor_clean)
-                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
+                    if base_url:
+                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
+                    else:
+                        # Use relative URL if no base_url available
+                        qr_url = f"/preroll-items/{group_id}?vendor={vendor_encoded}"
                 else:
                     # Fallback to group_id only if no vendor (backward compatibility)
-                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
+                    if base_url:
+                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
+                    else:
+                        # Use relative URL if no base_url available
+                        qr_url = f"/preroll-items/{group_id}"
                 
                 # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
                 # If we detect a local host, just drop the scheme/host and use a relative path; most
                 # modern scanners will still treat this as a URL when opened from a browser context.
-                if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
+                if base_url and ('localhost' in qr_url.lower() or '127.0.0.1' in qr_url):
                     from urllib.parse import urlparse
                     parsed = urlparse(qr_url)
                     qr_url = parsed.path or qr_url
@@ -2717,8 +2720,13 @@ class TemplateProcessor:
                         qr_url = f"{qr_url}?{parsed.query}"
                     self.logger.warning(f"QR URL used a localhost base, converted to relative path: {qr_url}")
                 
+                # Log if using relative URL (no base_url)
+                if not base_url:
+                    self.logger.info(f"PREROLL QR: No base URL available; using relative URL: {qr_url}")
+                
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
+                qr_url_for_log = qr_url  # Store for logging
                 if qr_code:
                     self.logger.info(f"PREROLL QR: Successfully generated QR code for URL: {qr_url}")
                 else:
@@ -2729,7 +2737,8 @@ class TemplateProcessor:
             
             if qr_code:
                 label_context['QR'] = qr_code
-                self.logger.info(f"✅ QR CODE SET: Template '{self.template_type}', Product: '{product_name if self.template_type != 'preroll' else qr_url}', QR object type: {type(qr_code)}")
+                log_product = qr_url_for_log if (self.template_type == 'preroll' and qr_url_for_log) else product_name
+                self.logger.info(f"✅ QR CODE SET: Template '{self.template_type}', Product: '{log_product}', QR object type: {type(qr_code)}")
             else:
                 label_context['QR'] = ''
                 self.logger.warning(f"❌ QR CODE MISSING: Failed to generate QR code for product: '{product_name}' (template: {self.template_type})")
