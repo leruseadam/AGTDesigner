@@ -8242,17 +8242,17 @@ def get_available_tags():
             # PERFORMANCE OPTIMIZATION: Only update DataFrame lineage when lineage alignment is needed
             # Skip this expensive operation when fast_load is enabled
             if lineage_alignment_needed:
-            # CRITICAL FIX: Also update Excel processor DataFrame lineage if it exists
-            # This ensures the DataFrame is in sync with database before tags are loaded
-            try:
-                excel_processor = get_session_excel_processor()
-                if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-                    if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
-                        logging.info("🔄 CRITICAL: Updating DataFrame lineage from database for cached tags...")
-                        excel_processor._update_dataframe_lineage_from_database()
-                        logging.info("✅ CRITICAL: DataFrame lineage updated for cached tags")
-            except Exception as df_update_err:
-                logging.warning(f"Could not update DataFrame lineage for cached tags: {df_update_err}")
+                # CRITICAL FIX: Also update Excel processor DataFrame lineage if it exists
+                # This ensures the DataFrame is in sync with database before tags are loaded
+                try:
+                    excel_processor = get_session_excel_processor()
+                    if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+                        if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                            logging.info("🔄 CRITICAL: Updating DataFrame lineage from database for cached tags...")
+                            excel_processor._update_dataframe_lineage_from_database()
+                            logging.info("✅ CRITICAL: DataFrame lineage updated for cached tags")
+                except Exception as df_update_err:
+                    logging.warning(f"Could not update DataFrame lineage for cached tags: {df_update_err}")
             else:
                 logging.debug("⚡ PERFORMANCE: Skipping DataFrame lineage update (fast_load enabled)")
             
@@ -8354,36 +8354,36 @@ def get_available_tags():
                                     batch_results = all_batch_results
                                 else:
                                     # Single batch query for all names
-                                placeholders = ','.join(['?'] * len(all_search_names))
-                                batch_query = f'''
-                                    SELECT DISTINCT
-                                        COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
-                                        COALESCE(s.strain_name, p."Product Strain") AS current_strain,
-                                        p."Product Name*" AS product_name,
-                                        p.normalized_name AS normalized_name
-                                    FROM products p
-                                    LEFT JOIN strains s ON p.strain_id = s.id
-                                    WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
-                                    ORDER BY p.id DESC
-                                '''
-                                # Add query timing to detect slow queries
-                                query_start = time.time()
-                                # PERFORMANCE: Add timeout to prevent slow queries from blocking response
-                                # Target: <200ms for fast loading, abort if >500ms
-                                MAX_QUERY_TIME = 0.5  # 500ms max query time
-                                try:
-                                    cur.execute(batch_query, all_search_names + all_search_names)
-                                    batch_results = cur.fetchall()
-                                    
-                                    query_duration = (time.time() - query_start) * 1000
-                                    # PERFORMANCE: Allow longer queries (1s) for better completeness
-                                    if query_duration > 1000:
-                                        logging.debug(f"Slow lineage query ({query_duration:.0f}ms) - using partial results")
-                                        # Use partial results instead of skipping entirely
-                                except Exception as query_err:
-                                    logging.warning(f"Lineage query failed, using cached lineage: {query_err}")
-                                    lineage_cache = {}  # Skip lineage alignment on error
-                                    batch_results = []
+                                    placeholders = ','.join(['?'] * len(all_search_names))
+                                    batch_query = f'''
+                                        SELECT DISTINCT
+                                            COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
+                                            COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                            p."Product Name*" AS product_name,
+                                            p.normalized_name AS normalized_name
+                                        FROM products p
+                                        LEFT JOIN strains s ON p.strain_id = s.id
+                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                        ORDER BY p.id DESC
+                                    '''
+                                    # Add query timing to detect slow queries
+                                    query_start = time.time()
+                                    # PERFORMANCE: Add timeout to prevent slow queries from blocking response
+                                    # Target: <200ms for fast loading, abort if >500ms
+                                    MAX_QUERY_TIME = 0.5  # 500ms max query time
+                                    try:
+                                        cur.execute(batch_query, all_search_names + all_search_names)
+                                        batch_results = cur.fetchall()
+                                        
+                                        query_duration = (time.time() - query_start) * 1000
+                                        # PERFORMANCE: Allow longer queries (1s) for better completeness
+                                        if query_duration > 1000:
+                                            logging.debug(f"Slow lineage query ({query_duration:.0f}ms) - using partial results")
+                                            # Use partial results instead of skipping entirely
+                                    except Exception as query_err:
+                                        logging.warning(f"Lineage query failed, using cached lineage: {query_err}")
+                                        lineage_cache = {}  # Skip lineage alignment on error
+                                        batch_results = []
                                 
                                 # Build lookup map from results
                                 for row in batch_results:
@@ -8466,55 +8466,55 @@ def get_available_tags():
                             # Skip this for fast_load to improve performance (batch query is sufficient)
                             logging.info(f"🔄 Verifying {len(cached_tags)} tags with individual database queries (prefer_db={prefer_db}, force_full_refresh={force_full_refresh})...")
                             # Only add tags that weren't found in batch query to individual query list
-                        for tag in cached_tags:
-                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            for tag in cached_tags:
+                                name = tag.get('Product Name*') or tag.get('ProductName') or ''
                                 if name and name not in lineage_cache:
                                     # Only query tags that weren't in batch results
-                                if (tag, name) not in tags_needing_individual_query:
-                                    tags_needing_individual_query.append((tag, name))
-                        
+                                    if (tag, name) not in tags_needing_individual_query:
+                                        tags_needing_individual_query.append((tag, name))
+                            
                             # Perform individual queries only for tags not found in batch
-                        if tags_needing_individual_query:
-                            if not product_db:
-                                logging.warning("⚠️ Product database not available for individual lineage queries")
-                            else:
+                            if tags_needing_individual_query:
+                                if not product_db:
+                                    logging.warning("⚠️ Product database not available for individual lineage queries")
+                                else:
                                     logging.info(f"🔄 Performing {len(tags_needing_individual_query)} individual database queries for tags not in batch...")
-                                individual_updated_count = 0
-                                try:
+                                    individual_updated_count = 0
+                                    try:
                                         # Limit individual queries to prevent timeout (max 100 queries)
                                         max_individual_queries = 100
                                         for tag, name in tags_needing_individual_query[:max_individual_queries]:
-                                        try:
+                                            try:
                                                 # Use get_product_lineage which handles normalization and case-insensitive matching
-                                            db_lineage = product_db.get_product_lineage(name)
-                                            if db_lineage:
-                                                db_lin_clean = str(db_lineage).strip().upper()
-                                                old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                                
-                                                tag['currentLineage'] = db_lin_clean
-                                                tag['canonical_lineage'] = db_lin_clean
-                                                tag['Lineage'] = db_lin_clean
-                                                tag['lineage'] = db_lin_clean.lower()
-                                                
-                                                individual_updated_count += 1
-                                                updated += 1
-                                                if old_lineage != db_lin_clean:
+                                                db_lineage = product_db.get_product_lineage(name)
+                                                if db_lineage:
+                                                    db_lin_clean = str(db_lineage).strip().upper()
+                                                    old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                                    
+                                                    tag['currentLineage'] = db_lin_clean
+                                                    tag['canonical_lineage'] = db_lin_clean
+                                                    tag['Lineage'] = db_lin_clean
+                                                    tag['lineage'] = db_lin_clean.lower()
+                                                    
+                                                    individual_updated_count += 1
+                                                    updated += 1
+                                                    if old_lineage != db_lin_clean:
                                                         logging.debug(f"🔄 Lineage updated (individual query): '{name}' - '{old_lineage}' → '{db_lin_clean}'")
-                                        except Exception as individual_err:
-                                            logging.debug(f"Individual lineage query failed for '{name}': {individual_err}")
+                                            except Exception as individual_err:
+                                                logging.debug(f"Individual lineage query failed for '{name}': {individual_err}")
                                                 # Ensure fields are consistent even on error
-                                            existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                            if existing_lineage:
-                                                tag['currentLineage'] = existing_lineage
-                                                tag['canonical_lineage'] = existing_lineage
-                                                tag['lineage'] = existing_lineage
-                                    
-                                    if individual_updated_count > 0:
+                                                existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                                if existing_lineage:
+                                                    tag['currentLineage'] = existing_lineage
+                                                    tag['canonical_lineage'] = existing_lineage
+                                                    tag['lineage'] = existing_lineage
+                                        
+                                        if individual_updated_count > 0:
                                             logging.info(f"✅ Verified {individual_updated_count}/{len(tags_needing_individual_query)} tags with individual queries")
-                                except Exception as batch_individual_err:
+                                    except Exception as batch_individual_err:
                                         logging.warning(f"Individual lineage queries failed: {batch_individual_err}")
-                        else:
-                            logging.debug(f"⚡ PERFORMANCE: Skipping individual queries (fast_load={fast_load}, prefer_db={prefer_db}, force_full_refresh={force_full_refresh})")
+                            else:
+                                logging.debug(f"⚡ PERFORMANCE: Skipping individual queries (fast_load={fast_load}, prefer_db={prefer_db}, force_full_refresh={force_full_refresh})")
                         
                         # Apply strain updates for tags that were found in batch cache
                         for tag in cached_tags:
