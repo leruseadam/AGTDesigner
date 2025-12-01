@@ -12,6 +12,7 @@ from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from flask import session
 from flask_caching import Cache
+from src.core.constants import PREROLL_ALLOWED_BRANDS
 
 
 def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -> Optional[Document]:
@@ -97,8 +98,20 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                             run.font.bold = True
                             run.font.size = Pt(11)
                 
+                # Filter items by allowed brands if configured
+                filtered_items = group_items
+                if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
+                    allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
+                    original_item_count = len(filtered_items)
+                    filtered_items = [
+                        item for item in group_items
+                        if str(item.get('brand', '')).strip().lower() in allowed_brands_lower
+                    ]
+                    if len(filtered_items) < original_item_count:
+                        logging.info(f"PREROLL LIST: Filtered {original_item_count} items to {len(filtered_items)} items for group '{display_name}' based on allowed brands")
+                
                 # Add items to table
-                for item in group_items:
+                for item in filtered_items:
                     row_cells = table.add_row().cells
                     row_cells[0].text = item.get('product_name', '')
                     row_cells[1].text = item.get('brand', '')
