@@ -769,23 +769,13 @@ const AppLoadingSplash = {
         const mainContent = document.getElementById('mainContent');
         
         if (splash) {
-            // FIX: Prevent zoom glitch by ensuring proper initial state
-            splash.style.transform = 'scale(1)';
-            splash.style.opacity = '1';
+            splash.style.display = 'flex';
             splash.classList.remove('fade-out');
-            // Use requestAnimationFrame to ensure smooth appearance
-            requestAnimationFrame(() => {
-                splash.style.display = 'flex';
-            });
         }
         
         if (mainContent) {
             mainContent.classList.remove('loaded');
             mainContent.style.opacity = '0';
-            // FIX: Ensure main content is hidden to prevent flash
-            if (mainContent.style.display !== 'none') {
-                mainContent.style.display = 'none';
-            }
         }
         
         this.updateProgress(0, 'Initializing application...');

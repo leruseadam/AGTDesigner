@@ -253,24 +253,18 @@
         console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, scale: ${scaleFactor.toFixed(2)}x`);
       }
       
-      // FIX: Prevent initial zoom glitch by delaying viewport normalization
-      // Run normalization after DOM is loaded and splash is ready
+      // Run normalization after DOM is loaded
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-          // Delay normalization slightly to prevent zoom glitch
-          setTimeout(normalizeViewport, 50);
-        });
+        document.addEventListener('DOMContentLoaded', normalizeViewport);
       } else {
-        // Delay normalization slightly to prevent zoom glitch
-        setTimeout(normalizeViewport, 50);
+        normalizeViewport();
       }
       window.addEventListener('resize', normalizeViewport);
       window.addEventListener('orientationchange', normalizeViewport);
       
       // Re-normalize after a short delay to catch any late-loading elements
-      // FIX: Increased delays to prevent zoom glitch during splash
-      setTimeout(normalizeViewport, 200);
-      setTimeout(normalizeViewport, 600);
+      setTimeout(normalizeViewport, 100);
+      setTimeout(normalizeViewport, 500);
     })();
     
     // Define showDatabaseEditor function immediately to prevent errors
@@ -2902,20 +2896,6 @@
             });
           </script>
   <style>
-    /* FIX: Prevent initial zoom glitch on page load */
-    html, body {
-      transform: scale(1) !important;
-      transform-origin: top left !important;
-      overflow-x: hidden;
-    }
-    
-    /* FIX: Ensure splash screen doesn't cause zoom */
-    #appLoadingSplash {
-      will-change: opacity;
-      backface-visibility: hidden;
-      -webkit-backface-visibility: hidden;
-    }
-    
     /* Store Selection Styles */
     .store-selection-container {
       text-align: center;
@@ -4679,12 +4659,10 @@
       height: 100%;
       background: transparent; /* CRITICAL FIX: Transparent to show lava background */
       z-index: 9999;
-      display: none; /* FIX: Hidden initially to prevent flash */
+      display: flex;
       justify-content: center;
       align-items: center;
       transition: opacity 0.5s ease-out;
-      opacity: 1; /* FIX: Ensure full opacity when shown */
-      transform: scale(1); /* FIX: Prevent zoom glitch */
     }
     
     /* CRITICAL FIX: Add lava background behind app loading splash */
@@ -4720,8 +4698,7 @@
         0 0 0 1px rgba(0, 212, 170, 0.1);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      transform: scale(1); /* FIX: Prevent zoom glitch - ensure normal scale */
-      transform-origin: center center; /* FIX: Center transform origin */
+      transform: translateX(0);
     }
 
     .app-loading-content {
@@ -5223,7 +5200,7 @@
 </head>
 <body>
   <!-- Application Loading Splash Screen -->
-  <div id="appLoadingSplash" class="app-loading-splash" style="display: none; opacity: 1; transform: scale(1);">
+  <div id="appLoadingSplash" class="app-loading-splash">
     <div class="app-loading-container">
       <div class="app-loading-content">
         <div class="app-loading-logo">🏷️</div>
@@ -5261,7 +5238,7 @@
   <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}" async></script>
 
   <!-- Main Content (hidden until store is selected) - JavaScript controls visibility -->
-  <div class="main-content" id="mainContent" style="display: none; opacity: 0;">
+  <div class="main-content" id="mainContent">
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
       <div class="orb"></div>
