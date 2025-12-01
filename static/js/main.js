@@ -10903,15 +10903,14 @@ const TagManager = {
             
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
-                    // PERFORMANCE: Increased delays to allow backend file processing
-                    // 1000ms initial delay (for file load + session save + Excel processing), then 2000ms, 3000ms
-                    const delay = attempt === 0 ? 1000 : attempt === 1 ? 2000 : 3000;
-                    if (attempt > 0) {
+                    // PERFORMANCE: Try immediately on first attempt, then back off on retries
+                    // 0ms initial delay (instant), then 1500ms, 3000ms
+                    const delay = attempt === 0 ? 0 : attempt === 1 ? 1500 : 3000;
+                    if (delay > 0) {
                         await new Promise(resolve => setTimeout(resolve, delay));
                         verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload (waiting ${delay}ms for backend processing)...`);
                     } else {
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                        verboseLog(`🔄 Loading tags after upload (waiting ${delay}ms for backend file processing and Excel loading)...`);
+                        verboseLog('🔄 Loading tags after upload (no initial delay – trying immediately)...');
                     }
                     
                     const tagsController = new AbortController();

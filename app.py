@@ -7307,7 +7307,7 @@ def generate_labels():
             try:
                 enforce_arial_bold_all_text(inventory_doc)
             except Exception as font_error:
-                logger.warning(f"INVENTORY LIST: Skipping font enforcement due to table structure issue: {font_error}")
+                logging.warning(f"INVENTORY LIST: Skipping font enforcement due to table structure issue: {font_error}")
 
             # Save the inventory list document to a buffer
             output_buffer = BytesIO()
