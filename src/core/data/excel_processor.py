@@ -4523,7 +4523,8 @@ class ExcelProcessor:
                     
                     # CRITICAL FIX: Look up database values (lineage, weight, units) and override Excel values
                     # Database is the source of truth, especially for lineage overrides
-                    # Use fuzzy matching to handle name variations (e.g., "100 Rackz Super Sale - 14g" vs "100 Rackz by Mt Baker Homegrown - 14g")
+                    # CRITICAL: Always use get_product_lineage() for lineage (same method as _build_label_context)
+                    # This ensures lineage changes are always reflected in output
                     db_weight = ''
                     db_units = ''
                     db_lineage = None
@@ -4531,6 +4532,24 @@ class ExcelProcessor:
                         from src.core.data.product_database import get_product_database
                         product_db = get_product_database()
                         if product_db:
+                            # CRITICAL FIX: ALWAYS use get_product_lineage() for lineage FIRST
+                            # This is the same method used in _build_label_context, ensuring consistency
+                            # This ensures lineage updates are immediately reflected in output
+                            try:
+                                db_lineage_from_method = product_db.get_product_lineage(product_name)
+                                if db_lineage_from_method:
+                                    db_lineage_clean = str(db_lineage_from_method).strip().upper()
+                                    excel_lineage = str(record.get('Lineage', '')).strip().upper()
+                                    
+                                    # Always override Excel lineage with database lineage
+                                    if excel_lineage != db_lineage_clean:
+                                        logger.info(f"🔄 LINEAGE OVERRIDE (get_selected_records): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
+                                    record['Lineage'] = db_lineage_clean
+                                    logger.debug(f"✅ Found lineage via get_product_lineage for '{product_name}': {db_lineage_clean}")
+                            except Exception as lineage_method_error:
+                                logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
+                            
+                            # Get weight and units from get_products_by_names (lineage already handled above)
                             # Try exact match first
                             db_products = product_db.get_products_by_names([product_name])
                             
@@ -4558,38 +4577,9 @@ class ExcelProcessor:
                                 db_product = db_products[0]
                                 db_weight = db_product.get('Weight*', '')
                                 db_units = db_product.get('Units', '')
-                                
-                                # CRITICAL FIX: Get lineage from database (prioritizes sovereign_lineage)
-                                db_lineage = (
-                                    db_product.get('currentLineage') or
-                                    db_product.get('canonical_lineage') or
-                                    db_product.get('Lineage')
-                                )
-                                
-                                if db_lineage:
-                                    db_lineage_clean = str(db_lineage).strip().upper()
-                                    excel_lineage = str(record.get('Lineage', '')).strip().upper()
-                                    
-                                    # Always override Excel lineage with database lineage
-                                    if excel_lineage != db_lineage_clean:
-                                        logger.info(f"🔄 LINEAGE OVERRIDE (get_selected_records): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
-                                    record['Lineage'] = db_lineage_clean
-                                
-                                logger.debug(f"Found database values for '{product_name}': Lineage={db_lineage}, Weight={db_weight}, Units={db_units}")
+                                logger.debug(f"Found database values for '{product_name}': Weight={db_weight}, Units={db_units}")
                             else:
-                                # Last resort: try get_product_lineage which might work even without exact name match
-                                try:
-                                    db_lineage_from_method = product_db.get_product_lineage(product_name)
-                                    if db_lineage_from_method:
-                                        db_lineage_clean = str(db_lineage_from_method).strip().upper()
-                                        excel_lineage = str(record.get('Lineage', '')).strip().upper()
-                                        if excel_lineage != db_lineage_clean:
-                                            logger.info(f"🔄 LINEAGE OVERRIDE (get_product_lineage fallback): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
-                                        record['Lineage'] = db_lineage_clean
-                                        logger.debug(f"Found lineage via get_product_lineage for '{product_name}': {db_lineage_clean}")
-                                except Exception as lineage_method_error:
-                                    logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
-                                logger.debug(f"Could not find database product for '{product_name}' (tried exact, fuzzy, base name, and get_product_lineage)")
+                                logger.debug(f"Could not find database product for '{product_name}' (tried exact, fuzzy, base name) - lineage already handled via get_product_lineage")
                     except Exception as e:
                         logger.debug(f"Could not lookup database values for '{product_name}': {e}")
                     

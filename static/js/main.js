@@ -1430,6 +1430,30 @@ const TagManager = {
         }).filter(Boolean);
     },
 
+    // CRITICAL FIX: Debounced update function for category checkbox handlers
+    // This prevents race conditions when multiple categories are selected quickly
+    _categoryUpdateTimeout: null,
+    updateSelectedTagsFromCategories() {
+        // Clear any pending update
+        if (this._categoryUpdateTimeout) {
+            clearTimeout(this._categoryUpdateTimeout);
+        }
+        
+        // Update the regular selectedTags set to match persistent ones
+        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+        
+        // Debounce the update to batch rapid category selections
+        this._categoryUpdateTimeout = setTimeout(() => {
+            // CRITICAL FIX: Use helper function to find ALL selected tags, preserving tags from multiple categories
+            const selectedTagObjects = this.getSelectedTagObjects();
+            this.updateSelectedTags(selectedTagObjects);
+            this._categoryUpdateTimeout = null;
+        }, 50); // Small delay to batch rapid category selections
+        
+        // Efficiently update available tags visibility without full rebuild
+        this.efficientlyUpdateAvailableTagsDisplay();
+    },
+
     clearInitialDataRetry() {
         if (this.state.initialDataRetryTimer) {
             clearTimeout(this.state.initialDataRetryTimer);
@@ -3085,12 +3109,8 @@ const TagManager = {
                         }
                     }
                 });
-                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
-                this.updateSelectedTags(selectedTagObjects);
-                this.efficientlyUpdateAvailableTagsDisplay();
+                // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                this.updateSelectedTagsFromCategories();
                 requestAnimationFrame(() => {
                     this._restoreAvailableScrollPosition(savedScroll);
                 });
@@ -3158,12 +3178,8 @@ const TagManager = {
                             }
                         }
                     });
-                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                        this.state.tags.find(t => t['Product Name*'] === name)
-                    ).filter(Boolean);
-                    this.updateSelectedTags(selectedTagObjects);
-                    this.efficientlyUpdateAvailableTagsDisplay();
+                    // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                    this.updateSelectedTagsFromCategories();
                     requestAnimationFrame(() => {
                         this._restoreAvailableScrollPosition(savedScroll);
                     });
@@ -3389,12 +3405,8 @@ const TagManager = {
                                             }
                                         }
                                     });
-                                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                        this.state.tags.find(t => t['Product Name*'] === name)
-                                    ).filter(Boolean);
-                                    this.updateSelectedTags(selectedTagObjects);
-                                    this.efficientlyUpdateAvailableTagsDisplay();
+                                    // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                                    this.updateSelectedTagsFromCategories();
                                     requestAnimationFrame(() => {
                                         this._restoreAvailableScrollPosition(savedScroll);
                                     });
@@ -3824,12 +3836,8 @@ const TagManager = {
                         }
                     }
                 });
-                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
-                this.updateSelectedTags(selectedTagObjects);
-                this.efficientlyUpdateAvailableTagsDisplay();
+                // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                this.updateSelectedTagsFromCategories();
                 // Use double requestAnimationFrame to ensure it happens after all updates, including updateSelectAllCheckboxes
                 requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
@@ -4013,12 +4021,8 @@ const TagManager = {
                                 }
                             }
                         });
-                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                        const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                            this.state.tags.find(t => t['Product Name*'] === name)
-                        ).filter(Boolean);
-                        this.updateSelectedTags(selectedTagObjects);
-                        this.efficientlyUpdateAvailableTagsDisplay();
+                        // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                        this.updateSelectedTagsFromCategories();
                         // Restore scroll after all DOM updates complete
                         requestAnimationFrame(() => {
                             this._restoreAvailableScrollPosition(savedScroll);
@@ -4104,12 +4108,8 @@ const TagManager = {
                                     }
                                 }
                             });
-                            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                this.state.tags.find(t => t['Product Name*'] === name)
-                            ).filter(Boolean);
-                            this.updateSelectedTags(selectedTagObjects);
-                            this.efficientlyUpdateAvailableTagsDisplay();
+                            // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                            this.updateSelectedTagsFromCategories();
                             // Restore scroll after all DOM updates complete
                             requestAnimationFrame(() => {
                                 this._restoreAvailableScrollPosition(savedScroll);
@@ -4201,12 +4201,8 @@ const TagManager = {
                                             }
                                         }
                                     });
-                                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                        this.state.tags.find(t => t['Product Name*'] === name)
-                                    ).filter(Boolean);
-                                    this.updateSelectedTags(selectedTagObjects);
-                                    this.efficientlyUpdateAvailableTagsDisplay();
+                                    // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                                    this.updateSelectedTagsFromCategories();
                                     requestAnimationFrame(() => {
                                         this._restoreAvailableScrollPosition(savedScroll);
                                     });
@@ -6858,19 +6854,8 @@ const TagManager = {
                     }
                 });
                 
-                // Update the regular selectedTags set to match persistent ones
-                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                
-                // Update selected tags display
-                // CRITICAL FIX: Use helper function to find ALL selected tags, preserving tags from multiple filters
-                const selectedTagObjects = this.getSelectedTagObjects();
-                this.updateSelectedTags(selectedTagObjects);
-                
-                // FIXED: Use efficient update instead of full rebuild to preserve filters and scroll
-                // This allows users to see all available options even after making selections
-                verboseLog('FIXED: Not filtering out selected tags - keeping all items visible in available list');
-                this.efficientlyUpdateAvailableTagsDisplay();
-                // Scroll is already preserved since we're not rebuilding the list
+                // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                this.updateSelectedTagsFromCategories();
             });
             
             // Add collapse/expand icon (will be placed to the right of the vendor name)
@@ -6956,18 +6941,8 @@ const TagManager = {
                         }
                     });
                     
-                    // Update the regular selectedTags set to match persistent ones
-                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                    
-                    // Update selected tags display
-                    const selectedTagObjects = Array.from(this.state.persistentSelectedTags).map(name =>
-                        this.state.tags.find(t => t['Product Name*'] === name)
-                    ).filter(Boolean);
-                    
-                    this.updateSelectedTags(selectedTagObjects);
-                    
-                    // Efficiently update available tags visibility without full rebuild
-                    this.efficientlyUpdateAvailableTagsDisplay();
+                    // CRITICAL FIX: Use debounced update function to prevent race conditions when multiple categories are selected
+                    this.updateSelectedTagsFromCategories();
                 });
                 
                 // Add collapse/expand icon (to the right of the brand name)
@@ -9052,11 +9027,9 @@ const TagManager = {
             }
         } catch (error) {
             verboseLog('Error checking for current file (non-blocking):', error);
-            // Assume file exists if cache has tags (optimistic)
-            const cachedTags = this.loadAvailableTagsFromCache();
-            if (cachedTags && cachedTags.length > 0) {
-                hasFile = true;
-            }
+            // FIX: Don't assume file exists just because cache exists
+            // Only use cache if we actually have a file from the backend
+            // hasFile remains false if backend check failed
         }
 
         // Show loading splash only if file exists, otherwise show upload prompt
@@ -9128,72 +9101,75 @@ const TagManager = {
         // Declare splashSafetyTimeout early so it can be cleared in early return paths
         let splashSafetyTimeout = null;
 
-        // PERFORMANCE FIX: Try cache first for instant load
-        const cachedTags = this.loadAvailableTagsFromCache();
-        if (cachedTags && cachedTags.length > 0) {
-            console.log(`⚡ INSTANT CACHE LOAD: ${cachedTags.length} tags available`);
-            // Render cached tags IMMEDIATELY for instant display
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
-            
-            // CRITICAL: Render immediately using requestAnimationFrame for instant UI update
-            requestAnimationFrame(() => {
-                this._updateAvailableTags(cachedTags);
-                console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
+        // PERFORMANCE FIX: Try cache first for instant load, but ONLY if we have a file
+        // FIX: Only load from cache if hasFile is actually true (file exists on backend)
+        if (hasFile) {
+            const cachedTags = this.loadAvailableTagsFromCache();
+            if (cachedTags && cachedTags.length > 0) {
+                console.log(`⚡ INSTANT CACHE LOAD: ${cachedTags.length} tags available`);
+                // Render cached tags IMMEDIATELY for instant display
+                this.state.tags = [...cachedTags];
+                this.state.originalTags = [...cachedTags];
                 
-                // Hide splash IMMEDIATELY since we have cached tags
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-            });
-
-            // INSTANT RELOAD FIX: Skip background refresh if cache is fresh (within 30 seconds)
-            const cacheKey = this.getAvailableTagsCacheKey();
-            const cachedRaw = sessionStorage.getItem(cacheKey);
-            if (cachedRaw) {
-                try {
-                    const cachedPayload = JSON.parse(cachedRaw);
-                    const cacheAge = Date.now() - (cachedPayload.timestamp || 0);
-                    // If cache is less than 30 seconds old, skip background refresh for instant reload
-                    if (cacheAge < 30000) {
-                        console.log('⚡ Cache is fresh (<30s), skipping background refresh for instant reload');
-                        if (splashSafetyTimeout) {
-                            clearTimeout(splashSafetyTimeout);
-                        }
-                        this._checkingExistingData = false;
-                        return; // Exit early - cache is fresh, no need to refresh
+                // CRITICAL: Render immediately using requestAnimationFrame for instant UI update
+                requestAnimationFrame(() => {
+                    this._updateAvailableTags(cachedTags);
+                    console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
+                    
+                    // Hide splash IMMEDIATELY since we have cached tags
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
                     }
-                } catch (e) {
-                    // Continue with background refresh if cache parsing fails
+                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                });
+
+                // INSTANT RELOAD FIX: Skip background refresh if cache is fresh (within 30 seconds)
+                const cacheKey = this.getAvailableTagsCacheKey();
+                const cachedRaw = sessionStorage.getItem(cacheKey) || (localStorage && localStorage.getItem(cacheKey));
+                if (cachedRaw) {
+                    try {
+                        const cachedPayload = JSON.parse(cachedRaw);
+                        const cacheAge = Date.now() - (cachedPayload.timestamp || 0);
+                        // If cache is less than 30 seconds old, skip background refresh for instant reload
+                        if (cacheAge < 30000) {
+                            console.log('⚡ Cache is fresh (<30s), skipping background refresh for instant reload');
+                            if (splashSafetyTimeout) {
+                                clearTimeout(splashSafetyTimeout);
+                            }
+                            this._checkingExistingData = false;
+                            return; // Exit early - cache is fresh, no need to refresh
+                        }
+                    } catch (e) {
+                        // Continue with background refresh if cache parsing fails
+                    }
                 }
+                
+                // Continue loading fresh data in background (non-blocking) only if cache is stale
+                console.log('📡 Background: Fetching selected tags and filters (cache is stale)');
+                // CRITICAL FIX: Fetch filters AFTER selected tags to ensure data is ready
+                Promise.allSettled([
+                    this.fetchAndUpdateSelectedTags()
+                ]).then(() => {
+                    // INSTANT RELOAD FIX: Reduced delay from 200ms to 50ms
+                    return new Promise(resolve => setTimeout(resolve, 50));
+                }).then(() => {
+                    // Now fetch filters with retry mechanism
+                    return this.fetchAndPopulateFilters();
+                }).then(() => {
+                    console.log('✅ Background: Selected tags and filters loaded');
+                }).catch(err => {
+                    console.warn('Background load error (non-critical):', err);
+                });
+                
+                if (splashSafetyTimeout) {
+                    clearTimeout(splashSafetyTimeout);
+                }
+                this._checkingExistingData = false;
+                return; // Exit early - we have cached data
             }
-            
-            // Continue loading fresh data in background (non-blocking) only if cache is stale
-            console.log('📡 Background: Fetching selected tags and filters (cache is stale)');
-            // CRITICAL FIX: Fetch filters AFTER selected tags to ensure data is ready
-            Promise.allSettled([
-                this.fetchAndUpdateSelectedTags()
-            ]).then(() => {
-                // INSTANT RELOAD FIX: Reduced delay from 200ms to 50ms
-                return new Promise(resolve => setTimeout(resolve, 50));
-            }).then(() => {
-                // Now fetch filters with retry mechanism
-                return this.fetchAndPopulateFilters();
-            }).then(() => {
-                console.log('✅ Background: Selected tags and filters loaded');
-            }).catch(err => {
-                console.warn('Background load error (non-critical):', err);
-            });
-            
-            if (splashSafetyTimeout) {
-                clearTimeout(splashSafetyTimeout);
-            }
-            this._checkingExistingData = false;
-            return; // Exit early - we have cached data
         }
 
         // PERFORMANCE FIX: Reduced timeout to 3 seconds - if it takes longer, use cache/fallback
