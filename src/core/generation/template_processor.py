@@ -1623,11 +1623,15 @@ class TemplateProcessor:
             
             self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                label_context['WeightUnits'] = joint_ratio.strip()
-                self.logger.debug(f"PRE-ROLL WeightUnits: Using JointRatio '{joint_ratio}' for {product_type}")
+                # Format JointRatio with soft hyphen and nonbreaking space, then prefix with newline for prerolls
+                formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
+                label_context['WeightUnits'] = f"\n{formatted_joint_ratio}"
+                self.logger.debug(f"PRE-ROLL WeightUnits: Using formatted JointRatio '{formatted_joint_ratio}' (with newline) for {product_type}")
             else:
-                label_context['WeightUnits'] = "0.5g x 2 Pack"  # Default for pre-rolls
-                self.logger.debug(f"PRE-ROLL WeightUnits: Using default '0.5g x 2 Pack' for {product_type}")
+                # Format default with soft hyphen and nonbreaking space, then prefix with newline
+                formatted_default = self.format_joint_ratio_pack("0.5g x 2 Pack")
+                label_context['WeightUnits'] = f"\n{formatted_default}"
+                self.logger.debug(f"PRE-ROLL WeightUnits: Using formatted default '{formatted_default}' (with newline) for {product_type}")
         else:
             # For non-pre-roll products, construct WeightUnits from available fields
             weight_units = (
@@ -3078,6 +3082,10 @@ class TemplateProcessor:
             
             # FINAL ENFORCEMENT: Absolutely ensure DOH images are centered - this overrides all other positioning
             self._final_doh_positioning_enforcement(doc)
+            
+            # PREROLL TEMPLATE: Center QR codes
+            if self.template_type == 'preroll':
+                self._ensure_preroll_qr_centering(doc)
         except Exception as e:
             self.logger.warning(f"DOH centering failed: {e}")
         
@@ -6113,6 +6121,81 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"DOH centering enforcement skipped: {e}")
 
+    def _ensure_preroll_qr_centering(self, doc):
+        """Ensure QR code paragraphs are centered in preroll templates."""
+        try:
+            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+            from docx.shared import Pt
+
+            fixed = 0
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        qr_paragraphs = []
+                        has_qr_image = False
+                        cell_text = cell.text.strip().upper()
+                        
+                        # Check all paragraphs in the cell for images
+                        for paragraph in cell.paragraphs:
+                            paragraph_text = paragraph.text.strip().upper()
+                            for run in paragraph.runs:
+                                if hasattr(run, '_element') and (
+                                    run._element.find(qn('w:drawing')) is not None or
+                                    run._element.find(qn('w:pict')) is not None
+                                ):
+                                    # In preroll templates, QR codes are typically the only images
+                                    # (DOH images are handled separately if present)
+                                    # Center all images in preroll templates as they are likely QR codes
+                                    has_qr_image = True
+                                    qr_paragraphs.append(paragraph)
+                                    break
+                            if has_qr_image:
+                                break
+
+                        if not has_qr_image or not qr_paragraphs:
+                            continue
+
+                        fixed += 1
+                        # Center the cell content vertically
+                        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                        
+                        # Center all QR code paragraphs
+                        for paragraph in qr_paragraphs:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            
+                            # Set proper spacing for QR code
+                            paragraph.paragraph_format.space_before = Pt(2)
+                            paragraph.paragraph_format.space_after = Pt(2)
+                            paragraph.paragraph_format.line_spacing = 1.0
+                            
+                            try:
+                                # Ensure XML-level centering
+                                pPr = paragraph._element.get_or_add_pPr()
+                                
+                                # Set paragraph justification to center
+                                existing_jc = pPr.find(qn('w:jc'))
+                                if existing_jc is not None:
+                                    pPr.remove(existing_jc)
+                                jc = OxmlElement('w:jc')
+                                jc.set(qn('w:val'), 'center')
+                                pPr.append(jc)
+
+                                # Remove any indentation that might offset the QR code
+                                existing_ind = pPr.find(qn('w:ind'))
+                                if existing_ind is not None:
+                                    pPr.remove(existing_ind)
+                                    
+                            except Exception as xml_error:
+                                self.logger.warning(f"Error centering QR code paragraph: {xml_error}")
+
+            if fixed:
+                self.logger.info(f"PREROLL QR centering: centered {fixed} QR code cell(s)")
+        except Exception as e:
+            self.logger.warning(f"PREROLL QR centering enforcement skipped: {e}")
+
     def _ensure_standalone_cannabinoid_font_sizing(self, doc):
         """
         Ensure any standalone cannabinoid text (CBD, THC, CBC, CBG, CBN) uses appropriate font sizing.
@@ -6367,17 +6450,17 @@ class TemplateProcessor:
                     if count and count.isdigit():
                         count_int = int(count)
                         if count_int == 1:
-                            # For single units, just show the weight with hyphen and non-breaking space
-                            formatted = f"-\u00A0{amount}g"
+                            # For single units, just show the weight with soft hyphen (breaking) and non-breaking space
+                            formatted = f"\u00AD\u00A0{amount}g"
                         else:
-                            # For multiple units, show the full pack format with hyphen and non-breaking space
-                            formatted = f"-\u00A0{amount}g x {count} Pack"
+                            # For multiple units, show the full pack format with soft hyphen (breaking) and non-breaking space
+                            formatted = f"\u00AD\u00A0{amount}g x {count} Pack"
                     else:
-                        # Only amount found (like "1g") - show just the weight with hyphen and non-breaking space
-                        formatted = f"-\u00A0{amount}g"
+                        # Only amount found (like "1g") - show just the weight with soft hyphen (breaking) and non-breaking space
+                        formatted = f"\u00AD\u00A0{amount}g"
                 except IndexError:
-                    # Only amount found (like "1g") - show just the weight with hyphen and non-breaking space
-                    formatted = f"-\u00A0{amount}g"
+                    # Only amount found (like "1g") - show just the weight with soft hyphen (breaking) and non-breaking space
+                    formatted = f"\u00AD\u00A0{amount}g"
                 return formatted
         
         # If no pattern matches, return the original text
