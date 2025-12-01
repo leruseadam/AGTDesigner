@@ -8145,8 +8145,9 @@ const TagManager = {
     },
 
     async fetchAndPopulateFilters(retryCount = 0, skipIfEmpty = false) {
-        const maxRetries = 5; // Increased retries
-        const retryDelay = 2000; // Increased to 2 seconds for better chance of data being ready
+        // PERFORMANCE TUNE: Keep retries short and fast so dropdowns populate quickly
+        const maxRetries = 2; // Reduced retries to cap total wait time
+        const retryDelay = 500; // 0.5s between retries instead of 2s
         
         try {
             // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting

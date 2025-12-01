@@ -2328,7 +2328,13 @@ class LabelMakerApp:
         )
 # === SESSION-BASED HELPERS ===
 def get_session_excel_processor():
-    """Get ExcelProcessor instance for the current session with proper error handling."""
+    """Get ExcelProcessor instance for the current session with proper error handling.
+
+    PERFORMANCE DIAGNOSTIC:
+    This function is a key part of the upload → available-tags pipeline.
+    We log timing for its main steps so we can see where Excel processing
+    is spending time on PythonAnywhere.
+    """
     session_file_path = None  # Initialize to prevent variable scoping errors
     
     # CRITICAL: Recursion protection - prevent infinite loop
@@ -2345,12 +2351,15 @@ def get_session_excel_processor():
             return None
     
     try:
+        diag_start = time.time()
         g._getting_excel_processor = True  # Set recursion guard
         
         if 'excel_processor' not in g:
+            step_start = time.time()
             # Use the global Excel processor instead of creating a new one
             # This ensures we always have the most up-to-date data
             g.excel_processor = get_excel_processor()
+            logging.info(f"[PERF] get_session_excel_processor: get_excel_processor() took {(time.time() - step_start) * 1000:.1f}ms")
             
             # CRITICAL FIX: Keep ProductDB integration enabled for lineage support
             # Direct database queries (get_product_lineage) still work even if integration is disabled
@@ -2402,14 +2411,19 @@ def get_session_excel_processor():
                     selected_store = get_current_store_name(allow_fallback=True)
                     default_file = get_default_upload_file(selected_store)
                     if default_file and os.path.exists(default_file):
-                        logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
+                        load_start = time.time()
+                        logging.info(f"[PERF] Loading default Excel file: {default_file}")
                         success = g.excel_processor.load_file(default_file)
+                        load_elapsed = (time.time() - load_start) * 1000
+                        logging.info(f"[PERF] Default Excel file load took {load_elapsed:.1f}ms (success={success})")
                         if success:
                             logging.info(f"CRITICAL FIX: Successfully loaded default file")
                             # Populate dropdown cache
                             if hasattr(g.excel_processor, '_cache_dropdown_values'):
                                 try:
+                                    cache_start = time.time()
                                     g.excel_processor._cache_dropdown_values()
+                                    logging.info(f"[PERF] Dropdown cache build took {(time.time() - cache_start) * 1000:.1f}ms")
                                     logging.info(f"Successfully populated dropdown cache from default file")
                                 except Exception as e:
                                     logging.error(f"Failed to populate dropdown cache from default file: {e}")
@@ -2507,6 +2521,8 @@ def get_session_excel_processor():
         if hasattr(g, '_getting_excel_processor'):
             delattr(g, '_getting_excel_processor')
         
+        total_elapsed = (time.time() - diag_start) * 1000
+        logging.info(f"[PERF] get_session_excel_processor TOTAL time: {total_elapsed:.1f}ms")
         return g.excel_processor
         
     except Exception as e:
@@ -8284,16 +8300,59 @@ def get_available_tags():
             except Exception as cache_clear_err:
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
-        # ULTRA-FAST PATH: If this is the first fast_load request after upload and
-        # we don't have cached tags yet, return Excel-only tags without doing any
-        # database lineage alignment. This gets something on screen as quickly as
-        # possible; slower DB alignment can happen on later non-fast loads.
-        if (fast_load and not prefer_db and not force_full_refresh and not cached_tags):
+        # ULTRA-FAST PATHS:
+        # 1) If the store has fully-ingested database products, serve tags directly from DB
+        #    (no Excel processor needed). This is the new primary fast path.
+        # 2) If we don't have DB products yet but do have an uploaded Excel file,
+        #    fall back to Excel-only tags without database lineage alignment.
+        #    This keeps something on screen quickly while DB ingest catches up.
+
+        # --- 1) DB-FIRST FAST PATH -------------------------------------------------
+        try:
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name) if store_name else None
+        except Exception as db_err:
+            logging.warning(f"FAST DB path: failed to resolve product database: {db_err}")
+            product_db = None
+
+        if fast_load and not prefer_db and not force_full_refresh and product_db and hasattr(product_db, 'get_available_tags_fast'):
             try:
+                db_fast_start = time.time()
+                logging.info("⚡ ULTRA-FAST DB: Using ProductDatabase.get_available_tags_fast() for available-tags")
+                db_tags = product_db.get_available_tags_fast()
+                if db_tags:
+                    safe_all_tags = make_json_safe(db_tags)
+                    elapsed = (time.time() - start_time) * 1000
+                    db_elapsed = (time.time() - db_fast_start) * 1000
+                    logging.info(f"[PERF] ULTRA-FAST DB path total time {db_elapsed:.1f}ms")
+                    logging.info(f"✅ ULTRA-FAST DB available-tags completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} DB tags")
+                    resp = jsonify({
+                        'tags': safe_all_tags,
+                        'total_count': len(safe_all_tags),
+                        'source': 'db-fast'
+                    })
+                    try:
+                        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                        resp.headers['Pragma'] = 'no-cache'
+                    except Exception:
+                        pass
+                    return resp
+                else:
+                    logging.info("⚠️ ULTRA-FAST DB: get_available_tags_fast() returned no tags, falling back to Excel/standard flow")
+            except Exception as db_fast_err:
+                logging.warning(f"ULTRA-FAST DB path failed, falling back to Excel/standard flow: {db_fast_err}")
+
+        # --- 2) EXCEL-ONLY FAST PATH (fallback when DB path not available) -------
+        if (fast_load and not prefer_db and not force_full_refresh and not cached_tags and (not product_db or not hasattr(product_db, 'get_available_tags_fast'))):
+            try:
+                excel_diag_start = time.time()
                 excel_processor = get_session_excel_processor()
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                     logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for initial fast_load request (no DB lineage alignment).")
+                    tags_start = time.time()
                     excel_tags = excel_processor.get_available_tags()
+                    tags_elapsed = (time.time() - tags_start) * 1000
+                    logging.info(f"[PERF] excel_processor.get_available_tags() took {tags_elapsed:.1f}ms (rows={len(excel_tags)})")
                     safe_all_tags = make_json_safe(excel_tags)
                     # Cache for this session/file so subsequent requests are instant
                     try:
@@ -8308,7 +8367,9 @@ def get_available_tags():
                     except Exception as cache_err:
                         logging.warning(f"Could not cache ultra-fast Excel tags: {cache_err}")
                     
+                    excel_total = (time.time() - excel_diag_start) * 1000
                     elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"[PERF] ULTRA-FAST Excel path total time {excel_total:.1f}ms")
                     logging.info(f"✅ ULTRA-FAST available-tags completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} Excel-only tags")
                     resp = jsonify({
                         'tags': safe_all_tags,
