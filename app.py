@@ -8677,18 +8677,27 @@ def get_available_tags():
                 try:
                     # CRITICAL: ALWAYS use enrichment to get database lineage - NEVER skip it
                     # Database lineage is the source of truth and must always be used for persistence
+                    # PERFORMANCE: Log start time for monitoring
+                    tags_start_time = time.time()
+                    logging.info(f"📊 Loading tags from Excel processor (DataFrame: {len(excel_processor.df)} rows)...")
+                    
                     # Even with fast_load, we MUST enrich with database lineage
                     excel_tags = excel_processor.get_available_tags()
                     
+                    tags_elapsed = (time.time() - tags_start_time) * 1000
+                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags in {tags_elapsed:.0f}ms")
+                    
                     # CRITICAL FIX: Verify Excel tags have database lineage fields
                     tags_with_db_lineage = sum(1 for tag in excel_tags if tag.get('currentLineage') or tag.get('canonical_lineage'))
-                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags ({tags_with_db_lineage} with DB lineage from enrichment)")
+                    logging.info(f"📊 Tags with DB lineage: {tags_with_db_lineage}/{len(excel_tags)}")
                     if tags_with_db_lineage < len(excel_tags) * 0.5:  # Less than 50% have DB lineage
                         logging.warning(f"⚠️ Only {tags_with_db_lineage}/{len(excel_tags)} Excel tags have database lineage - enrichment may have failed")
                     
                     all_tags.extend(excel_tags)
                 except Exception as e:
-                    logging.warning(f"Excel processor error: {e}")
+                    logging.error(f"❌ Excel processor error: {e}")
+                    import traceback
+                    logging.error(traceback.format_exc())
             
             # CRITICAL FIX: If no Excel data and prefer_db not set, fall back to database instead of returning empty
             if not all_tags:
