@@ -40,6 +40,8 @@ from src.core.generation.fast_generation import (
     optimize_records_for_generation,
     update_generation_stats
 )
+from src.core.generation.preroll_tag_generator import generate_preroll_tags, identify_preroll_product_group
+from src.core.generation.preroll_product_list import generate_preroll_product_list
 
 # Performance optimizations - Import response caching utilities
 # These decorators provide response caching, compression, and cache invalidation
@@ -743,6 +745,9 @@ load_and_cleanup_on_startup()
 
 def get_client_ip():
     """Get the client's IP address."""
+    from flask import has_request_context
+    if not has_request_context():
+        return None
     if request.headers.get('X-Forwarded-For'):
         return request.headers.get('X-Forwarded-For').split(',')[0].strip()
     elif request.headers.get('X-Real-IP'):
@@ -753,6 +758,14 @@ def get_client_ip():
 def get_current_store_name(allow_fallback=True):
     """Get the current store name for the requesting client. Returns None if no valid selection."""
     try:
+        # Check if we have a request context before accessing session/request
+        from flask import has_request_context
+        if not has_request_context():
+            # Outside request context - return None or fallback store
+            if allow_fallback:
+                return 'AGT_Bothell'  # Default fallback
+            return None
+        
         # CRITICAL FIX: Check Flask session first (more reliable on PythonAnywhere)
         if session.get('selected_store'):
             if session.get('store_server_id') == SERVER_INSTANCE_ID:
@@ -765,21 +778,22 @@ def get_current_store_name(allow_fallback=True):
         
         # Fallback to IP-based selection
         ip_address = get_client_ip()
-        with _ip_store_lock:
-            if ip_address in _ip_store_selections:
-                store_data = _ip_store_selections[ip_address]
-                # Check if the selection is still valid (not expired)
-                if is_store_selection_valid(ip_address, store_data):
-                    if store_data.get('server_id') != SERVER_INSTANCE_ID:
-                        logging.info("IP store selection from previous server instance ignored")
+        if ip_address is not None:
+            with _ip_store_lock:
+                if ip_address in _ip_store_selections:
+                    store_data = _ip_store_selections[ip_address]
+                    # Check if the selection is still valid (not expired)
+                    if is_store_selection_valid(ip_address, store_data):
+                        if store_data.get('server_id') != SERVER_INSTANCE_ID:
+                            logging.info("IP store selection from previous server instance ignored")
+                        else:
+                            # Also save to session for consistency
+                            session['selected_store'] = store_data['store']
+                            session['store_server_id'] = SERVER_INSTANCE_ID
+                            return store_data['store']
                     else:
-                        # Also save to session for consistency
-                        session['selected_store'] = store_data['store']
-                        session['store_server_id'] = SERVER_INSTANCE_ID
-                        return store_data['store']
-                else:
-                    # Remove expired selection
-                    del _ip_store_selections[ip_address]
+                        # Remove expired selection
+                        del _ip_store_selections[ip_address]
         
         if allow_fallback:
             # JSON MATCH FIX: If no store is selected, find and use the database with the most products
@@ -820,9 +834,11 @@ def get_current_store_name(allow_fallback=True):
                     
                     if best_store and best_count > 0:
                         logging.info(f"JSON MATCH FIX: Auto-selected store '{best_store}' with {best_count} products")
-                        # Save to session so future requests use the same store
-                        session['selected_store'] = best_store
-                        session['store_server_id'] = SERVER_INSTANCE_ID
+                        # Save to session so future requests use the same store (only if we have request context)
+                        from flask import has_request_context
+                        if has_request_context():
+                            session['selected_store'] = best_store
+                            session['store_server_id'] = SERVER_INSTANCE_ID
                         return best_store
             except Exception as e:
                 logging.warning(f"Error finding best database: {e}")
@@ -1163,12 +1179,18 @@ def get_excel_processor():
     global _excel_processor, _excel_processor_reset_flag
     
     # CRITICAL: Recursion protection - use thread-local flag
-    if hasattr(g, '_in_get_excel_processor'):
-        logging.error("⚠️ RECURSION DETECTED in get_excel_processor - returning None")
-        return None
+    # Check if we have an application context before accessing g
+    from flask import has_app_context
+    has_context = has_app_context()
+    
+    if has_context:
+        if hasattr(g, '_in_get_excel_processor'):
+            logging.error("⚠️ RECURSION DETECTED in get_excel_processor - returning None")
+            return None
     
     try:
-        g._in_get_excel_processor = True  # Set recursion guard
+        if has_context:
+            g._in_get_excel_processor = True  # Set recursion guard
         
         # Use thread lock to prevent race conditions
         with excel_processor_lock:
@@ -1181,10 +1203,17 @@ def get_excel_processor():
                 pass
             
             # Force reload if session has a different file than what's currently loaded
+            # OR if processor has no data but session has a file
             if _excel_processor is not None and session_file_path:
                 current_file = getattr(_excel_processor, '_last_loaded_file', None)
-                if current_file != session_file_path and os.path.exists(session_file_path):
-                    logging.info(f"🔄 FORCE RELOAD: Session has different file ({session_file_path}) than loaded ({current_file})")
+                has_data = hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty
+                
+                # Reload if: different file OR processor has no data but session has a file
+                if (current_file != session_file_path and os.path.exists(session_file_path)) or (not has_data and os.path.exists(session_file_path)):
+                    if current_file != session_file_path:
+                        logging.info(f"🔄 FORCE RELOAD: Session has different file ({session_file_path}) than loaded ({current_file})")
+                    else:
+                        logging.info(f"🔄 FORCE RELOAD: Processor has no data, loading session file: {session_file_path}")
                     _excel_processor = None  # Force recreation with new file
             
             # Determine the active store for this request (if any)
@@ -1201,6 +1230,26 @@ def get_excel_processor():
             if _excel_processor is None:
                 # Create processor with store-aware configuration so lineage updates persist per store
                 _excel_processor = ExcelProcessor(store_name=processor_store)
+                
+                # CRITICAL FIX: Check for uploaded file in session when creating new processor
+                # This ensures file persists across page reloads
+                try:
+                    from flask import session, has_request_context
+                    if has_request_context():
+                        session_file_path = session.get('file_path')
+                        if session_file_path and os.path.exists(session_file_path):
+                            logging.info(f"✅ Loading persisted file from session on processor creation: {session_file_path}")
+                            success = _excel_processor.load_file(session_file_path)
+                            if success:
+                                _excel_processor._last_loaded_file = session_file_path
+                                row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
+                                logging.info(f"✅ Successfully loaded {row_count} rows from persisted session file")
+                            else:
+                                logging.warning(f"⚠️ Failed to load persisted session file: {session_file_path}")
+                        elif session_file_path:
+                            logging.warning(f"⚠️ Session file_path exists but file not found: {session_file_path}")
+                except Exception as session_load_error:
+                    logging.debug(f"Could not load session file on processor creation: {session_load_error}")
             else:
                 # If the active store changed, update the processor's store context
                 current_processor_store = getattr(_excel_processor, '_store_name', None)
@@ -1216,51 +1265,62 @@ def get_excel_processor():
                     _excel_processor.enable_product_db_integration(True)
                     logging.info("Product database integration enabled by default")
                 
-                # CRITICAL FIX: Check if we have an uploaded file in session before loading default
+                # CRITICAL FIX: ALWAYS check for uploaded file in session FIRST
+                # Session file takes priority over default file to ensure persistence across reloads
+                session_file_path = None
                 try:
-                    from flask import session
-                    try:
-                        session_file_path = session.get('file_path')
-                        logging.info(f"🔍 DEBUG: Session file_path = {session_file_path}")
-                        logging.info(f"🔍 DEBUG: Session keys = {list(session.keys())}")
-                    except RuntimeError:
-                        # No active request context during startup
-                        session_file_path = None
-                        logging.info("🔍 DEBUG: No request context, session_file_path = None")
+                    from flask import session, has_request_context
+                    if has_request_context():
+                        try:
+                            session_file_path = session.get('file_path')
+                            logging.info(f"🔍 DEBUG: Session file_path = {session_file_path}")
+                            logging.info(f"🔍 DEBUG: Session keys = {list(session.keys())}")
+                        except RuntimeError:
+                            session_file_path = None
+                            logging.info("🔍 DEBUG: No request context, session_file_path = None")
+                except Exception as session_err:
+                    logging.debug(f"Could not access session: {session_err}")
+                    session_file_path = None
+                
+                if session_file_path and os.path.exists(session_file_path):
+                    logging.info(f"✅ CRITICAL FIX: Found uploaded file in session: {session_file_path}")
                     
-                    if session_file_path and os.path.exists(session_file_path):
-                        logging.info(f"✅ CRITICAL FIX: Found uploaded file in session: {session_file_path}")
-                        
-                        # Check if already loaded to avoid reprocessing
-                        if _excel_processor._last_loaded_file == session_file_path and hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
-                            logging.info(f"⚡ File already loaded, skipping reload: {session_file_path}")
-                            row_count = len(_excel_processor.df)
-                            logging.info(f"✅ Using cached data: {row_count} rows")
-                        else:
-                            # Load the uploaded file instead of clearing the DataFrame
-                            logging.info(f"📂 Loading session file: {session_file_path}")
-                            success = _excel_processor.load_file(session_file_path)
-                            if success:
-                                _excel_processor._last_loaded_file = session_file_path
-                                logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
-                                row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
-                                logging.info(f"✅ Loaded {row_count} rows from session file")
-                                
-                                # GUARANTEED FIX: Force DataFrame update from database after loading
-                                # This ensures database lineage is ALWAYS used, even on app restart
-                                if hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
-                                    try:
-                                        logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database after session file load...")
-                                        _excel_processor._update_dataframe_lineage_from_database()
-                                        logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database after session file load")
-                                    except Exception as df_update_err:
-                                        logging.warning(f"Could not update DataFrame lineage from database after session file load: {df_update_err}")
-                            else:
-                                logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
-                                _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
-                    elif session_file_path:
-                        logging.error(f"❌ Session file_path exists but file not found: {session_file_path}")
+                    # ALWAYS load session file if it's different from what's loaded, or if processor has no data
+                    current_file = getattr(_excel_processor, '_last_loaded_file', None)
+                    has_data = hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty
+                    
+                    if current_file == session_file_path and has_data:
+                        logging.info(f"⚡ Session file already loaded, skipping reload: {session_file_path}")
+                        row_count = len(_excel_processor.df)
+                        logging.info(f"✅ Using cached data: {row_count} rows")
                     else:
+                        # Load the session file (takes priority over default file)
+                        if current_file != session_file_path:
+                            logging.info(f"📂 Loading session file (different from current): {session_file_path}")
+                        else:
+                            logging.info(f"📂 Reloading session file (processor has no data): {session_file_path}")
+                        
+                        success = _excel_processor.load_file(session_file_path)
+                        if success:
+                            _excel_processor._last_loaded_file = session_file_path
+                            logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
+                            row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
+                            logging.info(f"✅ Loaded {row_count} rows from session file")
+                            
+                            # GUARANTEED FIX: Force DataFrame update from database after loading
+                            if hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
+                                try:
+                                    logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database after session file load...")
+                                    _excel_processor._update_dataframe_lineage_from_database()
+                                    logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database after session file load")
+                                except Exception as df_update_err:
+                                    logging.warning(f"Could not update DataFrame lineage from database after session file load: {df_update_err}")
+                        else:
+                            logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
+                            _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
+                elif session_file_path:
+                    logging.error(f"❌ Session file_path exists but file not found: {session_file_path}")
+                else:
                         # OPTIMIZATION: Skip default file loading on startup for faster app loading
                         if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
                             # Try to load the default file for the selected store
@@ -1325,52 +1385,18 @@ def get_excel_processor():
                             _excel_processor.df = pd.DataFrame()
                             # Clear the reset flag since we've handled it
                             _excel_processor_reset_flag = False
-                except Exception as session_error:
-                    logging.warning(f"Error checking session for uploaded file: {session_error}")
-                    # OPTIMIZATION: Skip default file loading on startup for faster app loading
-                    if not _excel_processor_reset_flag and not DISABLE_STARTUP_FILE_LOADING:
-                        selected_store = get_current_store_name() if has_store_selection() else None
-                        default_file = get_default_upload_file(selected_store)
-                        if default_file and os.path.exists(default_file):
-                            logging.info(f"Loading default file in get_excel_processor: {default_file}")
-                            success = _excel_processor.load_file(default_file)
-                            if success:
-                                _excel_processor._last_loaded_file = default_file
-                                # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
-                                if hasattr(_excel_processor, '_cache_dropdown_values'):
-                                    try:
-                                        _excel_processor._cache_dropdown_values()
-                                        logging.info(f"Successfully populated dropdown cache in get_excel_processor fallback")
-                                        # Log the strain count specifically
-                                        if 'strain' in _excel_processor.dropdown_cache:
-                                            strain_count = len(_excel_processor.dropdown_cache['strain'])
-                                            logging.info(f"Dropdown cache contains {strain_count} strains")
-                                        else:
-                                            logging.warning("No strain filter found in dropdown cache")
-                                    except Exception as e:
-                                        logging.error(f"Failed to populate dropdown cache in get_excel_processor fallback: {e}")
-                                else:
-                                    logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
-                            else:
-                                if not hasattr(_excel_processor, 'df'):
-                                    _excel_processor.df = pd.DataFrame()
-                        else:
-                            if not hasattr(_excel_processor, 'df'):
-                                _excel_processor.df = pd.DataFrame()
-                    else:
-                        _excel_processor.df = pd.DataFrame()
-                    _excel_processor_reset_flag = False
             
             # Ensure df attribute exists
             if not hasattr(_excel_processor, 'df'):
-                logging.error("ExcelProcessor missing df attribute - creating empty DataFrame"),
+                logging.error("ExcelProcessor missing df attribute - creating empty DataFrame")
+                _excel_processor.df = pd.DataFrame()
             
             # Ensure selected_tags attribute exists
             if not hasattr(_excel_processor, 'selected_tags'):
                 _excel_processor.selected_tags = []
             
             # Clear recursion guard before returning
-            if hasattr(g, '_in_get_excel_processor'):
+            if has_context and hasattr(g, '_in_get_excel_processor'):
                 delattr(g, '_in_get_excel_processor')
             
             return _excel_processor
@@ -1380,7 +1406,7 @@ def get_excel_processor():
         logging.error(traceback.format_exc())
         
         # Clear recursion guard on error
-        if hasattr(g, '_in_get_excel_processor'):
+        if has_context and hasattr(g, '_in_get_excel_processor'):
             delattr(g, '_in_get_excel_processor')
         
         # Return a safe fallback ExcelProcessor
@@ -1915,13 +1941,22 @@ def check_session_size():
             # Store essential data before clearing
             selected_tags = session.get('selected_tags', [])
             selected_store = session.get('selected_store', '')
+            file_path = session.get('file_path', '')
+            uploaded_filename = session.get('uploaded_filename', '')
+            upload_timestamp = session.get('upload_timestamp', None)
             session.clear()
             # Restore essential data after clearing
             if selected_tags:
                 session['selected_tags'] = selected_tags
             if selected_store:
                 session['selected_store'] = selected_store
-                logging.info(f"Preserved {len(selected_tags)} selected tags during session optimization")
+            if file_path:
+                session['file_path'] = file_path
+            if uploaded_filename:
+                session['uploaded_filename'] = uploaded_filename
+            if upload_timestamp:
+                session['upload_timestamp'] = upload_timestamp
+            logging.info(f"Preserved {len(selected_tags)} selected tags and file_path during session optimization")
             return True
     except Exception as e:
         logging.error(f"Error checking session size: {e}")
@@ -1935,7 +1970,7 @@ def optimize_session_data():
             return False
             
         # Only keep essential session data
-        essential_keys = ['selected_tags', 'file_path', UNDO_STACK_KEY]
+        essential_keys = ['selected_tags', 'file_path', 'uploaded_filename', 'upload_timestamp', UNDO_STACK_KEY]
         session_copy = {}
         
         for key in essential_keys:
@@ -1974,6 +2009,9 @@ def optimize_session_data():
             # Store essential data before clearing
             selected_tags = session.get('selected_tags', [])
             selected_store = session.get('selected_store', '')
+            file_path = session.get('file_path', '')
+            uploaded_filename = session.get('uploaded_filename', '')
+            upload_timestamp = session.get('upload_timestamp', None)
             session.clear()
             session.update(session_copy)
             # Restore essential data if they weren't in the optimized data
@@ -1981,7 +2019,13 @@ def optimize_session_data():
                 session['selected_tags'] = selected_tags
             if selected_store and 'selected_store' not in session_copy:
                 session['selected_store'] = selected_store
-                logging.info(f"Restored {len(selected_tags)} selected tags after session optimization")
+            if file_path and 'file_path' not in session_copy:
+                session['file_path'] = file_path
+            if uploaded_filename and 'uploaded_filename' not in session_copy:
+                session['uploaded_filename'] = uploaded_filename
+            if upload_timestamp and 'upload_timestamp' not in session_copy:
+                session['upload_timestamp'] = upload_timestamp
+            logging.info(f"Restored {len(selected_tags)} selected tags and file_path after session optimization")
             
             logging.info("Session data optimized")
             return True
@@ -2044,7 +2088,33 @@ def initialize_excel_processor():
             excel_processor.enable_product_db_integration(True)
             logging.info("Product database integration enabled by default")
         
-        # Try to load default file for the selected store
+        # CRITICAL FIX: Check for session file FIRST before loading default file
+        # This ensures uploaded files persist across page reloads
+        session_file_path = None
+        try:
+            from flask import session, has_request_context
+            if has_request_context():
+                session_file_path = session.get('file_path')
+                if session_file_path and os.path.exists(session_file_path):
+                    logging.info(f"✅ Found session file in initialize_excel_processor: {session_file_path}")
+                    # Check if already loaded
+                    if excel_processor._last_loaded_file != session_file_path or not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
+                        logging.info(f"📂 Loading session file in initialize_excel_processor: {session_file_path}")
+                        success = excel_processor.load_file(session_file_path)
+                        if success:
+                            excel_processor._last_loaded_file = session_file_path
+                            row_count = len(excel_processor.df) if hasattr(excel_processor, 'df') and excel_processor.df is not None else 0
+                            logging.info(f"✅ Session file loaded successfully with {row_count} records")
+                            return  # Don't load default file if session file was loaded
+                        else:
+                            logging.warning(f"⚠️ Failed to load session file: {session_file_path}")
+                    else:
+                        logging.info(f"✅ Session file already loaded: {session_file_path}")
+                        return  # Don't load default file if session file is already loaded
+        except Exception as session_check_error:
+            logging.debug(f"Could not check session in initialize_excel_processor: {session_check_error}")
+        
+        # Only load default file if no session file was found/loaded
         from src.core.data.excel_processor import get_default_upload_file
         selected_store = get_current_store_name() if has_store_selection() else None
         default_file = get_default_upload_file(selected_store)
@@ -2289,7 +2359,9 @@ def get_session_excel_processor():
             
             # CRITICAL FIX: Ensure ExcelProcessor has data for JSON matching
             # Only load default file if we don't have a session file AND DataFrame is empty
-            if not session_file_path:
+            # PERFORMANCE: Skip default file loading if _skip_default_file_load flag is set (for fast_load)
+            skip_default_load = getattr(g, '_skip_default_file_load', False)
+            if not session_file_path and not skip_default_load:
                 if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
                     logging.info("CRITICAL FIX: No session file and DataFrame is empty, loading default file")
                     from src.core.data.excel_processor import get_default_upload_file
@@ -2311,6 +2383,8 @@ def get_session_excel_processor():
                             logging.error(f"CRITICAL FIX: Failed to load default file: {default_file}")
                     else:
                         logging.warning("CRITICAL FIX: No default file available")
+            elif skip_default_load:
+                logging.info("⚡ Fast load: Skipping default file loading in get_session_excel_processor")
         
         # CRITICAL FIX: For new uploaded files, update the last processed file but DON'T clear tags
         if session_file_path and session_file_path != getattr(g.excel_processor, '_last_processed_file', None):
@@ -2943,6 +3017,8 @@ def upload_file():
             # Capture variables from request context for background thread
             original_filename = file.filename
             # Store context removed - using single database
+            # Capture session_id for preroll items update
+            background_session_id = session.get('session_id', 'default')
 
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
             # CRITICAL: Also clear cache to ensure old Excel data doesn't persist
@@ -2975,6 +3051,11 @@ def upload_file():
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
+                            
+                            # Update preroll items from newly loaded Excel data
+                            if hasattr(processor, 'df') and processor.df is not None:
+                                # Pass session_id from outer scope since we're in background thread
+                                update_preroll_items_from_excel(processor.df, session_id=background_session_id)
 
                             # Store in database
                             try:
@@ -3041,13 +3122,35 @@ def upload_file():
             return jsonify(response_data)
             
         else:
-            # Local development: FAST UPLOAD - just save file, don't process
-            # Processing happens on page reload for instant upload response
-            logging.info("[LOCAL] Fast upload mode - saving file without processing")
+            # Local development: FAST UPLOAD - save file and load it immediately
+            # This ensures tags can be loaded immediately after upload
+            logging.info("[LOCAL] Fast upload mode - saving file and loading immediately")
             
-            # CRITICAL FIX: Invalidate the global processor cache so page reload gets fresh data
-            _excel_processor = None
-            logging.info("✅ Cleared Excel processor cache to force reload of new file on next request")
+            # CRITICAL FIX: Load the file immediately after upload so tags can be accessed right away
+            # This ensures tags are available immediately when requested, preventing timeouts
+            try:
+                processor = get_excel_processor()
+                logging.info(f"✅ Loading uploaded file immediately: {file_path}")
+                success = processor.load_file(file_path)
+                if success:
+                    processor._last_loaded_file = file_path
+                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                    logging.info(f"✅ Successfully loaded {row_count} rows immediately after upload")
+                    
+                    # CRITICAL: Pre-populate dropdown cache to speed up tag loading
+                    if hasattr(processor, '_cache_dropdown_values'):
+                        try:
+                            processor._cache_dropdown_values()
+                            logging.info("✅ Pre-populated dropdown cache after upload")
+                        except Exception as cache_err:
+                            logging.warning(f"Could not pre-populate dropdown cache: {cache_err}")
+                else:
+                    logging.error(f"❌ Failed to load file immediately after upload: {file_path}")
+                    # Don't fail the upload, but log the error
+            except Exception as load_error:
+                logging.error(f"❌ Error loading file immediately after upload: {load_error}")
+                logging.error(traceback.format_exc())
+                # Don't fail the upload, but log the error
             
             # CRITICAL: Clear ALL caches to force complete refresh
             try:
@@ -6845,6 +6948,8 @@ def generate_labels():
                                     'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                     'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
                                     'Price': _format_price_value(_extract_price_from_database_product(processed_record)),  # Extract and format price
+                                    'Price*': _format_price_value(_extract_price_from_database_product(processed_record)),  # Also set Price* for generation compatibility
+                                    'Price* (Tier Name for Bulk)': _format_price_value(_extract_price_from_database_product(processed_record)),  # Set all price field variations
                                     'DOH': processed_record.get('DOH', ''),
                                     'DOH Compliant (Yes/No)': processed_record.get('DOH Compliant (Yes/No)', processed_record.get('DOH', '')),
                                     'Ratio': processed_record.get('Ratio', ''),
@@ -7093,11 +7198,16 @@ def generate_labels():
                                 'Product Strain': json_product.get('Product Strain', ''),
                                 'Lineage': json_product.get('Lineage', 'HYBRID'),
                                 'Vendor': json_product.get('Vendor/Supplier*', json_product.get('Vendor', '')),
-                                'Price': json_product.get('Price', ''),  # NO DEFAULT PRICE
+                                'Price': json_product.get('Price', '') or json_product.get('Price*', ''),  # NO DEFAULT PRICE - check multiple fields
+                                'Price*': json_product.get('Price*', '') or json_product.get('Price', ''),  # Also set Price* for generation compatibility
+                                'Price* (Tier Name for Bulk)': json_product.get('Price* (Tier Name for Bulk)', '') or json_product.get('Price*', '') or json_product.get('Price', ''),  # Set all price field variations
                                 'DOH': json_product.get('DOH', ''),
                                 'Ratio': json_product.get('Ratio', ''),
-                                'Weight*': json_product.get('Weight*', ''),
-                                'Units': json_product.get('Units', 'g'),
+                                'Weight*': json_product.get('Weight*', '') or json_product.get('Weight', ''),
+                                'Weight': json_product.get('Weight', '') or json_product.get('Weight*', ''),
+                                'Units': json_product.get('Units', '') or json_product.get('Weight Unit* (grams/gm or ounces/oz)', 'g'),
+                                'WeightUnits': json_product.get('WeightUnits', '') or json_product.get('CombinedWeight', '') or (f"{json_product.get('Weight*', '')}{json_product.get('Units', '')}" if json_product.get('Weight*') else ''),
+                                'CombinedWeight': json_product.get('CombinedWeight', '') or json_product.get('WeightUnits', '') or (f"{json_product.get('Weight*', '')}{json_product.get('Units', '')}" if json_product.get('Weight*') else ''),
                                 'Quantity*': json_product.get('Quantity*', '1'),
                                 'THC test result': json_product.get('THC test result', ''),
                                 'CBD test result': json_product.get('CBD test result', ''),
@@ -7163,6 +7273,10 @@ def generate_labels():
             logging.error("No selected tags found in the data or failed to process records.")
             return jsonify({'error': 'No selected tags found in the data or failed to process records. Please ensure you have selected tags and they exist in the loaded data.'}), 400
         
+        # PREROLL TEMPLATE: Group by unique vendor + description combination
+        if template_type == 'preroll':
+            records = generate_preroll_tags(records, cache)
+        
         # For mini templates, log how many labels will be filled vs. left blank
         if template_type == 'mini':
             if len(records) < 20:
@@ -7188,6 +7302,8 @@ def generate_labels():
         # Use the already imported TemplateProcessor and get_font_scheme
         font_scheme = get_font_scheme(template_type)
         processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor)
+        
+        # No need to pass preroll_session_id anymore - QR code uses static URL
         
         # ⚠️ DISABLED: Fast generation temporarily disabled for troubleshooting
         # from src.core.generation.fast_generation import FastGenerationEngine, optimize_records_for_generation
@@ -7381,6 +7497,11 @@ def generate_labels():
             except Exception as font_error:
                 logger.warning(f"Skipping font enforcement due to table structure issue: {font_error}")
 
+        # For preroll templates, generate product list as a separate document (not attached to tags)
+        product_list_doc = None
+        if template_type == 'preroll':
+            product_list_doc = generate_preroll_product_list(records, cache)
+
         # Save the final document to a buffer
         output_buffer = BytesIO()
         final_doc.save(output_buffer)
@@ -7551,14 +7672,12 @@ def process_record(row, template_type, excel_processor):
         primary_name = record.get('Product Name*') or record.get('ProductName') or record.get('Product Name') or ''
         record['ProductName'] = str(primary_name) if primary_name is not None else ''
         
-        # CRITICAL FIX: Apply lineage normalization to ensure proper lineage format
-        if 'Lineage' in record and record['Lineage']:
-            from src.core.data.excel_processor import normalize_lineage
-            original_lineage = record['Lineage']
-            normalized_lineage = normalize_lineage(original_lineage)
-            if normalized_lineage != original_lineage:
-                logging.debug(f"LINEAGE NORMALIZATION in process_record: '{original_lineage}' -> '{normalized_lineage}'")
-            record['Lineage'] = normalized_lineage
+        # CRITICAL: Use database lineage if available - don't normalize or convert
+        # Database lineage (canonical_lineage/currentLineage) is the source of truth
+        db_lineage = record.get('canonical_lineage') or record.get('currentLineage')
+        if db_lineage:
+            record['Lineage'] = str(db_lineage).strip().upper()
+            logging.debug(f"Export process_record: Using database lineage '{record['Lineage']}' for '{primary_name}'")
         
         return record
         
@@ -7600,6 +7719,7 @@ def download_transformed_excel():
         if not product_name_column:
             return jsonify({'error': 'No product name column found in data'}), 400
         
+        # Simple direct filtering like the working version - just use isin() for exact matches
         filtered_df = excel_processor.df[excel_processor.df[product_name_column].isin(selected_tags)]
         processed_records = []
         for _, row in filtered_df.iterrows():
@@ -7975,8 +8095,22 @@ def get_available_tags():
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
-        # Check memory before processing
-        if not check_memory_limit():
+        # Check memory before processing - but don't block if we have cached data
+        memory_ok = check_memory_limit()
+        if not memory_ok:
+            # Try to return cached data instead of failing
+            cache_key = get_session_cache_key('available_tags')
+            cached_tags = cache.get(cache_key)
+            if cached_tags:
+                logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
+                return jsonify({
+                    'tags': cached_tags,
+                    'total_count': len(cached_tags),
+                    'source': 'cache-memory-fallback',
+                    'warning': 'Memory usage high, serving cached data'
+                })
+            # Only return 503 if we have no cached data
+            logging.error("Memory usage too high and no cached data available")
             return jsonify({'error': 'Memory usage too high, please try again later'}), 503
         
         # Rate limiting: prevent rapid successive requests
@@ -8092,23 +8226,22 @@ def get_available_tags():
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
         if cached_tags and not nocache:
-            # CRITICAL FIX: ALWAYS align lineage from database - database is the source of truth
-            # Even during fast_load, we MUST query database for lineage to ensure persistence
-            # Skip alignment ONLY if explicitly disabled AND no recent lineage updates
-            # But for lineage persistence, we always need database lineage
-            # CRITICAL: Always align lineage from database, regardless of cache or timestamp
-            # This ensures lineage changes persist even after page reloads
-            lineage_alignment_needed = True  # ALWAYS align lineage - database is source of truth
-            logging.info(f"🔄 CRITICAL: Lineage alignment ALWAYS enabled to ensure database lineage is used (fast_load={fast_load}, force_full_refresh={force_full_refresh})")
+            # PERFORMANCE OPTIMIZATION: Skip lineage alignment when fast_load is enabled and no recent updates
+            # This dramatically speeds up tag loading (from 30-60s to <1s)
+            # Only align lineage when:
+            # 1. fast_load is False (explicitly requested full alignment)
+            # 2. Recent lineage updates detected (force_full_refresh)
+            # 3. prefer_db is True (explicitly requested database priority)
+            lineage_alignment_needed = not fast_load or force_full_refresh or prefer_db
             
-            # CRITICAL FIX: Force bypass cache if lineage might be stale
-            # Even if timestamp is old, we should still verify lineage from database
-            # This ensures lineage changes persist across page reloads
-            if not force_full_refresh:
-                # Check if we should still verify lineage (even if timestamp is old)
-                # Always verify lineage from database to ensure persistence
-                logging.info("🔄 CRITICAL: Verifying lineage from database even for cached tags to ensure persistence")
+            if lineage_alignment_needed:
+                logging.info(f"🔄 Lineage alignment enabled: fast_load={fast_load}, force_full_refresh={force_full_refresh}, prefer_db={prefer_db}")
+            else:
+                logging.info(f"⚡ PERFORMANCE: Skipping lineage alignment for fast loading (fast_load={fast_load}) - tags will load instantly")
             
+            # PERFORMANCE OPTIMIZATION: Only update DataFrame lineage when lineage alignment is needed
+            # Skip this expensive operation when fast_load is enabled
+            if lineage_alignment_needed:
             # CRITICAL FIX: Also update Excel processor DataFrame lineage if it exists
             # This ensures the DataFrame is in sync with database before tags are loaded
             try:
@@ -8120,6 +8253,8 @@ def get_available_tags():
                         logging.info("✅ CRITICAL: DataFrame lineage updated for cached tags")
             except Exception as df_update_err:
                 logging.warning(f"Could not update DataFrame lineage for cached tags: {df_update_err}")
+            else:
+                logging.debug("⚡ PERFORMANCE: Skipping DataFrame lineage update (fast_load enabled)")
             
             if lineage_alignment_needed:
                 logging.info(f"🔄 Lineage alignment enabled: fast_load={fast_load}, force_full_refresh={force_full_refresh}")
@@ -8191,14 +8326,34 @@ def get_available_tags():
                                 all_search_names = list(set(product_names + normalized_names))
 
                                 # PERFORMANCE: Use larger batch size for faster processing
-                                # SQLite handles up to 2000 items efficiently with proper indexing
-                                MAX_BATCH_SIZE = 2000  # Increased for better performance
+                                # SQLite handles up to 5000 items efficiently with proper indexing
+                                MAX_BATCH_SIZE = 5000  # Increased for better performance
                                 if len(all_search_names) > MAX_BATCH_SIZE:
                                     # Process in chunks but use larger chunks for speed
                                     all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
-                                    all_search_names = all_search_names_chunks[0]  # Process first chunk
-                                    # Note: Remaining chunks skipped for performance - batch covers most cases
-
+                                    # Process all chunks, not just the first one, to ensure complete coverage
+                                    all_batch_results = []
+                                    for chunk in all_search_names_chunks:
+                                        try:
+                                            placeholders = ','.join(['?'] * len(chunk))
+                                            chunk_query = f'''
+                                                SELECT DISTINCT
+                                                    COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
+                                                    COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                                    p."Product Name*" AS product_name,
+                                                    p.normalized_name AS normalized_name
+                                                FROM products p
+                                                LEFT JOIN strains s ON p.strain_id = s.id
+                                                WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                                ORDER BY p.id DESC
+                                            '''
+                                            cur.execute(chunk_query, chunk + chunk)
+                                            all_batch_results.extend(cur.fetchall())
+                                        except Exception as chunk_err:
+                                            logging.warning(f"Batch chunk query failed: {chunk_err}")
+                                    batch_results = all_batch_results
+                                else:
+                                    # Single batch query for all names
                                 placeholders = ','.join(['?'] * len(all_search_names))
                                 batch_query = f'''
                                     SELECT DISTINCT
@@ -8210,7 +8365,6 @@ def get_available_tags():
                                     LEFT JOIN strains s ON p.strain_id = s.id
                                     WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                     ORDER BY p.id DESC
-                                    LIMIT 1000
                                 '''
                                 # Add query timing to detect slow queries
                                 query_start = time.time()
@@ -8303,39 +8457,40 @@ def get_available_tags():
                             except Exception as _loop_err:
                                 logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
                         
-                        # CRITICAL FIX: ALWAYS verify ALL tags with individual database queries
-                        # This is the ONLY way to guarantee we get the latest database lineage values
-                        # Batch queries can return stale data, so we must verify every single tag individually
-                        logging.info(f"🔄 CRITICAL: Verifying ALL {len(cached_tags)} tags with individual database queries to guarantee latest lineage values...")
-                        # Add ALL tags to individual query list to verify their lineage from database
+                        # PERFORMANCE OPTIMIZATION: Only verify tags with individual queries when lineage alignment is needed
+                        # When fast_load is enabled, skip individual queries to dramatically improve performance
+                        # Individual queries are only needed when we need guaranteed fresh lineage values
+                        if not fast_load and (prefer_db or force_full_refresh):
+                            # CRITICAL FIX: Verify tags with individual database queries only when needed
+                            # This ensures we get the latest database lineage values when explicitly requested
+                            # Skip this for fast_load to improve performance (batch query is sufficient)
+                            logging.info(f"🔄 Verifying {len(cached_tags)} tags with individual database queries (prefer_db={prefer_db}, force_full_refresh={force_full_refresh})...")
+                            # Only add tags that weren't found in batch query to individual query list
                         for tag in cached_tags:
                             name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                            if name:
-                                # Always verify with individual query - don't trust batch cache
+                                if name and name not in lineage_cache:
+                                    # Only query tags that weren't in batch results
                                 if (tag, name) not in tags_needing_individual_query:
                                     tags_needing_individual_query.append((tag, name))
                         
-                        # CRITICAL FIX: Always perform individual queries, even if batch query failed
-                        # This ensures we always get the latest lineage from database
+                            # Perform individual queries only for tags not found in batch
                         if tags_needing_individual_query:
                             if not product_db:
                                 logging.warning("⚠️ Product database not available for individual lineage queries")
                             else:
-                                logging.info(f"🔄 CRITICAL: Performing {len(tags_needing_individual_query)} individual database queries to guarantee latest lineage values (overriding any batch cache data)...")
+                                    logging.info(f"🔄 Performing {len(tags_needing_individual_query)} individual database queries for tags not in batch...")
                                 individual_updated_count = 0
                                 try:
-                                    for tag, name in tags_needing_individual_query:
+                                        # Limit individual queries to prevent timeout (max 100 queries)
+                                        max_individual_queries = 100
+                                        for tag, name in tags_needing_individual_query[:max_individual_queries]:
                                         try:
-                                            # CRITICAL: Use get_product_lineage which handles normalization and case-insensitive matching
-                                            # This ALWAYS queries the database directly, never uses cache
+                                                # Use get_product_lineage which handles normalization and case-insensitive matching
                                             db_lineage = product_db.get_product_lineage(name)
                                             if db_lineage:
                                                 db_lin_clean = str(db_lineage).strip().upper()
-                                                # Get current lineage from tag (might be from batch cache)
                                                 old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
                                                 
-                                                # CRITICAL: ALWAYS override with database value, even if batch cache had a value
-                                                # Database is the single source of truth
                                                 tag['currentLineage'] = db_lin_clean
                                                 tag['canonical_lineage'] = db_lin_clean
                                                 tag['Lineage'] = db_lin_clean
@@ -8344,19 +8499,10 @@ def get_available_tags():
                                                 individual_updated_count += 1
                                                 updated += 1
                                                 if old_lineage != db_lin_clean:
-                                                    logging.info(f"🔄 CRITICAL: Lineage OVERRIDDEN by database (individual query): '{name}' - batch cache had '{old_lineage}' → database has '{db_lin_clean}'")
-                                                else:
-                                                    logging.debug(f"✅ Lineage confirmed by database (individual query): '{name}' = '{db_lin_clean}'")
-                                            else:
-                                                # Even if no DB lineage found, ensure fields are consistent
-                                                existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                                if existing_lineage:
-                                                    tag['currentLineage'] = existing_lineage
-                                                    tag['canonical_lineage'] = existing_lineage
-                                                    tag['lineage'] = existing_lineage
+                                                        logging.debug(f"🔄 Lineage updated (individual query): '{name}' - '{old_lineage}' → '{db_lin_clean}'")
                                         except Exception as individual_err:
                                             logging.debug(f"Individual lineage query failed for '{name}': {individual_err}")
-                                            # Even if query fails, ensure fields are consistent
+                                                # Ensure fields are consistent even on error
                                             existing_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
                                             if existing_lineage:
                                                 tag['currentLineage'] = existing_lineage
@@ -8364,20 +8510,11 @@ def get_available_tags():
                                                 tag['lineage'] = existing_lineage
                                     
                                     if individual_updated_count > 0:
-                                        logging.info(f"✅ CRITICAL: Verified {individual_updated_count}/{len(tags_needing_individual_query)} tags with individual database queries - all lineage values now guaranteed to match database")
-                                    else:
-                                        logging.info(f"✅ CRITICAL: Completed individual lineage queries for {len(tags_needing_individual_query)} tags (all values confirmed from database)")
+                                            logging.info(f"✅ Verified {individual_updated_count}/{len(tags_needing_individual_query)} tags with individual queries")
                                 except Exception as batch_individual_err:
-                                    logging.error(f"❌ CRITICAL FAILURE: Individual lineage queries failed: {batch_individual_err}")
-                                    import traceback
-                                    logging.error(traceback.format_exc())
-                                    # CRITICAL: Even if queries fail, try to ensure cache is updated with what we have
-                                    # This prevents stale cache from persisting
-                                    try:
-                                        cache.set(cache_key, make_json_safe(cached_tags), timeout=300)
-                                        logging.info("✅ Updated cache even after individual query failure to prevent stale data")
-                                    except Exception:
-                                        pass
+                                        logging.warning(f"Individual lineage queries failed: {batch_individual_err}")
+                        else:
+                            logging.debug(f"⚡ PERFORMANCE: Skipping individual queries (fast_load={fast_load}, prefer_db={prefer_db}, force_full_refresh={force_full_refresh})")
                         
                         # Apply strain updates for tags that were found in batch cache
                         for tag in cached_tags:
@@ -8439,6 +8576,30 @@ def get_available_tags():
                 elapsed = (time.time() - start_time) * 1000
                 logging.debug(f"✅ Using {len(cached_tags)} cached tags ({elapsed:.1f}ms, {updated} updated)")
                 
+                # PERFORMANCE OPTIMIZATION: Early return when fast_load and no lineage alignment needed
+                # This dramatically speeds up tag loading (from 30-60s to <1s)
+                if not lineage_alignment_needed:
+                    safe_all_tags = make_json_safe(cached_tags)
+                    # Cache the results for faster subsequent requests
+                    if safe_all_tags and not nocache:
+                        cache.set(cache_key, safe_all_tags, timeout=300)  # Cache for 5 minutes
+                        logging.info(f"✅ Cached {len(safe_all_tags)} tags for future requests")
+                    
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"⚡ PERFORMANCE: Fast return with cached tags ({elapsed:.1f}ms) - {len(safe_all_tags)} tags")
+                    
+                    resp = jsonify({
+                        'tags': safe_all_tags,
+                        'total_count': len(safe_all_tags),
+                        'source': 'cache-fast'
+                    })
+                    try:
+                        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                        resp.headers['Pragma'] = 'no-cache'
+                    except Exception:
+                        pass
+                    return resp
+                
                 # CRITICAL FIX: Ensure ALL tags have database lineage fields set, even if they weren't in the batch query
                 # This handles cases where products weren't found in the initial batch but exist in the database
                 if lineage_alignment_needed and lineage_cache:
@@ -8489,7 +8650,12 @@ def get_available_tags():
         if not skip_excel_loading and not prefer_db:
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
-            excel_processor = get_session_excel_processor()
+            try:
+                excel_processor = get_session_excel_processor()
+            except Exception as excel_proc_err:
+                logging.warning(f"Error getting Excel processor: {excel_proc_err}")
+                excel_processor = None
+            
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 # CRITICAL FIX: ALWAYS update DataFrame lineage from database BEFORE loading tags
                 # This ensures lineage changes persist after page refresh
@@ -8631,11 +8797,12 @@ def get_available_tags():
                                         db_lineage = product_db.get_product_lineage(tag_name)
                                         if db_lineage:
                                             db_lineage_clean = str(db_lineage).strip().upper()
-                                            # Get current lineage from tag (might be from batch query)
+                                            
+                                            # CRITICAL: Use database lineage directly - respect database values
+                                            # Don't convert or modify - database is the source of truth
                                             old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
                                             
-                                            # CRITICAL: ALWAYS override with database value, even if batch query had a value
-                                            # Database is the single source of truth
+                                            # CRITICAL: ALWAYS override with database value - database is the source of truth
                                             tag['currentLineage'] = db_lineage_clean
                                             tag['canonical_lineage'] = db_lineage_clean
                                             tag['Lineage'] = db_lineage_clean
@@ -8649,15 +8816,47 @@ def get_available_tags():
                                                 logging.debug(f"✅ GUARANTEED FIX: Lineage confirmed by database (individual query): '{tag_name}' = '{db_lineage_clean}'")
                                         else:
                                             # Even if no DB lineage found, ensure fields are consistent
-                                            current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or 'MIXED').strip().upper()
-                                            if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
-                                                if current_lineage:
-                                                    tag['currentLineage'] = current_lineage
-                                                    tag['canonical_lineage'] = current_lineage
+                                            # CRITICAL: Classic types should NOT default to MIXED
+                                            product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
+                                            from src.core.constants import CLASSIC_TYPES
+                                            is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                            default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
+                                            current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
+                                            
+                                            # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
+                                            if current_lineage == 'THC':
+                                                current_lineage = 'MIXED'
+                                            
+                                            # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID
+                                            # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
+                                            if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
+                                                current_lineage = 'HYBRID'
+                                            
+                                            # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
+                                            # Even if one exists, ensure both are set to the same value
+                                            if current_lineage:
+                                                tag['currentLineage'] = current_lineage
+                                                tag['canonical_lineage'] = current_lineage
+                                                tag['Lineage'] = current_lineage
+                                                tag['lineage'] = current_lineage.lower()
                                     except Exception as individual_err:
                                         logging.debug(f"GUARANTEED FIX individual query failed for '{tag_name}': {individual_err}")
                                         # Even if query fails, ensure fields are consistent
-                                        current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or 'MIXED').strip().upper()
+                                        # CRITICAL: Classic types should NOT default to MIXED
+                                        product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
+                                        from src.core.constants import CLASSIC_TYPES
+                                        is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                        default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
+                                        current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
+                                        
+                                        # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
+                                        if current_lineage == 'THC':
+                                            current_lineage = 'MIXED'
+                                        
+                                        # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID
+                                        # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
+                                        if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
+                                            current_lineage = 'HYBRID'
                                         if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
                                             if current_lineage:
                                                 tag['currentLineage'] = current_lineage
@@ -8897,21 +9096,79 @@ def get_available_tags():
                                 try:
                                     product_dict = dict(zip(columns, row))
                                     
-                                    # CRITICAL: Use preferred_lineage (from strains.canonical_lineage or products.Lineage)
-                                    # This ensures UI lineages match database - same pipeline as Excel alignment
-                                    preferred_lin = product_dict.pop('preferred_lineage', None)
-                                    if preferred_lin:
-                                        db_lin_clean = str(preferred_lin).strip().upper()
-                                        # Set all lineage fields to the same DB value (consistent pipeline)
-                                        product_dict['currentLineage'] = db_lin_clean
-                                        product_dict['canonical_lineage'] = db_lin_clean
-                                        product_dict['Lineage'] = db_lin_clean
+                                    # CRITICAL: Use get_product_lineage() for EXACT same lineage as output generation
+                                    # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                                    product_name = product_dict.get('Product Name*') or product_dict.get('ProductName', '')
+                                    if product_name and product_db:
+                                        try:
+                                            # Use exact same method as output generation (template_processor.py line 1515)
+                                            db_lineage = product_db.get_product_lineage(product_name)
+                                            if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                                db_lin_clean = str(db_lineage).strip().upper()
+                                                
+                                                # CRITICAL: Classic types should NEVER have MIXED lineage
+                                                product_type = str(product_dict.get('Product Type*', '') or product_dict.get('Type', '')).strip().lower()
+                                                from src.core.constants import CLASSIC_TYPES
+                                                is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                                if is_classic_type and db_lin_clean == 'MIXED':
+                                                    db_lin_clean = 'HYBRID'
+                                                    logging.debug(f"🔄 CRITICAL: Changed MIXED to HYBRID for classic type '{product_name}' (type: '{product_type}')")
+                                                
+                                                # Set all lineage fields to the same DB value (consistent with output generation)
+                                                product_dict['currentLineage'] = db_lin_clean
+                                                product_dict['canonical_lineage'] = db_lin_clean
+                                                product_dict['Lineage'] = db_lin_clean
+                                            else:
+                                                # Fallback to preferred_lineage if get_product_lineage returns None
+                                                preferred_lin = product_dict.pop('preferred_lineage', None)
+                                                if preferred_lin:
+                                                    db_lin_clean = str(preferred_lin).strip().upper()
+                                                    
+                                                    # CRITICAL: Classic types should NEVER have MIXED lineage
+                                                    product_type = str(product_dict.get('Product Type*', '') or product_dict.get('Type', '')).strip().lower()
+                                                    from src.core.constants import CLASSIC_TYPES
+                                                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                                    if is_classic_type and db_lin_clean == 'MIXED':
+                                                        db_lin_clean = 'HYBRID'
+                                                        logging.debug(f"🔄 CRITICAL: Changed MIXED to HYBRID for classic type '{product_name}' (type: '{product_type}')")
+                                                    
+                                                    product_dict['currentLineage'] = db_lin_clean
+                                                    product_dict['canonical_lineage'] = db_lin_clean
+                                                    product_dict['Lineage'] = db_lin_clean
+                                        except Exception as lineage_err:
+                                            logging.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_err}")
+                                            # Fallback to preferred_lineage
+                                            preferred_lin = product_dict.pop('preferred_lineage', None)
+                                            if preferred_lin:
+                                                db_lin_clean = str(preferred_lin).strip().upper()
+                                                
+                                                # CRITICAL: Classic types should NEVER have MIXED lineage
+                                                product_type = str(product_dict.get('Product Type*', '') or product_dict.get('Type', '')).strip().lower()
+                                                from src.core.constants import CLASSIC_TYPES
+                                                is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                                if is_classic_type and db_lin_clean == 'MIXED':
+                                                    db_lin_clean = 'HYBRID'
+                                                    logging.debug(f"🔄 CRITICAL: Changed MIXED to HYBRID for classic type '{product_name}' (type: '{product_type}')")
+                                                
+                                                product_dict['currentLineage'] = db_lin_clean
+                                                product_dict['canonical_lineage'] = db_lin_clean
+                                                product_dict['Lineage'] = db_lin_clean
                                     else:
-                                        # Fallback to product's Lineage if no preferred_lineage
-                                        lin = str(product_dict.get('Lineage', '')).strip().upper()
-                                        if lin:
-                                            product_dict['currentLineage'] = lin
-                                            product_dict['canonical_lineage'] = lin
+                                        # Fallback to preferred_lineage if no product name
+                                        preferred_lin = product_dict.pop('preferred_lineage', None)
+                                        if preferred_lin:
+                                            db_lin_clean = str(preferred_lin).strip().upper()
+                                            
+                                            # CRITICAL: Classic types should NEVER have MIXED lineage
+                                            product_type = str(product_dict.get('Product Type*', '') or product_dict.get('Type', '')).strip().lower()
+                                            from src.core.constants import CLASSIC_TYPES
+                                            is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                            if is_classic_type and db_lin_clean == 'MIXED':
+                                                db_lin_clean = 'HYBRID'
+                                            
+                                            product_dict['currentLineage'] = db_lin_clean
+                                            product_dict['canonical_lineage'] = db_lin_clean
+                                            product_dict['Lineage'] = db_lin_clean
                                     
                                     # Convert to the format expected by the frontend
                                     database_tags_prealloc[i] = product_dict
@@ -8990,9 +9247,18 @@ def get_available_tags():
                 except Exception as process_error:
                     logging.debug(f"Error processing database tag {db_tag.get('Product Name*', 'unknown')}: {process_error}")
                     # Still add the tag even if processing fails, but preserve lineage
+                    # CRITICAL: Classic types should NOT default to MIXED
+                    product_type = str(db_tag.get('Product Type*', '') or db_tag.get('Type', '')).strip().lower()
+                    from src.core.constants import CLASSIC_TYPES
+                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                    default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                     if db_tag.get('currentLineage') or db_tag.get('canonical_lineage'):
-                        db_tag['currentLineage'] = db_tag.get('currentLineage') or db_tag.get('Lineage', 'MIXED')
-                        db_tag['canonical_lineage'] = db_tag.get('canonical_lineage') or db_tag.get('Lineage', 'MIXED')
+                        fallback_lineage = db_tag.get('Lineage', default_lineage)
+                        # CRITICAL: Never allow MIXED for classic types
+                        if is_classic_type and fallback_lineage == 'MIXED':
+                            fallback_lineage = 'HYBRID'
+                        db_tag['currentLineage'] = db_tag.get('currentLineage') or fallback_lineage
+                        db_tag['canonical_lineage'] = db_tag.get('canonical_lineage') or fallback_lineage
                     processed_tags[i] = db_tag
             
             # Filter and extend
@@ -9139,10 +9405,52 @@ def get_available_tags():
                                 logging.debug(f"✅ Found case-insensitive match: '{product_name}' → '{db_name}'")
                                 break
                 
-                if db_lineage_data:
-                    # Update Excel tag with database lineage (database is source of truth)
+                # CRITICAL: Use get_product_lineage() for EXACT same lineage as output generation
+                # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                db_lineage_from_method = None
+                if product_db:
+                    try:
+                        # Use exact same method as output generation (template_processor.py line 1515)
+                        db_lineage_from_method = product_db.get_product_lineage(product_name)
+                    except Exception as method_err:
+                        logging.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {method_err}")
+                
+                if db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
+                    # Use get_product_lineage() result (same as output generation)
+                    db_lineage_clean = str(db_lineage_from_method).strip().upper()
+                    old_lineage = str(excel_tag.get('Lineage', '') or excel_tag.get('currentLineage', '') or excel_tag.get('canonical_lineage', '')).strip().upper()
+                    
+                    # CRITICAL: Classic types should NEVER have MIXED lineage
+                    product_type = str(excel_tag.get('Product Type*', '') or excel_tag.get('Type', '')).strip().lower()
+                    from src.core.constants import CLASSIC_TYPES
+                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                    if is_classic_type and db_lineage_clean == 'MIXED':
+                        db_lineage_clean = 'HYBRID'
+                        logging.debug(f"🔄 CRITICAL: Changed MIXED to HYBRID for classic type '{product_name}' (type: '{product_type}')")
+                    
+                    # CRITICAL: Always update ALL lineage fields from database using get_product_lineage()
+                    # This ensures frontend gets exact same values as output generation
+                    excel_tag['currentLineage'] = db_lineage_clean
+                    excel_tag['canonical_lineage'] = db_lineage_clean
+                    excel_tag['Lineage'] = db_lineage_clean
+                    excel_tag['lineage'] = db_lineage_clean.lower()
+                    
+                    updated_excel_count += 1
+                    if old_lineage != db_lineage_clean:
+                        logging.debug(f"✅ UI LINEAGE UPDATE (get_product_lineage): '{product_name}' - '{old_lineage}' → '{db_lineage_clean}'")
+                    continue  # Skip fallback lookup since we got lineage from get_product_lineage()
+                elif db_lineage_data:
+                    # Fallback: Update Excel tag with database lineage from lookup (database is source of truth)
                     old_lineage = str(excel_tag.get('Lineage', '') or excel_tag.get('currentLineage', '') or excel_tag.get('canonical_lineage', '')).strip().upper()
                     db_lineage_clean = str(db_lineage_data['Lineage']).strip().upper()
+                    
+                    # CRITICAL: Classic types should NEVER have MIXED lineage
+                    product_type = str(excel_tag.get('Product Type*', '') or excel_tag.get('Type', '')).strip().lower()
+                    from src.core.constants import CLASSIC_TYPES
+                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                    if is_classic_type and db_lineage_clean == 'MIXED':
+                        db_lineage_clean = 'HYBRID'
+                        logging.debug(f"🔄 CRITICAL: Changed MIXED to HYBRID for classic type '{product_name}' (type: '{product_type}')")
                     
                     # CRITICAL: Always update ALL lineage fields from database, even if they appear to match
                     # This ensures frontend gets fresh database values
@@ -9951,6 +10259,15 @@ def update_lineage():
         try:
             cache.clear()
             clear_available_tags_cache(reason="lineage_update")
+            # CRITICAL FIX: Clear filter options cache so lineage dropdown refreshes with database values
+            try:
+                filter_options_cache_key = get_session_cache_key('filter_options')
+                web_filter_options_cache_key = get_session_cache_key('web_filter_options')
+                cache.delete(filter_options_cache_key)
+                cache.delete(web_filter_options_cache_key)
+                logging.info("✅ Cleared filter options cache to refresh lineage dropdown with database values")
+            except Exception as cache_clear_err:
+                logging.warning(f"Could not clear filter options cache: {cache_clear_err}")
             # CRITICAL FIX: Set lineage_update_timestamp to force fresh lineage alignment in available-tags endpoint
             session['lineage_update_timestamp'] = time.time()
             # Ensure the modified timestamp is persisted across workers (PythonAnywhere multi-worker fix)
@@ -10284,6 +10601,15 @@ def batch_update_lineage():
             logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
         # Clear caches to ensure refreshed data after batch lineage updates
         clear_available_tags_cache(reason='batch_lineage_update')
+        # CRITICAL FIX: Clear filter options cache so lineage dropdown refreshes with database values
+        try:
+            filter_options_cache_key = get_session_cache_key('filter_options')
+            web_filter_options_cache_key = get_session_cache_key('web_filter_options')
+            cache.delete(filter_options_cache_key)
+            cache.delete(web_filter_options_cache_key)
+            logging.info("✅ Cleared filter options cache after batch lineage update to refresh dropdown")
+        except Exception as cache_clear_err:
+            logging.warning(f"Could not clear filter options cache after batch update: {cache_clear_err}")
         
         # CRITICAL FIX: Set lineage update timestamp to force /api/available-tags to refresh lineage from database
         # This ensures the UI shows updated lineage values even if cached tags are returned
@@ -10839,6 +11165,25 @@ def _get_filter_options_from_database(store_name=None):
         doh_values = set()
         high_cbd_types = set()
         
+        # CRITICAL FIX: Fetch lineage directly from database using COALESCE logic
+        # This ensures we get the same values as get_product_lineage (sovereign_lineage > canonical_lineage > products.Lineage)
+        try:
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT DISTINCT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL
+                  AND COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
+            ''')
+            db_lineages = [str(row[0]).strip() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
+            lineages = set(db_lineages)
+            logging.info(f"✅ Loaded {len(lineages)} unique lineage values from database using COALESCE logic")
+        except Exception as lineage_err:
+            logging.warning(f"⚠️ Error fetching lineages from database, using product data: {lineage_err}")
+            lineages = set()
+        
         for product in all_products:
             # Vendor
             vendor = product.get('Vendor/Supplier*', '') or product.get('Vendor', '')
@@ -10855,10 +11200,11 @@ def _get_filter_options_from_database(store_name=None):
             if product_type and str(product_type).strip():
                 product_types.add(str(product_type).strip())
             
-            # Lineage
-            lineage = product.get('Lineage', '') or product.get('lineage', '')
-            if lineage and str(lineage).strip():
-                lineages.add(str(lineage).strip().upper())
+            # Lineage - only add if not already loaded from database query above
+            if not lineages:
+                lineage = product.get('Lineage', '') or product.get('lineage', '')
+                if lineage and str(lineage).strip():
+                    lineages.add(str(lineage).strip().upper())
             
             # Weight - format similar to Excel processor
             weight_val = product.get('Weight*', '') or product.get('Weight', '')
@@ -13574,99 +13920,15 @@ def upload_product_database():
             logging.info("Clearing existing database data...")
             product_db.clear_all_data()
             
-            # Import the data
-            logging.info("Importing Excel data to database...")
-            stored_count = 0
-            strains_count = 0
+            # Import the data using optimized bulk storage method
+            logging.info("Importing Excel data to database using bulk operations...")
+            start_time = time.time()
+                    
+            # Use the optimized store_excel_data method which handles bulk operations
+            storage_result = product_db.store_excel_data(df, db_file_path)
             
-            # Column mapping from Excel column names to database column names
-            column_mapping = {
-                'Product Name*': 'ProductName',
-                'ProductType': 'ProductType',
-                'ProductBrand': 'ProductBrand',
-                'Description': 'Description',
-                'Lineage': 'Lineage',
-                'Vendor/Supplier*': 'Vendor',
-                'Weight*': 'Weight',
-                'Weight Unit*': 'Units',
-                'Quantity*': 'Quantity',
-                'Quantity Received*': 'QuantityReceived',
-                'Price*': 'Price',
-                'Price Tier': 'PriceTier',
-                'Bulk Price': 'BulkPrice',
-                'DOH Compliant*': 'DOHCompliant',
-                'DOH Status': 'DOHStatus',
-                'Product Strain': 'ProductStrain',
-                'Concentrate Type': 'ConcentrateType',
-                'Ratio': 'Ratio',
-                'Joint Ratio': 'JointRatio',
-                'THC Content': 'THCContent',
-                'CBD Content': 'CBDContent',
-                'THC_CBD': 'THCCBD',
-                'Total THC': 'TotalTHC',
-                'Total CBD': 'TotalCBD',
-                'Lab Test Date': 'LabTestDate',
-                'Lab Name': 'LabName',
-                'COA': 'COA',
-                'Batch Number': 'BatchNumber',
-                'Production Date': 'ProductionDate',
-                'Expiration Date': 'ExpirationDate',
-                'Terpenes': 'Terpenes',
-                'Flavor Profile': 'FlavorProfile',
-                'Effects': 'Effects',
-                'Medical Benefits': 'MedicalBenefits',
-                'SKU': 'SKU',
-                'Product Code': 'ProductCode',
-                'Category': 'Category',
-                'Subcategory': 'Subcategory',
-                'Supplier Contact': 'SupplierContact',
-                'Supplier Email': 'SupplierEmail',
-                'Country of Origin': 'CountryOfOrigin',
-                'Growing Method': 'GrowingMethod',
-                'Organic Status': 'OrganicStatus'
-            }
-            
-            for index, row in df.iterrows():
-                try:
-                    # Convert row to dictionary and clean NaN values
-                    product_data = {}
-                    for col, value in row.items():
-                        if pd.isna(value):
-                            product_data[col] = None
-                        else:
-                            product_data[col] = str(value).strip() if isinstance(value, str) else str(value)
-                    
-                    # Map Excel column names to database column names
-                    mapped_data = {}
-                    for excel_col, db_col in column_mapping.items():
-                        if excel_col in product_data:
-                            mapped_data[db_col] = product_data[excel_col]
-                    
-                    # CRITICAL FIX: Ensure Weight* and Units are properly mapped from Excel columns
-                    # Handle various Excel column name variations
-                    if 'Weight*' not in mapped_data and 'Weight' in product_data:
-                        mapped_data['Weight*'] = product_data['Weight']
-                    if 'Units' not in mapped_data:
-                        if 'Weight Unit*' in product_data:
-                            mapped_data['Units'] = product_data['Weight Unit*']
-                        elif 'Weight Unit* (grams/gm or ounces/oz)' in product_data:
-                            mapped_data['Units'] = product_data['Weight Unit* (grams/gm or ounces/oz)']
-                    
-                    # Log weight mapping for first few products (debugging)
-                    if index < 5:
-                        logging.info(f"[WEIGHT MAPPING] Product: '{product_data.get('Product Name*', 'Unknown')}' | "
-                                   f"Mapped Weight*: '{mapped_data.get('Weight*', 'NOT FOUND')}' | "
-                                   f"Mapped Units: '{mapped_data.get('Units', 'NOT FOUND')}'")
-                    
-                    # Add product to database with mapped column names
-                    result = product_db.add_or_update_product(mapped_data)
-                except Exception as row_error:
-                    logging.warning(f"Error processing row {index}: {row_error}")
-                    import traceback
-                    logging.warning(f"Row error traceback: {traceback.format_exc()}")
-                    continue
-            
-            logging.info(f"Database import completed: {stored_count} products, {strains_count} strains")
+            elapsed_time = time.time() - start_time
+            logging.info(f"Database import completed in {elapsed_time:.2f} seconds: {storage_result.get('stored', 0)} stored, {storage_result.get('updated', 0)} updated")
             
             # Get final database statistics
             try:
@@ -13677,18 +13939,20 @@ def upload_product_database():
                 cursor.execute("SELECT COUNT(*) FROM strains")
                 final_strains = cursor.fetchone()[0]
             except:
-                final_products = stored_count
-                final_strains = strains_count
+                final_products = storage_result.get('stored', 0) + storage_result.get('updated', 0)
+                final_strains = storage_result.get('strains_stored', 0)
             
             return jsonify({
                 'success': True, 
                 'message': 'Product database updated successfully',
                 'filename': sanitized_filename,
                 'size': file_size,
-                'stored': stored_count,
-                'strains_stored': strains_count,
+                'stored': storage_result.get('stored', 0),
+                'updated': storage_result.get('updated', 0),
+                'strains_stored': final_strains,
                 'total_products': final_products,
-                'total_strains': final_strains
+                'total_strains': final_strains,
+                'processing_time': f"{elapsed_time:.2f}s"
             })
         except Exception as db_error:
             logging.error(f"Error updating product database: {db_error}")
@@ -15450,6 +15714,149 @@ def get_rate_limit_info(ip_address):
         'window_reset': current_time + RATE_LIMIT_WINDOW
     }
 
+# identify_preroll_product_group is now imported from preroll_tag_generator module
+
+def update_preroll_items_from_excel(df, session_id=None):
+    """Extract and store preroll items grouped by category from Excel DataFrame.
+    
+    Args:
+        df: Pandas DataFrame containing Excel data
+        session_id: Optional session ID (if not provided, gets from Flask session)
+    """
+    try:
+        if df is None or df.empty:
+            logging.warning("PREROLL: Cannot update preroll items - DataFrame is empty")
+            return
+        
+        # Get session ID (works in both request context and background threads)
+        if session_id is None:
+            try:
+                from flask import session
+                session_id = session.get('session_id', 'default')
+            except RuntimeError:
+                # Not in request context (background thread) - use default
+                session_id = 'default'
+                logging.info("PREROLL: Not in request context, using default session_id for preroll items")
+        
+        # Filter for preroll products
+        preroll_keywords = ['preroll', 'pre-roll', 'infused preroll', 'infused pre-roll', 'blunt']
+        product_type_col = None
+        for col in ['Product Type*', 'ProductType', 'Product_Type']:
+            if col in df.columns:
+                product_type_col = col
+                break
+        
+        if not product_type_col:
+            logging.warning("PREROLL: No product type column found in DataFrame")
+            return
+        
+        # Filter DataFrame for preroll/blunt products
+        preroll_mask = df[product_type_col].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
+        
+        # Also check description/product name for preroll keywords
+        desc_mask = pd.Series([False] * len(df), index=df.index)
+        name_mask = pd.Series([False] * len(df), index=df.index)
+        
+        if 'Description' in df.columns:
+            desc_mask = df['Description'].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
+        if 'Product Name*' in df.columns:
+            name_mask = df['Product Name*'].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
+        elif 'ProductName' in df.columns:
+            name_mask = df['ProductName'].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
+        
+        combined_mask = preroll_mask | desc_mask | name_mask
+        preroll_df = df[combined_mask].copy()
+        
+        if preroll_df.empty:
+            logging.info("PREROLL: No preroll products found in Excel data")
+            return
+        
+        # Group items by product category
+        grouped_items = {}
+        for _, row in preroll_df.iterrows():
+            description = str(row.get('Description', ''))
+            product_name = str(row.get('Product Name*', row.get('ProductName', '')))
+            
+            # Identify the product group
+            group_info = identify_preroll_product_group(description, product_name)
+            group_id = group_info['group_id']
+            
+            # Extract price and normalize it
+            price = row.get('Price', '')
+            try:
+                if isinstance(price, str):
+                    price_clean = price.replace('$', '').replace(',', '').strip()
+                    try:
+                        price_float = float(price_clean)
+                        if price_float.is_integer():
+                            price_tier = str(int(price_float))
+                        else:
+                            price_tier = f"{price_float:.2f}".rstrip('0').rstrip('.')
+                    except ValueError:
+                        price_tier = price_clean
+                else:
+                    price_tier = str(price).strip()
+            except Exception:
+                price_tier = str(price).strip() if price else 'N/A'
+            
+            # Create grouping key: (price_tier, group_id)
+            group_key = (price_tier, group_id)
+            
+            if group_key not in grouped_items:
+                grouped_items[group_key] = {
+                    'items': [],
+                    'group_info': group_info
+                }
+            
+            # Create item dictionary
+            item = {
+                'product_name': product_name,
+                'description': description,
+                'price': str(price),
+                'weight': str(row.get('CombinedWeight', row.get('WeightUnits', ''))),
+                'vendor': str(row.get('Vendor', row.get('Vendor/Supplier*', ''))),
+                'strain': str(row.get('Product Strain', row.get('Strain', ''))),
+                'lineage': str(row.get('Lineage', '')),
+            }
+            # Replace NaN values with empty strings
+            for key, value in item.items():
+                if pd.isna(value) or str(value).lower() in ['nan', 'none']:
+                    item[key] = ''
+            
+            grouped_items[group_key]['items'].append(item)
+        
+        # Store items by group in cache
+        for group_key, group_data in grouped_items.items():
+            price_tier, group_id = group_key
+            group_info = group_data['group_info']
+            items = group_data['items']
+            
+            # Store group items in cache (with session_id for session-specific access)
+            cache.set(f"preroll_group_{session_id}_{group_id}", items, timeout=86400)
+            # CRITICAL: Also store with session-independent key so QR codes work across sessions
+            # This ensures QR codes can be scanned by anyone, not just the original session
+            cache.set(f"preroll_group_latest_{group_id}", items, timeout=86400)
+            # Also store group info for display purposes
+            cache.set(f"preroll_group_info_{session_id}_{group_id}", group_info, timeout=86400)
+            cache.set(f"preroll_group_info_latest_{group_id}", group_info, timeout=86400)
+            logging.info(f"PREROLL: Stored {len(items)} items for group '{group_info['display_name']}' (group_id: {group_id}) from Excel upload with session-independent key for QR codes")
+        
+        # Update session if in request context
+        try:
+            from flask import session
+            session['preroll_items_updated'] = time.time()
+            session.modified = True
+        except RuntimeError:
+            # Not in request context, skip session update
+            pass
+        
+        total_items = sum(len(g['items']) for g in grouped_items.values())
+        logging.info(f"PREROLL: Updated {total_items} preroll items in {len(grouped_items)} groups from Excel upload for session {session_id}")
+        
+    except Exception as e:
+        logging.error(f"PREROLL: Error updating preroll items from Excel: {e}")
+        logging.error(traceback.format_exc())
+
 @app.route('/api/initial-data', methods=['GET'])
 def get_initial_data():
     """Load initial data for the application (called by frontend after page load)."""
@@ -15471,10 +15878,96 @@ def get_initial_data():
         logging.info("=== INITIAL DATA REQUEST START ===")
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
-        # Get the excel processor
+        # PERFORMANCE: Check fast_load flag FIRST before any expensive operations
+        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        if request.args.get('fast_load') not in ('0', 'false', 'False'):
+            fast_load = True  # Default to fast loading
+        
+        # PERFORMANCE: For fast_load, check cache and session BEFORE loading any files
+        if fast_load:
+            # Check if we have cached tags for session file
+            session_file_path = session.get('file_path')
+            if session_file_path and os.path.exists(session_file_path):
+                available_tags_cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                cached_available_tags = cache.get(available_tags_cache_key)
+                if cached_available_tags:
+                    logging.info(f"⚡ Fast load: Found cached tags for session file, returning immediately")
+                    filters_cache_key = get_session_cache_key('filter_options')
+                    cached_filters = cache.get(filters_cache_key)
+                    if not cached_filters:
+                        cached_filters = {
+                            'vendor': [],
+                            'brand': [],
+                            'productType': [],
+                            'lineage': [],
+                            'weight': [],
+                            'strain': [],
+                            'doh': [],
+                            'highCbd': []
+                        }
+                    initial_data = {
+                        'success': True,
+                        'data_loaded': True,
+                        'filename': os.path.basename(session_file_path),
+                        'filepath': session_file_path,
+                        'columns': [],
+                        'filters': cached_filters,
+                        'available_tags': cached_available_tags,
+                        'selected_tags': [],
+                        'total_records': len(cached_available_tags),
+                        'source': 'cache'
+                    }
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"⚡ Fast load cached data returned in {elapsed:.0f}ms (skipped file loading)")
+                    response = make_response(jsonify(initial_data))
+                    response.headers['X-Cache'] = 'HIT'
+                    response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
+                    return response
+            
+            # No cached data - check if no file in session, return empty immediately
+            if not session_file_path or not os.path.exists(session_file_path):
+                logging.info("⚡ Fast load: No file in session - returning empty data immediately (skipped file loading)")
+                initial_data = {
+                    'success': True,
+                    'data_loaded': False,
+                    'filename': 'no_data',
+                    'filepath': 'no_data',
+                    'columns': [],
+                    'filters': {
+                        'vendor': [],
+                        'brand': [],
+                        'productType': [],
+                        'lineage': [],
+                        'weight': [],
+                        'strain': [],
+                        'doh': [],
+                        'highCbd': []
+                    },
+                    'available_tags': [],
+                    'selected_tags': [],
+                    'total_records': 0,
+                    'source': 'empty'
+                }
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"⚡ Fast load empty data returned in {elapsed:.0f}ms (skipped file loading)")
+                response = make_response(jsonify(initial_data))
+                response.headers['X-Cache'] = 'FAST_EMPTY'
+                response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
+                return response
+        
+        # Get the excel processor (only if we didn't return early)
         # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
-        excel_processor = get_session_excel_processor()
-        logging.info(f"Excel processor obtained: {excel_processor}")
+        # PERFORMANCE: For fast_load, temporarily disable default file loading
+        if fast_load:
+            # Set a flag to prevent default file loading in get_session_excel_processor
+            g._skip_default_file_load = True
+        try:
+            excel_processor = get_session_excel_processor()
+            logging.info(f"Excel processor obtained: {excel_processor}")
+        finally:
+            # Clear the flag
+            if hasattr(g, '_skip_default_file_load'):
+                delattr(g, '_skip_default_file_load')
         
         # Check if excel_processor is valid and has df attribute
         if not hasattr(excel_processor, 'df'):
@@ -15486,8 +15979,10 @@ def get_initial_data():
             logging.info("No data loaded - checking session for uploaded file first")
             
             # CRITICAL FIX: Check if there's an uploaded file in session first
+            # Note: Cache check already happened above for fast_load, so this is for non-fast_load or cache miss
             session_file_path = session.get('file_path')
             if session_file_path and os.path.exists(session_file_path):
+                # Load file normally (cache check already done above for fast_load)
                 try:
                     logging.info(f"📂 Found uploaded file in session: {session_file_path}")
                     success = excel_processor.load_file(session_file_path)
@@ -15495,6 +15990,8 @@ def get_initial_data():
                         excel_processor._last_loaded_file = session_file_path
                         logging.info(f"✅ Successfully loaded uploaded file from session: {os.path.basename(session_file_path)}")
                         logging.info(f"✅ Loaded {len(excel_processor.df)} rows from uploaded file")
+                        # Update preroll items from newly loaded Excel data
+                        update_preroll_items_from_excel(excel_processor.df)
                     else:
                         logging.error(f"❌ Failed to load uploaded file from session: {session_file_path}")
                         # Clear invalid session data
@@ -15507,7 +16004,40 @@ def get_initial_data():
                     session.pop('uploaded_filename', None)
             
             # If still no data after checking session, try default file
+            # PERFORMANCE: Skip default file loading for fast_load to avoid slow file I/O
             if excel_processor.df is None or excel_processor.df.empty:
+                if fast_load:
+                    # For fast_load, skip default file loading - return empty data immediately
+                    logging.info("⚡ Fast load: Skipping default file load - returning empty data")
+                    initial_data = {
+                        'success': True,
+                        'data_loaded': False,
+                        'filename': 'no_data',
+                        'filepath': 'no_data',
+                        'columns': [],
+                        'filters': {
+                            'vendor': [],
+                            'brand': [],
+                            'productType': [],
+                            'lineage': [],
+                            'weight': [],
+                            'strain': [],
+                            'doh': [],
+                            'highCbd': []
+                        },
+                        'available_tags': [],
+                        'selected_tags': [],
+                        'total_records': 0,
+                        'source': 'empty'
+                    }
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"⚡ Fast load empty data returned in {elapsed:.0f}ms (skipped default file)")
+                    response = make_response(jsonify(initial_data))
+                    response.headers['X-Cache'] = 'FAST_EMPTY'
+                    response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
+                    return response
+                
+                # Normal mode - load default file
                 logging.info("No uploaded file found - attempting to load default file")
                 from src.core.data.excel_processor import get_default_upload_file
 
@@ -15524,9 +16054,12 @@ def get_initial_data():
                 if default_file:
                     try:
                         logging.info(f"Loading default file for {selected_store}: {os.path.basename(default_file)}")
-                        excel_processor.load_file(default_file)
-                        excel_processor._last_loaded_file = default_file
-                        logging.info(f"Default file loaded successfully")
+                        success = excel_processor.load_file(default_file)
+                        if success:
+                            excel_processor._last_loaded_file = default_file
+                            logging.info(f"Default file loaded successfully")
+                            # Update preroll items from newly loaded Excel data
+                            update_preroll_items_from_excel(excel_processor.df)
                     except Exception as e:
                         logging.error(f"Failed to load default file: {e}")
                         return jsonify({
@@ -15540,44 +16073,87 @@ def get_initial_data():
         if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None and not excel_processor.df.empty:
             logging.info(f"Data loaded - DataFrame shape: {excel_processor.df.shape}")
             
-            # Use the same logic as filter-options to get properly formatted weight values
-            logging.info("Getting dynamic filter options...")
-            filters = excel_processor.get_dynamic_filter_options({})
-            import math
-            def clean_list(lst):
-                return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
-            filters = {k: clean_list(v) for k, v in filters.items()}
-            logging.info(f"Filter options processed: {len(filters)} filter categories")
-            
             # Get the current file path
             current_file = getattr(excel_processor, '_last_loaded_file', 'Unknown file')
             logging.info(f"Current file: {current_file}")
             
             # Get available tags
-            # PERFORMANCE: Check if this is a post-upload request - if so, skip database enrichment initially
-            # This allows tags to load immediately, then enrich in background
-            is_post_upload = request.args.get('post_upload') == '1' or request.headers.get('X-Post-Upload') == '1'
-            logging.info("Getting available tags...")
+            # PERFORMANCE OPTIMIZATION: Check for cached tags from /api/available-tags first
+            # This avoids expensive get_available_tags() call when tags are already cached
             tags_start = time.time()
+            available_tags = None
+            # fast_load is already set above
             
-            if is_post_upload:
-                # PERFORMANCE FIX: For post-upload, get tags without database enrichment first
-                # This allows immediate display, then enrich in background
-                logging.info("⚡ Post-upload detected - getting tags without database enrichment for fast display")
-                # Temporarily disable enrichment by using a flag
-                original_enrich = getattr(excel_processor, '_skip_enrichment', False)
-                excel_processor._skip_enrichment = True
-                try:
-                    available_tags = excel_processor.get_available_tags()
-                finally:
-                    excel_processor._skip_enrichment = original_enrich
-                tags_elapsed = (time.time() - tags_start) * 1000
-                logging.info(f"⚡ Available tags count: {len(available_tags)} (took {tags_elapsed:.0f}ms - fast mode)")
+            # Try to get cached tags from /api/available-tags cache
+            session_file_path = session.get('file_path', '')
+            if session_file_path:
+                available_tags_cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
             else:
-                # Normal mode - include database enrichment
-                available_tags = excel_processor.get_available_tags()
+                available_tags_cache_key = get_session_cache_key('available_tags')
+            
+            cached_available_tags = cache.get(available_tags_cache_key)
+            if cached_available_tags and fast_load:
+                available_tags = cached_available_tags
                 tags_elapsed = (time.time() - tags_start) * 1000
-                logging.info(f"Available tags count: {len(available_tags)} (took {tags_elapsed:.0f}ms)")
+                logging.info(f"⚡ Using cached available tags from /api/available-tags: {len(available_tags)} tags (took {tags_elapsed:.0f}ms)")
+            else:
+                # Cache miss or fast_load disabled - generate tags
+                is_post_upload = request.args.get('post_upload') == '1' or request.headers.get('X-Post-Upload') == '1'
+                logging.info("Getting available tags from Excel processor...")
+                
+                # PERFORMANCE FIX: Skip database enrichment for fast loading (both post-upload and fast_load=1)
+                # This allows immediate display, then enrich in background if needed
+                should_skip_enrichment = fast_load or is_post_upload
+                if should_skip_enrichment:
+                    logging.info(f"⚡ Fast load detected (fast_load={fast_load}, post_upload={is_post_upload}) - getting tags without database enrichment for fast display")
+                    # Temporarily disable enrichment by using a flag
+                    original_enrich = getattr(excel_processor, '_skip_enrichment', False)
+                    excel_processor._skip_enrichment = True
+                    try:
+                        available_tags = excel_processor.get_available_tags()
+                    finally:
+                        excel_processor._skip_enrichment = original_enrich
+                    tags_elapsed = (time.time() - tags_start) * 1000
+                    logging.info(f"⚡ Available tags count: {len(available_tags)} (took {tags_elapsed:.0f}ms - fast mode, enrichment skipped)")
+                else:
+                    # Normal mode - include database enrichment
+                    available_tags = excel_processor.get_available_tags()
+                    tags_elapsed = (time.time() - tags_start) * 1000
+                    logging.info(f"Available tags count: {len(available_tags)} (took {tags_elapsed:.0f}ms)")
+
+            # PERFORMANCE: Get filter options AFTER tags are loaded (or from cache)
+            # This allows fast_load to skip expensive filter processing if not needed
+            filters_start = time.time()
+            if fast_load and cached_available_tags:
+                # For fast_load with cache, use cached filters if available, otherwise get them quickly
+                filters_cache_key = get_session_cache_key('filter_options')
+                cached_filters = cache.get(filters_cache_key)
+                if cached_filters:
+                    filters = cached_filters
+                    filters_elapsed = (time.time() - filters_start) * 1000
+                    logging.info(f"⚡ Using cached filter options (took {filters_elapsed:.0f}ms)")
+                else:
+                    # Still need filters, but do it after tags are returned
+                    logging.info("Getting dynamic filter options...")
+                    filters = excel_processor.get_dynamic_filter_options({})
+                    import math
+                    def clean_list(lst):
+                        return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
+                    filters = {k: clean_list(v) for k, v in filters.items()}
+                    # Cache filters for next time
+                    cache.set(filters_cache_key, filters, timeout=300)
+                    filters_elapsed = (time.time() - filters_start) * 1000
+                    logging.info(f"Filter options processed: {len(filters)} filter categories (took {filters_elapsed:.0f}ms)")
+            else:
+                # Normal mode - get filters (they may be cached internally by get_dynamic_filter_options)
+                logging.info("Getting dynamic filter options...")
+                filters = excel_processor.get_dynamic_filter_options({})
+                import math
+                def clean_list(lst):
+                    return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
+                filters = {k: clean_list(v) for k, v in filters.items()}
+                filters_elapsed = (time.time() - filters_start) * 1000
+                logging.info(f"Filter options processed: {len(filters)} filter categories (took {filters_elapsed:.0f}ms)")
 
             initial_data = {
                 'success': True,
@@ -19628,6 +20204,258 @@ def clear_cache_route():
     except Exception as e:
         logging.error(f"Failed to clear caches: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/preroll-items/<group_id>')
+def display_preroll_items(group_id):
+    """Display preroll items for a specific product group - mobile-friendly page."""
+    try:
+        logging.info(f"PREROLL ROUTE: Accessing preroll-items for group_id: {group_id}")
+        # CRITICAL FIX: QR codes are accessed by anyone, so we need to search across all sessions
+        # Try session-independent key first (most recent items for this group)
+        preroll_items = cache.get(f"preroll_group_latest_{group_id}")
+        logging.info(f"PREROLL ROUTE: Cache lookup for 'preroll_group_latest_{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+        
+        # If not found, try current session
+        if not preroll_items:
+            current_session_id = session.get('session_id', 'default')
+            preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_id}")
+        
+        # If still not found, try default fallback
+        if not preroll_items:
+            preroll_items = cache.get(f"preroll_group_default_{group_id}")
+        
+        # Get group display name from group_id or items
+        group_display_name = "Preroll Items"
+        if group_id:
+            # Try session-independent group info first
+            group_info = cache.get(f"preroll_group_info_latest_{group_id}")
+            
+            # If not found, try current session
+            if not group_info:
+                current_session_id = session.get('session_id', 'default')
+                group_info = cache.get(f"preroll_group_info_{current_session_id}_{group_id}")
+            
+            if group_info and isinstance(group_info, dict):
+                group_display_name = group_info.get('display_name', 'Preroll Items')
+            else:
+                # Infer from group_id
+                group_display_name_map = {
+                    'blunts': 'Assorted Blunts',
+                    '5packs': 'Assorted 1g x 5 Packs',
+                    'infused-preroll-1g': 'Infused Pre-Roll - 1g',
+                    'preroll-1g': 'Pre-Roll - 1g',
+                    'other': 'Assorted Pre-Rolls'
+                }
+                group_display_name = group_display_name_map.get(group_id, 'Preroll Items')
+        
+        if not preroll_items:
+            # Return error page if items not found
+            return f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>{group_display_name} Not Found</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{ 
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 20px;
+                        padding: 40px;
+                        max-width: 500px;
+                        width: 100%;
+                        text-align: center;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                    }}
+                    h1 {{ color: #333; margin-bottom: 20px; font-size: 24px; }}
+                    p {{ color: #666; line-height: 1.6; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Items Not Found</h1>
+                    <p>The {group_display_name.lower()} list has expired or could not be found. Please scan a fresh QR code.</p>
+                </div>
+            </body>
+            </html>
+            """, 404
+        
+        # Generate mobile-friendly HTML
+        items_html = ""
+        for idx, item in enumerate(preroll_items, 1):
+            product_name = item.get('product_name', 'Unknown Product')
+            description = item.get('description', '')
+            price = item.get('price', 'N/A')
+            weight = item.get('weight', '')
+            vendor = item.get('vendor', '')
+            strain = item.get('strain', '')
+            lineage = item.get('lineage', '')
+            
+            items_html += f"""
+            <div class="item-card">
+                <div class="item-number">{idx}</div>
+                <div class="item-content">
+                    <h3 class="product-name">{product_name}</h3>
+                    {f'<p class="description">{description}</p>' if description else ''}
+                    <div class="item-details">
+                        {f'<span class="detail"><strong>Price:</strong> {price}</span>' if price and price != 'N/A' else ''}
+                        {f'<span class="detail"><strong>Weight:</strong> {weight}</span>' if weight else ''}
+                        {f'<span class="detail"><strong>Vendor:</strong> {vendor}</span>' if vendor else ''}
+                        {f'<span class="detail"><strong>Strain:</strong> {strain}</span>' if strain else ''}
+                        {f'<span class="detail"><strong>Lineage:</strong> {lineage}</span>' if lineage else ''}
+                    </div>
+                </div>
+            </div>
+            """
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{group_display_name}</title>
+            <style>
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                body {{ 
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    padding: 20px;
+                    padding-bottom: 40px;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                }}
+                .header {{
+                    background: white;
+                    border-radius: 20px;
+                    padding: 30px;
+                    margin-bottom: 20px;
+                    text-align: center;
+                    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+                }}
+                .header h1 {{
+                    color: #333;
+                    font-size: 28px;
+                    margin-bottom: 10px;
+                }}
+                .header p {{
+                    color: #666;
+                    font-size: 16px;
+                }}
+                .items-list {{
+                    display: flex;
+                    flex-direction: column;
+                    gap: 15px;
+                }}
+                .item-card {{
+                    background: white;
+                    border-radius: 15px;
+                    padding: 20px;
+                    display: flex;
+                    gap: 15px;
+                    box-shadow: 0 3px 15px rgba(0,0,0,0.1);
+                    transition: transform 0.2s, box-shadow 0.2s;
+                }}
+                .item-card:active {{
+                    transform: scale(0.98);
+                }}
+                .item-number {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                    font-size: 18px;
+                    flex-shrink: 0;
+                }}
+                .item-content {{
+                    flex: 1;
+                }}
+                .product-name {{
+                    color: #333;
+                    font-size: 18px;
+                    margin-bottom: 8px;
+                    font-weight: 600;
+                }}
+                .description {{
+                    color: #666;
+                    font-size: 14px;
+                    margin-bottom: 10px;
+                    line-height: 1.4;
+                }}
+                .item-details {{
+                    display: flex;
+                    flex-direction: column;
+                    gap: 5px;
+                }}
+                .detail {{
+                    color: #555;
+                    font-size: 13px;
+                    line-height: 1.5;
+                }}
+                .detail strong {{
+                    color: #333;
+                    margin-right: 5px;
+                }}
+                @media (max-width: 480px) {{
+                    .header h1 {{ font-size: 24px; }}
+                    .product-name {{ font-size: 16px; }}
+                    .item-card {{ padding: 15px; }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>{group_display_name}</h1>
+                    <p>{len(preroll_items)} option{'s' if len(preroll_items) != 1 else ''} available</p>
+                </div>
+                <div class="items-list">
+                    {items_html}
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return html
+        
+    except Exception as e:
+        logging.error(f"Error displaying preroll items: {e}")
+        return f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Error</title>
+            <style>
+                body {{ font-family: system-ui; padding: 40px; text-align: center; }}
+                h1 {{ color: #d32f2f; }}
+            </style>
+        </head>
+        <body>
+            <h1>Error</h1>
+            <p>An error occurred while loading preroll items.</p>
+        </body>
+        </html>
+        """, 500
 
 @app.route('/api/performance/optimize', methods=['POST'])
 def optimize_performance():

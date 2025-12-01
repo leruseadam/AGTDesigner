@@ -173,10 +173,12 @@ const PRODUCT_TYPE_OVERRIDES = {
   "rosin": "concentrate",
   "mini buds": "flower",
   "bud": "flower",
-  "pre-roll": "pre-roll",
-  "Pre-Roll": "pre-roll",  // Map title case to lowercase for filtering
-  "Infused Pre-Roll": "infused pre-roll",  // Map title case to lowercase for filtering
-  "infused pre-roll": "infused pre-roll",  // Map lowercase to lowercase for filtering
+  "pre-roll": "Pre-Roll",  // Normalize to title case for display
+  "Pre-Roll": "Pre-Roll",  // Keep title case
+  "preroll": "Pre-Roll",  // Map variations to title case
+  "Infused Pre-Roll": "Infused Pre-Roll",  // Keep title case
+  "infused pre-roll": "Infused Pre-Roll",  // Map lowercase to title case
+  "infused preroll": "Infused Pre-Roll",  // Map variations to title case
   "alcohol/ethanol extract": "rso/co2 tankers",
   "Alcohol/Ethanol Extract": "rso/co2 tankers",
   "alcohol ethanol extract": "rso/co2 tankers",
@@ -1112,7 +1114,11 @@ const TagManager = {
                         if (name) {
                             const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage;
                             if (dbLineage) {
-                                lineageMap.set(name, dbLineage.toString().trim().toUpperCase());
+                                // CRITICAL: Normalize lineage value using consistent helper function
+                                const normalizedLineage = (typeof window.normalizeLineageValue !== 'undefined') 
+                                    ? window.normalizeLineageValue(dbLineage)
+                                    : dbLineage.toString().trim().toUpperCase();
+                                lineageMap.set(name, normalizedLineage);
                             }
                         }
                     });
@@ -1124,7 +1130,11 @@ const TagManager = {
                         const name = tag['Product Name*'] || tag.ProductName;
                         if (name && lineageMap.has(name)) {
                             const dbLineage = lineageMap.get(name);
-                            const oldLineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || '').toString().trim().toUpperCase();
+                            // CRITICAL: Normalize old lineage for comparison
+                            const oldLineageRaw = tag.canonical_lineage || tag.currentLineage || tag.Lineage || '';
+                            const oldLineage = (typeof window.normalizeLineageValue !== 'undefined')
+                                ? window.normalizeLineageValue(oldLineageRaw)
+                                : oldLineageRaw.toString().trim().toUpperCase();
                             if (oldLineage !== dbLineage) {
                                 tag.canonical_lineage = dbLineage;
                                 tag.currentLineage = dbLineage;
@@ -2030,7 +2040,8 @@ const TagManager = {
         const filteredTags = tagsToFilter.filter(tag => {
             // Check vendor filter - only apply if not empty and not "All"
             if (vendorFilter && vendorFilter.trim() !== '' && vendorFilter.toLowerCase() !== 'all') {
-                const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
+                // Check multiple possible vendor field names
+                const tagVendor = (tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || tag.Vendor || tag.vendor || '').toString().trim();
                 if (tagVendor.toLowerCase() !== vendorFilter.toLowerCase()) {
                     return false;
                 }
@@ -2426,13 +2437,36 @@ const TagManager = {
 
             // Normalize the tag data (priceGroup is left on the object for analytics,
             // but we no longer group or categorize by price in the UI)
+            // CRITICAL: Preserve all lineage fields (database lineage fields must be preserved exactly)
+            // CRITICAL FIX: Ensure lineage fields are always set for UI consistency
+            // Use database lineage fields first, then fall back to Excel Lineage, then calculated lineage
+            const dbLineage = tag.canonical_lineage || tag.currentLineage || '';
+            const excelLineage = tag.Lineage || tag.lineage || '';
+            const calculatedLineage = lineage ? lineage.toString().trim().toUpperCase() : '';
+            let finalLineage = dbLineage || excelLineage || calculatedLineage || 'MIXED';
+            let finalLineageUpper = String(finalLineage).trim().toUpperCase();
+            
+            // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+            // This ensures UI displays correct lineage even if database/Excel has wrong value
+            const isClassicType = productType && (typeof window.getUniqueLineages === 'function' ? window.getUniqueLineages(productType).length === 6 : false);
+            if (isClassicType && (finalLineageUpper === 'MIXED' || finalLineageUpper === 'THC')) {
+                finalLineageUpper = 'HYBRID';
+                finalLineage = 'HYBRID';
+            }
+            
             const normalizedTag = {
-                ...tag,
+                ...tag,  // Spread all original fields first (preserves canonical_lineage, currentLineage, etc.)
                 vendor: this.capitalizeVendorName((vendor || '').toString().trim()),
                 brand: this.capitalizeBrandName((brand || '').toString().trim()),
                 productType: productType,
                 subcategory: subcategory,
-                lineage: (lineage || '').toString().trim().toUpperCase(), // always uppercase for color
+                lineage: finalLineageUpper, // always uppercase for color
+                // CRITICAL FIX: Always preserve database lineage fields - they are the source of truth
+                // Only override if database lineage doesn't exist
+                canonical_lineage: tag.canonical_lineage || dbLineage || finalLineageUpper,
+                currentLineage: tag.currentLineage || dbLineage || finalLineageUpper,
+                // Set Lineage field for backward compatibility (use database lineage if available)
+                Lineage: tag.canonical_lineage || tag.currentLineage || finalLineageUpper,
                 weight: weight,
                 weightWithUnits: weightWithUnits,
                 priceGroup: priceGroup,
@@ -2456,50 +2490,35 @@ const TagManager = {
                 productTypeGroups.set(normalizedTag.productType, new Map());
             }
             
-            // For vape products with subcategory, add an intermediate subcategory level
-            let targetGroups;
+            // COMBINE subcategory with weight to save space (e.g., "1g - 510" instead of separate levels)
+            // For vape products with subcategory, combine subcategory with weight
+            let combinedWeightKey = normalizedTag.weightWithUnits;
             if (normalizedTag.subcategory) {
-                let subcategoryGroups = productTypeGroups.get(normalizedTag.productType);
-                // Check if this is actually a Map (subcategory structure) or needs to be converted
-                if (!(subcategoryGroups instanceof Map) || (subcategoryGroups.size > 0 && Array.from(subcategoryGroups.values())[0] instanceof Array)) {
-                    // Need to restructure: convert existing weight groups to subcategory structure
-                    const existingWeightGroups = subcategoryGroups;
-                    subcategoryGroups = new Map();
-                    // Migrate existing items to a default subcategory
-                    if (existingWeightGroups instanceof Map && existingWeightGroups.size > 0) {
-                        existingWeightGroups.forEach((tags, weight) => {
-                            if (!subcategoryGroups.has('Other')) {
-                                subcategoryGroups.set('Other', new Map());
-                            }
-                            subcategoryGroups.get('Other').set(weight, tags);
-                        });
-                    }
-                    productTypeGroups.set(normalizedTag.productType, subcategoryGroups);
-                }
-                
-                // Create subcategory group if it doesn't exist
-                if (!subcategoryGroups.has(normalizedTag.subcategory)) {
-                    subcategoryGroups.set(normalizedTag.subcategory, new Map());
-                }
-                targetGroups = subcategoryGroups.get(normalizedTag.subcategory);
-            } else {
-                // For non-subcategory products, always treat the product type as a flat
-                // weight → products mapping (no price grouping)
-                let weightGroups = productTypeGroups.get(normalizedTag.productType);
-                if (!(weightGroups instanceof Map)) {
-                    weightGroups = new Map();
-                    productTypeGroups.set(normalizedTag.productType, weightGroups);
-                }
-                targetGroups = weightGroups;
+                // Format: "weight - subcategory" (e.g., "1g - 510", "1g - Disposable")
+                combinedWeightKey = `${normalizedTag.weightWithUnits} - ${normalizedTag.subcategory}`;
+            }
+            
+            // Always treat the product type as a flat weight → products mapping
+            // (combining subcategory into weight key for vape products)
+            let weightGroups = productTypeGroups.get(normalizedTag.productType);
+            if (!(weightGroups instanceof Map)) {
+                weightGroups = new Map();
+                productTypeGroups.set(normalizedTag.productType, weightGroups);
             }
 
-            // Create weight group if it doesn't exist - use weightWithUnits as the key,
-            // and store a simple array of products (no price-based structure)
-            if (!targetGroups.has(normalizedTag.weightWithUnits)) {
-                targetGroups.set(normalizedTag.weightWithUnits, []);
+            // Create weight group (with combined subcategory if applicable) if it doesn't exist
+            // and store products grouped by price (price-based subgroups)
+            if (!weightGroups.has(combinedWeightKey)) {
+                weightGroups.set(combinedWeightKey, new Map());
             }
-            const productsAtWeight = targetGroups.get(normalizedTag.weightWithUnits);
-            productsAtWeight.push(normalizedTag);
+            const priceGroups = weightGroups.get(combinedWeightKey);
+            
+            // Create price group if it doesn't exist
+            if (!priceGroups.has(normalizedTag.priceGroup)) {
+                priceGroups.set(normalizedTag.priceGroup, []);
+            }
+            const productsAtPrice = priceGroups.get(normalizedTag.priceGroup);
+            productsAtPrice.push(normalizedTag);
         });
 
         if (skippedTags > 0) {
@@ -2860,6 +2879,8 @@ const TagManager = {
                 
                 const brandContent = document.createElement('div');
                 brandContent.className = 'brand-content';
+                // CRITICAL FIX: JSON matched tags should always start expanded (not collapsed)
+                // Do NOT add 'collapsed' class - keep expanded by default
                 brandSection.appendChild(brandContent);
 
                 const sortedProductTypes = Array.from(productTypeGroups.entries())
@@ -2933,100 +2954,119 @@ const TagManager = {
                     
                     const productTypeContent = document.createElement('div');
                     productTypeContent.className = 'product-type-content';
+                    // CRITICAL FIX: JSON matched tags should always start expanded (not collapsed)
+                    // Do NOT add 'collapsed' class - keep expanded by default
                     productTypeSection.appendChild(productTypeContent);
 
-                    // Check if this product type has subcategories (vape products with 510/Disposable)
-                    // Check by looking at keys - subcategories have keys like "510" or "Disposable"
-                    const hasSubcategories = weightGroupsOrSubcategories instanceof Map && 
-                                           weightGroupsOrSubcategories.size > 0 &&
-                                           Array.from(weightGroupsOrSubcategories.keys()).some(key => 
-                                               key === '510' || key === 'Disposable' || key === 'Other'
-                                           );
+                    // Subcategories are now combined with weight (e.g., "1g - 510")
+                    // Always render weights directly - no separate subcategory level
+                    const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
+                        .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                    if (hasSubcategories) {
-                        // Render subcategories (510, Disposable, etc.)
-                        const sortedSubcategories = Array.from(weightGroupsOrSubcategories.entries())
-                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
-                        sortedSubcategories.forEach(([subcategory, weightGroups]) => {
-                            const subcategorySection = document.createElement('div');
-                            subcategorySection.className = 'subcategory-section ms-3 mb-2';
-                            
-                            // Create subcategory header with checkbox
-                            const subcategoryHeader = document.createElement('div');
-                            subcategoryHeader.className = 'subcategory-header mb-2 d-flex align-items-center cursor-pointer';
-                            
-                            const subcategoryCheckbox = document.createElement('input');
-                            subcategoryCheckbox.type = 'checkbox';
-                            subcategoryCheckbox.className = 'select-all-checkbox me-2';
-                            subcategoryCheckbox.addEventListener('change', (e) => {
-                                const savedScroll = this._saveAvailableScrollPosition();
-                                const isChecked = e.target.checked;
-                                const checkboxes = subcategorySection.querySelectorAll('input.tag-checkbox');
-                                checkboxes.forEach(checkbox => {
+                    sortedWeights.forEach(([weight, priceGroups]) => {
+                        const weightSection = document.createElement('div');
+                        weightSection.className = 'weight-section ms-3 mb-2';
+                        
+                        // Create weight header with checkbox
+                        const weightHeader = document.createElement('div');
+                        weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                        weightHeader.addEventListener('click', (e) => {
+                            if (e.target.type === 'checkbox') return;
+                            const weightContent = weightSection.querySelector('.weight-content');
+                            const isCollapsed = weightContent.classList.contains('collapsed');
+                            weightContent.classList.toggle('collapsed', !isCollapsed);
+                            weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                        });
+                        
+                        const weightCheckbox = document.createElement('input');
+                        weightCheckbox.type = 'checkbox';
+                        weightCheckbox.className = 'select-all-checkbox me-2';
+                        weightCheckbox.addEventListener('change', (e) => {
+                            const savedScroll = this._saveAvailableScrollPosition();
+                            const isChecked = e.target.checked;
+                            const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
+                            checkboxes.forEach(checkbox => {
+                                if (!checkbox.classList.contains('tag-checkbox')) {
                                     checkbox.checked = isChecked;
-                                    const tagName = checkbox.value;
-                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                    if (tag) {
-                                        if (isChecked) {
-                                            if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                this.state.persistentSelectedTags.push(tagName);
-                                            }
-                                        } else {
-                                            const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                            if (index > -1) {
-                                                this.state.persistentSelectedTags.splice(index, 1);
-                                            }
+                                    return;
+                                }
+                                
+                                checkbox.checked = isChecked;
+                                const tagName = checkbox.value;
+                                const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                if (tag) {
+                                    if (isChecked) {
+                                        if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                            this.state.persistentSelectedTags.push(tagName);
+                                        }
+                                    } else {
+                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                        if (index > -1) {
+                                            this.state.persistentSelectedTags.splice(index, 1);
                                         }
                                     }
-                                });
-                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                    this.state.tags.find(t => t['Product Name*'] === name)
-                                ).filter(Boolean);
-                                this.updateSelectedTags(selectedTagObjects);
-                                this.efficientlyUpdateAvailableTagsDisplay();
-                                requestAnimationFrame(() => {
-                                    this._restoreAvailableScrollPosition(savedScroll);
-                                });
+                                }
                             });
+                            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                this.state.tags.find(t => t['Product Name*'] === name)
+                            ).filter(Boolean);
+                            this.updateSelectedTags(selectedTagObjects);
+                            this.efficientlyUpdateAvailableTagsDisplay();
+                            requestAnimationFrame(() => {
+                                this._restoreAvailableScrollPosition(savedScroll);
+                            });
+                        });
+                        
+                        weightHeader.appendChild(weightCheckbox);
+                        weightHeader.appendChild(document.createTextNode(weight));
+                        const weightCollapseIcon = document.createElement('span');
+                        weightCollapseIcon.className = 'collapse-icon ms-auto';
+                        weightCollapseIcon.textContent = '▼';
+                        weightHeader.appendChild(weightCollapseIcon);
+                        weightSection.appendChild(weightHeader);
+                        
+                        const weightContent = document.createElement('div');
+                        weightContent.className = 'weight-content';
+                        // CRITICAL FIX: JSON matched tags should always start expanded (not collapsed)
+                        // Do NOT add 'collapsed' class - keep expanded by default
+                        weightSection.appendChild(weightContent);
+
+                        // Render price subgroups (price groups are now always organized as Map)
+                        if (priceGroups instanceof Map) {
+                            const sortedPriceGroups = Array.from(priceGroups.entries())
+                                .sort(([a], [b]) => {
+                                    // Sort price groups: No Price first, then by actual price value (numeric)
+                                    if (a === 'No Price') return -1;
+                                    if (b === 'No Price') return 1;
+                                    // Extract numeric value from price strings (e.g., "$10" -> 10, "$15.50" -> 15.50)
+                                    const priceA = parseFloat(a.replace(/[^0-9.]/g, '')) || 0;
+                                    const priceB = parseFloat(b.replace(/[^0-9.]/g, '')) || 0;
+                                    return priceA - priceB;
+                                });
                             
-                            subcategoryHeader.appendChild(subcategoryCheckbox);
-                            const subcategoryNameSpan = document.createElement('span');
-                            subcategoryNameSpan.textContent = subcategory;
-                            subcategoryHeader.appendChild(subcategoryNameSpan);
-                            subcategorySection.appendChild(subcategoryHeader);
-
-                            // Render weight groups under subcategory
-                            const sortedWeights = Array.from(weightGroups.entries())
-                                .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
-                            sortedWeights.forEach(([weight, priceGroups]) => {
-                                const weightSection = document.createElement('div');
-                                weightSection.className = 'weight-section ms-3 mb-2';
+                            sortedPriceGroups.forEach(([priceGroup, tagArray]) => {
+                                const priceSection = document.createElement('div');
+                                priceSection.className = 'price-section ms-3 mb-1';
                                 
-                                // Create weight header with checkbox
-                                const weightHeader = document.createElement('div');
-                                weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
-                                weightHeader.addEventListener('click', (e) => {
+                                // Create price header with checkbox and collapse functionality
+                                const priceHeader = document.createElement('div');
+                                priceHeader.className = 'price-header mb-1 d-flex align-items-center cursor-pointer';
+                                priceHeader.addEventListener('click', (e) => {
                                     if (e.target.type === 'checkbox') return;
-                                    const weightContent = weightSection.querySelector('.weight-content');
-                                    const isCollapsed = weightContent.classList.contains('collapsed');
-                                    weightContent.classList.toggle('collapsed', !isCollapsed);
-                                    weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                    const priceContent = priceSection.querySelector('.price-content');
+                                    const isCollapsed = priceContent.classList.contains('collapsed');
+                                    priceContent.classList.toggle('collapsed', !isCollapsed);
+                                    priceHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
                                 });
                                 
-                                const weightCheckbox = document.createElement('input');
-                                weightCheckbox.type = 'checkbox';
-                                weightCheckbox.className = 'select-all-checkbox me-2';
-                                weightCheckbox.addEventListener('change', (e) => {
-                                    // PERFORMANCE: Skip during bulk clear operations
-                                    if (this.state.isClearing) {
-                                        return;
-                                    }
+                                const priceCheckbox = document.createElement('input');
+                                priceCheckbox.type = 'checkbox';
+                                priceCheckbox.className = 'select-all-checkbox me-2';
+                                priceCheckbox.addEventListener('change', (e) => {
                                     const savedScroll = this._saveAvailableScrollPosition();
                                     const isChecked = e.target.checked;
-                                    const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
+                                    const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
                                     checkboxes.forEach(checkbox => {
                                         if (!checkbox.classList.contains('tag-checkbox')) {
                                             checkbox.checked = isChecked;
@@ -3060,211 +3100,38 @@ const TagManager = {
                                     });
                                 });
                                 
-                                weightHeader.appendChild(weightCheckbox);
-                                weightHeader.appendChild(document.createTextNode(weight));
-                                const weightCollapseIcon = document.createElement('span');
-                                weightCollapseIcon.className = 'collapse-icon ms-auto';
-                                weightCollapseIcon.textContent = '▼';
-                                weightHeader.appendChild(weightCollapseIcon);
-                                weightSection.appendChild(weightHeader);
+                                priceHeader.appendChild(priceCheckbox);
+                                priceHeader.appendChild(document.createTextNode(priceGroup));
+                                const priceCollapseIcon = document.createElement('span');
+                                priceCollapseIcon.className = 'collapse-icon ms-auto';
+                                priceCollapseIcon.textContent = '▼';
+                                priceHeader.appendChild(priceCollapseIcon);
+                                weightContent.appendChild(priceSection);
+                                priceSection.appendChild(priceHeader);
                                 
-                                const weightContent = document.createElement('div');
-                                weightContent.className = 'weight-content';
-                                weightSection.appendChild(weightContent);
-
-                                // Handle price groups - check if priceGroups is a Map (new structure) or Array (old structure)
-                                if (priceGroups instanceof Map) {
-                                    const sortedPriceGroups = Array.from(priceGroups.entries())
-                                        .sort(([a], [b]) => {
-                                            if (a === 'No Price') return -1;
-                                            if (b === 'No Price') return 1;
-                                            return a.localeCompare(b);
-                                        });
-                                    
-                                    sortedPriceGroups.forEach(([priceGroup, tagArray]) => {
-                                        const priceSection = document.createElement('div');
-                                        priceSection.className = 'price-section ms-3 mb-1';
-                                        
-                                        const priceHeader = document.createElement('div');
-                                        priceHeader.className = 'price-header mb-1 d-flex align-items-center cursor-pointer';
-                                        priceHeader.addEventListener('click', (e) => {
-                                            if (e.target.type === 'checkbox') return;
-                                            const priceContent = priceSection.querySelector('.price-content');
-                                            const isCollapsed = priceContent.classList.contains('collapsed');
-                                            priceContent.classList.toggle('collapsed', !isCollapsed);
-                                            priceHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                                        });
-                                        
-                                        const priceCheckbox = document.createElement('input');
-                                        priceCheckbox.type = 'checkbox';
-                                        priceCheckbox.className = 'select-all-checkbox me-2';
-                                        priceCheckbox.addEventListener('change', (e) => {
-                                            if (this.state.isClearing) return;
-                                            const savedScroll = this._saveAvailableScrollPosition();
-                                            const isChecked = e.target.checked;
-                                            const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
-                                            checkboxes.forEach(checkbox => {
-                                                if (!checkbox.classList.contains('tag-checkbox')) {
-                                                    checkbox.checked = isChecked;
-                                                    return;
-                                                }
-                                                
-                                                checkbox.checked = isChecked;
-                                                const tagName = checkbox.value;
-                                                const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                                if (tag) {
-                                                    if (isChecked) {
-                                                        if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                            this.state.persistentSelectedTags.push(tagName);
-                                                        }
-                                                    } else {
-                                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                                        if (index > -1) {
-                                                            this.state.persistentSelectedTags.splice(index, 1);
-                                                        }
-                                                    }
-                                                }
-                                            });
-                                            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                                this.state.tags.find(t => t['Product Name*'] === name)
-                                            ).filter(Boolean);
-                                            this.updateSelectedTags(selectedTagObjects);
-                                            this.efficientlyUpdateAvailableTagsDisplay();
-                                            requestAnimationFrame(() => {
-                                                this._restoreAvailableScrollPosition(savedScroll);
-                                            });
-                                        });
-                                        
-                                        priceHeader.appendChild(priceCheckbox);
-                                        priceHeader.appendChild(document.createTextNode(priceGroup));
-                                        const priceCollapseIcon = document.createElement('span');
-                                        priceCollapseIcon.className = 'collapse-icon ms-auto';
-                                        priceCollapseIcon.textContent = '▼';
-                                        priceHeader.appendChild(priceCollapseIcon);
-                                        weightContent.appendChild(priceSection);
-                                        priceSection.appendChild(priceHeader);
-                                        
-                                        const priceContent = document.createElement('div');
-                                        priceContent.className = 'price-content';
-                                        priceSection.appendChild(priceContent);
-                                        
-                                        const sortedTags = [...tagArray].sort((a, b) => {
-                                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                                            return aName.localeCompare(bName);
-                                        });
-                                        this._renderTagsInBatches(sortedTags, priceContent);
-                                    });
-                                } else {
-                                    // Old structure: backward compatibility
-                                    const sortedTags = [...(Array.isArray(priceGroups) ? priceGroups : [])].sort((a, b) => {
-                                        const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                                        const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                                        return aName.localeCompare(bName);
-                                    });
-                                    this._renderTagsInBatches(sortedTags, weightContent);
-                                }
-
-                                subcategorySection.appendChild(weightSection);
-                            });
-
-                            productTypeSection.appendChild(subcategorySection);
-                        });
-                    } else {
-                        // No subcategories - render weights directly
-                        const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
-                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
-                        sortedWeights.forEach(([weight, priceGroups]) => {
-                            const weightSection = document.createElement('div');
-                            weightSection.className = 'weight-section ms-3 mb-2';
-                            
-                            // Create weight header with checkbox
-                            const weightHeader = document.createElement('div');
-                            weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
-                            weightHeader.addEventListener('click', (e) => {
-                                if (e.target.type === 'checkbox') return;
-                                const weightContent = weightSection.querySelector('.weight-content');
-                                const isCollapsed = weightContent.classList.contains('collapsed');
-                                weightContent.classList.toggle('collapsed', !isCollapsed);
-                                weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                            });
-                            
-                            const weightCheckbox = document.createElement('input');
-                            weightCheckbox.type = 'checkbox';
-                            weightCheckbox.className = 'select-all-checkbox me-2';
-                            weightCheckbox.addEventListener('change', (e) => {
-                                const savedScroll = this._saveAvailableScrollPosition();
-                                const isChecked = e.target.checked;
-                                const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
-                                checkboxes.forEach(checkbox => {
-                                    if (!checkbox.classList.contains('tag-checkbox')) {
-                                        checkbox.checked = isChecked;
-                                        return;
-                                    }
-                                    
-                                    checkbox.checked = isChecked;
-                                    const tagName = checkbox.value;
-                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                    if (tag) {
-                                        if (isChecked) {
-                                            if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                this.state.persistentSelectedTags.push(tagName);
-                                            }
-                                        } else {
-                                            const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                            if (index > -1) {
-                                                this.state.persistentSelectedTags.splice(index, 1);
-                                            }
-                                        }
-                                    }
+                                const priceContent = document.createElement('div');
+                                priceContent.className = 'price-content';
+                                priceSection.appendChild(priceContent);
+                                
+                                const sortedTags = [...tagArray].sort((a, b) => {
+                                    const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                                    const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                                    return aName.localeCompare(bName);
                                 });
-                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                    this.state.tags.find(t => t['Product Name*'] === name)
-                                ).filter(Boolean);
-                                this.updateSelectedTags(selectedTagObjects);
-                                this.efficientlyUpdateAvailableTagsDisplay();
-                                requestAnimationFrame(() => {
-                                    this._restoreAvailableScrollPosition(savedScroll);
-                                });
+                                this._renderTagsInBatches(sortedTags, priceContent);
                             });
-                            
-                            weightHeader.appendChild(weightCheckbox);
-                            weightHeader.appendChild(document.createTextNode(weight));
-                            const weightCollapseIcon = document.createElement('span');
-                            weightCollapseIcon.className = 'collapse-icon ms-auto';
-                            weightCollapseIcon.textContent = '▼';
-                            weightHeader.appendChild(weightCollapseIcon);
-                            weightSection.appendChild(weightHeader);
-                            
-                            const weightContent = document.createElement('div');
-                            weightContent.className = 'weight-content';
-                            weightSection.appendChild(weightContent);
-
-                            // Flatten price groups back to a single weight list (no price headers)
-                            let allTagsForWeight = [];
-                            if (priceGroups instanceof Map) {
-                                priceGroups.forEach(tagArray => {
-                                    if (Array.isArray(tagArray)) {
-                                        allTagsForWeight = allTagsForWeight.concat(tagArray);
-                                    }
-                                });
-                            } else if (Array.isArray(priceGroups)) {
-                                allTagsForWeight = priceGroups;
-                            }
-
-                            const sortedTags = [...allTagsForWeight].sort((a, b) => {
+                        } else if (Array.isArray(priceGroups)) {
+                            // Backward compatibility: if priceGroups is an array, render directly
+                            const sortedTags = [...priceGroups].sort((a, b) => {
                                 const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
                                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                 return aName.localeCompare(bName);
                             });
                             this._renderTagsInBatches(sortedTags, weightContent);
+                        }
 
-                            productTypeContent.appendChild(weightSection);
-                        });
-                    }
+                        productTypeContent.appendChild(weightSection);
+                    });
 
                     brandContent.appendChild(productTypeSection);
                 });
@@ -3792,11 +3659,8 @@ const TagManager = {
                     // Check if this product type has subcategories (vape products with 510/Disposable)
                     // Check by looking at keys - subcategories have keys like "510" or "Disposable"
                     // Price groups have keys like "$10-$19.99", weights have keys like "3.5g"
-                    const hasSubcategories = weightGroupsOrSubcategories instanceof Map && 
-                                           weightGroupsOrSubcategories.size > 0 &&
-                                           Array.from(weightGroupsOrSubcategories.keys()).some(key => 
-                                               key === '510' || key === 'Disposable' || key === 'Other'
-                                           );
+                    // Subcategories are now combined with weight (e.g., "1g - 510")
+                    // Always render weights directly - no separate subcategory level
                     
                     // Create product type header with checkbox and collapse functionality
                     const typeHeader = document.createElement('div');
@@ -3881,31 +3745,149 @@ const TagManager = {
                     }
                     productTypeSection.appendChild(productTypeContent);
 
-                    if (hasSubcategories) {
-                        // Render subcategories (510, Disposable, etc.)
-                        const sortedSubcategories = Array.from(weightGroupsOrSubcategories.entries())
-                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+                    // Subcategories are now combined with weight - render weights directly
+                    const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
+                        .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-                        sortedSubcategories.forEach(([subcategory, weightGroups]) => {
-                            const subcategorySection = document.createElement('div');
-                            subcategorySection.className = 'subcategory-section ms-3 mb-2';
+                    sortedWeights.forEach(([weight, priceGroups]) => {
+                        const weightSection = document.createElement('div');
+                        weightSection.className = 'weight-section ms-3 mb-1';
+                        
+                        // Create weight header with checkbox and collapse functionality
+                        const weightHeader = document.createElement('div');
+                        weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                        weightHeader.addEventListener('click', (e) => {
+                            if (e.target.type === 'checkbox') return; // Don't collapse if clicking checkbox
+                            if (this.state.isSearching) return; // Don't collapse while searching
+                            const weightContent = weightSection.querySelector('.weight-content');
+                            const isCollapsed = weightContent.classList.contains('collapsed');
+                            weightContent.classList.toggle('collapsed', !isCollapsed);
+                            weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
                             
-                            // Create subcategory header with checkbox
-                            const subcategoryHeader = document.createElement('div');
-                            subcategoryHeader.className = 'subcategory-header mb-2 d-flex align-items-center cursor-pointer';
-                            
-                            const subcategoryCheckbox = document.createElement('input');
-                            subcategoryCheckbox.type = 'checkbox';
-                            subcategoryCheckbox.className = 'select-all-checkbox me-2';
-                            subcategoryCheckbox.addEventListener('change', (e) => {
-                                const savedScroll = this._saveAvailableScrollPosition();
-                                const isChecked = e.target.checked;
-                                const checkboxes = subcategorySection.querySelectorAll('input.tag-checkbox');
-                                checkboxes.forEach(checkbox => {
+                            // Remove the instructional blurb when any chevron is clicked
+                            this.removeDropdownInstructionBlurb();
+                        });
+                        
+                        const weightCheckbox = document.createElement('input');
+                        weightCheckbox.type = 'checkbox';
+                        weightCheckbox.className = 'select-all-checkbox me-2';
+                        weightCheckbox.addEventListener('change', (e) => {
+                            const savedScroll = this._saveAvailableScrollPosition();
+                            const isChecked = e.target.checked;
+                            // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
+                            const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
+                            checkboxes.forEach(checkbox => {
+                                if (!checkbox.classList.contains('tag-checkbox')) {
                                     checkbox.checked = isChecked;
-                                    const tagName = checkbox.value;
-                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                    if (tag) {
+                                    return;
+                                }
+
+                                const tagName = checkbox.value;
+                                const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                if (!tag) {
+                                    checkbox.checked = isChecked;
+                                    return;
+                                }
+
+                                checkbox.checked = isChecked;
+
+                                if (isChecked) {
+                                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                        this.state.persistentSelectedTags.push(tagName);
+                                    }
+                                } else {
+                                    if (!e.target.checked) {
+                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                        if (index > -1) {
+                                            this.state.persistentSelectedTags.splice(index, 1);
+                                        }
+                                    }
+                                }
+                            });
+                            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
+                                this.state.tags.find(t => t['Product Name*'] === name)
+                            ).filter(Boolean);
+                            this.updateSelectedTags(selectedTagObjects);
+                            this.efficientlyUpdateAvailableTagsDisplay();
+                            // Restore scroll after all DOM updates complete
+                            requestAnimationFrame(() => {
+                                this._restoreAvailableScrollPosition(savedScroll);
+                            });
+                        });
+                        
+                        weightHeader.appendChild(weightCheckbox);
+                        weightHeader.appendChild(document.createTextNode(weight));
+                        weightHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
+                        
+                        // Weight sections should always start expanded
+                        const shouldStartCollapsed = false;
+                        
+                        weightHeader.querySelector('.collapse-icon').textContent = shouldStartCollapsed ? '▶' : '▼';
+                        productTypeContent.appendChild(weightSection);
+                        weightSection.appendChild(weightHeader);
+
+                        // Create weight content container
+                        const weightContent = document.createElement('div');
+                        weightContent.className = 'weight-content';
+                        if (shouldStartCollapsed) {
+                            weightContent.classList.add('collapsed');
+                        }
+                        weightSection.appendChild(weightContent);
+
+                        // Handle price groups - check if priceGroups is a Map (new structure) or Array (old structure)
+                        if (priceGroups instanceof Map) {
+                            // New structure: priceGroups is a Map of price groups to tag arrays
+                            const sortedPriceGroups = Array.from(priceGroups.entries())
+                                .sort(([a], [b]) => {
+                                    // Sort price groups: No Price first, then by actual price value (numeric)
+                                    if (a === 'No Price') return -1;
+                                    if (b === 'No Price') return 1;
+                                    // Extract numeric value from price strings (e.g., "$10" -> 10, "$15.50" -> 15.50)
+                                    const priceA = parseFloat(a.replace(/[^0-9.]/g, '')) || 0;
+                                    const priceB = parseFloat(b.replace(/[^0-9.]/g, '')) || 0;
+                                    return priceA - priceB;
+                                });
+                            
+                            sortedPriceGroups.forEach(([priceGroup, tagArray]) => {
+                                const priceSection = document.createElement('div');
+                                priceSection.className = 'price-section ms-3 mb-1';
+                                
+                                // Create price header with checkbox and collapse functionality
+                                const priceHeader = document.createElement('div');
+                                priceHeader.className = 'price-header mb-1 d-flex align-items-center cursor-pointer';
+                                priceHeader.addEventListener('click', (e) => {
+                                    if (e.target.type === 'checkbox') return;
+                                    if (this.state.isSearching) return;
+                                    const priceContent = priceSection.querySelector('.price-content');
+                                    const isCollapsed = priceContent.classList.contains('collapsed');
+                                    priceContent.classList.toggle('collapsed', !isCollapsed);
+                                    priceHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                    this.removeDropdownInstructionBlurb();
+                                });
+                                
+                                const priceCheckbox = document.createElement('input');
+                                priceCheckbox.type = 'checkbox';
+                                priceCheckbox.className = 'select-all-checkbox me-2';
+                                priceCheckbox.addEventListener('change', (e) => {
+                                    const savedScroll = this._saveAvailableScrollPosition();
+                                    const isChecked = e.target.checked;
+                                    const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
+                                    checkboxes.forEach(checkbox => {
+                                        if (!checkbox.classList.contains('tag-checkbox')) {
+                                            checkbox.checked = isChecked;
+                                            return;
+                                        }
+                                        
+                                        const tagName = checkbox.value;
+                                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                        if (!tag) {
+                                            checkbox.checked = isChecked;
+                                            return;
+                                        }
+                                        
+                                        checkbox.checked = isChecked;
+                                        
                                         if (isChecked) {
                                             if (!this.state.persistentSelectedTags.includes(tagName)) {
                                                 this.state.persistentSelectedTags.push(tagName);
@@ -3918,83 +3900,6 @@ const TagManager = {
                                                 }
                                             }
                                         }
-                                    }
-                                });
-                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                    this.state.tags.find(t => t['Product Name*'] === name)
-                                ).filter(Boolean);
-                                this.updateSelectedTags(selectedTagObjects);
-                                this.efficientlyUpdateAvailableTagsDisplay();
-                                requestAnimationFrame(() => {
-                                    this._restoreAvailableScrollPosition(savedScroll);
-                                });
-                            });
-                            
-                            subcategoryHeader.appendChild(subcategoryCheckbox);
-                            const subcategoryNameSpan = document.createElement('span');
-                            subcategoryNameSpan.textContent = subcategory;
-                            subcategoryHeader.appendChild(subcategoryNameSpan);
-                            subcategorySection.appendChild(subcategoryHeader);
-
-                            // Create weight sections
-                            const sortedWeights = Array.from(weightGroups.entries())
-                                .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
-                            sortedWeights.forEach(([weight, priceGroups]) => {
-                                const weightSection = document.createElement('div');
-                                weightSection.className = 'weight-section ms-3 mb-1';
-                                
-                                // Create weight header with checkbox and collapse functionality
-                                const weightHeader = document.createElement('div');
-                                weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
-                                weightHeader.addEventListener('click', (e) => {
-                                    if (e.target.type === 'checkbox') return; // Don't collapse if clicking checkbox
-                                    if (this.state.isSearching) return; // Don't collapse while searching
-                                    const weightContent = weightSection.querySelector('.weight-content');
-                                    const isCollapsed = weightContent.classList.contains('collapsed');
-                                    weightContent.classList.toggle('collapsed', !isCollapsed);
-                                    weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                                    
-                                    // Remove the instructional blurb when any chevron is clicked
-                                    this.removeDropdownInstructionBlurb();
-                                });
-                                
-                                const weightCheckbox = document.createElement('input');
-                                weightCheckbox.type = 'checkbox';
-                                weightCheckbox.className = 'select-all-checkbox me-2';
-                                weightCheckbox.addEventListener('change', (e) => {
-                                    const savedScroll = this._saveAvailableScrollPosition();
-                                    const isChecked = e.target.checked;
-                                    // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
-                                    const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
-                                    checkboxes.forEach(checkbox => {
-                                        if (!checkbox.classList.contains('tag-checkbox')) {
-                                        checkbox.checked = isChecked;
-                                            return;
-                                        }
-
-                                        const tagName = checkbox.value;
-                                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                        if (!tag) {
-                                            checkbox.checked = isChecked;
-                                            return;
-                                        }
-
-                                        checkbox.checked = isChecked;
-
-                                                if (isChecked) {
-                                            if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                this.state.persistentSelectedTags.push(tagName);
-                                                    }
-                                                } else {
-                                            if (!e.target.checked) {
-                                                const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                                    if (index > -1) {
-                                                        this.state.persistentSelectedTags.splice(index, 1);
-                                                }
-                                            }
-                                        }
                                     });
                                     this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                                     const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
@@ -4002,347 +3907,48 @@ const TagManager = {
                                     ).filter(Boolean);
                                     this.updateSelectedTags(selectedTagObjects);
                                     this.efficientlyUpdateAvailableTagsDisplay();
-                                    // Restore scroll after all DOM updates complete
                                     requestAnimationFrame(() => {
                                         this._restoreAvailableScrollPosition(savedScroll);
                                     });
                                 });
                                 
-                                weightHeader.appendChild(weightCheckbox);
-                                weightHeader.appendChild(document.createTextNode(weight));
-                                weightHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
+                                priceHeader.appendChild(priceCheckbox);
+                                priceHeader.appendChild(document.createTextNode(priceGroup));
+                                priceHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
+                                priceHeader.querySelector('.collapse-icon').textContent = '▼';
                                 
-                                // Weight sections should always start expanded
-                                const shouldStartCollapsed = false;
+                                weightContent.appendChild(priceSection);
+                                priceSection.appendChild(priceHeader);
                                 
-                                weightHeader.querySelector('.collapse-icon').textContent = shouldStartCollapsed ? '▶' : '▼';
-                                subcategorySection.appendChild(weightSection);
-                                weightSection.appendChild(weightHeader);
-
-                                // Create weight content container
-                                const weightContent = document.createElement('div');
-                                weightContent.className = 'weight-content';
-                                if (shouldStartCollapsed) {
-                                    weightContent.classList.add('collapsed');
-                                }
-                                weightSection.appendChild(weightContent);
-
-                                // Handle price groups - check if priceGroups is a Map (new structure) or Array (old structure)
-                                if (priceGroups instanceof Map) {
-                                    // New structure: priceGroups is a Map of price groups to tag arrays
-                                    const sortedPriceGroups = Array.from(priceGroups.entries())
-                                        .sort(([a], [b]) => {
-                                            // Sort price groups: No Price first, then by actual price value (numeric)
-                                            if (a === 'No Price') return -1;
-                                            if (b === 'No Price') return 1;
-                                            // Extract numeric value from price strings (e.g., "$10" -> 10, "$15.50" -> 15.50)
-                                            const priceA = parseFloat(a.replace(/[^0-9.]/g, '')) || 0;
-                                            const priceB = parseFloat(b.replace(/[^0-9.]/g, '')) || 0;
-                                            return priceA - priceB;
-                                        });
-                                    
-                                    sortedPriceGroups.forEach(([priceGroup, tagArray]) => {
-                                        const priceSection = document.createElement('div');
-                                        priceSection.className = 'price-section ms-3 mb-1';
-                                        
-                                        // Create price header with checkbox and collapse functionality
-                                        const priceHeader = document.createElement('div');
-                                        priceHeader.className = 'price-header mb-1 d-flex align-items-center cursor-pointer';
-                                        priceHeader.addEventListener('click', (e) => {
-                                            if (e.target.type === 'checkbox') return;
-                                            if (this.state.isSearching) return;
-                                            const priceContent = priceSection.querySelector('.price-content');
-                                            const isCollapsed = priceContent.classList.contains('collapsed');
-                                            priceContent.classList.toggle('collapsed', !isCollapsed);
-                                            priceHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                                            this.removeDropdownInstructionBlurb();
-                                        });
-                                        
-                                        const priceCheckbox = document.createElement('input');
-                                        priceCheckbox.type = 'checkbox';
-                                        priceCheckbox.className = 'select-all-checkbox me-2';
-                                        priceCheckbox.addEventListener('change', (e) => {
-                                            const savedScroll = this._saveAvailableScrollPosition();
-                                            const isChecked = e.target.checked;
-                                            const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
-                                            checkboxes.forEach(checkbox => {
-                                                if (!checkbox.classList.contains('tag-checkbox')) {
-                                                    checkbox.checked = isChecked;
-                                                    return;
-                                                }
-                                                
-                                                const tagName = checkbox.value;
-                                                const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                                if (!tag) {
-                                                    checkbox.checked = isChecked;
-                                                    return;
-                                                }
-                                                
-                                                checkbox.checked = isChecked;
-                                                
-                                                if (isChecked) {
-                                                    if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                        this.state.persistentSelectedTags.push(tagName);
-                                                    }
-                                                } else {
-                                                    if (!e.target.checked) {
-                                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                                        if (index > -1) {
-                                                            this.state.persistentSelectedTags.splice(index, 1);
-                                                        }
-                                                    }
-                                                }
-                                            });
-                                            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                                this.state.tags.find(t => t['Product Name*'] === name)
-                                            ).filter(Boolean);
-                                            this.updateSelectedTags(selectedTagObjects);
-                                            this.efficientlyUpdateAvailableTagsDisplay();
-                                            requestAnimationFrame(() => {
-                                                this._restoreAvailableScrollPosition(savedScroll);
-                                            });
-                                        });
-                                        
-                                        priceHeader.appendChild(priceCheckbox);
-                                        priceHeader.appendChild(document.createTextNode(priceGroup));
-                                        priceHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
-                                        priceHeader.querySelector('.collapse-icon').textContent = '▼';
-                                        
-                                        weightContent.appendChild(priceSection);
-                                        priceSection.appendChild(priceHeader);
-                                        
-                                        // Create price content container
-                                        const priceContent = document.createElement('div');
-                                        priceContent.className = 'price-content';
-                                        priceSection.appendChild(priceContent);
-                                        
-                                        // Add individual tags (sorted alphabetically by product name)
-                                        const tagsToRender = [...tagArray].sort((a, b) => {
-                                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                                            return aName.localeCompare(bName);
-                                        });
-                                        tagsToRender.forEach(tag => {
-                                            const tagElement = this.createTagElement(tag, false);
-                                            priceContent.appendChild(tagElement);
-                                        });
-                                    });
-                                } else {
-                                    // Old structure: priceGroups is actually a tag array (backward compatibility)
-                                    const tagsToRender = [...(Array.isArray(priceGroups) ? priceGroups : [])].sort((a, b) => {
-                                        const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                                        const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                                        return aName.localeCompare(bName);
-                                    });
-                                    tagsToRender.forEach(tag => {
-                                        const tagElement = this.createTagElement(tag, false);
-                                        weightContent.appendChild(tagElement);
-                                    });
-                                }
-                            });
-                            
-                            productTypeContent.appendChild(subcategorySection);
-                        });
-                    } else {
-                        // No subcategories - render weights directly
-                        const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
-                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
-                        sortedWeights.forEach(([weight, priceGroups]) => {
-                            const weightSection = document.createElement('div');
-                            weightSection.className = 'weight-section ms-3 mb-1';
-                            
-                            // Create weight header with checkbox and collapse functionality
-                            const weightHeader = document.createElement('div');
-                            weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
-                            weightHeader.addEventListener('click', (e) => {
-                                if (e.target.type === 'checkbox') return; // Don't collapse if clicking checkbox
-                                if (this.state.isSearching) return; // Don't collapse while searching
-                                const weightContent = weightSection.querySelector('.weight-content');
-                                const isCollapsed = weightContent.classList.contains('collapsed');
-                                weightContent.classList.toggle('collapsed', !isCollapsed);
-                                weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                // Create price content container
+                                const priceContent = document.createElement('div');
+                                priceContent.className = 'price-content';
+                                priceSection.appendChild(priceContent);
                                 
-                                // Remove the instructional blurb when any chevron is clicked
-                                this.removeDropdownInstructionBlurb();
-                            });
-                            
-                            const weightCheckbox = document.createElement('input');
-                            weightCheckbox.type = 'checkbox';
-                            weightCheckbox.className = 'select-all-checkbox me-2';
-                            weightCheckbox.addEventListener('change', (e) => {
-                                const savedScroll = this._saveAvailableScrollPosition();
-                                const isChecked = e.target.checked;
-                                // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
-                                const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
-                                checkboxes.forEach(checkbox => {
-                                    if (!checkbox.classList.contains('tag-checkbox')) {
-                                    checkbox.checked = isChecked;
-                                        return;
-                                    }
-
-                                    const tagName = checkbox.value;
-                                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                    if (!tag) {
-                                        checkbox.checked = isChecked;
-                                        return;
-                                    }
-
-                                    checkbox.checked = isChecked;
-
-                                            if (isChecked) {
-                                        if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                            this.state.persistentSelectedTags.push(tagName);
-                                                }
-                                            } else {
-                                        if (!e.target.checked) {
-                                            const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                                if (index > -1) {
-                                                    this.state.persistentSelectedTags.splice(index, 1);
-                                            }
-                                        }
-                                    }
-                                });
-                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                    this.state.tags.find(t => t['Product Name*'] === name)
-                                ).filter(Boolean);
-                                this.updateSelectedTags(selectedTagObjects);
-                                this.efficientlyUpdateAvailableTagsDisplay();
-                                // Restore scroll after all DOM updates complete
-                                requestAnimationFrame(() => {
-                                    this._restoreAvailableScrollPosition(savedScroll);
-                                });
-                            });
-                            
-                            weightHeader.appendChild(weightCheckbox);
-                            weightHeader.appendChild(document.createTextNode(weight));
-                            weightHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
-                            
-                            // Weight sections should always start expanded
-                            const shouldStartCollapsed = false;
-                            
-                            weightHeader.querySelector('.collapse-icon').textContent = shouldStartCollapsed ? '▶' : '▼';
-                            productTypeContent.appendChild(weightSection);
-                            weightSection.appendChild(weightHeader);
-
-                            // Create weight content container
-                            const weightContent = document.createElement('div');
-                            weightContent.className = 'weight-content';
-                            if (shouldStartCollapsed) {
-                                weightContent.classList.add('collapsed');
-                            }
-                            weightSection.appendChild(weightContent);
-
-                            // Handle price groups - check if priceGroups is a Map (new structure) or Array (old structure)
-                            if (priceGroups instanceof Map) {
-                                // New structure: priceGroups is a Map of price groups to tag arrays
-                                const sortedPriceGroups = Array.from(priceGroups.entries())
-                                    .sort(([a], [b]) => {
-                                        // Sort price groups: No Price first, then by price range
-                                        if (a === 'No Price') return -1;
-                                        if (b === 'No Price') return 1;
-                                        return a.localeCompare(b);
-                                    });
-                                
-                                sortedPriceGroups.forEach(([priceGroup, tagArray]) => {
-                                    const priceSection = document.createElement('div');
-                                    priceSection.className = 'price-section ms-3 mb-1';
-                                    
-                                    // Create price header with checkbox and collapse functionality
-                                    const priceHeader = document.createElement('div');
-                                    priceHeader.className = 'price-header mb-1 d-flex align-items-center cursor-pointer';
-                                    priceHeader.addEventListener('click', (e) => {
-                                        if (e.target.type === 'checkbox') return;
-                                        if (this.state.isSearching) return;
-                                        const priceContent = priceSection.querySelector('.price-content');
-                                        const isCollapsed = priceContent.classList.contains('collapsed');
-                                        priceContent.classList.toggle('collapsed', !isCollapsed);
-                                        priceHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
-                                        this.removeDropdownInstructionBlurb();
-                                    });
-                                    
-                                    const priceCheckbox = document.createElement('input');
-                                    priceCheckbox.type = 'checkbox';
-                                    priceCheckbox.className = 'select-all-checkbox me-2';
-                                    priceCheckbox.addEventListener('change', (e) => {
-                                        const savedScroll = this._saveAvailableScrollPosition();
-                                        const isChecked = e.target.checked;
-                                        const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
-                                        checkboxes.forEach(checkbox => {
-                                            if (!checkbox.classList.contains('tag-checkbox')) {
-                                                checkbox.checked = isChecked;
-                                                return;
-                                            }
-                                            
-                                            const tagName = checkbox.value;
-                                            const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                            if (!tag) {
-                                                checkbox.checked = isChecked;
-                                                return;
-                                            }
-                                            
-                                            checkbox.checked = isChecked;
-                                            
-                                            if (isChecked) {
-                                                if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                    this.state.persistentSelectedTags.push(tagName);
-                                                }
-                                            } else {
-                                                if (!e.target.checked) {
-                                                    const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                                    if (index > -1) {
-                                                        this.state.persistentSelectedTags.splice(index, 1);
-                                                    }
-                                                }
-                                            }
-                                        });
-                                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                        const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                            this.state.tags.find(t => t['Product Name*'] === name)
-                                        ).filter(Boolean);
-                                        this.updateSelectedTags(selectedTagObjects);
-                                        this.efficientlyUpdateAvailableTagsDisplay();
-                                        requestAnimationFrame(() => {
-                                            this._restoreAvailableScrollPosition(savedScroll);
-                                        });
-                                    });
-                                    
-                                    priceHeader.appendChild(priceCheckbox);
-                                    priceHeader.appendChild(document.createTextNode(priceGroup));
-                                    priceHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
-                                    priceHeader.querySelector('.collapse-icon').textContent = '▼';
-                                    
-                                    weightContent.appendChild(priceSection);
-                                    priceSection.appendChild(priceHeader);
-                                    
-                                    // Create price content container
-                                    const priceContent = document.createElement('div');
-                                    priceContent.className = 'price-content';
-                                    priceSection.appendChild(priceContent);
-                                    
-                                    // Add individual tags (sorted alphabetically by product name)
-                                    const tagsToRender = [...tagArray].sort((a, b) => {
-                                        const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                                        const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                                        return aName.localeCompare(bName);
-                                    });
-                                    // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
-                                    this._renderTagsInBatches(tagsToRender, priceContent);
-                                });
-                            } else {
-                                // Old structure: priceGroups is actually a tag array (backward compatibility)
-                                const tagsToRender = [...(Array.isArray(priceGroups) ? priceGroups : [])].sort((a, b) => {
+                                // Add individual tags (sorted alphabetically by product name)
+                                const tagsToRender = [...tagArray].sort((a, b) => {
                                     const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
                                     const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                     return aName.localeCompare(bName);
                                 });
-                                // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
-                                this._renderTagsInBatches(tagsToRender, weightContent);
-                            }
-                        });
-                    }
+                                tagsToRender.forEach(tag => {
+                                    const tagElement = this.createTagElement(tag, false);
+                                    priceContent.appendChild(tagElement);
+                                });
+                            });
+                        } else {
+                            // Old structure: priceGroups is actually a tag array (backward compatibility)
+                            const tagsToRender = [...(Array.isArray(priceGroups) ? priceGroups : [])].sort((a, b) => {
+                                const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                                const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                                return aName.localeCompare(bName);
+                            });
+                            tagsToRender.forEach(tag => {
+                                const tagElement = this.createTagElement(tag, false);
+                                weightContent.appendChild(tagElement);
+                            });
+                        }
+                    });
                 });
             });
         });
@@ -4711,8 +4317,22 @@ const TagManager = {
             }
         }
         
-        // Normalize lineage to uppercase for consistent matching
-        lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
+        // Normalize lineage to uppercase for consistent matching - respect database value
+        lineage = (lineage || '').toString().trim().toUpperCase();
+        
+        // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+        // This ensures UI displays correct lineage even if database/Excel has wrong value
+        const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
+        if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+            lineage = 'HYBRID';
+        }
+        
+        // Only set default if lineage is completely missing
+        if (!lineage) {
+            lineage = isClassicType ? 'HYBRID' : 'MIXED';
+        }
         
         // Validate lineage from database is present
         if (!tag.canonical_lineage && !tag.currentLineage && lineage !== 'MIXED') {
@@ -4735,14 +4355,13 @@ const TagManager = {
         
         // CRITICAL FIX: Use database lineage FIRST for all product types
         // Only fall back to Product Strain logic if database lineage is missing or invalid
-        let displayLineage = lineage; // Start with database lineage
-        const productType = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+        let displayLineage = lineage; // Start with database lineage (already converted if classic type)
         const nameStr = (tag['Product Name*'] || tag.ProductName || tag.productName || displayName || '').toString().toLowerCase();
         const descStr = (tag.Description || tag.description || '').toString().toLowerCase();
         const brandStr = (tag['Product Brand'] || tag.productBrand || tag.brand || '').toString().toLowerCase();
         const ratioStr = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().toLowerCase();
         const lineageStr = (lineage || '').toString().toLowerCase();
-        const lowerProductType = productType.toLowerCase();
+        const lowerProductType = (productTypeCheck || '').toString().toLowerCase();
 
         const hasCbdIndicator = () => {
             const tokens = ['cbd', 'cbg', 'cbn', 'cbc'];
@@ -4762,8 +4381,8 @@ const TagManager = {
         const hasValidDatabaseLineage = validDatabaseLineages.includes(lineage);
         
         // Apply nonclassic product type logic ONLY if database lineage is missing or invalid
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
-        const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(productType.toLowerCase());
+        // Reuse classicTypes already declared above (line 4325)
+        const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(lowerProductType);
         
         // CRITICAL FIX: Classic lineages (SATIVA, INDICA, HYBRID) should NEVER be used for capsules/nonclassic types
         // Capsules and other nonclassic types should ONLY use MIXED (blue) or CBD_BLEND (yellow)
@@ -4809,8 +4428,9 @@ const TagManager = {
                 verboseLog(`🎨 NON-CLASSIC default (capsule/nonclassic): "${displayName}" → MIXED (blue)`);
             }
         } else {
-            // Classic types - use database lineage or default to MIXED
-            displayLineage = lineage || 'MIXED';
+            // Classic types - use database lineage or default to HYBRID (never MIXED for classic types)
+            // CRITICAL FIX: Always use the resolved lineage (which already has database value and MIXED->HYBRID conversion)
+            displayLineage = lineage || 'HYBRID';
             verboseLog(`🎨 Classic type using database lineage: "${displayName}" → ${displayLineage}`);
         }
         
@@ -5054,6 +4674,16 @@ const TagManager = {
             }
         }
         
+        // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage in dropdown - convert to HYBRID
+        // This must happen AFTER getting database lineage but BEFORE setting dropdown value
+        const productTypeForDropdown = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+        const classicTypesForDropdown = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        const isClassicTypeForDropdown = classicTypesForDropdown.map(ct => ct.toLowerCase()).includes((productTypeForDropdown || '').toString().toLowerCase());
+        if (isClassicTypeForDropdown && (normalizedLineage === 'MIXED' || normalizedLineage === 'THC')) {
+            console.log(`🔄 DROPDOWN FIX: Converting ${normalizedLineage} to HYBRID for classic type "${displayName}" (${productTypeForDropdown})`);
+            normalizedLineage = 'HYBRID';
+        }
+        
         // NOW create options using normalizedLineage (database lineage) for selection
         uniqueLineages.forEach(option => {
             const optionElement = document.createElement('option');
@@ -5078,13 +4708,24 @@ const TagManager = {
         if (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD') {
             lineageSelect.value = 'CBD';
         } else if (shouldMapToMixed(normalizedLineage)) {
-            lineageSelect.value = 'MIXED';
+            // CRITICAL FIX: Classic types should never get MIXED - use HYBRID instead
+            if (isClassicTypeForDropdown) {
+                lineageSelect.value = 'HYBRID';
+                console.log(`🔄 DROPDOWN FIX: Mapped invalid lineage "${normalizedLineage}" to HYBRID for classic type "${displayName}"`);
+            } else {
+                lineageSelect.value = 'MIXED';
+            }
         } else if (normalizedLineage && uniqueLineages.some(opt => opt.value === normalizedLineage)) {
             lineageSelect.value = normalizedLineage;
         } else {
-            // Fallback to MIXED if lineage doesn't match any valid option
-            lineageSelect.value = 'MIXED';
-            console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for ${displayName}, defaulting to MIXED`);
+            // CRITICAL FIX: Fallback to HYBRID for classic types, MIXED for non-classic
+            if (isClassicTypeForDropdown) {
+                lineageSelect.value = 'HYBRID';
+                console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for classic type "${displayName}", defaulting to HYBRID`);
+            } else {
+                lineageSelect.value = 'MIXED';
+                console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for "${displayName}", defaulting to MIXED`);
+            }
         }
         
         // CRITICAL DEBUG: Log what lineage value was set in dropdown
@@ -7888,64 +7529,31 @@ const TagManager = {
                 return false;
             }
             
-            // CRITICAL FIX: Normalize tags to ensure database lineage is ALWAYS used
-            // This ensures TagManager state reflects database lineage, not Excel lineage
-            console.log(`🔄 Normalizing ${tags.length} tags to prioritize database lineage...`);
-            let normalizedCount = 0;
+            // PERFORMANCE OPTIMIZATION: Single-pass normalization to reduce processing overhead
+            // Normalize tags to ensure database lineage is ALWAYS used (single pass instead of multiple)
+            verboseLog(`Normalizing ${tags.length} tags to prioritize database lineage...`);
             const normalizedTags = tags.map(tag => {
-                const tagName = tag['Product Name*'] || tag.ProductName || 'Unknown';
-                
                 // CRITICAL: ALWAYS prioritize database lineage fields over Excel Lineage
                 if (tag.canonical_lineage || tag.currentLineage) {
                     const dbLineage = (tag.canonical_lineage || tag.currentLineage).toString().trim().toUpperCase();
-                    // Update Excel Lineage field to match database lineage for consistency
-                    if (tag.Lineage !== dbLineage) {
-                        console.log(`🔄 Normalizing "${tagName}": Excel Lineage="${tag.Lineage}" → Database Lineage="${dbLineage}"`);
-                        normalizedCount++;
-                    }
+                    // Update all lineage fields to match database lineage for consistency
                     tag.Lineage = dbLineage;
                     tag.lineage = dbLineage.toLowerCase();
-                    // Ensure all database fields are set
                     tag.currentLineage = dbLineage;
                     tag.canonical_lineage = dbLineage;
-                } else {
-                    // No database lineage - log warning
-                    if (tag.Lineage && tag.Lineage !== 'MIXED') {
-                        console.warn(`⚠️ Tag "${tagName}" missing database lineage (canonical_lineage/currentLineage), using Excel Lineage: "${tag.Lineage}"`);
                     }
-                }
-                return tag;
+                // Apply normalization function if available (for additional processing)
+                return this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag;
             });
             
-            if (normalizedCount > 0) {
-                console.log(`✅ Normalized ${normalizedCount} tags to use database lineage`);
-            }
-            
-            // Use normalized tags
             tags = normalizedTags;
-            
-            verboseLog(`Fetched ${tags.length} available tags`);
+            verboseLog(`Fetched and normalized ${tags.length} available tags`);
 
-            // CRITICAL FIX: Apply normalization function to ensure database lineage is ALWAYS used
-            // This ensures TagManager state reflects database lineage, not Excel lineage
-            console.log(`🔄 CRITICAL: Applying lineage normalization to ${tags.length} tags...`);
-            tags = tags.map(tag => this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag);
-            
-            // Debug: Log sample of normalized tags to verify database lineage is being used
-            const sampleTags = tags.slice(0, 5).map(t => {
-                const name = t['Product Name*'] || t.ProductName || 'Unknown';
-                return {
-                    name: name,
-                    canonical_lineage: t.canonical_lineage || 'NONE',
-                    currentLineage: t.currentLineage || 'NONE',
-                    Lineage: t.Lineage || 'NONE',
-                    hasDbLineage: !!(t.canonical_lineage || t.currentLineage)
-                };
-            });
-            console.log(`📋 CRITICAL: Normalized tags sample:`, sampleTags);
-            
+            // PERFORMANCE: Reduced debug logging - only log summary, not every tag
+            if (verboseLog.enabled) {
             const tagsWithDbLineage = tags.filter(t => t.canonical_lineage || t.currentLineage).length;
-            console.log(`📊 CRITICAL: ${tagsWithDbLineage}/${tags.length} tags have database lineage fields after normalization`);
+                verboseLog(`📊 ${tagsWithDbLineage}/${tags.length} tags have database lineage fields`);
+            }
             
             // CRITICAL FIX: Auto-refresh filters after tags are successfully loaded
             // This ensures filters are populated when data becomes available
@@ -7959,52 +7567,9 @@ const TagManager = {
                 }, 500);
             }
             
-            // CRITICAL DEBUG: Verify database lineage fields are present
-            console.log('🔄 CRITICAL: Checking lineage fields in received tags:');
-            const lineageStats = { withCanonical: 0, withCurrent: 0, withLineageOnly: 0, none: 0 };
-            const missingDbLineage = [];
-            tags.slice(0, 10).forEach(tag => {
-                const name = tag['Product Name*'] || tag.ProductName || 'Unknown';
-                const canonical = tag.canonical_lineage || 'NONE';
-                const current = tag.currentLineage || 'NONE';
-                const excelLineage = tag.Lineage || 'NONE';
-                
-                if (tag.canonical_lineage || tag.currentLineage) {
-                    if (tag.canonical_lineage) lineageStats.withCanonical++;
-                    if (tag.currentLineage) lineageStats.withCurrent++;
-                } else if (tag.Lineage) {
-                    lineageStats.withLineageOnly++;
-                    // CRITICAL: Tag has Excel Lineage but NO database lineage fields
-                    if (excelLineage !== 'NONE' && excelLineage !== 'MIXED') {
-                        missingDbLineage.push(name);
-                        console.warn(`⚠️ CRITICAL: Tag "${name}" has Excel Lineage="${excelLineage}" but NO database lineage fields (canonical_lineage/currentLineage)`);
-                    }
-                } else {
-                    lineageStats.none++;
-                }
-                console.log(`  ✓ ${name}: canonical_lineage=${canonical}, currentLineage=${current}, Excel Lineage=${excelLineage}`);
-            });
-            console.log(`📊 CRITICAL Lineage stats (first 10): withCanonical=${lineageStats.withCanonical}, withCurrent=${lineageStats.withCurrent}, withLineageOnly=${lineageStats.withLineageOnly}, none=${lineageStats.none}`);
-            
-            if (missingDbLineage.length > 0) {
-                console.error(`❌ CRITICAL: ${missingDbLineage.length} tags missing database lineage fields:`, missingDbLineage);
-                console.error(`❌ CRITICAL: Backend is NOT sending database lineage fields (canonical_lineage/currentLineage) for these tags!`);
-            }
-            
             // CRITICAL FIX: Ensure ALL tags in state have database lineage fields set
             // This ensures TagManager state ALWAYS reflects database lineage, not Excel lineage
-            const stateTagsWithDbLineage = tags.map(tag => {
-                // If tag has database lineage, ensure ALL lineage fields match it
-                if (tag.canonical_lineage || tag.currentLineage) {
-                    const dbLineage = (tag.canonical_lineage || tag.currentLineage).toString().trim().toUpperCase();
-                    // Force ALL lineage fields to database value
-                    tag.Lineage = dbLineage;  // Overwrite Excel Lineage with database value
-                    tag.lineage = dbLineage.toLowerCase();
-                    tag.currentLineage = dbLineage;
-                    tag.canonical_lineage = dbLineage;
-                }
-                return tag;
-            });
+            const stateTagsWithDbLineage = tags; // Already normalized above, no need for another pass
             
             // Clear existing state and set new data
             this.state.tags = [...stateTagsWithDbLineage];
@@ -8317,6 +7882,14 @@ const TagManager = {
     async fetchAndUpdateSelectedTags() {
         try {
             verboseLog('Fetching selected tags...');
+            
+            // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 2 seconds)
+            // This prevents tags from disappearing right after selection on initial load
+            const now = Date.now();
+            if (this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000) {
+                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent tag selection detected (within 2s)');
+                return true; // Return success to avoid error handling
+            }
             
             // CRITICAL FIX: Preserve local selections before fetching from backend
             // This prevents selections from disappearing if backend hasn't saved them yet
@@ -9046,6 +8619,11 @@ const TagManager = {
             }
         }
 
+        // Safety net: ensure loading overlay never blocks interaction for long
+        // Reduced to 10 seconds since we're using faster timeouts and cache
+        // Declare splashSafetyTimeout early so it can be cleared in early return paths
+        let splashSafetyTimeout = null;
+
         // PERFORMANCE FIX: Try cache first for instant load
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length > 0) {
@@ -9086,7 +8664,9 @@ const TagManager = {
                 console.warn('Background load error (non-critical):', err);
             });
             
-            clearTimeout(splashSafetyTimeout);
+            if (splashSafetyTimeout) {
+                clearTimeout(splashSafetyTimeout);
+            }
             this._checkingExistingData = false;
             return; // Exit early - we have cached data
         }
@@ -9096,9 +8676,8 @@ const TagManager = {
             setTimeout(() => reject(new Error('Initialization timeout')), 8000);
         });
 
-        // Safety net: ensure loading overlay never blocks interaction for long
-        // Reduced to 10 seconds since we're using faster timeouts and cache
-        const splashSafetyTimeout = setTimeout(() => {
+        // Set the safety timeout
+        splashSafetyTimeout = setTimeout(() => {
             // Check if tags have loaded before hiding splash
             const availableTagsContainer = document.getElementById('availableTags');
             const tagItems = availableTagsContainer ? availableTagsContainer.querySelectorAll('.tag-item') : [];
@@ -10159,39 +9738,45 @@ const TagManager = {
         this.state.isClearing = true;
         this.clearAvailableTagsCache();
         
+        // CRITICAL FIX: Get button references before try block so they're accessible in catch
+        const clearBtn = document.getElementById('clearFiltersBtn');
+        const clearResetBtn = document.querySelector('button[onclick*="clearSelected"]');
+        
+        // CRITICAL FIX: Disable clear button immediately to prevent multiple clicks
+        if (clearBtn) {
+            clearBtn.disabled = true;
+            clearBtn.style.opacity = '0.6';
+            clearBtn.style.cursor = 'wait';
+        }
+        if (clearResetBtn) {
+            clearResetBtn.disabled = true;
+            clearResetBtn.style.opacity = '0.6';
+            clearResetBtn.style.cursor = 'wait';
+        }
+        
+        // CRITICAL FIX: Set timeout to ensure flag is always reset (prevent freeze)
+        const clearingTimeout = setTimeout(() => {
+            if (this.state.isClearing) {
+                console.warn('⚠️ Clear operation took too long, forcing reset of isClearing flag');
+                this.state.isClearing = false;
+                // Re-enable buttons
+                if (clearBtn) {
+                    clearBtn.disabled = false;
+                    clearBtn.style.opacity = '1';
+                    clearBtn.style.cursor = 'pointer';
+                }
+                if (clearResetBtn) {
+                    clearResetBtn.disabled = false;
+                    clearResetBtn.style.opacity = '1';
+                    clearResetBtn.style.cursor = 'pointer';
+                }
+            }
+        }, 10000); // 10 second timeout
+        
         try {
             verboseLog('🔄 Clearing selected tags and performing full app reset...');
             
-            // Show loading feedback
-            this.showActionSplash('Clearing and resetting...');
-
-            // Clear search inputs without nuking the entire DOM
-            this.resetSearchInputs();
-            
-            // Call the backend API to clear selected tags
-            let response;
-            try {
-                response = await fetch('/api/clear-filters', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            } catch (fetchError) {
-                console.error('Network error clearing filters:', fetchError);
-                // Continue with local clearing even if API fails
-                response = null;
-            }
-            
-            if (response && response.ok) {
-                try {
-                    const data = await response.json();
-                    verboseLog('Backend clear-filters response:', data);
-                } catch (jsonError) {
-                    console.error('Error parsing response:', jsonError);
-                }
-            } else if (response) {
-                console.error('Failed to clear selected tags on server:', response.status, response.statusText);
-            }
-            
+            // INSTANTANEOUS: Update UI state immediately (synchronously)
             // Clear persistent selected tags
             if (this.state) {
                 if (Array.isArray(this.state.persistentSelectedTags)) {
@@ -10200,9 +9785,43 @@ const TagManager = {
                 if (this.state.selectedTags && typeof this.state.selectedTags.clear === 'function') {
                     this.state.selectedTags.clear();
                 }
+                this.state.filterCache = null;
             }
             
-            // Update the selected tags display immediately
+            // INSTANTANEOUS: Clear all checkboxes immediately (no batching)
+            try {
+                const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
+                for (let i = 0; i < availableCheckboxes.length; i++) {
+                    availableCheckboxes[i].checked = false;
+                }
+                
+                const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
+                for (let i = 0; i < selectedCheckboxes.length; i++) {
+                    selectedCheckboxes[i].checked = false;
+                }
+            } catch (checkboxError) {
+                console.error('Error clearing checkboxes:', checkboxError);
+            }
+            
+            // INSTANTANEOUS: Clear search inputs
+            this.resetSearchInputs();
+            
+            // INSTANTANEOUS: Clear all filter dropdowns
+            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+            filterIds.forEach(filterId => {
+                const filterElement = document.getElementById(filterId);
+                if (filterElement) {
+                    filterElement.value = '';
+                }
+            });
+            
+            // INSTANTANEOUS: Reset template to horizontal
+            const templateSelect = document.getElementById('templateSelect');
+            if (templateSelect) {
+                templateSelect.value = 'horizontal';
+            }
+            
+            // INSTANTANEOUS: Update selected tags display immediately
             if (this.updateSelectedTags) {
                 try {
                     this.updateSelectedTags([]);
@@ -10211,123 +9830,152 @@ const TagManager = {
                 }
             }
             
-            // PERFORMANCE: Clear checkboxes in batches without dispatching events to prevent UI freeze
-            // Event handlers check isClearing flag, so no need to dispatch events
+            // INSTANTANEOUS: Show all available tags immediately
             try {
-                const availableCheckboxes = document.querySelectorAll('#availableTags input[type="checkbox"]');
-                const batchSize = 100; // Process 100 checkboxes at a time
-                
-                // Clear checkboxes in batches to prevent blocking UI
-                const clearBatch = (index) => {
-                    const end = Math.min(index + batchSize, availableCheckboxes.length);
-                    for (let i = index; i < end; i++) {
-                        availableCheckboxes[i].checked = false;
-                    }
-                    
-                    if (end < availableCheckboxes.length) {
-                        // Process next batch in next frame to avoid blocking
-                        requestAnimationFrame(() => clearBatch(end));
-                    } else {
-                        // All checkboxes cleared, now clear selected tags
-                        requestAnimationFrame(() => {
-                            const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
-                            selectedCheckboxes.forEach(checkbox => {
-                                checkbox.checked = false;
-                            });
-                            
-                            // Show all available tags in next frame
-                            requestAnimationFrame(() => {
-                                try {
-                                    const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
-                                    // Use display style in batch
-                                    const tagBatchSize = 200;
-                                    const showBatch = (tagIndex) => {
-                                        const tagEnd = Math.min(tagIndex + tagBatchSize, availableTagItems.length);
-                                        for (let i = tagIndex; i < tagEnd; i++) {
-                                            availableTagItems[i].style.display = 'block';
-                                        }
-                                        if (tagEnd < availableTagItems.length) {
-                                            requestAnimationFrame(() => showBatch(tagEnd));
-                                        }
-                                    };
-                                    showBatch(0);
-                                } catch (displayError) {
-                                    console.error('Error showing available tags:', displayError);
-                                }
-                            });
-                        });
-                    }
-                };
-                
-                if (availableCheckboxes.length > 0) {
-                    clearBatch(0);
-                } else {
-                    // No checkboxes to clear, proceed directly
-                    const selectedCheckboxes = document.querySelectorAll('#selectedTags input[type="checkbox"]');
-                    selectedCheckboxes.forEach(checkbox => {
-                        checkbox.checked = false;
-                    });
+                const availableTagItems = document.querySelectorAll('#availableTags .tag-item');
+                for (let i = 0; i < availableTagItems.length; i++) {
+                    availableTagItems[i].style.display = 'block';
                 }
-            } catch (checkboxError) {
-                console.error('Error clearing checkboxes:', checkboxError);
+            } catch (displayError) {
+                console.error('Error showing available tags:', displayError);
             }
             
-            // Clear filter cache to ensure fresh data
-            if (this.state) {
-                this.state.filterCache = null;
+            // INSTANTANEOUS: Update select all checkboxes
+            if (this.updateSelectAllCheckboxes) {
+                try {
+                    this.updateSelectAllCheckboxes();
+                } catch (updateError) {
+                    console.error('Error updating select all checkboxes:', updateError);
+                }
             }
             
-            // PERFORMANCE: Defer expensive operations to avoid blocking UI during clear
-            // Use requestAnimationFrame to batch these operations after checkbox clearing completes
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    // Update available tags display to reflect cleared state
-                    if (this.efficientlyUpdateAvailableTagsDisplay) {
-                        try {
-                            this.efficientlyUpdateAvailableTagsDisplay();
-                        } catch (updateError) {
-                            console.error('Error updating available tags display:', updateError);
-                        }
-                    }
-                    
-                    // Update select all checkboxes to unchecked state
-                    if (this.updateSelectAllCheckboxes) {
-                        try {
-                            this.updateSelectAllCheckboxes();
-                        } catch (updateError) {
-                            console.error('Error updating select all checkboxes:', updateError);
-                        }
-                    }
-                    
-                    // Also clear filters (non-blocking)
-                    if (this.clearAllFilters) {
-                        this.clearAllFilters().catch(filterError => {
-                            console.error('Error clearing filters:', filterError);
-                        });
-                    }
-                });
-            });
+            // INSTANTANEOUS: Apply filters to show all tags
+            if (this.applyFilters) {
+                this.applyFilters();
+            }
+            
+            // INSTANTANEOUS: Render active filters (should be empty now)
+            if (this.renderActiveFilters) {
+                this.renderActiveFilters();
+            }
+            
+            // INSTANTANEOUS: Update available tags display
+            if (this.efficientlyUpdateAvailableTagsDisplay) {
+                try {
+                    this.efficientlyUpdateAvailableTagsDisplay();
+                } catch (updateError) {
+                    console.error('Error updating available tags display:', updateError);
+                }
+            }
+            
+            // Reset the clearing flag immediately
+            clearTimeout(clearingTimeout);
+            this.state.isClearing = false;
+            
+            // CRITICAL FIX: Re-enable clear button
+            if (clearBtn) {
+                clearBtn.disabled = false;
+                clearBtn.style.opacity = '1';
+                clearBtn.style.cursor = 'pointer';
+            }
+            if (clearResetBtn) {
+                clearResetBtn.disabled = false;
+                clearResetBtn.style.opacity = '1';
+                clearResetBtn.style.cursor = 'pointer';
+            }
             
             verboseLog('✅ Selected tags cleared and app reset completed successfully');
             
-            // Show success message
+            // Show success message (non-blocking)
             if (window.Toast && window.Toast.show) {
                 window.Toast.show('success', 'Cleared and reset successfully', { duration: 2000 });
             }
             
+            // CRITICAL FIX: Add timeout to fetch operations to prevent hanging
+            const fetchWithTimeout = (url, options, timeout = 5000) => {
+                return Promise.race([
+                    fetch(url, options),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Request timeout')), timeout)
+                    )
+                ]);
+            };
+            
+            // NON-BLOCKING: Clear JSON matches and switch to full Excel view with timeout
+            fetchWithTimeout('/api/json-clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }, 5000).then(() => {
+                // Then switch to full Excel view
+                return fetchWithTimeout('/api/toggle-json-filter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filter_mode: 'full_excel' })
+                }, 5000);
+            }).then(response => {
+                if (response && response.ok) {
+                    return response.json();
+                }
+                return null;
+            }).then(data => {
+                // Always refresh available tags after clearing JSON matches and switching to full Excel
+                verboseLog('Refreshing available tags with full Excel data...');
+                if (this.fetchAndUpdateAvailableTags) {
+                    // CRITICAL FIX: Wrap in try-catch and timeout to prevent hanging
+                    try {
+                        this.fetchAndUpdateAvailableTags();
+                    } catch (fetchError) {
+                        console.error('Error refreshing available tags:', fetchError);
+                        this.state.isClearing = false; // Ensure flag is reset
+                    }
+                }
+            }).catch(fetchError => {
+                // Silently handle errors - UI is already updated, but still try to refresh tags
+                verboseLog('Backend JSON clear/toggle call failed (non-critical):', fetchError);
+                // Still refresh tags to ensure we show full Excel data
+                if (this.fetchAndUpdateAvailableTags) {
+                    try {
+                        this.fetchAndUpdateAvailableTags();
+                    } catch (refreshError) {
+                        console.error('Error refreshing available tags after failure:', refreshError);
+                        this.state.isClearing = false; // Ensure flag is reset
+                    }
+                }
+            });
+            
+            // NON-BLOCKING: Fire-and-forget backend API call for clearing filters (don't wait for it)
+            fetchWithTimeout('/api/clear-filters', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }, 5000).catch(fetchError => {
+                // Silently handle errors - UI is already updated
+                verboseLog('Backend clear-filters call failed (non-critical):', fetchError);
+            });
+            
         } catch (error) {
             console.error('Failed to clear selected tags:', error);
-            // Show error message
+            // CRITICAL FIX: Always reset the clearing flag and clear timeout
+            clearTimeout(clearingTimeout);
+            this.state.isClearing = false;
+            
+            // CRITICAL FIX: Re-enable clear button even on error (buttons already declared above)
+            if (clearBtn) {
+                clearBtn.disabled = false;
+                clearBtn.style.opacity = '1';
+                clearBtn.style.cursor = 'pointer';
+            }
+            if (clearResetBtn) {
+                clearResetBtn.disabled = false;
+                clearResetBtn.style.opacity = '1';
+                clearResetBtn.style.cursor = 'pointer';
+            }
+            
+            // Show error message (non-blocking)
             if (window.Toast && window.Toast.show) {
                 window.Toast.show('error', `Failed to clear: ${error.message}`, { duration: 5000 });
             } else {
                 alert(`Failed to clear and reset: ${error.message}`);
             }
-        } finally {
-            // Hide loading splash
-            this.hideActionSplash();
-            // Reset the clearing flag
-            this.state.isClearing = false;
         }
     },
 
@@ -11084,18 +10732,20 @@ const TagManager = {
             
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
-                    // Increasing delays: 100ms (for session save), 500ms, 1000ms
-                    const delay = attempt === 0 ? 100 : attempt === 1 ? 500 : 1000;
+                    // PERFORMANCE: Increased delays to allow backend file processing
+                    // 500ms initial delay (for file load + session save), then 1000ms, 2000ms
+                    const delay = attempt === 0 ? 500 : attempt === 1 ? 1000 : 2000;
                     if (attempt > 0) {
                         await new Promise(resolve => setTimeout(resolve, delay));
                         verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload...`);
                     } else {
                         await new Promise(resolve => setTimeout(resolve, delay));
-                        verboseLog('🔄 Loading tags instantly after upload...');
+                        verboseLog('🔄 Loading tags after upload (allowing time for file processing)...');
                     }
                     
                     const tagsController = new AbortController();
-                    const tagsTimeout = setTimeout(() => tagsController.abort(), 8000); // 8s timeout
+                    // PERFORMANCE: Increased timeout after upload to allow for file processing (15s instead of 8s)
+                    const tagsTimeout = setTimeout(() => tagsController.abort(), 15000); // 15s timeout after upload
                     
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
                     const tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
@@ -11138,6 +10788,13 @@ const TagManager = {
                         }
                     }
                 } catch (tagsError) {
+                    const isTimeout = tagsError.name === 'AbortError' || tagsError.message?.includes('aborted');
+                    if (isTimeout) {
+                        verboseLog(`⏱️ Tag loading timeout (attempt ${attempt + 1}/${maxRetries}) - file may still be processing`);
+                    } else {
+                        verboseLog(`⚠️ Tag loading error (attempt ${attempt + 1}/${maxRetries}):`, tagsError);
+                    }
+                    
                     if (attempt === maxRetries - 1) {
                         // Last attempt failed - try using the standard tag loading method instead of reloading
                         console.warn('⚠️ Failed to load tags after all retries, trying standard method:', tagsError);
@@ -11500,13 +11157,16 @@ const TagManager = {
         const isWindows = navigator.platform.toLowerCase().includes('win') || 
                          navigator.userAgent.toLowerCase().includes('windows');
         
+        // Store reference to this for use in closures
+        const self = this;
+        
         // Ultra-fast debounced filter update (Mac-like speed)
         // Immediate filter update function (no debounce for instant response)
         const immediateFilterUpdate = async (filterType, value) => {
             verboseLog(`🔥 immediateFilterUpdate called for ${filterType}: ${value}`);
             
             // CRITICAL FIX: Don't update filters during deselection
-            if (this.state.isProcessingDeselection) {
+            if (self.state.isProcessingDeselection) {
                 verboseLog('🚫 SKIPPING immediateFilterUpdate - currently processing deselection');
                 return;
             }
@@ -11524,30 +11184,40 @@ const TagManager = {
             
             const stateKey = filterTypeMap[filterType];
             if (stateKey) {
-                this.state.filters[stateKey] = value || 'All';
+                self.state.filters[stateKey] = value || 'All';
             }
             
             // GUARANTEED FIX: Save filters to localStorage when they change
-            this.saveFiltersToStorage();
+            self.saveFiltersToStorage();
             
             // Apply filters immediately with immediate UI update (bypass debounce)
             // Cancel any pending debounced updates to prevent delays
-            if (this.debouncedUpdateAvailableTags.cancel) {
-                this.debouncedUpdateAvailableTags.cancel();
+            if (self.debouncedUpdateAvailableTags && self.debouncedUpdateAvailableTags.cancel) {
+                self.debouncedUpdateAvailableTags.cancel();
             }
             
             // Call applyFilters with immediate flag to skip debounce
-            this.applyFilters(true); // Pass true to indicate immediate update
+            if (self.applyFilters) {
+                self.applyFilters(true); // Pass true to indicate immediate update
+            } else {
+                console.error('applyFilters method not found on TagManager');
+            }
             
             // Update filter options asynchronously (non-blocking) after UI update
             Promise.resolve().then(async () => {
                 if (!isWindows) {
                     // Mac: Update filter options and render active filters
-                    await this.updateFilterOptions();
-                    this.renderActiveFilters();
+                    if (self.updateFilterOptions) {
+                        await self.updateFilterOptions();
+                    }
+                    if (self.renderActiveFilters) {
+                        self.renderActiveFilters();
+                    }
                 } else {
                     // Windows: Just update filter options (skip renderActiveFilters for speed)
-                    await this.updateFilterOptions();
+                    if (self.updateFilterOptions) {
+                        await self.updateFilterOptions();
+                    }
                 }
             }).catch(err => {
                 console.warn('Filter options update failed (non-critical):', err);
@@ -11560,9 +11230,13 @@ const TagManager = {
                         const dohValueUpper = (value || '').toString().trim().toUpperCase();
                         // Treat "No"/empty/NONE as removing the DOH image and persisting 'No'
                         if (dohValueUpper === 'NONE' || dohValueUpper === 'NO' || dohValueUpper === '') {
-                            await this.bulkUpdateDohForSelected('NONE');
+                            if (self.bulkUpdateDohForSelected) {
+                                await self.bulkUpdateDohForSelected('NONE');
+                            }
                         } else if (dohValueUpper === 'DOH' || dohValueUpper === 'THC' || dohValueUpper === 'CBD') {
-                            await this.bulkUpdateDohForSelected(dohValueUpper);
+                            if (self.bulkUpdateDohForSelected) {
+                                await self.bulkUpdateDohForSelected(dohValueUpper);
+                            }
                         }
                     } catch (bulkErr) {
                         console.warn('Bulk DOH update from filter failed:', bulkErr);
@@ -11573,38 +11247,68 @@ const TagManager = {
             verboseLog(`🔥 immediateFilterUpdate completed for ${filterType}`);
         };
         
+        let foundCount = 0;
+        let missingFilters = [];
+        
         filterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
             
             if (filterElement) {
+                foundCount++;
                 // Remove all existing listeners for clean slate
-                filterElement.removeEventListener('change', filterElement._filterChangeHandler);
-                filterElement.removeEventListener('input', filterElement._filterInputHandler);
-                filterElement.removeEventListener('click', filterElement._filterClickHandler);
+                if (filterElement._filterChangeHandler) {
+                    filterElement.removeEventListener('change', filterElement._filterChangeHandler);
+                }
+                if (filterElement._filterInputHandler) {
+                    filterElement.removeEventListener('input', filterElement._filterInputHandler);
+                }
+                if (filterElement._filterClickHandler) {
+                    filterElement.removeEventListener('click', filterElement._filterClickHandler);
+                }
                 
                 // Single, fast event handler (Mac-like simplicity)
-                const self = this;
                 filterElement._filterChangeHandler = (event) => {
-                    verboseLog(`🔥 FILTER CHANGED: ${filterId} = "${event.target.value}"`);
-                    const filterType = self.getFilterTypeFromId(filterId);
-                    const value = event.target.value;
-                    
-                    // Special handling for vendor filter
-                    if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
-                        self.resetAllOtherFilters();
+                    try {
+                        verboseLog(`🔥 FILTER CHANGED: ${filterId} = "${event.target.value}"`);
+                        const filterType = self.getFilterTypeFromId(filterId);
+                        const value = event.target.value;
+                        
+                        // Special handling for vendor filter
+                        if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
+                            if (self.resetAllOtherFilters) {
+                                self.resetAllOtherFilters();
+                            }
+                        }
+                        
+                        // Immediate filter update (no debounce for instant response)
+                        verboseLog(`🔥 Calling immediateFilterUpdate for ${filterType}: ${value}`);
+                        immediateFilterUpdate(filterType, value);
+                    } catch (error) {
+                        console.error(`Error in filter change handler for ${filterId}:`, error);
                     }
-                    
-                    // Immediate filter update (no debounce for instant response)
-                    verboseLog(`🔥 Calling immediateFilterUpdate for ${filterType}: ${value}`);
-                    immediateFilterUpdate(filterType, value);
                 };
                 
                 // Only use change event for Mac-like behavior
                 filterElement.addEventListener('change', filterElement._filterChangeHandler);
                 
-                verboseLog(`Fast event listener attached to ${filterId}`);
+                verboseLog(`✅ Fast event listener attached to ${filterId}`);
+            } else {
+                missingFilters.push(filterId);
+                console.warn(`⚠️ Filter element not found: ${filterId}`);
             }
         });
+        
+        if (foundCount === 0) {
+            console.error('❌ No filter elements found! Filters will not work. Retrying in 500ms...');
+            setTimeout(() => {
+                console.log('🔄 Retrying filter event listener setup...');
+                this.setupFilterEventListeners();
+            }, 500);
+        } else if (missingFilters.length > 0) {
+            console.warn(`⚠️ Some filter elements missing: ${missingFilters.join(', ')}. Found ${foundCount}/${filterIds.length} filters.`);
+        } else {
+            verboseLog(`✅ All ${foundCount} filter event listeners attached successfully`);
+        }
     },
 
     setupSearchEventListeners() {

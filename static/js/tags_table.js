@@ -28,17 +28,101 @@ if (typeof window.ABBREVIATED_LINEAGE === 'undefined') {
 // Use window.ABBREVIATED_LINEAGE directly to avoid const redeclaration
 // This will reference the one from main.js if it exists, or our fallback
 
+// Helper function to normalize lineage values consistently - make it globally available
+if (typeof window.normalizeLineageValue === 'undefined') {
+  window.normalizeLineageValue = function(lineage) {
+    if (!lineage) return 'MIXED';
+    
+    const normalized = String(lineage).trim().toUpperCase();
+    
+    // CRITICAL: "THC" is an abbreviation for "MIXED"
+    // Convert it to MIXED - valid for non-classic types (edibles), invalid for classic types
+    if (normalized === 'THC') {
+      return 'MIXED'; // Convert THC abbreviation to MIXED
+    }
+    
+    // Handle common variations
+    if (normalized === 'CBD_BLEND' || normalized === 'CBD BLEND') {
+      return 'CBD';
+    }
+    if (normalized.includes('HYBRID/INDICA') || normalized.includes('HYBRID INDICA')) {
+      return 'HYBRID/INDICA';
+    }
+    if (normalized.includes('HYBRID/SATIVA') || normalized.includes('HYBRID SATIVA')) {
+      return 'HYBRID/SATIVA';
+    }
+    if (normalized.includes('SATIVA') && !normalized.includes('HYBRID')) {
+      return 'SATIVA';
+    }
+    if (normalized.includes('INDICA') && !normalized.includes('HYBRID')) {
+      return 'INDICA';
+    }
+    if (normalized.includes('HYBRID')) {
+      return 'HYBRID';
+    }
+    if (normalized.includes('CBD')) {
+      return 'CBD';
+    }
+    if (normalized.includes('PARAPHERNALIA') || normalized === 'PARA') {
+      return 'PARA';  // Match dropdown option value
+    }
+    if (normalized.includes('MIXED')) {
+      return 'MIXED';
+    }
+    
+    // Default fallback
+    return normalized || 'MIXED';
+  };
+}
+
 // Use full lineage names for all dropdowns
-const getUniqueLineages = () => {
-  return ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','MIXED','PARA'];
+const getUniqueLineages = (productType = null) => {
+  // Valid lineages for classic types (from VALID_CLASSIC_LINEAGES constant)
+  const VALID_CLASSIC_LINEAGES = ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD'];
+  const ALL_LINEAGES = ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','MIXED','PARA'];
+  
+  // If productType is provided and it's a classic type, exclude MIXED
+  if (productType) {
+    const typeLower = (productType || '').toString().toLowerCase().trim();
+    const CLASSIC_TYPES = [
+      'flower', 'bud', 'pre-roll', 'infused pre-roll', 'preroll',
+      'concentrate', 'solventless concentrate', 'live resin', 'rosin', 
+      'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 
+      'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar',
+      'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'
+    ];
+    
+    const isClassicType = CLASSIC_TYPES.some(ct => typeLower.includes(ct) || typeLower === ct);
+    if (isClassicType) {
+      // For classic types, only return valid classic lineages (no MIXED, no PARA)
+      return VALID_CLASSIC_LINEAGES;
+    }
+  }
+  
+  // For non-classic types, return all lineages including MIXED
+  return ALL_LINEAGES;
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
-  // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
-  let lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
-  // CRITICAL: Normalize lineage to uppercase for consistent dropdown matching
-  lineage = (lineage || 'MIXED').toString().trim().toUpperCase();
+  // CRITICAL: Use database lineage directly - canonical_lineage/currentLineage is source of truth
+  // Respect database values - don't convert unless absolutely necessary
+  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
+  
+  // Normalize to uppercase, but keep the original value
+  let lineage = String(rawLineage || '').trim().toUpperCase();
+  
+  // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+  // This ensures UI displays correct lineage even if database/Excel has wrong value
+  const productType = tag['Product Type*'] || tag.Type || '';
+  const isClassicType = productType && getUniqueLineages(productType).length === 6;
+  if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+    lineage = 'HYBRID';
+  }
+  
+  // Only convert if lineage is empty
+  if (!lineage) {
+    lineage = isClassicType ? 'HYBRID' : 'MIXED';
+  }
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
@@ -59,14 +143,28 @@ function createTagRow(tag) {
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
                             onchange="TagsTable.handleLineageChange(this, '${tagName}')">
-                        <option value="SATIVA" ${lineage === 'SATIVA' ? 'selected' : ''}>S</option>
-                        <option value="INDICA" ${lineage === 'INDICA' ? 'selected' : ''}>I</option>
-                        <option value="HYBRID" ${lineage === 'HYBRID' ? 'selected' : ''}>H</option>
-                        <option value="HYBRID/SATIVA" ${lineage === 'HYBRID/SATIVA' ? 'selected' : ''}>H/S</option>
-                        <option value="HYBRID/INDICA" ${lineage === 'HYBRID/INDICA' ? 'selected' : ''}>H/I</option>
-                        <option value="CBD" ${(lineage === 'CBD' || lineage === 'CBD_BLEND') ? 'selected' : ''}>CBD</option>
-                        <option value="MIXED" ${(lineage === 'MIXED' || !['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'].includes((lineage || '').toUpperCase())) ? 'selected' : ''}>THC</option>
-                        <option value="PARA" ${lineage === 'PARA' ? 'selected' : ''}>P</option>
+                        ${(() => {
+                          const productType = tag['Product Type*'] || tag.Type || '';
+                          const uniqueLineages = getUniqueLineages(productType);
+                          
+                          // CRITICAL FIX: Convert MIXED/THC to HYBRID for classic types before dropdown creation
+                          let dropdownLineage = lineage;
+                          const isClassicType = productType && getUniqueLineages(productType).length === 6;
+                          if (isClassicType && (dropdownLineage === 'MIXED' || dropdownLineage === 'THC')) {
+                            dropdownLineage = 'HYBRID';
+                          }
+                          
+                          return uniqueLineages.map(lin => {
+                            const linNormalized = (typeof window.normalizeLineageValue !== 'undefined') 
+                              ? window.normalizeLineageValue(lin)
+                              : String(lin).trim().toUpperCase();
+                            
+                            // Compare normalized values directly - use converted lineage for classic types
+                            const selected = (dropdownLineage === linNormalized) ? 'selected' : '';
+                            const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
+                            return `<option value="${lin}" ${selected}>${displayName}</option>`;
+                          }).join('');
+                        })()}
                     </select>
                 </div>
             </td>
@@ -123,9 +221,26 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Use same pipeline as backend - prefer canonical_lineage/currentLineage (from DB) over Lineage
-  // This ensures UI lineages match database (strains.canonical_lineage is source of truth)
-  const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+  // CRITICAL: Use database lineage directly - canonical_lineage/currentLineage is source of truth
+  // Respect database values - don't convert unless absolutely necessary
+  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
+  
+  // Normalize to uppercase, but keep the original database value
+  let lineage = String(rawLineage || '').trim().toUpperCase();
+  
+  // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+  // This ensures UI displays correct lineage even if database/Excel has wrong value
+  const productType = tag['Product Type*'] || tag.Type || '';
+  const isClassicType = productType && getUniqueLineages(productType).length === 6;
+  if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+    lineage = 'HYBRID';
+  }
+  
+  // Only set default if lineage is completely missing
+  if (!lineage) {
+    lineage = isClassicType ? 'HYBRID' : 'MIXED';
+  }
+  
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
     
@@ -198,9 +313,23 @@ class TagsTable {
     const color = getLineageColorFromBackendRules(lineage);
 
     // Use abbreviated lineage names for compact dropdown
-    const uniqueLineages = getUniqueLineages();
+    // CRITICAL: Exclude MIXED for classic types - MIXED is only for non-classic types
+    // Note: productType already declared above (line 233), reusing it here
+    const uniqueLineages = getUniqueLineages(productType);
+    
+    // CRITICAL FIX: Ensure lineage is converted from MIXED/THC to HYBRID for classic types before dropdown creation
+    // This ensures the dropdown shows the correct selected value
+    let dropdownLineage = lineage;
+    const isClassicTypeForDropdown = productType && getUniqueLineages(productType).length === 6;
+    if (isClassicTypeForDropdown && (dropdownLineage === 'MIXED' || dropdownLineage === 'THC')) {
+      dropdownLineage = 'HYBRID';
+      console.log(`🔄 TAGS_TABLE DROPDOWN FIX: Converting ${lineage} to HYBRID for classic type "${tagName}" (${productType})`);
+    }
+    
     const dropdownOptions = uniqueLineages.map(lin => {
-      const selected = (lineage === lin || (lin === 'CBD' && lineage === 'CBD_BLEND')) ? 'selected' : '';
+      // Both values are already normalized - direct comparison
+      const linNormalized = window.normalizeLineageValue(lin);
+      const selected = (dropdownLineage === linNormalized) ? 'selected' : '';
       const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
@@ -218,11 +347,11 @@ class TagsTable {
 
     // Add DOH and High CBD images if applicable
     const dohValue = (tag.DOH || '').toString().toUpperCase();
-    const productType = (tag['Product Type*'] || '').toString().toLowerCase();
+    const productTypeLower = productType.toLowerCase();
     let dohImageHtml = '';
     
     if (dohValue === 'YES') {
-      if (productType.startsWith('high cbd')) {
+      if (productTypeLower.startsWith('high cbd')) {
         dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 24px; width: auto; margin-left: 6px; vertical-align: middle;">';
       } else if (tagName.toLowerCase().includes('high thc')) {
         dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 24px; width: auto; margin-left: 6px; vertical-align: middle;">';
@@ -264,10 +393,16 @@ class TagsTable {
     `;
   }
 
-  static createLineageSelect(currentLineage, tagName) {
-    const uniqueLineages = getUniqueLineages();
+  static createLineageSelect(currentLineage, tagName, productType = null) {
+    // CRITICAL: Exclude MIXED for classic types - MIXED is only for non-classic types
+    // Normalize current lineage using consistent helper function
+    const normalizedLineage = window.normalizeLineageValue(currentLineage);
+    
+    const uniqueLineages = getUniqueLineages(productType);
     const options = uniqueLineages.map(lin => {
-      const selected = (currentLineage === lin || (lin === 'CBD' && currentLineage === 'CBD_BLEND')) ? 'selected' : '';
+      // Both values are already normalized - direct comparison
+      const linNormalized = window.normalizeLineageValue(lin);
+      const selected = (normalizedLineage === linNormalized) ? 'selected' : '';
       const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
