@@ -5483,16 +5483,14 @@ class ExcelProcessor:
         # But we'll optimize by creating filtered DataFrames more efficiently
         for filter_key, col in filter_map.items():
             # Create filtered DataFrame by applying all OTHER filters (not the current one)
-            # PERFORMANCE: Use view/copy only when necessary, apply filters in-place where possible
+            # CRITICAL FIX: Start with the original df for each filter type to avoid cross-contamination
             temp_df = df
             
             # Apply all other filters except the current one
-            filters_applied = False
             for key, value in current_filters.items():
                 if key == filter_key:
                     continue  # Skip filtering by itself
                 if value and value != "All":
-                    filters_applied = True
                     # CRITICAL FIX: Handle vendor filter specially to check multiple column names
                     if key == "vendor" and vendor_col:
                         temp_df = temp_df[
@@ -5504,14 +5502,6 @@ class ExcelProcessor:
                             temp_df = temp_df[
                                 temp_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
                             ]
-            
-            # Only create a copy if we actually applied filters (to avoid unnecessary copies)
-            if filters_applied and not temp_df is df:
-                # Already filtered, no need to copy
-                pass
-            elif filters_applied:
-                # Need to ensure we have a filtered view
-                pass
             
             # CRITICAL FIX: Handle vendor filter specially to check multiple column names
             if filter_key == "vendor":

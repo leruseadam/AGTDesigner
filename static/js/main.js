@@ -12070,8 +12070,12 @@ const TagManager = {
             }
             
             // Apply the cleared filters to show all tags (call after ensuring filters are cleared)
-            if (this.applyFilters) {
+            // CRITICAL FIX: Only call applyFilters if we have tags loaded, otherwise tags will load naturally
+            if (this.applyFilters && this.state.originalTags && this.state.originalTags.length > 0) {
                 this.applyFilters(true); // Use immediate flag to show all tags right away
+            } else if (this.state.tags && this.state.tags.length > 0) {
+                // If we have tags but no originalTags, just update with current tags
+                this._updateAvailableTags(this.state.tags, null);
             }
             
             // Render active filters (should be empty now)
