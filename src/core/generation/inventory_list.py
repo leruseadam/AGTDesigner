@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 
 from docx import Document
 from docx.shared import Pt, Inches
-from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
@@ -193,19 +193,19 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             section.page_width = new_width
             section.page_height = new_height
             # Tighten margins a bit to fit more columns/rows on the page
-            section.left_margin = Inches(0.4)
-            section.right_margin = Inches(0.4)
-            section.top_margin = Inches(0.4)
-            section.bottom_margin = Inches(0.4)
+            section.left_margin = Inches(0.25)
+            section.right_margin = Inches(0.25)
+            section.top_margin = Inches(0.25)
+            section.bottom_margin = Inches(0.25)
         except Exception as e:
             logger.warning(f"INVENTORY LIST: Failed to set landscape orientation: {e}")
 
         # Title
         title = doc.add_heading("Current Inventory", level=0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        # Slightly smaller title to save vertical space
+        # Smaller title to save vertical space
         for run in title.runs:
-            run.font.size = Pt(18)
+            run.font.size = Pt(14)
 
         # Sort categories alphabetically
         for category in sorted(grouped.keys(), key=lambda c: c.lower()):
@@ -217,11 +217,15 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             heading = doc.add_heading(category, level=1)
             heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
             for run in heading.runs:
-                run.font.size = Pt(12)
+                run.font.size = Pt(9)
+            # Remove extra spacing before/after heading
+            for paragraph in heading._element.xpath(".//w:p"):
+                p = paragraph
+                # We can't easily wrap as Paragraph, but heading spacing is already small; skip heavy XML tweaks
 
-            # Table with 9 columns
+            # Table with 9 columns - use a plain grid style to minimize ink (no colored fills)
             table = doc.add_table(rows=1, cols=9)
-            table.style = "Light Grid Accent 1"
+            table.style = "Table Grid"
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
             headers = [
@@ -241,7 +245,16 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                 for paragraph in header_cells[idx].paragraphs:
                     for run in paragraph.runs:
                         run.font.bold = True
-                        run.font.size = Pt(9)
+                        run.font.size = Pt(7)
+                    # Compact header spacing
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(0)
+                    paragraph.paragraph_format.line_spacing = 1.0
+
+            # Make header row more compact
+            header_row = table.rows[0]
+            header_row.height = Pt(10)
+            header_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
             # Sort items within category alphabetically by product name
             items_sorted = sorted(
@@ -261,14 +274,19 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                 row_cells[7].text = _get_accepted_date(record)
                 row_cells[8].text = _get_room(record)
 
-                # Make body font slightly smaller to maximize rows per page
+                # Make body font very compact to maximize rows per page
                 for cell in row_cells:
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
-                            run.font.size = Pt(8)
+                            run.font.size = Pt(6)
+                        paragraph.paragraph_format.space_before = Pt(0)
+                        paragraph.paragraph_format.space_after = Pt(0)
+                        paragraph.paragraph_format.line_spacing = 1.0
 
-            # Add a blank paragraph after each category for spacing
-            doc.add_paragraph("")
+                # Compact row height
+                row = table.rows[-1]
+                row.height = Pt(9)
+                row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
         logger.info(
             f"INVENTORY LIST: Generated inventory list with "

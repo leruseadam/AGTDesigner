@@ -1078,88 +1078,19 @@ class TagsTable {
   }
 
   static addEventListeners(container) {
-    // Add checkbox change listeners
+    // Add lightweight checkbox change listeners (UI-only; heavy work is centralized in TagManager)
     container.querySelectorAll('.tag-checkbox').forEach(checkbox => {
       checkbox.addEventListener('change', function(e) {
         try {
-          // CRITICAL FIX: Don't process during deselection to prevent filter clearing
-          if (TagManager.state.isProcessingDeselection) {
-            console.log('🚫 TagsTable: Skipping checkbox handler - currently processing deselection');
-            return;
-          }
-          
-          if (this.checked) {
-            TagManager.state.selectedTags.add(this.value);
-          } else {
-            const tagName = this.value;
-            console.log(`🔄 Deselecting tag: ${tagName}`);
-            
-            TagManager.state.selectedTags.delete(tagName);
-            // Also remove from persistent selections to avoid drift
-            const idx = TagManager.state.persistentSelectedTags.indexOf(tagName);
-            if (idx > -1) TagManager.state.persistentSelectedTags.splice(idx, 1);
-            
-            // CRITICAL: Also uncheck the corresponding checkbox in available tags
-            // Try multiple selector approaches to be more robust
-            let availableCheckbox = document.querySelector(`#availableTags .tag-checkbox[value="${tagName}"]`);
-            if (!availableCheckbox) {
-              // Try escaping special characters in the value
-              const escapedValue = tagName.replace(/"/g, '\\"');
-              availableCheckbox = document.querySelector(`#availableTags .tag-checkbox[value="${escapedValue}"]`);
-            }
-            if (!availableCheckbox) {
-              // Try finding by iterating through checkboxes
-              const allAvailableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
-              for (let cb of allAvailableCheckboxes) {
-                if (cb.value === tagName) {
-                  availableCheckbox = cb;
-                  break;
-                }
-              }
-            }
-            
-            if (availableCheckbox) {
-              availableCheckbox.checked = false;
-              console.log(`✅ Unchecked available tags checkbox for ${tagName}`);
-              
-              // Also update the UI state if the checkbox element has a handler
-              if (availableCheckbox._changeHandler) {
-                console.log('Found checkbox handler, triggering update');
-                // Don't trigger the handler, just ensure UI consistency
-              }
-              
-              // Immediately update hierarchical checkboxes after unchecking
-              requestAnimationFrame(() => {
-                if (TagManager.updateSelectAllCheckboxes) {
-                  TagManager.updateSelectAllCheckboxes();
-                }
-              });
-            } else {
-              console.warn(`⚠️ Could not find available tags checkbox for: ${tagName}`);
-            }
-            
-            // Remove DOM row when in selected list without triggering big re-render
-            const row = this.closest('.tag-item, .tag-row');
-            if (row) {
-              // Look for an ancestor that is the selected tags container
-              const selectedContainer = row.closest('#selectedTags');
-              if (selectedContainer) {
-                row.remove();
-                if (TagManager && typeof TagManager.updateTagCount === 'function') {
-                  TagManager.updateTagCount('selected', TagManager.state.persistentSelectedTags.length);
-                }
-              }
-            }
-          }
-          // Halt further propagation to avoid any global listeners that might reload data
+          // Keep this handler minimal so checkbox toggles feel instant.
+          // TagManager's delegated handlers will manage state, counts, and
+          // any cross-list synchronization.
           if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
           e.stopPropagation();
-          e.preventDefault();
         } catch (error) {
-          console.error('Error in checkbox change handler:', error);
-          // Prevent the error from causing the page to exit
+          console.error('Error in lightweight checkbox change handler:', error);
         }
-      });
+      }, { passive: true });
     });
 
     // Require explicit checkbox clicks; do not toggle selection on tag body clicks

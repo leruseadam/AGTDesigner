@@ -8315,7 +8315,11 @@ def get_available_tags():
             logging.warning(f"FAST DB path: failed to resolve product database: {db_err}")
             product_db = None
 
-        if fast_load and not prefer_db and not force_full_refresh and product_db and hasattr(product_db, 'get_available_tags_fast'):
+        # NOTE: Even when force_full_refresh is set due to recent lineage edits,
+        # the database already holds the canonical lineage values. It's safe and
+        # desirable to serve tags directly from DB here instead of falling back
+        # to the slower Excel/lineage-alignment path.
+        if fast_load and not prefer_db and product_db and hasattr(product_db, 'get_available_tags_fast'):
             try:
                 db_fast_start = time.time()
                 logging.info("⚡ ULTRA-FAST DB: Using ProductDatabase.get_available_tags_fast() for available-tags")

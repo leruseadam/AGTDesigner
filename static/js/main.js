@@ -1361,6 +1361,101 @@ const TagManager = {
         }
     },
 
+    // Quickly derive filter option lists directly from a set of tags.
+    // This is used to populate the top dropdowns immediately after tags load,
+    // instead of waiting on the slower /api/filter-options endpoint.
+    computeFilterOptionsFromTags(tags) {
+        if (!Array.isArray(tags) || tags.length === 0) {
+            return null;
+        }
+
+        const availableOptions = {
+            vendor: new Set(),
+            brand: new Set(),
+            productType: new Set(),
+            lineage: new Set(),
+            weight: new Set(),
+            doh: new Set(),
+            highCbd: new Set()
+        };
+
+        // Use the full tag list for vendor/brand/productType/lineage/DOH/High CBD
+        const tagsForOptions = tags;
+
+        for (let i = 0; i < tagsForOptions.length; i++) {
+            const tag = tagsForOptions[i];
+
+            // Vendor
+            const vendor = (tag.Vendor || tag.vendor || '').toString().trim();
+            if (vendor) availableOptions.vendor.add(vendor);
+
+            // Brand
+            const brand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
+            if (brand) availableOptions.brand.add(brand);
+
+            // Product Type (normalized)
+            const productType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+            if (productType) {
+                const normalizedType = typeof normalizeProductType === 'function'
+                    ? normalizeProductType(productType)
+                    : productType;
+                if (normalizedType) availableOptions.productType.add(normalizedType);
+            }
+
+            // Lineage (including CBD blend detection)
+            const rawLineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
+            if (rawLineage) {
+                availableOptions.lineage.add(rawLineage);
+            }
+
+            const nameLower = (tag['Product Name*'] || tag.ProductName || '').toString().toLowerCase();
+            const typeLower = (tag['Product Type*'] || tag.productType || '').toString().toLowerCase();
+            const hasCbdFlag = (rawLineage && (rawLineage.toLowerCase().includes('cbd') ||
+                                               rawLineage.toLowerCase().includes('cbg') ||
+                                               rawLineage.toLowerCase().includes('cbn') ||
+                                               rawLineage.toLowerCase().includes('cbc'))) ||
+                nameLower.includes('cbd') || nameLower.includes('cbg') ||
+                nameLower.includes('cbn') || nameLower.includes('cbc') ||
+                typeLower.includes('high cbd') || typeLower.includes('cbd');
+            if (hasCbdFlag) {
+                availableOptions.lineage.add('CBD_BLEND');
+            }
+
+            // DOH
+            const doh = (tag.DOH || tag.doh || '').toString().trim();
+            if (doh) availableOptions.doh.add(doh);
+
+            // High CBD Products vs Non-High CBD Products
+            if (typeLower.startsWith('high cbd')) {
+                availableOptions.highCbd.add('High CBD Products');
+            } else if (typeLower) {
+                availableOptions.highCbd.add('Non-High CBD Products');
+            }
+        }
+
+        // Weight options – use same logic as updateFilterOptions
+        for (let i = 0; i < tags.length; i++) {
+            const tag = tags[i];
+            const combined = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits ||
+                             tag.CombinedWeight || tag['Weight*'] || tag.weight);
+            if (combined) {
+                const combinedStr = combined.toString().trim();
+                if (combinedStr) availableOptions.weight.add(combinedStr);
+            }
+        }
+
+        // Convert Sets to arrays for updateFilters
+        return {
+            vendor: Array.from(availableOptions.vendor),
+            brand: Array.from(availableOptions.brand),
+            productType: Array.from(availableOptions.productType),
+            lineage: Array.from(availableOptions.lineage),
+            weight: Array.from(availableOptions.weight),
+            doh: Array.from(availableOptions.doh),
+            highCbd: Array.from(availableOptions.highCbd)
+        };
+    },
+
     updateFilters(filters, preserveExistingValues = true) {
         if (!filters) return;
         
@@ -7699,10 +7794,21 @@ const TagManager = {
             // This ensures filters are populated when data becomes available
             if (tags.length > 0) {
                 verboseLog('Tags loaded successfully, refreshing filters...');
-                // Use a small delay to ensure Excel processor is ready
+                // INSTANT PATH: Immediately populate filter dropdowns from loaded tags
+                try {
+                    const instantFilters = this.computeFilterOptionsFromTags(tags);
+                    if (instantFilters) {
+                        this.updateFilters(instantFilters, false); // Don't preserve old values on first load
+                    }
+                } catch (e) {
+                    console.warn('Instant filter computation failed (non-critical):', e);
+                }
+
+                // BACKGROUND PATH: Still fetch server-side filter options for parity
+                // but do not block UI – any later updates will be subtle refinements.
                 setTimeout(() => {
-                    this.fetchAndPopulateFilters(0).catch(error => {
-                        console.warn('Auto-refresh filters after tag load failed (non-critical):', error);
+                    this.fetchAndPopulateFilters(0, true).catch(error => {
+                        console.warn('Background filter refresh after tag load failed (non-critical):', error);
                     });
                 }, 500);
             }
