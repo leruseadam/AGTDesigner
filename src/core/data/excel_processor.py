@@ -7991,6 +7991,11 @@ class ExcelProcessor:
         cache_key = self._build_cache_key('available_tags', filters or {})
         cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
         if cached_tags is not None:
+            # PERFORMANCE: When fast-load is enabled, skip enrichment and return cached tags directly
+            if getattr(self, '_skip_enrichment', False):
+                logger.info("⚡ Fast-load: returning cached available_tags without database enrichment")
+                return self._clone_tag_results(cached_tags)
+            
             # CRITICAL FIX: Always enrich cached tags with fresh database values
             # This ensures lineage updates are reflected even when cache is used
             # Database lineage ALWAYS overrides cached/Excel lineage values
@@ -8002,11 +8007,13 @@ class ExcelProcessor:
         
         # CRITICAL FIX: Update Excel DataFrame Lineage column from database BEFORE building tags
         # This ensures tags are built with database lineage, not Excel file lineage
-        try:
-            self._update_dataframe_lineage_from_database()
-        except Exception as df_update_err:
-            logger.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
-            # Continue even if update fails - enrichment will handle it later
+        # PERFORMANCE: Skip this expensive step when fast-load is enabled
+        if not getattr(self, '_skip_enrichment', False):
+            try:
+                self._update_dataframe_lineage_from_database()
+            except Exception as df_update_err:
+                logger.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
+                # Continue even if update fails - enrichment will handle it later
 
         def _return_with_cache(tag_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # PERFORMANCE: Skip enrichment if flag is set (for fast post-upload loading)
