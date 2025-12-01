@@ -70,7 +70,7 @@ IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
 MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
-CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
+CHUNK_SIZE_LIMIT = 100              # PERFORMANCE: Increased from 50 to 100 for faster generation of large batches
 
 def get_font_scheme(template_type, base_size=12):
     schemes = {
@@ -1179,6 +1179,12 @@ class TemplateProcessor:
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
             # QR code functionality enabled
+            # Debug: Log QR code presence in context before rendering
+            qr_count = sum(1 for label_key, label_data in context.items() 
+                          if isinstance(label_data, dict) and label_data.get('QR') and 
+                          not (isinstance(label_data.get('QR'), str) and label_data.get('QR').strip() == ''))
+            self.logger.info(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
+            
             try:
                 doc.render(context)
                 self.logger.debug("DocxTemplate render completed successfully")
@@ -2713,16 +2719,20 @@ class TemplateProcessor:
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
+                if qr_code:
+                    self.logger.info(f"PREROLL QR: Successfully generated QR code for URL: {qr_url}")
+                else:
+                    self.logger.error(f"PREROLL QR: Failed to generate QR code for URL: {qr_url}")
             else:
                 # All other templates: use product name as before
                 qr_code = self._generate_qr_code(product_name, doc)
             
             if qr_code:
                 label_context['QR'] = qr_code
-                self.logger.debug(f"Generated QR code for template '{self.template_type}': '{product_name if self.template_type != 'preroll' else qr_url}'")
+                self.logger.info(f"✅ QR CODE SET: Template '{self.template_type}', Product: '{product_name if self.template_type != 'preroll' else qr_url}', QR object type: {type(qr_code)}")
             else:
                 label_context['QR'] = ''
-                self.logger.warning(f"Failed to generate QR code for product: '{product_name}'")
+                self.logger.warning(f"❌ QR CODE MISSING: Failed to generate QR code for product: '{product_name}' (template: {self.template_type})")
         else:
             label_context['QR'] = ''
             self.logger.debug("No product name available for QR code generation")
@@ -2807,11 +2817,17 @@ class TemplateProcessor:
             qr_size = Mm(qr_size_mm)
             
             # Check if doc is a DocxTemplate or Document
+            # CRITICAL FIX: Always use the doc parameter for InlineImage creation
+            # DocxTemplate requires the template object to properly render InlineImage
             if hasattr(doc, 'docx'):
                 # This is a DocxTemplate - use it directly for InlineImage
+                # This is required for DocxTemplate to properly render the image
                 qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
+                self.logger.debug(f"Created InlineImage with DocxTemplate for QR code: {clean_name[:50]}")
             else:
                 # This is a Document - create InlineImage with None template for manual insertion
+                # This shouldn't happen during normal rendering, but handle it gracefully
+                self.logger.warning(f"QR code generation received Document instead of DocxTemplate - creating InlineImage with None")
                 qr_inline_image = InlineImage(None, img_buffer, width=qr_size)
                 # Store document reference for manual insertion
                 qr_inline_image._doc = doc
