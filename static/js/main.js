@@ -10733,21 +10733,26 @@ const TagManager = {
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
                     // PERFORMANCE: Increased delays to allow backend file processing
-                    // 500ms initial delay (for file load + session save), then 1000ms, 2000ms
-                    const delay = attempt === 0 ? 500 : attempt === 1 ? 1000 : 2000;
+                    // 1000ms initial delay (for file load + session save + Excel processing), then 2000ms, 3000ms
+                    const delay = attempt === 0 ? 1000 : attempt === 1 ? 2000 : 3000;
                     if (attempt > 0) {
                         await new Promise(resolve => setTimeout(resolve, delay));
-                        verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload...`);
+                        verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload (waiting ${delay}ms for backend processing)...`);
                     } else {
                         await new Promise(resolve => setTimeout(resolve, delay));
-                        verboseLog('🔄 Loading tags after upload (allowing time for file processing)...');
+                        verboseLog(`🔄 Loading tags after upload (waiting ${delay}ms for backend file processing and Excel loading)...`);
                     }
                     
                     const tagsController = new AbortController();
-                    // PERFORMANCE: Increased timeout after upload to allow for file processing (15s instead of 8s)
-                    const tagsTimeout = setTimeout(() => tagsController.abort(), 15000); // 15s timeout after upload
+                    // PERFORMANCE: Increased timeout after upload to allow for file processing (30s for large files)
+                    // Large Excel files can take time to process, especially on first load
+                    const tagsTimeout = setTimeout(() => {
+                        verboseLog('⏱️ Tag loading timeout - file may be large, continuing to wait...');
+                        tagsController.abort();
+                    }, 30000); // 30s timeout after upload for large files
                     
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
+                    verboseLog(`🔄 Requesting tags from /api/available-tags (timeout: 30s)...`);
                     const tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
                         signal: tagsController.signal
                     });
