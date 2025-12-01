@@ -7327,9 +7327,99 @@ const TagManager = {
         verboseLog('All checkboxes and tag items updated and enabled');
     },
 
+    // Ultra-fast, non-blocking prefetch using the lite tags endpoint.
+    // This is used to get *something* on screen immediately on cold loads,
+    // while the full /api/available-tags endpoint continues to load in the background.
+    async _prefetchLiteAvailableTags(savedScrollPosition) {
+        try {
+            // If we already rendered lite or full tags, don't overwrite them
+            if (this._liteTagsRendered || (Array.isArray(this.state.tags) && this.state.tags.length > 0)) {
+                return;
+            }
+
+            verboseLog('Prefetching lite available tags for instant first render...');
+            const controller = new AbortController();
+            // Keep this timeout short – we only want it if it is truly fast
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+            const response = await fetch(`/api/available-tags-lite?t=${Date.now()}`, {
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                verboseLog('Lite tags prefetch skipped – non-OK response:', response.status);
+                return;
+            }
+
+            const responseText = await response.text();
+            if (!responseText) {
+                verboseLog('Lite tags prefetch returned empty body');
+                return;
+            }
+
+            let liteData;
+            try {
+                liteData = JSON.parse(responseText);
+            } catch (parseError) {
+                console.warn('Failed to parse /api/available-tags-lite prefetch response:', {
+                    parseError,
+                    snippet: responseText.slice(0, 500)
+                });
+                return;
+            }
+
+            if (!liteData || !Array.isArray(liteData.tags) || liteData.tags.length === 0) {
+                verboseLog('Lite tags prefetch returned no tags – skipping UI update');
+                return;
+            }
+
+            // Normalize lineage fields to keep behavior consistent with full endpoint
+            const liteTags = liteData.tags.map(tag => this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag);
+
+            // If full tags arrived while we were fetching lite tags, don't overwrite them
+            if (Array.isArray(this.state.tags) && this.state.tags.length > 0) {
+                verboseLog('Skipping lite prefetch render – full tags already loaded');
+                return;
+            }
+
+            this._liteTagsRendered = true;
+            this.state.tags = [...liteTags];
+            this.state.originalTags = [...liteTags];
+            this.state.hydratedFromCache = false;
+            this.saveAvailableTagsToCache(liteTags);
+
+            this._updateAvailableTags(liteTags);
+            if (savedScrollPosition) {
+                this._restoreAvailableScrollPosition(savedScrollPosition);
+            }
+
+            this.updateTagCount('available', liteTags.length);
+            this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+
+            // Once something is on screen, remove the splash so it feels instant
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+
+            verboseLog(`✅ Lite tags prefetch rendered ${liteTags.length} tags for instant load`);
+        } catch (e) {
+            if (e && e.name === 'AbortError') {
+                verboseLog('Lite tags prefetch aborted (timeout) – continuing with full available-tags flow');
+            } else {
+                verboseLog('Lite tags prefetch failed (non-critical):', e);
+            }
+        }
+    },
+
     async fetchAndUpdateAvailableTags() {
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
+            // Ensure flag is initialized
+            if (typeof this._liteTagsRendered === 'undefined') {
+                this._liteTagsRendered = false;
+            }
+
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
                 console.log('✅ Tags rendered instantly from cache - fetching fresh lineage from database');
@@ -7345,24 +7435,37 @@ const TagManager = {
             }
             
             // Only show loading if we don't have cached tags
-            console.log('⏳ No cache available - showing loader');
-            this.showActionSplash('Loading tags...');
-            
-            // Show loading indicator in container IMMEDIATELY to prevent blank screen
+            console.log('⏳ No cache available - preparing loader');
+            // Only replace the list with a loader on true cold start; during mid-use refreshes,
+            // keep the existing inventory visible so it does not disappear while new tags load.
             const availableTagsContainer = document.getElementById('availableTags');
-            if (availableTagsContainer) {
-                availableTagsContainer.innerHTML = `
-                    <div class="text-center py-4">
-                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                            <span class="visually-hidden">Loading...</span>
+            const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
+            if (!hasExistingTags) {
+                this.showActionSplash('Loading tags...');
+                if (availableTagsContainer) {
+                    availableTagsContainer.innerHTML = `
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 text-white">Loading tags...</p>
                         </div>
-                        <p class="mt-2 text-white">Loading tags...</p>
-                    </div>
-                `;
+                    `;
+                }
+            } else {
+                // For warm refreshes, just show the splash without clearing the current list.
+                this.showActionSplash('Refreshing tags...');
             }
             
             // Preserve current scroll/anchor so refreshes don't jump the list
             const savedScroll = this._saveAvailableScrollPosition();
+
+            // Fire off a non-blocking lite prefetch to get instant tags while the
+            // full /api/available-tags endpoint is still loading.
+            // This should never throw or block the main flow.
+            this._prefetchLiteAvailableTags(savedScroll).catch(err => {
+                verboseLog('Lite prefetch error (non-critical):', err);
+            });
             
             // Rate limiting: prevent rapid successive calls
             // Reduced from 2000ms to 500ms to allow faster retries while still preventing abuse
@@ -7727,7 +7830,21 @@ const TagManager = {
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
             // CRITICAL FIX: savedScroll may not be defined if error occurs early - save it now if needed
             const savedScrollForFallback = typeof savedScroll !== 'undefined' ? savedScroll : this._saveAvailableScrollPosition();
-            const fallbackLoaded = await this._fallbackToLiteAvailableTags(error, savedScrollForFallback);
+            // If this is just a timeout/AbortError and we already have tags on screen,
+            // keep the existing inventory visible and avoid nuking the UI.
+            const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
+            if (error && error.name === 'AbortError' && hasExistingTags) {
+                verboseLog('Available tags request aborted, preserving existing inventory');
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                return true;
+            }
+
+            // If lite tags already rendered successfully, don't invoke fallback again
+            const fallbackLoaded = this._liteTagsRendered
+                ? false
+                : await this._fallbackToLiteAvailableTags(error, savedScrollForFallback);
             if (fallbackLoaded) {
                 verboseLog('✅ Fallback lite tags loaded successfully');
                 return true;

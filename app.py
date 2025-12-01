@@ -1886,7 +1886,15 @@ app = create_app()
 
 # Initialize Flask-Caching after app creation (if available)
 if CACHE_AVAILABLE:
-    cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 300})
+    # CRITICAL FIX: Use a shared filesystem cache so preroll QR data is visible
+    # across all worker processes (SimpleCache is per-process and loses data between workers).
+    cache_config = {
+        'CACHE_TYPE': 'FileSystemCache',
+        'CACHE_DIR': CACHE_DIR,
+        # 24h default timeout for group/item data so QR codes remain valid through the day
+        'CACHE_DEFAULT_TIMEOUT': 86400
+    }
+    cache = Cache(app, config=cache_config)
 else:
     cache = Cache()  # Use dummy cache
 
@@ -3148,35 +3156,16 @@ def upload_file():
             return jsonify(response_data)
             
         else:
-            # Local development: FAST UPLOAD - save file and load it immediately
-            # This ensures tags can be loaded immediately after upload
-            logging.info("[LOCAL] Fast upload mode - saving file and loading immediately")
+            # Local development: FAST UPLOAD - save file only
+            # Let the first tag/filter request lazily load the Excel file instead of blocking the upload.
+            logging.info("[LOCAL] Fast upload mode - saving file only (lazy Excel load on first tag request)")
             
-            # CRITICAL FIX: Load the file immediately after upload so tags can be accessed right away
-            # This ensures tags are available immediately when requested, preventing timeouts
+            # Ensure any existing in‑memory processor doesn't hold on to the old file
             try:
-                processor = get_excel_processor()
-                logging.info(f"✅ Loading uploaded file immediately: {file_path}")
-                success = processor.load_file(file_path)
-                if success:
-                    processor._last_loaded_file = file_path
-                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                    logging.info(f"✅ Successfully loaded {row_count} rows immediately after upload")
-                    
-                    # CRITICAL: Pre-populate dropdown cache to speed up tag loading
-                    if hasattr(processor, '_cache_dropdown_values'):
-                        try:
-                            processor._cache_dropdown_values()
-                            logging.info("✅ Pre-populated dropdown cache after upload")
-                        except Exception as cache_err:
-                            logging.warning(f"Could not pre-populate dropdown cache: {cache_err}")
-                else:
-                    logging.error(f"❌ Failed to load file immediately after upload: {file_path}")
-                    # Don't fail the upload, but log the error
+                _excel_processor = None  # type: ignore[name-defined]
+                logging.info("✅ Cleared in‑memory Excel processor; new file will be loaded lazily")
             except Exception as load_error:
-                logging.error(f"❌ Error loading file immediately after upload: {load_error}")
-                logging.error(traceback.format_exc())
-                # Don't fail the upload, but log the error
+                logging.warning(f"⚠️ Could not clear in‑memory Excel processor: {load_error}")
             
             # CRITICAL: Clear ALL caches to force complete refresh
             try:
@@ -8252,6 +8241,29 @@ def get_available_tags():
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
         if cached_tags and not nocache:
+            # SUPER FAST PATH: If this is a fast-load request and we have cached tags,
+            # return them immediately without any additional database work.
+            # Full lineage alignment will still be done later by non-fast-load or
+            # prefer_db/refresh calls, but simple page refreshes stay instant.
+            if fast_load and not prefer_db:
+                safe_all_tags = make_json_safe(cached_tags)
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(
+                    f"⚡ SUPER-FAST: Returning {len(safe_all_tags)} cached tags for fast_load request "
+                    f"({elapsed:.1f}ms, source='cache-ultrafast')"
+                )
+                resp = jsonify({
+                    'tags': safe_all_tags,
+                    'total_count': len(safe_all_tags),
+                    'source': 'cache-ultrafast'
+                })
+                try:
+                    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                    resp.headers['Pragma'] = 'no-cache'
+                except Exception:
+                    pass
+                return resp
+
             # PERFORMANCE OPTIMIZATION: Skip lineage alignment when fast_load is enabled and no recent updates
             # This dramatically speeds up tag loading (from 30-60s to <1s)
             # Only align lineage when:
