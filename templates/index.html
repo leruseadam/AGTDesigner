@@ -3715,6 +3715,11 @@
     }
 
     /* Database Editor Modal Styles */
+    #databaseEditorModal .modal-dialog {
+      max-width: min(1200px, 95vw);
+      margin: 1.75rem auto;
+    }
+
     #databaseEditorModal .modal-content {
       background: rgba(22, 33, 62, 0.95);
       backdrop-filter: blur(20px);
@@ -3722,6 +3727,18 @@
       border: 1px solid rgba(0, 212, 170, 0.3);
       border-radius: 20px;
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(0, 212, 170, 0.1);
+    }
+
+    #databaseEditorModal .modal-body {
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 220px);
+    }
+
+    #databaseEditorModal .database-editor-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
     }
 
     #databaseEditorModal .modal-header {
@@ -11805,7 +11822,7 @@
 
   <!-- Database Editor Modal -->
   <div class="modal fade" id="databaseEditorModal" tabindex="-1" aria-labelledby="databaseEditorModalLabel" aria-hidden="true">                                                                                         
-    <div class="modal-dialog modal-xl">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
       <div class="modal-content">
         <div class="modal-header border-0">
           <h5 class="modal-title" id="databaseEditorModalLabel">
@@ -11819,6 +11836,7 @@
         </div>
         <div class="modal-body">
           <!-- Database Editor Content -->
+          <div class="database-editor-scroll">
           <div class="row mb-3">
             <div class="col-md-6">
               <div class="input-group">
@@ -11878,6 +11896,7 @@
                 Load More
               </button>
             </div>
+          </div>
           </div>
         </div>
         <div class="modal-footer border-0">

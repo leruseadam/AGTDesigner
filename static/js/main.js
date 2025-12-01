@@ -10824,6 +10824,21 @@ const TagManager = {
                     </div>
                 `;
             }
+
+            // NEW: Immediately kick off lite tag prefetch so something appears quickly,
+            // even if the full /api/available-tags call is still processing the upload.
+            if (typeof this._prefetchLiteAvailableTags === 'function') {
+                try {
+                    const savedScroll = this._saveAvailableScrollPosition
+                        ? this._saveAvailableScrollPosition()
+                        : null;
+                    this._prefetchLiteAvailableTags(savedScroll).catch(err => {
+                        verboseLog('Lite prefetch after upload failed (non-critical):', err);
+                    });
+                } catch (e) {
+                    verboseLog('Lite prefetch after upload threw (non-critical):', e);
+                }
+            }
             
             // Update file info immediately
             const fileInfoText = document.getElementById('fileInfoText');
