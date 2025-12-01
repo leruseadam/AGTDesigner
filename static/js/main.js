@@ -12033,14 +12033,14 @@ const TagManager = {
             // CRITICAL FIX: Prevent infinite recursion - don't call performFullAppReset which calls this again
             // Instead, do the filter clearing directly
             
-            // Clear all filter dropdowns (don't trigger events yet to avoid multiple applyFilters calls)
+            // Clear all filter dropdowns (set to empty string which represents "All")
             const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
             
             filterIds.forEach(filterId => {
                 const filterElement = document.getElementById(filterId);
                 if (filterElement) {
                     filterElement.value = '';
-                    verboseLog(`Cleared ${filterId}`);
+                    verboseLog(`Cleared ${filterId} to empty string (All)`);
                 }
             });
             
@@ -12055,16 +12055,23 @@ const TagManager = {
             // Clear filter cache
             this.state.filterCache = null;
             
-            // Apply the cleared filters to show all tags (single call after all filters are cleared)
-            if (this.applyFilters) {
-                this.applyFilters();
-            }
-            
-            // Update filter dropdowns to show all options
+            // Update filter dropdowns to show all options (refresh options, but don't preserve values)
             if (this.state.originalFilterOptions && this.state.originalFilterOptions.vendor) {
                 if (this.updateFilters) {
                     this.updateFilters(this.state.originalFilterOptions, false); // Don't preserve values when clearing
+                    // CRITICAL FIX: After updateFilters, ensure all filters are still set to empty string (All)
+                    filterIds.forEach(filterId => {
+                        const filterElement = document.getElementById(filterId);
+                        if (filterElement) {
+                            filterElement.value = '';
+                        }
+                    });
                 }
+            }
+            
+            // Apply the cleared filters to show all tags (call after ensuring filters are cleared)
+            if (this.applyFilters) {
+                this.applyFilters(true); // Use immediate flag to show all tags right away
             }
             
             // Render active filters (should be empty now)
@@ -12081,7 +12088,7 @@ const TagManager = {
                 }, 150);
             }
             
-            verboseLog('✅ All filters cleared successfully');
+            verboseLog('✅ All filters cleared successfully - showing all tags');
             
         } catch (error) {
             console.error('❌ Error during clear all filters:', error);

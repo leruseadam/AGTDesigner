@@ -4877,43 +4877,67 @@ class TemplateProcessor:
             
             # Add each part as a separate run, with line breaks between them
             size_index = 0
+            previous_was_empty = False
             for i, part in enumerate(parts):
-                if part.strip():  # Only add non-empty parts
-                    # CRITICAL FIX: Preserve non-breaking hyphens when stripping whitespace
-                    # Check for non-breaking hyphens before stripping
-                    if '\u2011' in part:
-                        self.logger.debug(f"BR CONVERSION DEBUG: Found non-breaking hyphens in part: '{part}'")
-                    # Strip whitespace for all content to remove extra spaces, but preserve non-breaking hyphens
-                    # First, temporarily replace non-breaking hyphens with a placeholder
-                    temp_part = part.replace('\u2011', '___NONBREAKING_HYPHEN___')
-                    # Then strip whitespace
-                    stripped_part = temp_part.strip()
-                    # Finally, restore non-breaking hyphens
-                    stripped_part = stripped_part.replace('___NONBREAKING_HYPHEN___', '\u2011')
-                    # Check for non-breaking hyphens after stripping
-                    if '\u2011' in stripped_part:
-                        self.logger.debug(f"BR CONVERSION DEBUG: Preserved non-breaking hyphens after strip: '{stripped_part}'")
-                    else:
-                        self.logger.debug(f"BR CONVERSION DEBUG: Lost non-breaking hyphens after strip: '{stripped_part}'")
-                    run = paragraph.add_run(stripped_part)
-                    run.font.name = "Arial"
-                    
-                    # ALL text should be Arial Bold - NO EXCEPTIONS
-                    run.font.bold = True
-                    
-                    # Use consistent font size for all runs
-                    if consistent_font_size:
-                        run.font.size = consistent_font_size
-                    else:
-                        # Use unified font sizing for default size
-                        from src.core.generation.unified_font_sizing import get_font_size
-                        default_font_size = get_font_size(stripped_part, 'default', self.template_type, self.scale_factor)
-                        run.font.size = default_font_size
-                    
-                    # Add a line break after this part only if the next part is not empty
-                    if i < len(parts) - 1 and parts[i + 1].strip():
-                        # Use add_break() with WD_BREAK.LINE to create proper line breaks within the same paragraph
+                stripped_part = part.strip() if part else ''
+                is_empty = not stripped_part
+                
+                # CRITICAL FIX: Handle empty parts to ensure text starts on new lines
+                # If previous part was empty or this is the first part and it's empty,
+                # we need to ensure the next part starts on a new line
+                if is_empty:
+                    previous_was_empty = True
+                    # If there's a next part, we'll add a line break before it
+                    continue
+                
+                # If previous part was empty, add a line break before this part
+                if previous_was_empty:
+                    break_run = paragraph.add_run()
+                    break_run.add_break(WD_BREAK.LINE)
+                    previous_was_empty = False
+                
+                # This part has content - add it
+                # CRITICAL FIX: Preserve non-breaking hyphens when stripping whitespace
+                # Check for non-breaking hyphens before stripping
+                if '\u2011' in part:
+                    self.logger.debug(f"BR CONVERSION DEBUG: Found non-breaking hyphens in part: '{part}'")
+                # Strip whitespace for all content to remove extra spaces, but preserve non-breaking hyphens
+                # First, temporarily replace non-breaking hyphens with a placeholder
+                temp_part = part.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                # Then strip whitespace
+                stripped_part = temp_part.strip()
+                # Finally, restore non-breaking hyphens
+                stripped_part = stripped_part.replace('___NONBREAKING_HYPHEN___', '\u2011')
+                # Check for non-breaking hyphens after stripping
+                if '\u2011' in stripped_part:
+                    self.logger.debug(f"BR CONVERSION DEBUG: Preserved non-breaking hyphens after strip: '{stripped_part}'")
+                else:
+                    self.logger.debug(f"BR CONVERSION DEBUG: Lost non-breaking hyphens after strip: '{stripped_part}'")
+                
+                run = paragraph.add_run(stripped_part)
+                run.font.name = "Arial"
+                
+                # ALL text should be Arial Bold - NO EXCEPTIONS
+                run.font.bold = True
+                
+                # Use consistent font size for all runs
+                if consistent_font_size:
+                    run.font.size = consistent_font_size
+                else:
+                    # Use unified font sizing for default size
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    default_font_size = get_font_size(stripped_part, 'default', self.template_type, self.scale_factor)
+                    run.font.size = default_font_size
+                
+                # Add a line break after this part if there's a next part
+                # This ensures that text after |BR| or \n starts on a new line
+                if i < len(parts) - 1:
+                    # Check if next part is empty - if so, we'll handle it in the next iteration
+                    next_part = parts[i + 1].strip() if i + 1 < len(parts) else ''
+                    if next_part:
+                        # Next part has content - add line break after current part
                         run.add_break(WD_BREAK.LINE)
+                    # If next part is empty, we'll add the break before the part after that
             
             # All content now uses standard 1.0 line spacing
             
@@ -6450,17 +6474,18 @@ class TemplateProcessor:
                     if count and count.isdigit():
                         count_int = int(count)
                         if count_int == 1:
-                            # For single units, just show the weight with soft hyphen (breaking) and non-breaking space
-                            formatted = f"\u00AD\u00A0{amount}g"
+                            # For single units, just show the weight with non-breaking hyphen and non-breaking space
+                            formatted = f"\u2011\u00A0{amount}g"
                         else:
-                            # For multiple units, show the full pack format with soft hyphen (breaking) and non-breaking space
-                            formatted = f"\u00AD\u00A0{amount}g x {count} Pack"
+                            # For multiple units, show the full pack format with non-breaking hyphen and non-breaking space
+                            # Use non-breaking hyphen to prevent "1g x 5 Pack" from breaking across lines
+                            formatted = f"\u2011\u00A0{amount}g\u00A0x\u00A0{count}\u00A0Pack"
                     else:
-                        # Only amount found (like "1g") - show just the weight with soft hyphen (breaking) and non-breaking space
-                        formatted = f"\u00AD\u00A0{amount}g"
+                        # Only amount found (like "1g") - show just the weight with non-breaking hyphen and non-breaking space
+                        formatted = f"\u2011\u00A0{amount}g"
                 except IndexError:
-                    # Only amount found (like "1g") - show just the weight with soft hyphen (breaking) and non-breaking space
-                    formatted = f"\u00AD\u00A0{amount}g"
+                    # Only amount found (like "1g") - show just the weight with non-breaking hyphen and non-breaking space
+                    formatted = f"\u2011\u00A0{amount}g"
                 return formatted
         
         # If no pattern matches, return the original text

@@ -16420,21 +16420,60 @@ def update_preroll_items_from_excel(df, session_id=None):
             
             grouped_items[group_key]['items'].append(item)
         
-        # Store items by group in cache
+        # CRITICAL FIX: Aggregate items by group_id (across all price tiers) before storing
+        # This ensures all items for a group are available when QR codes are scanned
+        aggregated_by_group = {}
         for group_key, group_data in grouped_items.items():
             price_tier, group_id = group_key
             group_info = group_data['group_info']
             items = group_data['items']
+            
+            # Aggregate items by group_id (combine all price tiers)
+            if group_id not in aggregated_by_group:
+                aggregated_by_group[group_id] = {
+                    'items': [],
+                    'group_info': group_info,
+                    'vendors': set()  # Track unique vendors for vendor-specific storage
+                }
+            
+            aggregated_by_group[group_id]['items'].extend(items)
+            # Track vendors for vendor-specific cache keys
+            for item in items:
+                vendor = item.get('vendor', '').strip()
+                if vendor:
+                    aggregated_by_group[group_id]['vendors'].add(vendor)
+        
+        # Store aggregated items by group in cache
+        for group_id, group_data in aggregated_by_group.items():
+            items = group_data['items']
+            group_info = group_data['group_info']
+            vendors = group_data['vendors']
             
             # Store group items in cache (with session_id for session-specific access)
             cache.set(f"preroll_group_{session_id}_{group_id}", items, timeout=86400)
             # CRITICAL: Also store with session-independent key so QR codes work across sessions
             # This ensures QR codes can be scanned by anyone, not just the original session
             cache.set(f"preroll_group_latest_{group_id}", items, timeout=86400)
+            
+            # CRITICAL FIX: Store vendor-specific cache keys for better QR code lookup
+            # This allows QR codes with vendor filters to find items more efficiently
+            for vendor in vendors:
+                if vendor:
+                    # Normalize vendor name consistently (same as lookup)
+                    vendor_clean = str(vendor).strip()
+                    # Use normalized vendor for cache key to ensure consistent lookup
+                    group_key = f"{group_id}|{vendor_clean}"
+                    # Store vendor-specific items (filtered)
+                    vendor_items = [item for item in items if str(item.get('vendor', '')).strip() == vendor_clean]
+                    if vendor_items:
+                        cache.set(f"preroll_group_latest_{group_key}", vendor_items, timeout=86400)
+                        cache.set(f"preroll_group_{session_id}_{group_key}", vendor_items, timeout=86400)
+                        logging.info(f"PREROLL: Stored {len(vendor_items)} vendor-specific items for group '{group_id}', vendor '{vendor_clean}' (cache key: preroll_group_latest_{group_key})")
+            
             # Also store group info for display purposes
             cache.set(f"preroll_group_info_{session_id}_{group_id}", group_info, timeout=86400)
             cache.set(f"preroll_group_info_latest_{group_id}", group_info, timeout=86400)
-            logging.info(f"PREROLL: Stored {len(items)} items for group '{group_info['display_name']}' (group_id: {group_id}) from Excel upload with session-independent key for QR codes")
+            logging.info(f"PREROLL: Stored {len(items)} items (aggregated across all price tiers) for group '{group_info['display_name']}' (group_id: {group_id}) from Excel upload with session-independent key for QR codes")
         
         # Update session if in request context
         try:
@@ -20822,7 +20861,11 @@ def display_preroll_items(group_id):
         # Format: group_key = "group_id|vendor"
         preroll_items = None
         if vendor_filter:
-            group_key = f"{group_id}|{vendor_filter}"
+            # Normalize vendor name for cache lookup (must match storage format exactly)
+            vendor_normalized = str(vendor_filter).strip()
+            group_key = f"{group_id}|{vendor_normalized}"
+            logging.info(f"PREROLL ROUTE: Looking up vendor-specific cache with key: 'preroll_group_latest_{group_key}'")
+            
             # Try session-independent key first (most recent items for this vendor+group)
             preroll_items = cache.get(f"preroll_group_latest_{group_key}")
             logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
@@ -20831,6 +20874,15 @@ def display_preroll_items(group_id):
             if not preroll_items:
                 current_session_id = session.get('session_id', 'default')
                 preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key}")
+            
+            # If still not found, try case-insensitive vendor matching
+            if not preroll_items:
+                # Get all items for this group and filter by vendor
+                all_items = cache.get(f"preroll_group_latest_{group_id}")
+                if all_items:
+                    logging.info(f"PREROLL ROUTE: Vendor-specific cache not found, filtering {len(all_items)} items by vendor '{vendor_filter}'")
+                    # Will filter below in the vendor filtering section
+                    preroll_items = all_items
         
         # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
         if not preroll_items:
@@ -20929,7 +20981,25 @@ def display_preroll_items(group_id):
                 preroll_items = filtered_items
                 logging.info(f"PREROLL ROUTE: Filtered {original_count} items to {len(preroll_items)} items based on allowed brands: {PREROLL_ALLOWED_BRANDS}")
         
+        # CRITICAL FIX: Better error handling and debugging
         if not preroll_items:
+            # Log all available cache keys for debugging
+            logging.warning(f"PREROLL ROUTE: No items found for group_id: '{group_id}', vendor: '{vendor_filter}'")
+            logging.warning(f"PREROLL ROUTE: Attempted cache keys:")
+            logging.warning(f"  - preroll_group_latest_{group_id}")
+            if vendor_filter:
+                logging.warning(f"  - preroll_group_latest_{group_id}|{vendor_filter}")
+            
+            # Try to get any available cache keys for debugging
+            try:
+                # Check if cache has any preroll items at all
+                from flask_caching import Cache
+                if hasattr(cache, 'cache'):
+                    # Try to inspect cache (if possible)
+                    logging.warning(f"PREROLL ROUTE: Cache type: {type(cache)}")
+            except Exception as debug_err:
+                logging.debug(f"PREROLL ROUTE: Could not inspect cache: {debug_err}")
+            
             # Return error page if items not found
             return f"""
             <!DOCTYPE html>
