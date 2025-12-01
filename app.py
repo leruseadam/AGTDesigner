@@ -10607,13 +10607,13 @@ def batch_update_lineage():
                 try:
                     original_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
                     
-                    # Check if this is a paraphernalia product and enforce PARAPHERNALIA lineage
+                    # Check if this is a paraphernalia product and enforce PARA lineage
                     try:
                         product_type = excel_processor.df.loc[mask, 'Product Type*'].iloc[0]
                         if str(product_type).strip().lower() == 'paraphernalia':
-                            # Force paraphernalia products to always have PARAPHERNALIA lineage
-                            new_lineage = 'PARAPHERNALIA'
-                            logging.info(f"Enforcing PARAPHERNALIA lineage for paraphernalia product: {tag_name}")
+                            # Force paraphernalia products to always have PARA lineage (frontend shows pink 'P')
+                            new_lineage = 'PARA'
+                            logging.info(f"Enforcing PARA lineage for paraphernalia product: {tag_name}")
                     except (IndexError, KeyError):
                         pass  # If we can't determine product type, proceed with user's choice
                     

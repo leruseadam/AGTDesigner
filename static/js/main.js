@@ -4500,10 +4500,10 @@ const TagManager = {
             const productStrain = tag['Product Strain'] || tag.productStrain || tag.ProductStrain || '';
             const strainStr = String(productStrain).toLowerCase();
             
-            // CRITICAL: For non-classic types, always check for CBD indicators first
-            // If database has a valid non-classic lineage (like CBD_BLEND or MIXED), use it
-            // But if database has classic lineage, ignore it and use CBD detection
-            if (!isClassicLineage && hasValidDatabaseLineage && (lineage === 'CBD_BLEND' || lineage === 'MIXED' || lineage === 'PARAPHERNALIA')) {
+        // CRITICAL: For non-classic types, always check for CBD indicators first
+        // If database has a valid non-classic lineage (like CBD_BLEND, MIXED, PARA/PARAPHERNALIA), use it
+        // But if database has classic lineage, ignore it and use CBD detection
+        if (!isClassicLineage && hasValidDatabaseLineage && (lineage === 'CBD_BLEND' || lineage === 'MIXED' || lineage === 'PARAPHERNALIA' || lineage === 'PARA')) {
                 // Use valid non-classic lineage from database
                 displayLineage = lineage;
                 verboseLog(`🎨 NON-CLASSIC using valid DB lineage: "${displayName}" → ${displayLineage}`);
@@ -4515,8 +4515,9 @@ const TagManager = {
                 displayLineage = 'CBD_BLEND';
                 verboseLog(`🎨 NON-CLASSIC CBD SIGNAL: "${displayName}" → CBD_BLEND (yellow)`);
             } else if (strainStr.includes('paraphernalia')) {
-                displayLineage = 'PARAPHERNALIA'; // Pink color
-                verboseLog(`🎨 NON-CLASSIC PARA: "${displayName}" → PARAPHERNALIA (pink)`);
+                // Use PARA as the canonical code for paraphernalia in the dropdown/UI
+                displayLineage = 'PARA'; // Pink color (mapped in lineage color map)
+                verboseLog(`🎨 NON-CLASSIC PARA: "${displayName}" → PARA (pink)`);
             } else {
                 // Default to MIXED for all other nonclassic types (including capsules without CBD indicators)
                 displayLineage = 'MIXED'; // Blue color
@@ -4747,15 +4748,20 @@ const TagManager = {
         // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
         let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
-        // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
+        // CRITICAL FIX: Force database lineage if it exists, with special handling for PARA/PARAPHERNALIA
         // IMPORTANT: Check tag object DIRECTLY, not the lineage variable, to ensure we get the latest database values
-        const tagDbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
-        if (tagDbLineage) {
+        const tagDbLineageRaw = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+        if (tagDbLineageRaw) {
+            let tagDbLineage = tagDbLineageRaw;
+            // Normalize PARAPHERNALIA to PARA for UI consistency
+            if (tagDbLineage === 'PARAPHERNALIA') {
+                tagDbLineage = 'PARA';
+            }
             // Database lineage exists - use it exclusively, ignore Excel Lineage completely
             if (tagDbLineage !== normalizedLineage) {
                 console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.canonical_lineage=${tag.canonical_lineage} or tag.currentLineage=${tag.currentLineage})`);
             }
-            normalizedLineage = tagDbLineage;  // Force database lineage
+            normalizedLineage = tagDbLineage;  // Force normalized database lineage
         } else {
             // No database lineage - log warning for debugging
             if (isForSelectedTags && normalizedLineage && normalizedLineage !== 'MIXED') {
@@ -4847,10 +4853,6 @@ const TagManager = {
             'resolved lineage': normalizedLineage,
             'dropdown value': lineageSelect.value
         });
-        if (tag.productType === 'Paraphernalia' || tag['Product Type*'] === 'Paraphernalia') {
-            lineageSelect.disabled = true;
-            lineageSelect.style.opacity = '0.7';
-        }
         lineageSelect.addEventListener('change', (e) => {
             // CRITICAL FIX: Skip if this is a programmatic update (not user-initiated)
             if (e.target._isProgrammaticUpdate) {
@@ -9640,9 +9642,9 @@ const TagManager = {
             if (strainLower.includes('cbd blend') || strainLower.includes('cbd') || strainLower.includes('cbn') || strainLower.includes('cbc') || strainLower.includes('cbg')) {
                 return 'CBD_BLEND';
             }
-            // Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
+            // Paraphernalia products -> PARA lineage (pink) - override existing lineage
             else if (strainLower.includes('paraphernalia')) {
-                return 'PARAPHERNALIA';
+                return 'PARA';
             }
             // Mixed products -> MIXED lineage (blue) - override existing lineage
             else if (strainLower.includes('mixed')) {

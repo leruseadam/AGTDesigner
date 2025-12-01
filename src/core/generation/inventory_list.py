@@ -157,9 +157,9 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
     - Within each category, products are sorted alphabetically by product name.
     - Each distinct record is preserved (NO deduplication), so items with different
       barcodes will appear multiple times as required.
-    - Columns include:
-      Product Name, Product Type, Brand, Weight, Vendor,
-      Quantity, Barcode, Accepted Date, Room.
+    - Columns include (in this exact order):
+      Weight, Product Name, Quantity, Product Type, Vendor,
+      Brand, Barcode, Accepted Date, Room.
     """
     try:
         if not records:
@@ -228,13 +228,15 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             table.style = "Table Grid"
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
+            # Column order (matching user preference):
+            # Weight, Product Name, Quantity, Product Type, Vendor, Brand, Barcode, Accepted Date, Room
             headers = [
-                "Product Name",
-                "Product Type",
-                "Brand",
                 "Weight",
-                "Vendor",
+                "Product Name",
                 "Quantity",
+                "Product Type",
+                "Vendor",
+                "Brand",
                 "Barcode",
                 "Accepted Date",
                 "Room",
@@ -264,12 +266,13 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
 
             for record in items_sorted:
                 row_cells = table.add_row().cells
-                row_cells[0].text = _get_product_name(record)
-                row_cells[1].text = _get_product_type(record)
-                row_cells[2].text = _get_brand(record)
-                row_cells[3].text = _get_weight(record)
+                # Weight, Product Name, Quantity, Product Type, Vendor, Brand, Barcode, Accepted Date, Room
+                row_cells[0].text = _get_weight(record)
+                row_cells[1].text = _get_product_name(record)
+                row_cells[2].text = _get_quantity(record)
+                row_cells[3].text = _get_product_type(record)
                 row_cells[4].text = _get_vendor(record)
-                row_cells[5].text = _get_quantity(record)
+                row_cells[5].text = _get_brand(record)
                 row_cells[6].text = _get_barcode(record)
                 row_cells[7].text = _get_accepted_date(record)
                 row_cells[8].text = _get_room(record)
