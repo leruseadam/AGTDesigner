@@ -1720,7 +1720,10 @@ const TagManager = {
             // Removed strain since there's no strainFilter dropdown in the HTML
         };
         
-        // Update each filter dropdown
+        // PERFORMANCE OPTIMIZATION: Prepare all filter data first, then batch DOM updates
+        // This prevents multiple reflows and paints, making filter population much faster
+        const filterUpdates = [];
+        
         Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
             const filterElement = document.getElementById(filterId);
             
@@ -1769,17 +1772,47 @@ const TagManager = {
             // Store current value
             const currentValue = filterElement.value;
             
-            // Update the dropdown options with special formatting for RSO/CO2 Tanker
-            filterElement.innerHTML = `
-                <option value="">All</option>
-                ${sortedValues.map(value => {
-                    // Apply special font formatting for RSO/CO2 Tanker
-                    if (value === 'rso/co2 tankers') {
-                        return `<option value="${value}" style="font-weight: bold; font-style: italic; color: #a084e8;">RSO/CO2 Tanker</option>`;
-                    }
-                    return `<option value="${value}">${value}</option>`;
-                }).join('')}
-            `;
+            // PERFORMANCE: Use DocumentFragment for faster DOM manipulation
+            const fragment = document.createDocumentFragment();
+            
+            // Add "All" option
+            const allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = 'All';
+            fragment.appendChild(allOption);
+            
+            // Add all other options
+            sortedValues.forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                // Apply special font formatting for RSO/CO2 Tanker
+                if (value === 'rso/co2 tankers') {
+                    option.textContent = 'RSO/CO2 Tanker';
+                    option.style.fontWeight = 'bold';
+                    option.style.fontStyle = 'italic';
+                    option.style.color = '#a084e8';
+                } else {
+                    option.textContent = value;
+                }
+                fragment.appendChild(option);
+            });
+            
+            filterUpdates.push({
+                element: filterElement,
+                fragment: fragment,
+                currentValue: currentValue,
+                sortedValues: sortedValues,
+                filterType: filterType,
+                filterId: filterId
+            });
+        });
+        
+        // PERFORMANCE: Apply all DOM updates in a single batch to minimize reflows
+        // Using DocumentFragment and batching all updates together causes only one reflow
+        filterUpdates.forEach(({ element, fragment, currentValue, sortedValues, filterType, filterId }) => {
+            // Clear and replace all options in one operation using DocumentFragment
+            element.innerHTML = '';
+            element.appendChild(fragment);
             
             // Handle value restoration based on preserveExistingValues parameter
             if (preserveExistingValues) {
@@ -1787,7 +1820,7 @@ const TagManager = {
                 if (currentValue && currentValue.trim() !== '') {
                     if (sortedValues.includes(currentValue)) {
                         // Value is still valid, restore it
-                        filterElement.value = currentValue;
+                        element.value = currentValue;
                     } else {
                         // Value is no longer in current options, but preserve it by adding it back
                         verboseLog(`Preserving filter value "${currentValue}" for ${filterId} even though it's not in current options`);
@@ -1795,8 +1828,8 @@ const TagManager = {
                         option.value = currentValue;
                         option.textContent = currentValue;
                         option.style.color = '#666'; // Gray out to indicate it's not currently available
-                        filterElement.appendChild(option);
-                        filterElement.value = currentValue;
+                        element.appendChild(option);
+                        element.value = currentValue;
                     }
                 } else {
                     // CRITICAL FIX: Only clear filter if it's not a valid current value that the user selected
@@ -1806,16 +1839,16 @@ const TagManager = {
                         option.value = currentValue;
                         option.textContent = currentValue;
                         option.style.color = '#666';
-                        filterElement.appendChild(option);
-                        filterElement.value = currentValue;
+                        element.appendChild(option);
+                        element.value = currentValue;
                     } else {
-                        filterElement.value = '';
+                        element.value = '';
                     }
                 }
             } else {
                 // Only restore if value is still valid (for explicit filter clearing)
                 if (currentValue && sortedValues.includes(currentValue)) {
-                    filterElement.value = currentValue;
+                    element.value = currentValue;
                 } else {
                     // CRITICAL FIX: Only clear filter if it's not a valid current value that the user selected
                     if (currentValue && currentValue.trim() !== '') {
@@ -1824,10 +1857,10 @@ const TagManager = {
                         option.value = currentValue;
                         option.textContent = currentValue;
                         option.style.color = '#666';
-                        filterElement.appendChild(option);
-                        filterElement.value = currentValue;
+                        element.appendChild(option);
+                        element.value = currentValue;
                     } else {
-                        filterElement.value = '';
+                        element.value = '';
                     }
                 }
             }
