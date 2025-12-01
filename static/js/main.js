@@ -1923,9 +1923,31 @@ const TagManager = {
                 return;
             }
             
-            // Fast path: skip if no original options (Mac-like speed)
+            // CRITICAL FIX: If originalFilterOptions not set, compute from tags first
             if (!this.state.originalFilterOptions.vendor) {
-                return;
+                // Compute filter options from available tags if not already set
+                if (this.state.originalTags && this.state.originalTags.length > 0) {
+                    const computedOptions = this.computeFilterOptionsFromTags(this.state.originalTags);
+                    if (computedOptions) {
+                        this.state.originalFilterOptions = computedOptions;
+                        verboseLog('✅ Computed originalFilterOptions from tags:', computedOptions);
+                    } else {
+                        verboseLog('⚠️ Could not compute filter options from tags');
+                        return;
+                    }
+                } else if (this.state.tags && this.state.tags.length > 0) {
+                    const computedOptions = this.computeFilterOptionsFromTags(this.state.tags);
+                    if (computedOptions) {
+                        this.state.originalFilterOptions = computedOptions;
+                        verboseLog('✅ Computed originalFilterOptions from state.tags:', computedOptions);
+                    } else {
+                        verboseLog('⚠️ Could not compute filter options from state.tags');
+                        return;
+                    }
+                } else {
+                    verboseLog('⚠️ No tags available to compute filter options');
+                    return;
+                }
             }
             
             // Get current filter values (minimal)
@@ -6640,22 +6662,38 @@ const TagManager = {
                 
                 const tagCheckboxes = document.querySelectorAll('#selectedTags .tag-checkbox');
                 
-                tagCheckboxes.forEach(checkbox => {
-                    checkbox.checked = isChecked;
-                    const tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                    if (tag) {
-                        if (isChecked) {
-                            if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                this.state.persistentSelectedTags.push(tag['Product Name*']);
-                            }
-                        } else {
-                            const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
+                if (isChecked) {
+                    // When selecting all, add tags to persistentSelectedTags
+                    tagCheckboxes.forEach(checkbox => {
+                        checkbox.checked = isChecked;
+                        const tagName = checkbox.value;
+                        // Try to find tag in originalTags first (all tags regardless of filters)
+                        let tag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
+                        // If not found in originalTags, try current tags (filtered view)
+                        if (!tag) {
+                            tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                        }
+                        if (tag) {
+                            if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                this.state.persistentSelectedTags.push(tagName);
                             }
                         }
-                    }
-                });
+                    });
+                } else {
+                    // When deselecting all, remove ALL tags from persistentSelectedTags
+                    // Use checkbox values directly to ensure we remove all selected tags
+                    const tagNamesToRemove = Array.from(tagCheckboxes).map(cb => cb.value);
+                    tagNamesToRemove.forEach(tagName => {
+                        const index = this.state.persistentSelectedTags.indexOf(tagName);
+                        if (index > -1) {
+                            this.state.persistentSelectedTags.splice(index, 1);
+                        }
+                    });
+                    // Also update all checkboxes to unchecked state
+                    tagCheckboxes.forEach(checkbox => {
+                        checkbox.checked = isChecked;
+                    });
+                }
                 
                 // Update the regular selectedTags set to match persistent ones
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
@@ -7983,6 +8021,12 @@ const TagManager = {
                 try {
                     const instantFilters = this.computeFilterOptionsFromTags(tags);
                     if (instantFilters) {
+                        // CRITICAL FIX: Store originalFilterOptions before updating filters
+                        // This ensures updateFilterOptions() doesn't return early
+                        if (!this.state.originalFilterOptions.vendor) {
+                            this.state.originalFilterOptions = { ...instantFilters };
+                            verboseLog('✅ Stored originalFilterOptions from instant filters');
+                        }
                         this.updateFilters(instantFilters, false); // Don't preserve old values on first load
                     }
                 } catch (e) {

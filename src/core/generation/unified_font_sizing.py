@@ -92,7 +92,7 @@ def _load_font_sizing_config():
                     'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
                     'doh': [(5, 12), (10, 11), (float('inf'), 10)],
                     'vendor': [(5, 6), (10, 5), (15, 4), (20, 3), (float('inf'), 2)],
-                    'qr': [(float('inf'), 24)],  # QR codes: Small size for preroll template (same as mini)
+                    'qr': [(float('inf'), 26)],  # QR codes: Small size for preroll template (same as mini)
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 }
             }

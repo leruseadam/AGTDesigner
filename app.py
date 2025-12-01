@@ -7041,49 +7041,88 @@ def generate_labels():
                                 records.append(record)
                         logging.info(f"✅ Generated {len(records)} records from database")
                         
-                        # CRITICAL FIX: Override lineage from database if it has been updated
-                        logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database...")
+                        # PERFORMANCE FIX: Batch lineage override to avoid N+1 queries
+                        logging.info("LINEAGE OVERRIDE: Batch checking for updated lineage in database...")
                         store_name = get_current_store_name()
                         product_db = get_product_database(store_name)
                         # Log which database path is being used for override
                         override_db_path = getattr(product_db, 'db_path', 'Unknown')
                         logging.info(f"🔄 LINEAGE OVERRIDE: Using database at {override_db_path} for store {store_name}")
-                        for record in records:
-                            product_name = record.get('Product Name*', record.get('ProductName', ''))
-                            if product_name:
+                        
+                        if product_db:
+                            # PERFORMANCE: Batch query all product lineages at once
+                            product_names = [r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')]
+                            if product_names:
                                 try:
-                                    # Get the most up-to-date lineage from the database
-                                    if product_db:
-                                        # Try to get lineage by product name first
-                                        db_lineage = product_db.get_product_lineage(product_name)
-                                        if db_lineage:
+                                    from src.core.generation.fast_generation import BatchedDatabaseQuerier
+                                    batched_querier = BatchedDatabaseQuerier(product_db)
+                                    db_records = batched_querier.get_products_batch(product_names, batch_size=100)
+                                    
+                                    # Create lookup map
+                                    lineage_map = {}
+                                    for db_record in db_records:
+                                        name = db_record.get('Product Name*', '')
+                                        if name:
+                                            db_lineage = (
+                                                db_record.get('currentLineage') or
+                                                db_record.get('canonical_lineage') or
+                                                db_record.get('Lineage')
+                                            )
+                                            if db_lineage:
+                                                lineage_map[name] = str(db_lineage).strip().upper()
+                                    
+                                    # Apply lineage overrides from batch results
+                                    for record in records:
+                                        product_name = record.get('Product Name*', record.get('ProductName', ''))
+                                        if product_name and product_name in lineage_map:
+                                            db_lineage_clean = lineage_map[product_name]
                                             original_lineage = record.get('Lineage', '')
-                                            db_lineage_clean = str(db_lineage).strip().upper()
                                             original_lineage_clean = str(original_lineage).strip().upper()
                                             
-                                            # Always update to ensure database value is used
                                             if db_lineage_clean != original_lineage_clean:
-                                                logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
-                                                record['Lineage'] = db_lineage_clean
-                                            else:
-                                                logging.debug(f"LINEAGE SKIP: '{product_name}' - Already matches database: '{original_lineage_clean}'")
-                                                # Still update to ensure consistency
-                                                record['Lineage'] = db_lineage_clean
-                                        else:
-                                            # Try to get lineage by strain name
+                                                logging.debug(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                            record['Lineage'] = db_lineage_clean
+                                    
+                                    # PERFORMANCE: Batch query strain lineages for records without product-level lineage
+                                    strain_names = []
+                                    strain_record_map = {}
+                                    for record in records:
+                                        product_name = record.get('Product Name*', record.get('ProductName', ''))
+                                        if product_name and product_name not in lineage_map:
                                             product_strain = record.get('Product Strain', '')
                                             if product_strain:
-                                                strain_info = product_db.get_strain_info(product_strain)
+                                                strain_names.append(product_strain)
+                                                if product_strain not in strain_record_map:
+                                                    strain_record_map[product_strain] = []
+                                                strain_record_map[product_strain].append(record)
+                                    
+                                    # Batch query unique strains
+                                    unique_strains = list(set(strain_names))
+                                    for strain_name in unique_strains:
+                                        if strain_name in strain_record_map:
+                                            try:
+                                                strain_info = product_db.get_strain_info(strain_name)
                                                 if strain_info and strain_info.get('canonical_lineage'):
-                                                    db_lineage = strain_info['canonical_lineage']
-                                                    original_lineage = record.get('Lineage', '')
-                                                    if str(db_lineage).strip() != str(original_lineage).strip():
-                                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
-                                                        record['Lineage'] = str(db_lineage).strip()
-                                                    else:
-                                                        logging.debug(f"LINEAGE SKIP: '{product_name}' - Strain lineage already matches: '{original_lineage}'")
-                                except Exception as e:
-                                    logging.warning(f"Error checking lineage override for '{product_name}': {e}")
+                                                    db_lineage = str(strain_info['canonical_lineage']).strip().upper()
+                                                    for record in strain_record_map[strain_name]:
+                                                        if not record.get('Lineage') or record.get('Lineage') in ['', 'None', 'nan']:
+                                                            record['Lineage'] = db_lineage
+                                                            logging.debug(f"LINEAGE OVERRIDE (strain): '{record.get('Product Name*', 'Unknown')}' (strain: '{strain_name}') -> '{db_lineage}'")
+                                            except Exception as e:
+                                                logging.warning(f"Error checking strain lineage for '{strain_name}': {e}")
+                                except Exception as batch_err:
+                                    logging.warning(f"Batch lineage override failed, falling back to individual queries: {batch_err}")
+                                    # Fallback to individual queries (slower but works)
+                                    for record in records:
+                                        product_name = record.get('Product Name*', record.get('ProductName', ''))
+                                        if product_name:
+                                            try:
+                                                db_lineage = product_db.get_product_lineage(product_name)
+                                                if db_lineage:
+                                                    db_lineage_clean = str(db_lineage).strip().upper()
+                                                    record['Lineage'] = db_lineage_clean
+                                            except Exception as e:
+                                                logging.warning(f"Error checking lineage override for '{product_name}': {e}")
                         
                         # NOTE: Removed Excel processor override - database lineage takes precedence
                         # The old logic would incorrectly revert manual lineage changes back to the original Excel values.
@@ -7129,10 +7168,10 @@ def generate_labels():
                     lineage = record.get('Lineage', 'NOT_FOUND')
                     logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
             
-            # CRITICAL FIX: Apply database lineage override to ALL records (not just JSON matched)
+            # PERFORMANCE FIX: Batch apply database lineage override to ALL records
             # This ensures that any lineage updates saved to database will always be reflected in output
             if records:
-                logging.info("LINEAGE OVERRIDE: Checking database for updated lineage values for all records...")
+                logging.info("LINEAGE OVERRIDE: Batch checking database for updated lineage values for all records...")
                 try:
                     store_name = get_current_store_name()
                     product_db = get_product_database(store_name)
@@ -7140,73 +7179,88 @@ def generate_labels():
                         # Log which database path is being used for override
                         override_db_path = getattr(product_db, 'db_path', 'Unknown')
                         logging.info(f"🔄 LINEAGE OVERRIDE (all records): Using database at {override_db_path} for store {store_name}")
-                        lineage_overrides_applied = 0
-                        for record in records:
-                            product_name = record.get('Product Name*', record.get('ProductName', ''))
-                            if not product_name:
-                                continue
-                            
-                            try:
-                                # GUARANTEED FIX: Use get_products_by_names for more reliable matching
-                                # This handles normalized names, case-insensitive matching, etc.
-                                db_records = product_db.get_products_by_names([product_name])
-                                db_lineage = None
-                                
-                                if db_records:
-                                    db_record = db_records[0]
-                                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
-                                    db_lineage = (
-                                        db_record.get('currentLineage') or
-                                        db_record.get('canonical_lineage') or
-                                        db_record.get('Lineage')
-                                    )
-                                
-                                # Fallback to get_product_lineage if get_products_by_names didn't find it
-                                if not db_lineage:
-                                    db_lineage = product_db.get_product_lineage(product_name)
-                                
-                                if db_lineage:
-                                    original_lineage = record.get('Lineage', '')
-                                    db_lineage_clean = str(db_lineage).strip().upper()
-                                    original_lineage_clean = str(original_lineage).strip().upper()
-                                    
-                                    # GUARANTEED FIX: Always update with database lineage (database is source of truth)
-                                    record['Lineage'] = db_lineage_clean
-                                    record['currentLineage'] = db_lineage_clean
-                                    record['canonical_lineage'] = db_lineage_clean
-                                    record['lineage'] = db_lineage_clean.lower()
-                                    
-                                    # Only log if different
-                                    if db_lineage_clean != original_lineage_clean:
-                                        logging.info(f"🔄 GUARANTEED FIX (output): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
-                                        lineage_overrides_applied += 1
-                                    else:
-                                        logging.debug(f"✅ GUARANTEED FIX (output): '{product_name}' - Lineage confirmed: '{db_lineage_clean}'")
-                                else:
-                                    # Try strain-level lookup as fallback
-                                    product_strain = record.get('Product Strain', '')
-                                    if product_strain and str(product_strain).strip():
-                                        strain_info = product_db.get_strain_info(str(product_strain).strip())
-                                        if strain_info and strain_info.get('canonical_lineage'):
-                                            db_lineage = strain_info['canonical_lineage']
-                                            original_lineage = record.get('Lineage', '')
-                                            db_lineage_clean = str(db_lineage).strip().upper()
-                                            original_lineage_clean = str(original_lineage).strip().upper()
-                                            
-                                            if db_lineage_clean != original_lineage_clean:
-                                                logging.info(f"LINEAGE OVERRIDE (strain): '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
-                                                record['Lineage'] = db_lineage_clean
-                                                lineage_overrides_applied += 1
-                                            else:
-                                                record['Lineage'] = db_lineage_clean
-                            except Exception as e:
-                                logging.warning(f"Error checking lineage override for product '{product_name}': {e}")
-                                continue
                         
-                        if lineage_overrides_applied > 0:
-                            logging.info(f"✅ LINEAGE OVERRIDE: Applied {lineage_overrides_applied} database lineage updates to records")
-                        else:
-                            logging.debug("LINEAGE OVERRIDE: No lineage updates needed - all records match database")
+                        # PERFORMANCE: Batch query all product lineages at once
+                        product_names = [r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')]
+                        lineage_overrides_applied = 0
+                        
+                        if product_names:
+                            try:
+                                from src.core.generation.fast_generation import BatchedDatabaseQuerier
+                                batched_querier = BatchedDatabaseQuerier(product_db)
+                                db_records = batched_querier.get_products_batch(product_names, batch_size=100)
+                                
+                                # Create lookup map for product lineages
+                                product_lineage_map = {}
+                                for db_record in db_records:
+                                    name = db_record.get('Product Name*', '')
+                                    if name:
+                                        db_lineage = (
+                                            db_record.get('currentLineage') or
+                                            db_record.get('canonical_lineage') or
+                                            db_record.get('Lineage')
+                                        )
+                                        if db_lineage:
+                                            product_lineage_map[name] = str(db_lineage).strip().upper()
+                                
+                                # Apply lineage overrides from batch results
+                                for record in records:
+                                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                                    if not product_name:
+                                        continue
+                                    
+                                    if product_name in product_lineage_map:
+                                        db_lineage_clean = product_lineage_map[product_name]
+                                        original_lineage = record.get('Lineage', '')
+                                        original_lineage_clean = str(original_lineage).strip().upper()
+                                        
+                                        # Always update with database lineage (database is source of truth)
+                                        record['Lineage'] = db_lineage_clean
+                                        record['currentLineage'] = db_lineage_clean
+                                        record['canonical_lineage'] = db_lineage_clean
+                                        record['lineage'] = db_lineage_clean.lower()
+                                        
+                                        if db_lineage_clean != original_lineage_clean:
+                                            logging.debug(f"🔄 GUARANTEED FIX (output): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                            lineage_overrides_applied += 1
+                                    
+                                    # PERFORMANCE: Batch query strain lineages for records without product-level lineage
+                                    if product_name not in product_lineage_map:
+                                        product_strain = record.get('Product Strain', '')
+                                        if product_strain and str(product_strain).strip():
+                                            try:
+                                                strain_info = product_db.get_strain_info(str(product_strain).strip())
+                                                if strain_info and strain_info.get('canonical_lineage'):
+                                                    db_lineage_clean = str(strain_info['canonical_lineage']).strip().upper()
+                                                    original_lineage = record.get('Lineage', '')
+                                                    original_lineage_clean = str(original_lineage).strip().upper()
+                                                    
+                                                    record['Lineage'] = db_lineage_clean
+                                                    if db_lineage_clean != original_lineage_clean:
+                                                        logging.debug(f"LINEAGE OVERRIDE (strain): '{product_name}' (strain: '{product_strain}') -> '{db_lineage_clean}'")
+                                                        lineage_overrides_applied += 1
+                                            except Exception as strain_err:
+                                                logging.warning(f"Error checking strain lineage for '{product_strain}': {strain_err}")
+                                
+                                if lineage_overrides_applied > 0:
+                                    logging.info(f"✅ LINEAGE OVERRIDE: Applied {lineage_overrides_applied} database lineage updates to records (batch mode)")
+                                else:
+                                    logging.debug("LINEAGE OVERRIDE: No lineage updates needed - all records match database")
+                            except Exception as batch_err:
+                                logging.warning(f"Batch lineage override failed, falling back to individual queries: {batch_err}")
+                                # Fallback to individual queries (slower but works)
+                                for record in records:
+                                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                                    if not product_name:
+                                        continue
+                                    try:
+                                        db_lineage = product_db.get_product_lineage(product_name)
+                                        if db_lineage:
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            record['Lineage'] = db_lineage_clean
+                                            lineage_overrides_applied += 1
+                                    except Exception as e:
+                                        logging.warning(f"Error checking lineage override for product '{product_name}': {e}")
                 except Exception as e:
                     logging.warning(f"Error during lineage override check: {e}")
                     logging.warning(traceback.format_exc())
@@ -7427,13 +7481,14 @@ def generate_labels():
         # Log the number of records passed to the template processor
         logging.info(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
 
-        # For horizontal/vertical/double templates, ensure all records are processed (no chunking)
-        if template_type in ['horizontal', 'vertical', 'double']:
+        # PERFORMANCE: For horizontal/vertical/double templates, increase chunk size for better throughput
+        if template_type in ['horizontal', 'vertical', 'double', 'preroll']:
             if hasattr(processor, 'CHUNK_SIZE_LIMIT'):
-                processor.CHUNK_SIZE_LIMIT = max(len(records), 1000)  # Remove chunking limit
+                # PERFORMANCE: Use larger chunks (up to 200) for better throughput, but keep reasonable limit
+                processor.CHUNK_SIZE_LIMIT = min(max(len(records), 100), 200)
             if hasattr(processor, 'chunk_size'):
-                processor.chunk_size = max(len(records), 1000)
-            logging.info(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
+                processor.chunk_size = min(max(len(records), 100), 200)
+            logging.info(f"🔍 LABEL RENDER: Optimized chunk size to {processor.chunk_size if hasattr(processor, 'chunk_size') else 'N/A'} for template '{template_type}'")
 
         # Apply DOH session overrides just before generation to guarantee latest UI choice wins
         try:
@@ -7503,38 +7558,87 @@ def generate_labels():
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
             logging.error(f"DOH override error details: {traceback.format_exc()}")
 
-        # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
+        # PERFORMANCE FIX: Batch lineage enrichment to avoid N+1 queries
         try:
             store_name = session.get('current_store')
             if store_name:
                 product_db = get_product_database(store_name)
                 if product_db:
                     enriched_count = 0
+                    # PERFORMANCE: Batch all product names and strains for single query
+                    product_names = []
+                    strain_names = []
+                    record_map = {}  # Map product_name -> record
+                    strain_map = {}  # Map strain_name -> [records]
+                    
                     for record in records:
                         product_name = record.get('ProductName') or record.get('Product Name*', '')
                         if product_name:
-                            # Get lineage from database (product-level first, then strain-level)
-                            db_lineage = product_db.get_product_lineage(product_name)
+                            product_names.append(product_name)
+                            record_map[product_name] = record
                             
-                            # Try strain-level if no product-level lineage
-                            if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
-                                product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
-                                if product_strain:
-                                    strain_info = product_db.get_strain_info(product_strain)
-                                    if strain_info:
-                                        db_lineage = (
-                                            strain_info.get('display_lineage') or
-                                            strain_info.get('sovereign_lineage') or
-                                            strain_info.get('canonical_lineage')
-                                        )
+                            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+                            if product_strain:
+                                strain_names.append(product_strain)
+                                if product_strain not in strain_map:
+                                    strain_map[product_strain] = []
+                                strain_map[product_strain].append(record)
+                    
+                    # PERFORMANCE: Batch query all product lineages at once
+                    if product_names:
+                        try:
+                            # Use batched query if available
+                            from src.core.generation.fast_generation import BatchedDatabaseQuerier
+                            batched_querier = BatchedDatabaseQuerier(product_db)
+                            db_records = batched_querier.get_products_batch(product_names, batch_size=100)
                             
-                            if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                                record['Lineage'] = str(db_lineage).strip().upper()
-                                record['lineage'] = str(db_lineage).strip().upper()
-                                enriched_count += 1
+                            # Extract lineages from batch results
+                            for db_record in db_records:
+                                product_name = db_record.get('Product Name*', '')
+                                if product_name in record_map:
+                                    record = record_map[product_name]
+                                    db_lineage = (
+                                        db_record.get('currentLineage') or
+                                        db_record.get('canonical_lineage') or
+                                        db_record.get('Lineage')
+                                    )
+                                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                        record['Lineage'] = str(db_lineage).strip().upper()
+                                        record['lineage'] = str(db_lineage).strip().upper()
+                                        enriched_count += 1
+                        except Exception as batch_err:
+                            logging.warning(f"Batch lineage query failed, falling back to individual queries: {batch_err}")
+                            # Fallback to individual queries (slower but works)
+                            for product_name in product_names:
+                                if product_name in record_map:
+                                    record = record_map[product_name]
+                                    db_lineage = product_db.get_product_lineage(product_name)
+                                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                        record['Lineage'] = str(db_lineage).strip().upper()
+                                        record['lineage'] = str(db_lineage).strip().upper()
+                                        enriched_count += 1
+                    
+                    # PERFORMANCE: Batch query all strain lineages at once
+                    if strain_names:
+                        unique_strains = list(set(strain_names))
+                        for strain_name in unique_strains:
+                            if strain_name in strain_map:
+                                strain_info = product_db.get_strain_info(strain_name)
+                                if strain_info:
+                                    db_lineage = (
+                                        strain_info.get('display_lineage') or
+                                        strain_info.get('sovereign_lineage') or
+                                        strain_info.get('canonical_lineage')
+                                    )
+                                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                        for record in strain_map[strain_name]:
+                                            if not record.get('Lineage') or record.get('Lineage') in ['', 'None', 'nan']:
+                                                record['Lineage'] = str(db_lineage).strip().upper()
+                                                record['lineage'] = str(db_lineage).strip().upper()
+                                                enriched_count += 1
                     
                     if enriched_count > 0:
-                        logging.info(f"✅ Enriched {enriched_count}/{len(records)} records with lineage")
+                        logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage")
         except Exception as enrich_err:
             logging.error(f"Lineage enrichment failed: {enrich_err}")
         
@@ -9187,8 +9291,8 @@ def get_available_tags():
                                         SELECT {quoted_columns}, COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                         FROM products p
                                         LEFT JOIN strains s ON p.strain_id = s.id
-                                ORDER BY p.id DESC
-                                LIMIT 2000
+                                        WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes')
+                                        ORDER BY p.id DESC
                                     '''
                                     try:
                                         main_cursor.execute(query)
@@ -9197,7 +9301,7 @@ def get_available_tags():
                                         logging.info(f"Main database query with strain join returned {len(rows)} rows")
                                     except Exception as join_err:
                                         logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
-                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
+                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != \'yes\') ORDER BY p.id DESC'
                                         main_cursor.execute(query)
                                         rows = main_cursor.fetchall()
                                         columns = columns_to_query + ['preferred_lineage']
@@ -9247,14 +9351,14 @@ def get_available_tags():
                             
                             # PERFORMANCE: Use simpler query without strain join for faster loading
                             # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
-                            # OPTIMIZATION: Reduce limit and skip expensive join initially
+                            # Removed LIMIT to show all products
                             lineage_query_join_by_name = f'''
                                 SELECT {quoted_columns}, 
                                        COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                 FROM products p
                                 LEFT JOIN strains s ON p.strain_id = s.id
+                                WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes')
                                 ORDER BY p.id DESC
-                                LIMIT 2000
                             '''
                             
                             # Fallback query if strains table/join fails - use this first for speed
@@ -9262,8 +9366,8 @@ def get_available_tags():
                                 SELECT {quoted_columns}, 
                                        p."Lineage" AS preferred_lineage
                                 FROM products p
+                                WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes')
                                 ORDER BY p.id DESC
-                                LIMIT 2000
                             '''
                             
                             # PERFORMANCE: Use simpler fallback query first (no join) for faster loading
