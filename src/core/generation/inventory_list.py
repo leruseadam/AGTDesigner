@@ -185,20 +185,19 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
 
         doc = Document()
 
-        # Make document landscape to maximize horizontal space
+        # Set document to portrait orientation and optimize margins
         try:
             section = doc.sections[0]
-            # Swap orientation to landscape
-            new_width, new_height = section.page_height, section.page_width
-            section.page_width = new_width
-            section.page_height = new_height
-            # Tighten margins a bit to fit more columns/rows on the page
-            section.left_margin = Inches(0.25)
-            section.right_margin = Inches(0.25)
-            section.top_margin = Inches(0.25)
-            section.bottom_margin = Inches(0.25)
+            # Ensure portrait orientation (default, but explicitly set)
+            section.page_width = Inches(8.5)  # Standard letter width
+            section.page_height = Inches(11)   # Standard letter height
+            # Tighten margins to maximize space for table
+            section.left_margin = Inches(0.3)
+            section.right_margin = Inches(0.3)
+            section.top_margin = Inches(0.4)
+            section.bottom_margin = Inches(0.4)
         except Exception as e:
-            logger.warning(f"INVENTORY LIST: Failed to set landscape orientation: {e}")
+            logger.warning(f"INVENTORY LIST: Failed to set portrait orientation: {e}")
 
         # Title
         title = doc.add_heading("Current Inventory", level=0)
@@ -228,6 +227,47 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             table.style = "Table Grid"
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
+            # PERFORMANCE: Set optimized column widths based on content
+            # Total available width: 8.5" - 0.3" left - 0.3" right = 7.9"
+            # Optimized widths to minimize wasted space while fitting in portrait:
+            column_widths = [
+                Inches(0.55),  # Weight: "0.5g x 3 Pack" - compact
+                Inches(2.35),  # Product Name: Long names, needs most space (35% of width)
+                Inches(0.3),   # Quantity: Single digits, very narrow
+                Inches(0.8),   # Product Type: "Infused Pre-Roll" - moderate
+                Inches(0.65),  # Vendor: "Seattle Bubble Works" - narrower
+                Inches(0.65),  # Brand: Same as vendor - narrower
+                Inches(0.9),   # Barcode: Long alphanumeric strings
+                Inches(0.6),   # Accepted Date: "2025-07-28" - compact
+                Inches(0.25),  # Room: "Default" - very narrow
+            ]
+            # Total: 7.05" - leaves room for table borders and padding
+            
+            # Set column widths
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            tbl = table._element
+            tblGrid = tbl.find(qn('w:tblGrid'))
+            if tblGrid is None:
+                tblGrid = OxmlElement('w:tblGrid')
+                tbl.insert(0, tblGrid)
+            
+            # Clear existing grid columns and add optimized ones
+            for existing_col in tblGrid.findall(qn('w:gridCol')):
+                tblGrid.remove(existing_col)
+            
+            for width in column_widths:
+                gridCol = OxmlElement('w:gridCol')
+                gridCol.set(qn('w:w'), str(int(width * 1440)))  # Convert inches to twips (1 inch = 1440 twips)
+                tblGrid.append(gridCol)
+            
+            # CRITICAL: Also set cell widths explicitly to ensure columns respect the grid
+            # This ensures Word actually applies the column widths
+            for row in table.rows:
+                for idx, cell in enumerate(row.cells):
+                    if idx < len(column_widths):
+                        cell.width = column_widths[idx]
+
             # Column order (matching user preference):
             # Weight, Product Name, Quantity, Product Type, Vendor, Brand, Barcode, Accepted Date, Room
             headers = [
@@ -247,7 +287,7 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                 for paragraph in header_cells[idx].paragraphs:
                     for run in paragraph.runs:
                         run.font.bold = True
-                        run.font.size = Pt(7)
+                        run.font.size = Pt(10)  # Increased from 7 to 10
                     # Compact header spacing
                     paragraph.paragraph_format.space_before = Pt(0)
                     paragraph.paragraph_format.space_after = Pt(0)
@@ -255,7 +295,7 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
 
             # Make header row more compact
             header_row = table.rows[0]
-            header_row.height = Pt(10)
+            header_row.height = Pt(12)  # Slightly increased for larger font
             header_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
             # Sort items within category alphabetically by product name
@@ -266,6 +306,12 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
 
             for record in items_sorted:
                 row_cells = table.add_row().cells
+                
+                # CRITICAL: Set cell widths for new row to match column widths
+                for idx, cell in enumerate(row_cells):
+                    if idx < len(column_widths):
+                        cell.width = column_widths[idx]
+                
                 # Weight, Product Name, Quantity, Product Type, Vendor, Brand, Barcode, Accepted Date, Room
                 row_cells[0].text = _get_weight(record)
                 row_cells[1].text = _get_product_name(record)
@@ -277,18 +323,19 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                 row_cells[7].text = _get_accepted_date(record)
                 row_cells[8].text = _get_room(record)
 
-                # Make body font very compact to maximize rows per page
+                # PERFORMANCE: Increased font size while maintaining readability
+                # With optimized column widths, we can use larger fonts
                 for cell in row_cells:
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
-                            run.font.size = Pt(6)
+                            run.font.size = Pt(9)  # Increased from 6 to 9 (50% larger)
                         paragraph.paragraph_format.space_before = Pt(0)
                         paragraph.paragraph_format.space_after = Pt(0)
                         paragraph.paragraph_format.line_spacing = 1.0
 
-                # Compact row height
+                # Row height adjusted for larger font
                 row = table.rows[-1]
-                row.height = Pt(9)
+                row.height = Pt(12)  # Increased from 9 to 12 for larger font
                 row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
         logger.info(
