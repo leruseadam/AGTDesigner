@@ -2370,7 +2370,8 @@ def get_session_excel_processor():
                 if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
                     logging.info("CRITICAL FIX: No session file and DataFrame is empty, loading default file")
                     from src.core.data.excel_processor import get_default_upload_file
-                    selected_store = get_current_store_name() if has_store_selection() else None
+                    # CRITICAL FIX: Use allow_fallback=True for default file loading
+                    selected_store = get_current_store_name(allow_fallback=True)
                     default_file = get_default_upload_file(selected_store)
                     if default_file and os.path.exists(default_file):
                         logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
@@ -11339,7 +11340,8 @@ def get_filter_options():
                 'error': 'Excel processor not initialized'
             }), 200
         
-        if excel_processor.df is None or excel_processor.df.empty:
+        # CRITICAL FIX: Check if df attribute exists before accessing it
+        if not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
             logging.warning(f"CRITICAL: Excel processor DataFrame is empty (df is None: {excel_processor.df is None}, df.empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'})")
             
             from src.core.data.excel_processor import get_default_upload_file
@@ -11433,7 +11435,7 @@ def get_filter_options():
             current_filters = data.get('filters', {})
         
         # CRITICAL FIX: If DataFrame is empty, try to get filter options from database
-        if excel_processor.df is None or excel_processor.df.empty:
+        if not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
             logging.info("DataFrame is empty, attempting to get filter options from database")
             options = _get_filter_options_from_database(selected_store)
             if options:
