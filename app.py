@@ -11465,7 +11465,10 @@ def get_filter_options():
             }), 200
         
         # Log DataFrame info for debugging
-        logging.info(f"Filter options: DataFrame has {len(excel_processor.df)} rows, {len(excel_processor.df.columns)} columns")
+        if hasattr(excel_processor, 'df') and excel_processor.df is not None:
+            logging.info(f"Filter options: DataFrame has {len(excel_processor.df)} rows, {len(excel_processor.df.columns)} columns")
+        else:
+            logging.warning("Filter options: DataFrame not available for logging")
         
         # Use optimized method for Windows
         try:
@@ -11503,7 +11506,7 @@ def get_filter_options():
             logging.warning("CRITICAL: All filter options are empty - this indicates a data issue")
         
         # Debug: Log available columns and weight options
-        if excel_processor.df is not None:
+        if hasattr(excel_processor, 'df') and excel_processor.df is not None:
             if ENHANCED_LOGGING_AVAILABLE:
                 enhanced_logger.log_info(f"Available columns: {list(excel_processor.df.columns)}")
                 if 'Weight*' in excel_processor.df.columns:
@@ -20225,22 +20228,49 @@ def clear_cache_route():
 
 @app.route('/preroll-items/<group_id>')
 def display_preroll_items(group_id):
-    """Display preroll items for a specific product group - mobile-friendly page."""
+    """Display preroll items for a specific product group - mobile-friendly page.
+    
+    Query parameters:
+        vendor: Optional vendor name to filter products by vendor
+    """
     try:
-        logging.info(f"PREROLL ROUTE: Accessing preroll-items for group_id: {group_id}")
-        # CRITICAL FIX: QR codes are accessed by anyone, so we need to search across all sessions
-        # Try session-independent key first (most recent items for this group)
-        preroll_items = cache.get(f"preroll_group_latest_{group_id}")
-        logging.info(f"PREROLL ROUTE: Cache lookup for 'preroll_group_latest_{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+        # Get vendor from query parameter for vendor-specific filtering
+        vendor_filter = request.args.get('vendor', '').strip()
+        if vendor_filter:
+            from urllib.parse import unquote
+            vendor_filter = unquote(vendor_filter)  # Decode URL-encoded vendor name
+            logging.info(f"PREROLL ROUTE: Accessing preroll-items for group_id: {group_id} with vendor filter: '{vendor_filter}'")
+        else:
+            logging.info(f"PREROLL ROUTE: Accessing preroll-items for group_id: {group_id} (no vendor filter)")
         
-        # If not found, try current session
-        if not preroll_items:
-            current_session_id = session.get('session_id', 'default')
-            preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_id}")
+        # CRITICAL FIX: If vendor is provided, try to get vendor-specific cache first
+        # Format: group_key = "group_id|vendor"
+        preroll_items = None
+        if vendor_filter:
+            group_key = f"{group_id}|{vendor_filter}"
+            # Try session-independent key first (most recent items for this vendor+group)
+            preroll_items = cache.get(f"preroll_group_latest_{group_key}")
+            logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            
+            # If not found, try current session
+            if not preroll_items:
+                current_session_id = session.get('session_id', 'default')
+                preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key}")
         
-        # If still not found, try default fallback
+        # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
         if not preroll_items:
-            preroll_items = cache.get(f"preroll_group_default_{group_id}")
+            # Try session-independent key first (most recent items for this group)
+            preroll_items = cache.get(f"preroll_group_latest_{group_id}")
+            logging.info(f"PREROLL ROUTE: Cache lookup for 'preroll_group_latest_{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            
+            # If not found, try current session
+            if not preroll_items:
+                current_session_id = session.get('session_id', 'default')
+                preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_id}")
+            
+            # If still not found, try default fallback
+            if not preroll_items:
+                preroll_items = cache.get(f"preroll_group_default_{group_id}")
         
         # Get group display name from group_id or items
         group_display_name = "Preroll Items"
@@ -20265,6 +20295,43 @@ def display_preroll_items(group_id):
                     'other': 'Assorted Pre-Rolls'
                 }
                 group_display_name = group_display_name_map.get(group_id, 'Preroll Items')
+        
+        # CRITICAL FIX: Filter items by vendor if vendor parameter is provided
+        # This ensures QR codes show only the specific vendor's products
+        if vendor_filter and preroll_items:
+            original_count = len(preroll_items)
+            # Filter items to only include those from the specified vendor
+            filtered_items = []
+            vendor_filter_lower = vendor_filter.lower().strip()
+            
+            for item in preroll_items:
+                item_vendor = str(item.get('vendor', '')).strip()
+                item_vendor_lower = item_vendor.lower().strip()
+                
+                # Case-insensitive vendor matching with normalization
+                # Handle common variations: apostrophes, spaces, special characters
+                def normalize_vendor(v):
+                    """Normalize vendor name for comparison."""
+                    v = v.lower().strip()
+                    # Remove common punctuation variations
+                    v = v.replace("'", "").replace("'", "").replace("`", "")
+                    v = v.replace("  ", " ")  # Multiple spaces to single space
+                    return v
+                
+                vendor_normalized = normalize_vendor(vendor_filter)
+                item_vendor_normalized = normalize_vendor(item_vendor)
+                
+                # Exact match (case-insensitive) or normalized match
+                if (item_vendor_lower == vendor_filter_lower or 
+                    item_vendor_normalized == vendor_normalized):
+                    filtered_items.append(item)
+            
+            preroll_items = filtered_items
+            logging.info(f"PREROLL ROUTE: Filtered {original_count} items to {len(preroll_items)} items for vendor '{vendor_filter}'")
+            
+            # Update group display name to include vendor
+            if preroll_items:
+                group_display_name = f"{group_display_name} - {vendor_filter}"
         
         if not preroll_items:
             # Return error page if items not found
