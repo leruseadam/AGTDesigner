@@ -2668,16 +2668,25 @@ class TemplateProcessor:
                 )
                 vendor_clean = str(vendor).strip()
                 
-                # Always use production domain for QR codes - never use localhost
-                # QR codes need to work for customers, so they must point to production
+                # Always derive the QR base from the current request host so we don't
+                # bake any specific domain into the code or printed labels.
+                from flask import request
                 import os
-                
-                # Check if we're on PythonAnywhere (production)
-                is_production = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
-                
-                # Always use production URL for QR codes regardless of environment
-                # QR codes are printed and distributed, so they must work from anywhere
-                base_url = 'https://www.agtpricetags.com'
+
+                try:
+                    base_url = (request.host_url or '').rstrip('/')
+                except Exception:
+                    base_url = ''
+
+                # If host_url is unavailable (very unusual), allow an override via env;
+                # otherwise, skip generating a QR for this record.
+                if not base_url:
+                    base_url = os.environ.get('QR_BASE_URL', '').strip()
+                if not base_url:
+                    self.logger.warning("PREROLL QR: No base URL available; skipping QR generation for this label")
+                    qr_code = None
+                    label_context['QR'] = ''
+                    return label_context
                 
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
@@ -2691,16 +2700,16 @@ class TemplateProcessor:
                     # Fallback to group_id only if no vendor (backward compatibility)
                     qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
                 
-                # Final safety check: verify URL doesn't contain localhost
+                # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
+                # If we detect a local host, just drop the scheme/host and use a relative path; most
+                # modern scanners will still treat this as a URL when opened from a browser context.
                 if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
-                    # Force production URL
-                    if vendor_clean:
-                        from urllib.parse import quote
-                        vendor_encoded = quote(vendor_clean)
-                        qr_url = f"https://www.agtpricetags.com/preroll-items/{group_id}?vendor={vendor_encoded}"
-                    else:
-                        qr_url = f"https://www.agtpricetags.com/preroll-items/{group_id}"
-                    self.logger.warning(f"QR URL contained localhost, forced to production: {qr_url}")
+                    from urllib.parse import urlparse
+                    parsed = urlparse(qr_url)
+                    qr_url = parsed.path or qr_url
+                    if parsed.query:
+                        qr_url = f"{qr_url}?{parsed.query}"
+                    self.logger.warning(f"QR URL used a localhost base, converted to relative path: {qr_url}")
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
@@ -2748,26 +2757,18 @@ class TemplateProcessor:
             # Clean the product name or URL
             clean_name = str(product_name).strip()
             
-            # For preroll URLs, ensure it's an absolute URL if possible
+            # For preroll URLs, ensure it's an absolute URL if possible, without hardcoding any domain.
             if is_url and not clean_name.startswith('http'):
-                # Make it an absolute URL using environment variable or request context
                 try:
-                    import os
-                    base_url = os.environ.get('FLASK_BASE_URL', 'https://www.agtpricetags.com')
-                    if not base_url.startswith('http'):
-                        base_url = f'https://{base_url}'
-                    clean_name = f"{base_url.rstrip('/')}{clean_name}"
-                    self.logger.debug(f"Converted relative URL to absolute: {clean_name}")
-                except Exception as e:
-                    # If we can't get base URL, try request context as last resort
-                    try:
-                        from flask import request
-                        if hasattr(request, 'host_url'):
-                            clean_name = request.host_url.rstrip('/') + clean_name
-                    except Exception:
-                        # If all else fails, log warning but keep relative URL
-                        self.logger.warning(f"Could not convert relative URL to absolute: {clean_name}")
-                        pass
+                    from flask import request
+                    if hasattr(request, 'host_url') and request.host_url:
+                        base_url = request.host_url.rstrip('/')
+                        clean_name = f"{base_url}{clean_name}"
+                        self.logger.debug(f"Converted relative URL to absolute using request.host_url: {clean_name}")
+                except Exception:
+                    # If we can't get a host URL, leave the relative path as-is. Most scanners
+                    # will still treat it as a valid URL once opened in a browser context.
+                    self.logger.warning(f"Could not convert relative URL to absolute; leaving as-is: {clean_name}")
             
             # Create QR code instance
             qr = qrcode.QRCode(

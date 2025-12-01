@@ -5862,13 +5862,36 @@ const TagManager = {
 
     // NEW: Update lineage for all items with the same vendor + strain immediately in UI/state
     updateSimilarLineages(tagName, newLineage) {
+        // Helper to normalize values
+        const norm = v => (v || '').toString().trim().toLowerCase();
+
+        // Robust helper to pull vendor from a tag record
+        const getVendor = (t) => {
+            if (!t) return '';
+            const vendorKeys = [
+                'Vendor/Supplier*',
+                'Vendor/Supplier',
+                'Vendor*',
+                'Vendor',
+                'Supplier*',
+                'Supplier',
+                'vendor'
+            ];
+            for (const key of vendorKeys) {
+                if (t[key]) return t[key];
+            }
+            // Fallback: treat Product Brand as pseudo‑vendor when no explicit vendor is present
+            return t['Product Brand'] || t.Brand || t.brand || '';
+        };
+
         // Find source tag info
-        const source = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
+        const source = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName) ||
+                       this.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
         if (!source) {
             console.warn('updateSimilarLineages: Source tag not found for', tagName);
             return;
         }
-        const srcVendor = (source['Vendor/Supplier*'] || source['Vendor'] || source.vendor || '').toString().trim().toLowerCase();
+        const srcVendor = norm(getVendor(source));
         // Prefer explicit strain columns
         // Support multiple possible keys for strain across datasets
         const srcStrain = (
@@ -5882,15 +5905,13 @@ const TagManager = {
         ).toString().trim().toLowerCase();
         verboseLog('updateSimilarLineages:', {tagName, vendor: srcVendor, strain: srcStrain});
         if (!srcVendor) {
-            console.warn('updateSimilarLineages: No vendor found for', tagName);
+            console.warn('updateSimilarLineages: No vendor/brand context found for', tagName);
             return;
         }
 
-        // Helper to normalize
-        const norm = v => (v || '').toString().trim().toLowerCase();
         const isSimilar = (t) => {
             const tagProductName = t['Product Name*'] || t.ProductName || 'UNKNOWN';
-            const v = norm(t['Vendor/Supplier*'] || t['Vendor'] || t.vendor);
+            const v = norm(getVendor(t));
             
             if (v !== srcVendor) {
                 verboseLog(`  ❌ ${tagProductName}: Vendor mismatch (${v} !== ${srcVendor})`);
@@ -5938,17 +5959,26 @@ const TagManager = {
 
         // Update state.tags and state.originalTags
         let tagsUpdated = 0;
+        const affectedNames = new Set();
         this.state.tags.forEach(t => {
             if (isSimilar(t)) {
                 t.lineage = newLineage;
                 t.Lineage = newLineage;
                 tagsUpdated++;
+                const name = t['Product Name*'] || t.ProductName;
+                if (name && name !== tagName) {
+                    affectedNames.add(name);
+                }
             }
         });
         this.state.originalTags.forEach(t => {
             if (isSimilar(t)) {
                 t.lineage = newLineage;
                 t.Lineage = newLineage;
+                const name = t['Product Name*'] || t.ProductName;
+                if (name && name !== tagName) {
+                    affectedNames.add(name);
+                }
             }
         });
         verboseLog(`✅ Updated ${tagsUpdated} similar items in state`);
@@ -6029,6 +6059,13 @@ const TagManager = {
             }
         });
         verboseLog(`✅ Updated ${selectedUpdated} dropdowns in selected tags`);
+
+        // Propagate lineage change to backend for all affected similar items
+        if (typeof this.updateLineageOnBackendDebounced === 'function') {
+            affectedNames.forEach(name => {
+                this.updateLineageOnBackendDebounced(name, newLineage);
+            });
+        }
     },
 
     updateSelectedTags(tags) {

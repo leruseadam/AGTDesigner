@@ -42,17 +42,20 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         weight_display = weight.lstrip('0').lstrip('.') if '.' in weight else weight
         if weight_display.startswith('.'):
             weight_display = '0' + weight_display
+        # Include the word "Pre-Roll" in the display name so grouped
+        # pack labels clearly indicate they are prerolls.
         return {
             'group_id': f'{weight}g-{count}pack',
-            'display_name': f'Assorted {weight_display}g x {count} Packs',
+            'display_name': f'Assorted Pre-Roll {weight_display}g x {count} Packs',
             'category': f'{weight_display}g x {count} Packs'
         }
     
     # Check specifically for 1g x 5 packs (more specific, should be caught by above but keeping for safety)
     if re.search(r'1g\s*x\s*5\s*pack', combined, re.IGNORECASE) or '1g x 5 pack' in combined.lower() or '1 g x 5 pack' in combined.lower():
+        # Ensure the specific 1g x 5 pack group also includes "Pre-Roll"
         return {
             'group_id': '5packs',
-            'display_name': 'Assorted 1g x 5 Packs',
+            'display_name': 'Assorted Pre-Roll 1g x 5 Packs',
             'category': '1g x 5 Packs'
         }
     
@@ -241,6 +244,20 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # Store items for this group in cache (for QR code page) - use ALL original records
         group_items = []
         for record in group_records_list:
+            # Normalize DOH/DOH-compliant field so lists and QR views can display
+            # a clean YES/NO status.
+            doh_raw = record.get('DOH') or record.get('DOH Compliant (Yes/No)', '')
+            doh_str = str(doh_raw).strip() if doh_raw is not None else ''
+            doh_display = ''
+            if doh_str:
+                upper = doh_str.upper()
+                if upper in ['YES', 'Y', 'TRUE', '1']:
+                    doh_display = 'YES'
+                elif upper in ['NO', 'N', 'FALSE', '0']:
+                    doh_display = 'NO'
+                else:
+                    doh_display = doh_str
+
             item = {
                 'product_name': record.get('Product Name*', record.get('ProductName', '')),
                 'description': record.get('Description', ''),
@@ -250,6 +267,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'brand': record.get('Product Brand', record.get('ProductBrand', '')),
                 'strain': record.get('Product Strain', ''),
                 'lineage': record.get('Lineage', ''),
+                'doh': doh_display,
             }
             group_items.append(item)
         logging.info(f"PREROLL GROUP: Storing {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_id: {original_group_id}, vendor: {vendor})")

@@ -1140,9 +1140,15 @@ class TagsTable {
             
             // Remove DOM row when in selected list without triggering big re-render
             const row = this.closest('.tag-item, .tag-row');
-            if (row && row.parentElement && row.parentElement.id === 'selectedTags') {
-              row.remove();
-              TagManager.updateTagCount('selected', TagManager.state.persistentSelectedTags.length);
+            if (row) {
+              // Look for an ancestor that is the selected tags container
+              const selectedContainer = row.closest('#selectedTags');
+              if (selectedContainer) {
+                row.remove();
+                if (TagManager && typeof TagManager.updateTagCount === 'function') {
+                  TagManager.updateTagCount('selected', TagManager.state.persistentSelectedTags.length);
+                }
+              }
             }
           }
           // Halt further propagation to avoid any global listeners that might reload data

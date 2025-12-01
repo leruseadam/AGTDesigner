@@ -7287,7 +7287,51 @@ def generate_labels():
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
             return jsonify({'error': 'No selected tags found in the data or failed to process records. Please ensure you have selected tags and they exist in the loaded data.'}), 400
-        
+
+        # SPECIAL CASE: Inventory template now generates inventory lists directly from Excel
+        if template_type == 'inventory':
+            try:
+                from src.core.generation.inventory_list import generate_inventory_list
+                from src.core.generation.docx_formatting import enforce_arial_bold_all_text
+            except Exception as import_err:
+                logging.error(f"INVENTORY LIST: Failed to import generator: {import_err}")
+                return jsonify({'error': 'Inventory list generator is unavailable.'}), 500
+
+            logging.info("INVENTORY LIST: Generating inventory list from selected Excel products")
+            inventory_doc = generate_inventory_list(records)
+            if inventory_doc is None:
+                logging.error("INVENTORY LIST: No inventory items to generate")
+                return jsonify({'error': 'No inventory items found for the selected products.'}), 400
+
+            # Enforce Arial Bold formatting for consistency
+            try:
+                enforce_arial_bold_all_text(inventory_doc)
+            except Exception as font_error:
+                logger.warning(f"INVENTORY LIST: Skipping font enforcement due to table structure issue: {font_error}")
+
+            # Save the inventory list document to a buffer
+            output_buffer = BytesIO()
+            inventory_doc.save(output_buffer)
+            output_buffer.seek(0)
+
+            today_str = datetime.now().strftime('%Y%m%d')
+            time_str = datetime.now().strftime('%H%M%S')
+            filename = f"AGT_Inventory_List_{today_str}_{time_str}.docx"
+            filename = sanitize_filename(filename)
+
+            logging.info(f"INVENTORY LIST: Returning inventory list file '{filename}'")
+
+            response = send_file(
+                output_buffer,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            )
+
+            response = set_download_filename(response, filename)
+            response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            return response
+
         # PREROLL TEMPLATE: Group by unique vendor + description combination
         if template_type == 'preroll':
             records = generate_preroll_tags(records, cache)
@@ -8240,7 +8284,51 @@ def get_available_tags():
             except Exception as cache_clear_err:
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
-        if cached_tags and not nocache:
+        # ULTRA-FAST PATH: If this is the first fast_load request after upload and
+        # we don't have cached tags yet, return Excel-only tags without doing any
+        # database lineage alignment. This gets something on screen as quickly as
+        # possible; slower DB alignment can happen on later non-fast loads.
+        if (fast_load and not prefer_db and not force_full_refresh and not cached_tags):
+            try:
+                excel_processor = get_session_excel_processor()
+                if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+                    logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for initial fast_load request (no DB lineage alignment).")
+                    excel_tags = excel_processor.get_available_tags()
+                    safe_all_tags = make_json_safe(excel_tags)
+                    # Cache for this session/file so subsequent requests are instant
+                    try:
+                        if 'cache_key' not in locals():
+                            session_file_path = session.get('file_path', '')
+                            if session_file_path:
+                                cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                            else:
+                                cache_key = get_session_cache_key('available_tags')
+                        cache.set(cache_key, safe_all_tags, timeout=300)
+                        logging.info(f"✅ Cached {len(safe_all_tags)} ultra-fast Excel tags.")
+                    except Exception as cache_err:
+                        logging.warning(f"Could not cache ultra-fast Excel tags: {cache_err}")
+                    
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"✅ ULTRA-FAST available-tags completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} Excel-only tags")
+                    resp = jsonify({
+                        'tags': safe_all_tags,
+                        'total_count': len(safe_all_tags),
+                        'source': 'excel-fast'
+                    })
+                    try:
+                        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                        resp.headers['Pragma'] = 'no-cache'
+                    except Exception:
+                        pass
+                    return resp
+            except Exception as ultra_err:
+                logging.warning(f"Ultra-fast Excel-only tag path failed, falling back to full flow: {ultra_err}")
+
+        # PERFORMANCE: Even when nocache=1, allow fast_load requests to reuse
+        # per-file cached tags. The cache key already includes the uploaded file
+        # path, so using it here will not leak tags from a previous upload.
+        # This makes repeated fast_load retries after upload much cheaper.
+        if cached_tags and (not nocache or fast_load):
             # SUPER FAST PATH: If this is a fast-load request and we have cached tags,
             # return them immediately without any additional database work.
             # Full lineage alignment will still be done later by non-fast-load or
@@ -13029,6 +13117,283 @@ def get_database_products():
         tb = traceback.format_exc()
         logging.error(f"Error getting database products: {e}\n{tb}")
         return jsonify({'error': str(e), 'trace': tb}), 500
+
+
+def _get_editor_database():
+    """
+    Helper to obtain a usable ProductDatabase instance for the editor,
+    applying the same fallback logic used by /api/database-products.
+    """
+    store_name = get_current_store_name()
+    product_db = get_product_database(store_name)
+
+    # Reuse the fallback logic from get_database_products to ensure we are
+    # always talking to a real products table.
+    try:
+        import sqlite3
+        needs_fallback = False
+        with db_connection(product_db.db_path) as test_conn:
+            cur = test_conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not cur.fetchone():
+                needs_fallback = True
+            else:
+                cur.execute('SELECT COUNT(*) FROM products')
+                count = cur.fetchone()[0]
+                if count == 0:
+                    needs_fallback = True
+        if needs_fallback:
+            logging.info("[DB EDITOR] Falling back to main product database for editor write operation")
+            from src.core.data.product_database import ProductDatabase
+            main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+            product_db = ProductDatabase(main_db_path)
+            if not product_db._initialized:
+                product_db.init_database()
+    except Exception as fallback_error:
+        logging.warning(f"[DB EDITOR] Database fallback check (editor helper) failed: {fallback_error}")
+
+    return product_db
+
+
+@app.route('/api/database-product/<int:product_id>', methods=['PUT'])
+def update_database_product(product_id: int):
+    """
+    Update a single product row for the Edit DB modal.
+    Supports both Excel-style and modern schemas by mapping the
+    friendly field names used in the editor back to real columns.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        product_db = _get_editor_database()
+
+        import sqlite3
+        with db_connection(product_db.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('PRAGMA table_info(products)')
+            cols = {row['name'] for row in cursor.fetchall()}
+
+            excel_style = 'Product Name*' in cols or 'Product Brand' in cols
+
+            updates = []
+            params = []
+
+            # Common logical fields coming from the editor
+            logical_fields = [
+                'Product Name*',
+                'Product Type*',
+                'Product Brand',
+                'Vendor/Supplier*',
+                'Lineage',
+                'Price',
+                'Weight*',
+                'Description',
+            ]
+
+            if excel_style:
+                # Map logical "Price" to the actual column as done in get_database_products
+                column_mappings = {
+                    'Price': ['Price', 'Price* (Tier Name for Bulk)'],
+                }
+
+                def get_column_name(options):
+                    if isinstance(options, str):
+                        options = [options]
+                    for opt in options:
+                        if opt in cols:
+                            return opt
+                    return None
+
+                price_col = get_column_name(column_mappings['Price'])
+
+                for logical_name in logical_fields:
+                    if logical_name not in data:
+                        continue
+
+                    if logical_name == 'Price':
+                        if price_col:
+                            updates.append(f'"{price_col}" = ?')
+                            params.append(data[logical_name])
+                        continue
+
+                    if logical_name in cols:
+                        updates.append(f'"{logical_name}" = ?')
+                        params.append(data[logical_name])
+            else:
+                # Modern schema uses snake_case columns
+                mapping = {
+                    'Product Name*': 'product_name',
+                    'Product Type*': 'product_type',
+                    'Product Brand': 'brand',
+                    'Vendor/Supplier*': 'vendor',
+                    'Lineage': 'lineage',
+                    'Price': 'price',
+                    'Weight*': 'weight',
+                    'Description': 'description',
+                }
+
+                for logical_name, real_col in mapping.items():
+                    if logical_name in data and real_col in cols:
+                        updates.append(f'{real_col} = ?')
+                        params.append(data[logical_name])
+
+            if not updates:
+                return jsonify({'success': False, 'error': 'No updatable fields provided'}), 400
+
+            where_clause = 'rowid = ?' if excel_style else 'id = ?'
+            params.append(product_id)
+
+            query = f'UPDATE products SET {", ".join(updates)} WHERE {where_clause}'
+            cursor.execute(query, params)
+            conn.commit()
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        logging.error(f"[DB EDITOR] Error updating product {product_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/database-product/<int:product_id>', methods=['DELETE'])
+def delete_database_product(product_id: int):
+    """Soft-delete (archive) a single product row for the Edit DB modal."""
+    try:
+        product_db = _get_editor_database()
+
+        import sqlite3
+        with db_connection(product_db.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('PRAGMA table_info(products)')
+            cols = {row['name'] for row in cursor.fetchall()}
+
+            excel_style = 'Product Name*' in cols or 'Product Brand' in cols
+
+            # Prefer an archive flag over hard delete
+            archive_column = None
+            if excel_style and 'Is Archived? (yes/no)' in cols:
+                archive_column = 'Is Archived? (yes/no)'
+            elif not excel_style and 'is_archived' in cols:
+                archive_column = 'is_archived'
+
+            if archive_column:
+                where_clause = 'rowid = ?' if excel_style else 'id = ?'
+                cursor.execute(
+                    f'UPDATE products SET "{archive_column}" = ? WHERE {where_clause}',
+                    (('yes' if excel_style else 1), product_id),
+                )
+            else:
+                # Fallback: refuse to hard-delete if we don't have a safe archive flag
+                logging.warning(
+                    "[DB EDITOR] Delete requested but no archive flag column present; "
+                    "refusing hard delete for product_id=%s",
+                    product_id,
+                )
+                return jsonify({
+                    'success': False,
+                    'error': 'Archive flag column not found; hard delete is disabled for safety.'
+                }), 400
+
+            conn.commit()
+
+        return jsonify({'success': True, 'archived': True})
+
+    except Exception as e:
+        logging.error(f"[DB EDITOR] Error deleting product {product_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/database-product', methods=['POST'])
+def create_database_product():
+    """
+    Create a new product row for the Edit DB modal.
+    Inserts only the fields provided that exist in the current schema.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        product_db = _get_editor_database()
+
+        import sqlite3
+        with db_connection(product_db.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('PRAGMA table_info(products)')
+            cols = {row['name'] for row in cursor.fetchall()}
+
+            excel_style = 'Product Name*' in cols or 'Product Brand' in cols
+
+            if excel_style:
+                # Determine actual price column if available
+                column_mappings = {
+                    'Price': ['Price', 'Price* (Tier Name for Bulk)'],
+                }
+
+                def get_column_name(options):
+                    if isinstance(options, str):
+                        options = [options]
+                    for opt in options:
+                        if opt in cols:
+                            return opt
+                    return None
+
+                price_col = get_column_name(column_mappings['Price'])
+
+                logical_to_real = {
+                    'Product Name*': 'Product Name*',
+                    'Product Type*': 'Product Type*',
+                    'Product Brand': 'Product Brand',
+                    'Vendor/Supplier*': 'Vendor/Supplier*',
+                    'Lineage': 'Lineage',
+                    'Weight*': 'Weight*',
+                    'Description': 'Description',
+                }
+
+                columns = []
+                values = []
+
+                for logical_name, real_col in logical_to_real.items():
+                    if logical_name in data and real_col in cols:
+                        columns.append(f'"{real_col}"')
+                        values.append(data[logical_name])
+
+                if 'Price' in data and price_col:
+                    columns.append(f'"{price_col}"')
+                    values.append(data['Price'])
+            else:
+                mapping = {
+                    'Product Name*': 'product_name',
+                    'Product Type*': 'product_type',
+                    'Product Brand': 'brand',
+                    'Vendor/Supplier*': 'vendor',
+                    'Lineage': 'lineage',
+                    'Price': 'price',
+                    'Weight*': 'weight',
+                    'Description': 'description',
+                }
+
+                columns = []
+                values = []
+
+                for logical_name, real_col in mapping.items():
+                    if logical_name in data and real_col in cols:
+                        columns.append(real_col)
+                        values.append(data[logical_name])
+
+            if not columns:
+                return jsonify({'success': False, 'error': 'No valid fields provided for insert'}), 400
+
+            placeholders = ','.join(['?'] * len(columns))
+            cols_sql = ','.join(columns)
+            query = f'INSERT INTO products ({cols_sql}) VALUES ({placeholders})'
+            cursor.execute(query, values)
+            new_id = cursor.lastrowid
+            conn.commit()
+
+        return jsonify({'success': True, 'id': new_id})
+
+    except Exception as e:
+        logging.error(f"[DB EDITOR] Error creating product: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/force-database-storage', methods=['POST'])
 def force_database_storage():

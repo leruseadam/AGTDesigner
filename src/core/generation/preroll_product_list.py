@@ -77,8 +77,8 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                 heading = list_doc.add_heading(display_name, level=1)
                 heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 
-                # Create a table for the items (5 columns to include Brand)
-                table = list_doc.add_table(rows=1, cols=5)
+                # Create a table for the items (6 columns: add DOH status)
+                table = list_doc.add_table(rows=1, cols=6)
                 table.style = 'Light Grid Accent 1'
                 
                 # Header row
@@ -88,6 +88,7 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                 header_cells[2].text = 'Price'
                 header_cells[3].text = 'Weight'
                 header_cells[4].text = 'Lineage'
+                header_cells[5].text = 'DOH'
                 
                 # Make header row bold
                 for cell in header_cells:
@@ -104,6 +105,7 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                     row_cells[2].text = item.get('price', '')
                     row_cells[3].text = item.get('weight', '')
                     row_cells[4].text = item.get('lineage', '')
+                    row_cells[5].text = item.get('doh', '')
                 
                 # Add spacing after each group
                 list_doc.add_paragraph('')
