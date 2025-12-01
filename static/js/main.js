@@ -769,13 +769,23 @@ const AppLoadingSplash = {
         const mainContent = document.getElementById('mainContent');
         
         if (splash) {
-            splash.style.display = 'flex';
+            // FIX: Prevent zoom glitch by ensuring proper initial state
+            splash.style.transform = 'scale(1)';
+            splash.style.opacity = '1';
             splash.classList.remove('fade-out');
+            // Use requestAnimationFrame to ensure smooth appearance
+            requestAnimationFrame(() => {
+                splash.style.display = 'flex';
+            });
         }
         
         if (mainContent) {
             mainContent.classList.remove('loaded');
             mainContent.style.opacity = '0';
+            // FIX: Ensure main content is hidden to prevent flash
+            if (mainContent.style.display !== 'none') {
+                mainContent.style.display = 'none';
+            }
         }
         
         this.updateProgress(0, 'Initializing application...');
@@ -941,10 +951,16 @@ const TagManager = {
 
     getAvailableTagsCacheKey() {
         try {
+            // Try multiple sources for store name
             const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                (window.localStorage && (localStorage.getItem('selected_store') || localStorage.getItem('store'))) ||
                 window.currentStore || 'default';
+            
+            // Try multiple sources for file name
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
+                (window.localStorage && (localStorage.getItem('uploaded_filename') || localStorage.getItem('file_path'))) ||
                 'nofile';
+            
             const cacheKey = `agt_available_tags_${store}_${file}`;
             console.log('🔑 Cache key generated:', cacheKey, '{ store:', store, 'file:', file, '}');
             return cacheKey;
@@ -954,33 +970,132 @@ const TagManager = {
         }
     },
 
+    // ULTRA-FAST RELOAD: Aggressively search all storage for cached tags
+    findAvailableTagsInCache() {
+        try {
+            const storageBackends = [];
+            if (window.localStorage) storageBackends.push({ name: 'localStorage', storage: localStorage });
+            if (window.sessionStorage) storageBackends.push({ name: 'sessionStorage', storage: sessionStorage });
+            
+            if (storageBackends.length === 0) {
+                return null;
+            }
+            
+            // Try primary cache key first in both storages
+            const primaryKey = this.getAvailableTagsCacheKey();
+            for (const backend of storageBackends) {
+                const raw = backend.storage.getItem(primaryKey);
+                if (raw) {
+                    try {
+                        const payload = JSON.parse(raw);
+                        if (payload && Array.isArray(payload.tags) && payload.tags.length > 0) {
+                            console.log(`✅ Found cache with primary key in ${backend.name}:`, primaryKey);
+                            return { key: primaryKey, data: raw, storage: backend.storage };
+                        }
+                    } catch (e) {
+                        // Invalid JSON, continue
+                    }
+                }
+            }
+            
+            // ULTRA-FAST RELOAD: Aggressively search ALL cache keys across ALL storages
+            const allKeys = new Set();
+            for (const backend of storageBackends) {
+                for (let i = 0; i < backend.storage.length; i++) {
+                    const key = backend.storage.key(i);
+                    if (key && key.startsWith('agt_available_tags_')) {
+                        allKeys.add({ key, storage: backend.storage, backend: backend.name });
+                    }
+                }
+            }
+            
+            console.log(`🔍 Searching ${allKeys.size} cache keys across ${storageBackends.length} storage backends...`);
+            
+            // Sort keys by recency (try keys with store match first, then any key)
+            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                (window.localStorage && (localStorage.getItem('selected_store') || localStorage.getItem('store'))) ||
+                window.currentStore || 'default';
+            
+            const sortedKeys = Array.from(allKeys).sort((a, b) => {
+                const aMatchesStore = a.key.includes(store);
+                const bMatchesStore = b.key.includes(store);
+                if (aMatchesStore && !bMatchesStore) return -1;
+                if (!aMatchesStore && bMatchesStore) return 1;
+                return 0;
+            });
+            
+            // Try each key and return the first valid one
+            for (const { key, storage } of sortedKeys) {
+                const raw = storage.getItem(key);
+                if (raw) {
+                    try {
+                        const payload = JSON.parse(raw);
+                        if (payload && Array.isArray(payload.tags) && payload.tags.length > 0) {
+                            // Check if cache is expired
+                            const age = Date.now() - (payload.timestamp || 0);
+                            if (age <= this.CACHE_TTL_MS) {
+                                console.log(`✅ Found valid cache with key: ${key} (${payload.tags.length} tags)`);
+                                return { key: key, data: raw, storage: storage };
+                            }
+                        }
+                    } catch (e) {
+                        // Invalid JSON, try next key
+                        continue;
+                    }
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            console.warn('Failed to find cache:', error);
+            return null;
+        }
+    },
+
     loadAvailableTagsFromCache() {
         try {
             console.log('💾 Attempting to load tags from cache...');
-            if (!window.sessionStorage) {
-                console.log('❌ No sessionStorage available');
+            
+            // ULTRA-FAST RELOAD: Check for early cache found by fast-page-load.js
+            if (window._earlyCacheFound && window._earlyCacheFound.tags) {
+                console.log(`⚡ Using early cache: ${window._earlyCacheFound.tags.length} tags from ${window._earlyCacheFound.storage}`);
+                const tags = window._earlyCacheFound.tags;
+                delete window._earlyCacheFound; // Clear after use
+                return tags;
+            }
+            
+            const storageBackends = [];
+            if (window.localStorage) storageBackends.push('localStorage');
+            if (window.sessionStorage) storageBackends.push('sessionStorage');
+            
+            if (storageBackends.length === 0) {
+                console.log('❌ No storage available');
                 return null;
             }
-            const cacheKey = this.getAvailableTagsCacheKey();
-            const raw = sessionStorage.getItem(cacheKey);
-            if (!raw) {
+            
+            // ULTRA-FAST RELOAD: Aggressively search all cache keys
+            const cacheResult = this.findAvailableTagsInCache();
+            if (!cacheResult) {
+                const cacheKey = this.getAvailableTagsCacheKey();
                 console.log('❌ No cached data found for key:', cacheKey);
                 return null;
             }
+            
+            const raw = cacheResult.data;
             console.log('✅ Found cached data, parsing...');
             const payload = JSON.parse(raw);
             if (!payload || !Array.isArray(payload.tags) || payload.tags.length === 0) {
                 console.log('❌ Invalid cache payload:', payload);
                 return null;
             }
-            const age = Date.now() - payload.timestamp;
+            const age = Date.now() - (payload.timestamp || 0);
             const ageMinutes = (age / 60000).toFixed(1);
             console.log(`📅 Cache age: ${ageMinutes} minutes (max: ${this.CACHE_TTL_MS / 60000} minutes)`);
             if (payload.timestamp && age > this.CACHE_TTL_MS) {
                 console.log('⏰ Cache expired, ignoring');
                 return null;
             }
-            console.log(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
+            console.log(`✅ Cache HIT: ${payload.tags.length} tags loaded from ${cacheResult.storage === localStorage ? 'localStorage' : 'sessionStorage'}`);
             
             // Verify cached tags have database lineage
             const sampleTag = payload.tags[0];
@@ -1002,10 +1117,11 @@ const TagManager = {
 
     saveAvailableTagsToCache(tags) {
         try {
-            if (!window.sessionStorage || !Array.isArray(tags) || tags.length === 0) {
-                console.log('⚠️ Cannot save cache:', !window.sessionStorage ? 'no sessionStorage' : 'invalid tags');
+            if (!Array.isArray(tags) || tags.length === 0) {
+                console.log('⚠️ Cannot save cache: invalid tags');
                 return;
             }
+            
             const payload = {
                 timestamp: Date.now(),
                 tags
@@ -1023,8 +1139,41 @@ const TagManager = {
                 });
             }
             
-            sessionStorage.setItem(cacheKey, JSON.stringify(payload));
-            console.log(`💾 Cached ${tags.length} tags with key: ${cacheKey}`);
+            // ULTRA-FAST RELOAD: Save to BOTH localStorage and sessionStorage for maximum persistence
+            const savedTo = [];
+            try {
+                if (window.localStorage) {
+                    localStorage.setItem(cacheKey, JSON.stringify(payload));
+                    savedTo.push('localStorage');
+                }
+            } catch (localError) {
+                console.warn('⚠️ Failed to save to localStorage (may be full):', localError);
+            }
+            
+            try {
+                if (window.sessionStorage) {
+                    sessionStorage.setItem(cacheKey, JSON.stringify(payload));
+                    savedTo.push('sessionStorage');
+                }
+            } catch (sessionError) {
+                console.warn('⚠️ Failed to save to sessionStorage:', sessionError);
+            }
+            
+            // Also save store and filename to localStorage for faster cache key generation on reload
+            try {
+                if (window.localStorage) {
+                    const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                        window.currentStore || 'default';
+                    const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
+                        'nofile';
+                    localStorage.setItem('last_cache_store', store);
+                    localStorage.setItem('last_cache_file', file);
+                }
+            } catch (e) {
+                // Non-critical, continue
+            }
+            
+            console.log(`💾 Cached ${tags.length} tags with key: ${cacheKey} (saved to: ${savedTo.join(', ') || 'none'})`);
         } catch (error) {
             console.warn('❌ Failed to save cache:', error);
         }
@@ -1032,10 +1181,14 @@ const TagManager = {
 
     clearAvailableTagsCache() {
         try {
-            if (window.sessionStorage) {
-                sessionStorage.removeItem(this.getAvailableTagsCacheKey());
-                verboseLog('Cleared available-tags cache');
+            const cacheKey = this.getAvailableTagsCacheKey();
+            if (window.localStorage) {
+                localStorage.removeItem(cacheKey);
             }
+            if (window.sessionStorage) {
+                sessionStorage.removeItem(cacheKey);
+            }
+            verboseLog('Cleared available-tags cache from both storages');
         } catch (error) {
             console.warn('Failed to clear available-tags cache:', error);
         }
@@ -1079,10 +1232,38 @@ const TagManager = {
                 
                 // INSTANT RELOAD FIX: Refresh lineage in background (non-blocking) with fast API call
                 // This ensures lineage changes persist but doesn't block the UI
+                // CRITICAL: Preserve selected tags during background refresh
+                const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
                 this._refreshLineageFromDatabase(cachedTags, true).then(() => {
                     console.log('✅ Lineage refreshed from database after cache hydration');
+                    // CRITICAL FIX: Restore selected tags after lineage refresh
+                    if (savedSelectedTags.length > 0) {
+                        this.state.persistentSelectedTags = [...savedSelectedTags];
+                        this.state.selectedTags = new Set(savedSelectedTags);
+                        // Restore checkboxes
+                        requestAnimationFrame(() => {
+                            savedSelectedTags.forEach(tagName => {
+                                const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+                                checkboxes.forEach(cb => {
+                                    if (!cb.checked) {
+                                        cb.checked = true;
+                                    }
+                                });
+                            });
+                            // Restore selected tags display
+                            const selectedTagObjects = this.getSelectedTagObjects();
+                            if (selectedTagObjects.length > 0) {
+                                this.updateSelectedTags(selectedTagObjects);
+                            }
+                        });
+                    }
                 }).catch(err => {
                     console.warn('⚠️ Failed to refresh lineage after cache hydration:', err);
+                    // Restore selected tags even on error
+                    if (savedSelectedTags.length > 0) {
+                        this.state.persistentSelectedTags = [...savedSelectedTags];
+                        this.state.selectedTags = new Set(savedSelectedTags);
+                    }
                 });
                 
                 // Hide splash immediately when rendering from cache (don't wait for lineage refresh)
@@ -1177,8 +1358,36 @@ const TagManager = {
                     
                     if (updatedCount > 0) {
                         console.log(`✅ Refreshed lineage for ${updatedCount} tags from database`);
-                        // Re-render with updated lineage
+                        // CRITICAL FIX: Preserve selected tags during lineage refresh
+                        // Set flag to prevent clearing selected tags
+                        const wasLineageUpdate = this._lineageUpdateInProgress;
+                        this._lineageUpdateInProgress = true;
+                        
+                        // Re-render with updated lineage (but preserve selected tags)
                         this._updateAvailableTags(this.state.tags, null);
+                        
+                        // Restore selected tags after update
+                        if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+                            // Restore checkboxes for selected tags
+                            requestAnimationFrame(() => {
+                                this.state.persistentSelectedTags.forEach(tagName => {
+                                    const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+                                    checkboxes.forEach(cb => {
+                                        if (!cb.checked) {
+                                            cb.checked = true;
+                                        }
+                                    });
+                                });
+                                // Restore selected tags display
+                                const selectedTagObjects = this.getSelectedTagObjects();
+                                if (selectedTagObjects.length > 0) {
+                                    this.updateSelectedTags(selectedTagObjects);
+                                }
+                            });
+                        }
+                        
+                        // Restore flag
+                        this._lineageUpdateInProgress = wasLineageUpdate;
                     } else {
                         console.log(`✅ Lineage already up-to-date (verified ${freshTags.length} tags)`);
                     }
@@ -9046,10 +9255,11 @@ const TagManager = {
         }, 5000); // 5 second safety net - faster UI display
 
         try {
-            // PERFORMANCE FIX: Use fast_load=1 for initial loads to skip expensive lineage alignment
+            // INSTANT RELOAD FIX: Use fast_load=1 and stream=1 for ultra-fast initial loads
             // This dramatically speeds up initial tag loading
+            const fetchPromise = fetch('/api/initial-data?fast_load=1&stream=1');
             const response = await Promise.race([
-                fetch('/api/initial-data?fast_load=1'),
+                fetchPromise,
                 timeoutPromise
             ]);
 
