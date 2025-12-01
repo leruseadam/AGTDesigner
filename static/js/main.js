@@ -936,7 +936,7 @@ const TagManager = {
         _lastCleanup: Date.now()
     },
     SIMPLIFIED_RENDER_THRESHOLD: 900,
-    initialDataRetryDelays: [1500, 3500, 6000, 10000],
+    initialDataRetryDelays: [500, 1000, 2000, 3000], // Reduced delays for faster reloads
     isGenerating: false, // Add generation lock flag
 
     getAvailableTagsCacheKey() {
@@ -1046,16 +1046,20 @@ const TagManager = {
             return false;
         }
         
-        // CRITICAL FIX: On page reload, check if we recently updated lineage
+        // INSTANT RELOAD FIX: On page reload, check if we recently updated lineage
         // If so, skip cache to ensure we get fresh lineage data from database
         const recentLineageUpdate = sessionStorage.getItem('lastLineageUpdateTime');
         if (recentLineageUpdate) {
             const timeSinceUpdate = Date.now() - parseInt(recentLineageUpdate, 10);
-            // If lineage was updated within last 2 minutes, skip cache to get fresh data
-            if (timeSinceUpdate < 120000) {
-                console.log('🔄 Recent lineage update detected, skipping cache to fetch fresh data...');
+            // INSTANT RELOAD: Only skip cache if lineage was updated within last 30 seconds (reduced from 2 minutes)
+            // This allows faster reloads while still getting fresh data when needed
+            if (timeSinceUpdate < 30000) {
+                console.log('🔄 Recent lineage update detected (within 30s), skipping cache to fetch fresh data...');
                 sessionStorage.removeItem('lastLineageUpdateTime'); // Clear after use
                 return false; // Force fresh fetch
+            } else {
+                // Clear old timestamp to avoid checking again
+                sessionStorage.removeItem('lastLineageUpdateTime');
             }
         }
         
@@ -1073,15 +1077,15 @@ const TagManager = {
                 this._updateAvailableTags(cachedTags, null);
                 console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
                 
-                // CRITICAL FIX: Always refresh lineage from database even when using cache
-                // This ensures lineage changes persist after page reload
-                this._refreshLineageFromDatabase(cachedTags).then(() => {
+                // INSTANT RELOAD FIX: Refresh lineage in background (non-blocking) with fast API call
+                // This ensures lineage changes persist but doesn't block the UI
+                this._refreshLineageFromDatabase(cachedTags, true).then(() => {
                     console.log('✅ Lineage refreshed from database after cache hydration');
                 }).catch(err => {
                     console.warn('⚠️ Failed to refresh lineage after cache hydration:', err);
                 });
                 
-                // Hide splash immediately when rendering from cache
+                // Hide splash immediately when rendering from cache (don't wait for lineage refresh)
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
@@ -1096,12 +1100,14 @@ const TagManager = {
     },
 
     // Helper method to refresh lineage from database
-    async _refreshLineageFromDatabase(tags) {
+    async _refreshLineageFromDatabase(tags, fastMode = false) {
         const timestamp = Date.now();
         try {
-            // Force fresh lineage fetch by bypassing cache and requesting database lineage
-            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&fast_load=0`, {
-                signal: AbortSignal.timeout(30000) // 30 second timeout
+            // INSTANT RELOAD FIX: Use fast_load=1 and shorter timeout for non-blocking refresh
+            const timeoutMs = fastMode ? 3000 : 30000; // 3 seconds for fast mode, 30 for normal
+            const fastLoadParam = fastMode ? '1' : '0';
+            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&fast_load=${fastLoadParam}`, {
+                signal: AbortSignal.timeout(timeoutMs) // Much shorter timeout for instant reloads
             });
             if (lineageResponse.ok) {
                 const lineageData = await lineageResponse.json();
@@ -7785,6 +7791,9 @@ const TagManager = {
             
             tags = normalizedTags;
             verboseLog(`Fetched and normalized ${tags.length} available tags`);
+            
+            // CRITICAL FIX: Track when tags are loaded to prevent aggressive validation
+            this._lastTagLoadTime = Date.now();
 
             // PERFORMANCE: Reduced debug logging - only log summary, not every tag
             if (verboseLog.enabled) {
@@ -7844,9 +7853,33 @@ const TagManager = {
             // CRITICAL: ALWAYS update selected tags after loading tags to ensure they have database lineage
             // This is essential because selected tags dropdowns need to show database lineage, not Excel lineage
             if (this.state.persistentSelectedTags.length > 0) {
+                // CRITICAL FIX: Use case-insensitive matching to find selected tags
+                // Create a case-insensitive lookup map for faster matching
+                const tagsByNameLower = new Map();
+                tags.forEach(tag => {
+                    const tagName = tag['Product Name*'];
+                    if (tagName) {
+                        tagsByNameLower.set(tagName.toLowerCase(), tag);
+                    }
+                });
+                
                 // Map selected tag names to updated tag objects with database lineage
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
-                    const updatedTag = tags.find(t => t['Product Name*'] === name);
+                const selectedTagObjects = [];
+                const notFoundTags = [];
+                
+                for (const selectedName of this.state.persistentSelectedTags) {
+                    // Try exact match first
+                    let updatedTag = tags.find(t => t['Product Name*'] === selectedName);
+                    
+                    // If not found, try case-insensitive match
+                    if (!updatedTag) {
+                        const selectedNameLower = selectedName.toLowerCase();
+                        updatedTag = tagsByNameLower.get(selectedNameLower);
+                        if (updatedTag) {
+                            console.log(`🔄 Found selected tag "${selectedName}" via case-insensitive match`);
+                        }
+                    }
+                    
                     if (updatedTag) {
                         // CRITICAL: Ensure this tag has database lineage - prioritize canonical_lineage/currentLineage
                         const dbLineage = updatedTag.canonical_lineage || updatedTag.currentLineage;
@@ -7857,23 +7890,43 @@ const TagManager = {
                             updatedTag.Lineage = dbLineage;  // Overwrite Excel Lineage with database value
                             updatedTag.lineage = dbLineage;
                             updatedTag['Lineage*'] = dbLineage;
-                            console.log(`🔄 Selected tag "${name}" updated with database lineage: ${dbLineage} (was: ${updatedTag.Lineage})`);
+                            console.log(`🔄 Selected tag "${selectedName}" updated with database lineage: ${dbLineage}`);
                         } else {
-                            console.warn(`⚠️ Selected tag "${name}" has no database lineage (canonical_lineage or currentLineage)`);
+                            console.warn(`⚠️ Selected tag "${selectedName}" has no database lineage (canonical_lineage or currentLineage)`);
                         }
-                        return updatedTag;
+                        selectedTagObjects.push(updatedTag);
+                    } else {
+                        // Tag not found - preserve it anyway (might be temporarily unavailable or JSON matched)
+                        notFoundTags.push(selectedName);
+                        console.warn(`⚠️ Selected tag "${selectedName}" not found in updated available tags - preserving selection`);
                     }
-                    console.warn(`⚠️ Selected tag "${name}" not found in updated available tags`);
-                    return null;
-                }).filter(Boolean);
+                }
                 
-                if (selectedTagObjects.length > 0) {
-                    console.log(`✅ Updating ${selectedTagObjects.length} selected tags with database lineage from available tags`);
-                    // Force update to ensure dropdowns are re-rendered with database lineage
-                    this._forceSelectedTagsUpdate = true;
-                    this.updateSelectedTags(selectedTagObjects);
-                } else {
-                    console.warn(`⚠️ No matching selected tags found in updated available tags`);
+                // CRITICAL FIX: Always update selected tags display, even if some weren't found
+                // This ensures the UI stays in sync and doesn't clear selections
+                if (selectedTagObjects.length > 0 || notFoundTags.length > 0) {
+                    if (selectedTagObjects.length > 0) {
+                        console.log(`✅ Updating ${selectedTagObjects.length} selected tags with database lineage from available tags`);
+                        // Force update to ensure dropdowns are re-rendered with database lineage
+                        this._forceSelectedTagsUpdate = true;
+                        this.updateSelectedTags(selectedTagObjects);
+                    } else {
+                        // No tags found, but preserve selections anyway
+                        console.log(`⚠️ No matching selected tags found in updated available tags, but preserving ${notFoundTags.length} selections`);
+                        // Try to rebuild from originalTags as fallback
+                        const fallbackTags = notFoundTags.map(name => {
+                            return this.state.originalTags.find(t => {
+                                const tName = t['Product Name*'];
+                                return tName && tName.toLowerCase() === name.toLowerCase();
+                            });
+                        }).filter(Boolean);
+                        
+                        if (fallbackTags.length > 0) {
+                            console.log(`✅ Found ${fallbackTags.length} selected tags in originalTags fallback`);
+                            this._forceSelectedTagsUpdate = true;
+                            this.updateSelectedTags(fallbackTags);
+                        }
+                    }
                 }
             }
             
@@ -8774,10 +8827,13 @@ const TagManager = {
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
 
-        // Check for current uploaded file FIRST to determine if we should show loading or upload prompt
+        // INSTANT RELOAD FIX: Check for current uploaded file with short timeout
         let hasFile = false;
         try {
-            const fileResponse = await fetch('/api/current-file');
+            const fileResponse = await Promise.race([
+                fetch('/api/current-file'),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000)) // 2 second timeout
+            ]);
             if (fileResponse.ok) {
                 const fileData = await fileResponse.json();
                 if (fileData && fileData.success && fileData.has_file && fileData.filename) {
@@ -8796,7 +8852,12 @@ const TagManager = {
                 }
             }
         } catch (error) {
-            verboseLog('Error checking for current file:', error);
+            verboseLog('Error checking for current file (non-blocking):', error);
+            // Assume file exists if cache has tags (optimistic)
+            const cachedTags = this.loadAvailableTagsFromCache();
+            if (cachedTags && cachedTags.length > 0) {
+                hasFile = true;
+            }
         }
 
         // Show loading splash only if file exists, otherwise show upload prompt
@@ -8891,14 +8952,35 @@ const TagManager = {
                 }
             });
 
-            // Continue loading fresh data in background (non-blocking)
-            console.log('📡 Background: Fetching selected tags and filters');
+            // INSTANT RELOAD FIX: Skip background refresh if cache is fresh (within 30 seconds)
+            const cacheKey = this.getAvailableTagsCacheKey();
+            const cachedRaw = sessionStorage.getItem(cacheKey);
+            if (cachedRaw) {
+                try {
+                    const cachedPayload = JSON.parse(cachedRaw);
+                    const cacheAge = Date.now() - (cachedPayload.timestamp || 0);
+                    // If cache is less than 30 seconds old, skip background refresh for instant reload
+                    if (cacheAge < 30000) {
+                        console.log('⚡ Cache is fresh (<30s), skipping background refresh for instant reload');
+                        if (splashSafetyTimeout) {
+                            clearTimeout(splashSafetyTimeout);
+                        }
+                        this._checkingExistingData = false;
+                        return; // Exit early - cache is fresh, no need to refresh
+                    }
+                } catch (e) {
+                    // Continue with background refresh if cache parsing fails
+                }
+            }
+            
+            // Continue loading fresh data in background (non-blocking) only if cache is stale
+            console.log('📡 Background: Fetching selected tags and filters (cache is stale)');
             // CRITICAL FIX: Fetch filters AFTER selected tags to ensure data is ready
             Promise.allSettled([
                 this.fetchAndUpdateSelectedTags()
             ]).then(() => {
-                // Small delay to ensure Excel processor is ready
-                return new Promise(resolve => setTimeout(resolve, 200));
+                // INSTANT RELOAD FIX: Reduced delay from 200ms to 50ms
+                return new Promise(resolve => setTimeout(resolve, 50));
             }).then(() => {
                 // Now fetch filters with retry mechanism
                 return this.fetchAndPopulateFilters();
@@ -11902,6 +11984,12 @@ const TagManager = {
             return;
         }
         
+        // CRITICAL FIX: Don't validate during lineage updates or tag loading
+        if (this._lineageUpdateInProgress || this._lineageUpdateProcessing || this.state.loading) {
+            verboseLog('⏭️ Skipping validateSelectedTags - lineage update or loading in progress');
+            return;
+        }
+        
         // Add safeguard to prevent clearing tags that were just added via JSON matching
         const hasJsonMatchedTags = this.state.persistentSelectedTags.length > 0;
         
@@ -11927,6 +12015,14 @@ const TagManager = {
         // This prevents clearing during partial data loads
         if (this.state.originalTags.length < 10 && this.state.persistentSelectedTags.length > 0) {
             verboseLog('⏭️ Skipping validation - originalTags count is low, may be partial load');
+            return;
+        }
+        
+        // CRITICAL FIX: Add delay check - don't validate if tags were just loaded (within last 3 seconds)
+        // This prevents clearing tags immediately after they're selected
+        const now = Date.now();
+        if (this._lastTagLoadTime && (now - this._lastTagLoadTime) < 3000) {
+            verboseLog('⏭️ Skipping validation - tags were just loaded (within 3s)');
             return;
         }
 
@@ -11959,8 +12055,9 @@ const TagManager = {
 
         // CRITICAL FIX: Only clear and update if we actually found invalid tags AND they represent a significant portion
         // This prevents clearing when data is still loading
-        if (invalidTags.length > 0 && invalidTags.length > this.state.persistentSelectedTags.length * 0.5) {
-            // More than 50% invalid - likely a data mismatch, clean up
+        // INCREASED threshold from 50% to 80% to be less aggressive
+        if (invalidTags.length > 0 && invalidTags.length > this.state.persistentSelectedTags.length * 0.8) {
+            // More than 80% invalid - likely a data mismatch, clean up
             verboseLog(`Cleaning up ${invalidTags.length} invalid tags (${(invalidTags.length / this.state.persistentSelectedTags.length * 100).toFixed(1)}% of selections)`);
             
             // Remove invalid tags and update with corrected case
@@ -11986,6 +12083,9 @@ const TagManager = {
             ).filter(Boolean);
             
             this.updateSelectedTags(validTagObjects);
+        } else if (invalidTags.length > 0) {
+            // Some tags are invalid but not enough to clear - just log a warning
+            verboseLog(`⚠️ ${invalidTags.length} selected tags not found in current data, but preserving them (may be JSON matched or temporarily unavailable)`);
         }
     },
 
@@ -12761,7 +12861,7 @@ document.addEventListener('DOMContentLoaded', function() {
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
         }
-    }, 10000); // 10 second fallback
+    }, 5000); // 5 second fallback (reduced for faster reloads)
 });
 
 // Global functions for debugging
