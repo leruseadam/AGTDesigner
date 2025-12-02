@@ -236,39 +236,35 @@
         document.documentElement.style.setProperty('--vmin', vmin + 'px');
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
         
-        // UNIVERSAL SCALING: Adapt to any screen size
-        // Calculate scale factor based on viewport width (1920px = baseline)
-        // Scale down on larger screens to prevent excessive size on PC monitors
+        // DISABLE SCALING FOR LARGE SCREENS - Keep at 1.0 to prevent oversized viewport
         const baseWidth = 1920;
-        let scaleFactor;
-        if (window.innerWidth > baseWidth) {
-          // For screens larger than baseline, scale DOWN (inverse ratio)
-          // More aggressive scaling for very large screens
-          scaleFactor = Math.max(baseWidth / window.innerWidth, 0.5);
-        } else {
-          // For screens smaller than baseline, scale proportionally (but not too small)
+        let scaleFactor = 1.0;
+        
+        // Only scale DOWN for smaller screens, never scale up
+        if (window.innerWidth < baseWidth) {
           scaleFactor = Math.max(window.innerWidth / baseWidth, 0.5);
         }
-        // Cap maximum scale at 1.0 to prevent upscaling
-        scaleFactor = Math.min(scaleFactor, 1.0);
+        
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
-        // Apply scale directly to body for large screens to prevent oversized viewport
-        if (window.innerWidth > baseWidth && document.body) {
-          // Use CSS zoom for better browser compatibility
-          document.body.style.zoom = scaleFactor;
-          // Also set transform as fallback
-          document.body.style.transform = `scale(${scaleFactor})`;
-          document.body.style.transformOrigin = 'top left';
-          document.body.style.width = `${(100 / scaleFactor).toFixed(4)}%`;
-          document.body.style.height = `${(100 / scaleFactor).toFixed(4)}%`;
-        } else if (document.body) {
-          // Reset scaling for smaller screens
+        // NEVER apply body scaling - let CSS handle it
+        if (document.body) {
           document.body.style.zoom = '';
           document.body.style.transform = '';
           document.body.style.width = '';
           document.body.style.height = '';
+        }
+        
+        // Disable scaleAppToFit for large screens
+        if (window.innerWidth > baseWidth && window.scaleAppToFit) {
+          const originalScaleAppToFit = window.scaleAppToFit;
+          window.scaleAppToFit = function() {
+            // Only run on small screens
+            if (window.innerWidth <= baseWidth) {
+              originalScaleAppToFit();
+            }
+          };
         }
         
         // Ensure body fills viewport (only if body exists)

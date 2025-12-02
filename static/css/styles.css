@@ -105,27 +105,46 @@ body > .container-fluid {
   margin: 0 auto !important;
 }
 
-/* Constrain width on very large PC monitors for better readability */
-@media (min-width: 2560px) {
+/* FIXED MAX-WIDTH FOR ALL LARGE SCREENS - Prevents oversized viewport */
+@media (min-width: 1920px) {
   body > .container,
   body > .container-fluid,
-  .main-content {
-    max-width: 2000px !important;
+  .main-content,
+  #mainContent {
+    max-width: 1800px !important;
     margin-left: auto !important;
     margin-right: auto !important;
   }
+  
+  html {
+    font-size: 14px !important;
+  }
 }
 
-/* Additional scaling for ultra-wide and 4K monitors */
-@media (min-width: 3840px) {
-  html {
-    font-size: 12px !important; /* Even smaller for 4K */
-  }
-  
+/* Additional constraint for ultra-wide and 4K monitors */
+@media (min-width: 2560px) {
   body > .container,
   body > .container-fluid,
-  .main-content {
-    max-width: 1800px !important;
+  .main-content,
+  #mainContent {
+    max-width: 1600px !important;
+  }
+  
+  html {
+    font-size: 13px !important;
+  }
+}
+
+@media (min-width: 3840px) {
+  body > .container,
+  body > .container-fluid,
+  .main-content,
+  #mainContent {
+    max-width: 1400px !important;
+  }
+  
+  html {
+    font-size: 12px !important;
   }
 }
   

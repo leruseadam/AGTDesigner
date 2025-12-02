@@ -923,35 +923,59 @@ document.addEventListener('DOMContentLoaded', function() {
   // Expose for other scripts
   window.scaleAppToFit = scaleAppToFit;
 
+  // DISABLE scaleAppToFit for large screens (1920px+) to prevent oversized viewport
+  const BASELINE_WIDTH = 1920;
+  
   // Apply on ready (after content becomes visible), and on resize/orientation
   document.addEventListener('DOMContentLoaded', function() {
     const main = document.getElementById('mainContent');
     if (!main) return;
+    
+    // Skip scaling for large screens
+    if (window.innerWidth > BASELINE_WIDTH) return;
 
     const tryApply = () => {
       const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
-      if (visible) {
+      if (visible && window.innerWidth <= BASELINE_WIDTH) {
         requestAnimationFrame(scaleAppToFit);
-      } else {
+      } else if (window.innerWidth <= BASELINE_WIDTH) {
         setTimeout(tryApply, 200);
       }
     };
     tryApply();
   });
 
-  // Ensure after full load (fonts/images) we re-calc
+  // Ensure after full load (fonts/images) we re-calc - ONLY for small screens
   window.addEventListener('load', () => {
-    requestAnimationFrame(scaleAppToFit);
-    setTimeout(scaleAppToFit, 0);
-    setTimeout(scaleAppToFit, 250);
+    if (window.innerWidth <= BASELINE_WIDTH) {
+      requestAnimationFrame(scaleAppToFit);
+      setTimeout(scaleAppToFit, 0);
+      setTimeout(scaleAppToFit, 250);
+    }
   });
 
   let resizeTimer;
   window.addEventListener('resize', () => {
     cancelAnimationFrame(resizeTimer);
-    resizeTimer = requestAnimationFrame(scaleAppToFit);
+    // Only scale on small screens
+    if (window.innerWidth <= BASELINE_WIDTH) {
+      resizeTimer = requestAnimationFrame(scaleAppToFit);
+    } else {
+      // Reset any scaling on large screens
+      const body = document.body;
+      if (body) {
+        body.style.transform = '';
+        body.style.width = '';
+        body.style.height = '';
+        body.style.zoom = '';
+      }
+    }
   });
-  window.addEventListener('orientationchange', () => setTimeout(scaleAppToFit, 0));
+  window.addEventListener('orientationchange', () => {
+    if (window.innerWidth <= BASELINE_WIDTH) {
+      setTimeout(scaleAppToFit, 0);
+    }
+  });
 })();
 
 // Expose manual control in console
