@@ -9437,6 +9437,10 @@ const TagManager = {
                 }
                 this._checkingExistingData = false;
                 return; // Exit early - we have cached data
+            } else {
+                // CRITICAL FIX: No cache found but file exists - fetch tags from server
+                console.log('⚠️ File exists but no cache found - fetching tags from server...');
+                // Don't return - continue to fetch from server below
             }
         }
 
@@ -9672,6 +9676,21 @@ const TagManager = {
             }
         } catch (error) {
             verboseLog('Error loading initial data:', error.message);
+            
+            // CRITICAL FIX: If /api/initial-data fails or times out, fall back to direct tag fetch
+            // This ensures tags load even if initial-data endpoint is slow or fails
+            if (hasFile && (!this.state.tags || this.state.tags.length === 0)) {
+                console.log('⚠️ /api/initial-data failed or timed out - falling back to direct tag fetch...');
+                try {
+                    await this.fetchAndUpdateAvailableTags();
+                    console.log('✅ Fallback tag fetch succeeded');
+                    clearTimeout(splashSafetyTimeout);
+                    this._checkingExistingData = false;
+                    return;
+                } catch (fallbackError) {
+                    console.error('❌ Fallback tag fetch also failed:', fallbackError);
+                }
+            }
             
             // Handle timeout specifically
             if (error.message === 'Initialization timeout') {
