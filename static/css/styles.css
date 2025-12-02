@@ -105,48 +105,8 @@ body > .container-fluid {
   margin: 0 auto !important;
 }
 
-/* FIXED MAX-WIDTH FOR ALL LARGE SCREENS - Prevents oversized viewport */
-@media (min-width: 1920px) {
-  body > .container,
-  body > .container-fluid,
-  .main-content,
-  #mainContent {
-    max-width: 1800px !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
-  
-  html {
-    font-size: 14px !important;
-  }
-}
-
-/* Additional constraint for ultra-wide and 4K monitors */
-@media (min-width: 2560px) {
-  body > .container,
-  body > .container-fluid,
-  .main-content,
-  #mainContent {
-    max-width: 1600px !important;
-  }
-  
-  html {
-    font-size: 13px !important;
-  }
-}
-
-@media (min-width: 3840px) {
-  body > .container,
-  body > .container-fluid,
-  .main-content,
-  #mainContent {
-    max-width: 1400px !important;
-  }
-  
-  html {
-    font-size: 12px !important;
-  }
-}
+/* Remove max-width constraints - let scaleAppToFit handle all scaling consistently */
+/* This ensures MacBook and PC scale the same way */
   
 /* Tag lists and containers - ensure they scale with zoom */
 .tag-list-container,
