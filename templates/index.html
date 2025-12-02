@@ -7663,12 +7663,11 @@
           return;
         }
         
-        // CRITICAL FIX: Check if TagManager is not just loaded, but also initialized
-        // TagManager.init() must be called before uploadFile is available
+        // CRITICAL FIX: Check if TagManager is loaded and has uploadFile method
+        // uploadFile exists on TagManager even before init() is called
+        // We just need TagManager to be loaded from main.js
         const tagManagerReady = window.TagManager && 
-                                typeof window.TagManager.uploadFile === 'function' &&
-                                window.TagManager.state && // Check if state exists (indicates init was called)
-                                !window.STORE_MODAL_BLOCKING; // Don't initialize if store selection is blocking
+                                typeof window.TagManager.uploadFile === 'function';
         
         if (tagManagerReady) {
           console.log('✓ TagManager ready and initialized, attaching file upload listener');
@@ -7693,10 +7692,8 @@
         } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
           // Only log every 10th attempt to reduce console spam
           if (window.fileUploadInitAttempts % 10 === 0 || window.fileUploadInitAttempts <= 5) {
-            const reason = !window.TagManager ? 'TagManager not loaded' :
-                          !window.TagManager.uploadFile ? 'uploadFile method not available' :
-                          !window.TagManager.state ? 'TagManager not initialized (waiting for store selection)' :
-                          window.STORE_MODAL_BLOCKING ? 'store selection in progress' : 'unknown';
+            const reason = !window.TagManager ? 'TagManager not loaded from main.js' :
+                          !window.TagManager.uploadFile ? 'uploadFile method not available' : 'unknown';
             console.warn(`⏳ TagManager not ready yet (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS}): ${reason}`);
           }
           // Retry after a short delay
@@ -7707,8 +7704,8 @@
           console.warn('⚠️ File upload initialization delayed - TagManager not ready yet');
           console.warn('⚠️ TagManager available:', !!window.TagManager);
           console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
-          console.warn('⚠️ TagManager.state available:', !!(window.TagManager && window.TagManager.state));
-          console.warn('⚠️ Store modal blocking:', !!window.STORE_MODAL_BLOCKING);
+          console.warn('⚠️ main.js loaded:', window.mainJsLoaded || false);
+          console.warn('⚠️ main.js error:', window.mainJsError || 'None');
           console.warn('⚠️ Will continue retrying every 2 seconds until TagManager is ready...');
           
           // Reset counter and retry with longer interval (2 seconds instead of 100ms)
