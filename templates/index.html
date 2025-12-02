@@ -696,6 +696,14 @@
               window.STORE_MODAL_BLOCKING = false;
             }
             
+            // CRITICAL FIX: Retry file upload initialization after store is confirmed
+            // This ensures file upload is initialized even if it failed earlier
+            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+              console.log('🔄 Store confirmed - retrying file upload initialization...');
+              window.fileUploadInitAttempts = 0; // Reset counter
+              setTimeout(window.initializeFileUpload, 200);
+            }
+            
             console.log('✅ Content shown, modal hidden');
             
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
@@ -7467,6 +7475,16 @@
             
             if (window.TagManager && typeof window.TagManager.init === 'function') {
               TagManager.init();
+              
+              // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
+              // Give it a moment for init to complete
+              setTimeout(() => {
+                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
+                  window.fileUploadInitAttempts = 0; // Reset counter
+                  setTimeout(window.initializeFileUpload, 200);
+                }
+              }, 500);
             } else {
               console.error('❌ TagManager.init is not available');
             }
@@ -7645,9 +7663,15 @@
           return;
         }
         
-        // Check if TagManager and uploadFile method are available
-        if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
-          console.log('✓ TagManager ready, attaching file upload listener');
+        // CRITICAL FIX: Check if TagManager is not just loaded, but also initialized
+        // TagManager.init() must be called before uploadFile is available
+        const tagManagerReady = window.TagManager && 
+                                typeof window.TagManager.uploadFile === 'function' &&
+                                window.TagManager.state && // Check if state exists (indicates init was called)
+                                !window.STORE_MODAL_BLOCKING; // Don't initialize if store selection is blocking
+        
+        if (tagManagerReady) {
+          console.log('✓ TagManager ready and initialized, attaching file upload listener');
           window.fileUploadInitialized = true; // Mark as initialized to prevent retries
           
           // Remove any existing listeners to prevent duplicates
