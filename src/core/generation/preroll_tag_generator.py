@@ -10,7 +10,6 @@ import logging
 from typing import List, Dict, Any, Optional
 from flask import session
 from flask_caching import Cache
-from src.core.constants import PREROLL_ALLOWED_BRANDS
 
 
 def identify_preroll_product_group(description: str, product_name: str = '') -> Dict[str, str]:
@@ -89,10 +88,9 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             }
     
     # Default: use truncated description pattern
-    # CRITICAL FIX: Check for infused prerolls FIRST before regular prerolls
     preroll_patterns = [
-        r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)',  # Infused prerolls first
-        r'(.+?)(Pre[-‑ ]?Roll.*)',  # Regular prerolls second
+        r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)',
+        r'(.+?)(Pre[-‑ ]?Roll.*)',
     ]
     for pattern in preroll_patterns:
         match = re.search(pattern, description, re.IGNORECASE)
@@ -101,14 +99,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             # Create a safe group ID from the description
             group_id = re.sub(r'[^a-z0-9-]+', '-', universal_desc).strip('-')
             display_name = universal_desc.replace('pre-roll', 'Pre-Roll').replace('pre roll', 'Pre-Roll')
-            # CRITICAL FIX: Ensure "infused" is capitalized and preserved in display name
-            if 'infused' in universal_desc:
-                display_name = display_name.replace('infused', 'Infused').title()
-                # Ensure "Infused" appears before "Pre-Roll" in the display name
-                if 'infused' in display_name.lower() and 'pre-roll' not in display_name:
-                    display_name = display_name.replace('Infused', 'Infused Pre-Roll')
-            else:
-                display_name = display_name.title()
+            display_name = display_name.replace('infused', 'Infused').title()
             return {
                 'group_id': group_id[:50],  # Limit length
                 'display_name': display_name,
@@ -134,32 +125,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     Returns:
         List of grouped representative records (one per category)
     """
-    # Filter records by allowed brands if configured
-    if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
-        original_count = len(records)
-        # Normalize allowed brands to lowercase for case-insensitive matching
-        allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
-        
-        filtered_records = []
-        for record in records:
-            # Get brand from various possible fields
-            brand = (
-                record.get('Product Brand', '') or
-                record.get('ProductBrand', '') or
-                record.get('Brand', '') or
-                ''
-            )
-            brand_lower = str(brand).strip().lower()
-            
-            # Check if brand is in allowed list
-            if brand_lower in allowed_brands_lower:
-                filtered_records.append(record)
-            else:
-                logging.debug(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' (not in allowed brands)")
-        
-        records = filtered_records
-        logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} records to {len(records)} records matching allowed brands: {PREROLL_ALLOWED_BRANDS}")
-    
     # Save original records for QR page (before grouping)
     original_records_for_qr = [r.copy() for r in records]
     
@@ -240,19 +205,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # Also update DescAndWeight - use group name only (no individual product details)
         representative['DescAndWeight'] = group_display_name
         
-        # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
-        # Check if this is an infused preroll group and set Product Type* accordingly
-        if 'infused' in group_display_name.lower() or original_group_id.startswith('infused-preroll'):
-            representative['Product Type*'] = 'Infused Pre-Roll'
-            representative['ProductType'] = 'infused pre-roll'
-            logging.info(f"PREROLL GROUP REP: Set Product Type* to 'Infused Pre-Roll' for infused preroll group '{group_display_name}'")
-        else:
-            # For regular prerolls, ensure Product Type* is set correctly
-            if 'pre' in group_display_name.lower() and 'roll' in group_display_name.lower():
-                representative['Product Type*'] = 'Pre-Roll'
-                representative['ProductType'] = 'pre-roll'
-                logging.info(f"PREROLL GROUP REP: Set Product Type* to 'Pre-Roll' for regular preroll group '{group_display_name}'")
-        
         # CRITICAL FIX: Preserve vendor information in the representative record
         # This ensures each vendor's label shows their vendor name
         vendor = (
@@ -290,24 +242,8 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         unique_records.append(representative)
         
         # Store items for this group in cache (for QR code page) - use ALL original records
-        # But filter by allowed brands if configured
         group_items = []
         for record in group_records_list:
-            # Filter by allowed brands if configured
-            if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
-                brand = (
-                    record.get('Product Brand', '') or
-                    record.get('ProductBrand', '') or
-                    record.get('Brand', '') or
-                    ''
-                )
-                brand_lower = str(brand).strip().lower()
-                allowed_brands_lower = {b.lower().strip() for b in PREROLL_ALLOWED_BRANDS if b and str(b).strip()}
-                
-                if brand_lower not in allowed_brands_lower:
-                    logging.debug(f"PREROLL GROUP CACHE: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' from cache (not in allowed brands)")
-                    continue
-            
             # Normalize DOH/DOH-compliant field so lists and QR views can display
             # a clean YES/NO status.
             doh_raw = record.get('DOH') or record.get('DOH Compliant (Yes/No)', '')

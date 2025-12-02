@@ -11,23 +11,20 @@
     
     // CRITICAL: Clear cache if no file uploaded
     // Prevents showing stale cached data from previous sessions
-    // NOTE: Only clear sessionStorage, keep localStorage for faster reloads
     const fileInfoText = document.getElementById('fileInfoText');
     const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded');
-    if (!hasUploadedFile) {
-        console.log('🗑️ No uploaded file detected - clearing stale sessionStorage cache (keeping localStorage)');
-        // Clear all tag-related cache entries from sessionStorage only
-        if (window.sessionStorage) {
-            const keysToRemove = [];
-            for (let i = 0; i < sessionStorage.length; i++) {
-                const key = sessionStorage.key(i);
-                if (key && key.includes('agt_available_tags')) {
-                    keysToRemove.push(key);
-                }
+    if (!hasUploadedFile && window.sessionStorage) {
+        console.log('🗑️ No uploaded file detected - clearing stale cache');
+        // Clear all tag-related cache entries
+        const keysToRemove = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key && key.includes('agt_available_tags')) {
+                keysToRemove.push(key);
             }
-            keysToRemove.forEach(key => sessionStorage.removeItem(key));
-            console.log(`✅ Cleared ${keysToRemove.length} stale sessionStorage cache entries`);
         }
+        keysToRemove.forEach(key => sessionStorage.removeItem(key));
+        console.log(`✅ Cleared ${keysToRemove.length} stale cache entries`);
     }
     
     // Store original checkForExistingData function
@@ -82,9 +79,6 @@
             
             if (cachedTags && cachedTags.length > 0) {
                 console.log(`⚡ INSTANT CACHE HIT: ${cachedTags.length} tags available`);
-                // CRITICAL FIX: Preserve selected tags before rendering
-                const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
-                
                 // Render cached tags IMMEDIATELY
                 this.state.tags = [...cachedTags];
                 this.state.originalTags = [...cachedTags];
@@ -97,30 +91,6 @@
                         this._updateAvailableTags(cachedTags, null);
                     }
                     console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
-                    
-                    // CRITICAL FIX: Restore selected tags after rendering
-                    if (savedSelectedTags.length > 0) {
-                        this.state.persistentSelectedTags = [...savedSelectedTags];
-                        this.state.selectedTags = new Set(savedSelectedTags);
-                        // Restore checkboxes
-                        requestAnimationFrame(() => {
-                            savedSelectedTags.forEach(tagName => {
-                                const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
-                                checkboxes.forEach(cb => {
-                                    if (!cb.checked) {
-                                        cb.checked = true;
-                                    }
-                                });
-                            });
-                            // Restore selected tags display
-                            if (this.getSelectedTagObjects && this.updateSelectedTags) {
-                                const selectedTagObjects = this.getSelectedTagObjects();
-                                if (selectedTagObjects.length > 0) {
-                                    this.updateSelectedTags(selectedTagObjects);
-                                }
-                            }
-                        });
-                    }
                     
                     // Hide splash immediately
                     if (this.hideActionSplash) {
@@ -139,17 +109,6 @@
                     this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
                 ]).then(() => {
                     console.log('✅ Background: Selected tags and filters loaded');
-                    // CRITICAL FIX: Ensure selected tags are still preserved after background fetch
-                    if (savedSelectedTags.length > 0 && this.state.persistentSelectedTags.length === 0) {
-                        this.state.persistentSelectedTags = [...savedSelectedTags];
-                        this.state.selectedTags = new Set(savedSelectedTags);
-                        if (this.getSelectedTagObjects && this.updateSelectedTags) {
-                            const selectedTagObjects = this.getSelectedTagObjects();
-                            if (selectedTagObjects.length > 0) {
-                                this.updateSelectedTags(selectedTagObjects);
-                            }
-                        }
-                    }
                 }).catch(err => {
                     console.warn('⚠️ Background load error (non-critical):', err);
                 });
@@ -168,25 +127,9 @@
                 this.showActionSplash('Loading tags from server...');
             }
             
-            // INSTANT RELOAD FIX: Load data from server with timeout and show UI immediately
+            // Load data from server
             try {
-                // Use Promise.race to timeout after 2 seconds
-                const fetchPromise = fetch('/api/initial-data?fast_load=1&stream=1');
-                const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Server timeout')), 2000)
-                );
-                
-                let response;
-                try {
-                    response = await Promise.race([fetchPromise, timeoutPromise]);
-                } catch (timeoutError) {
-                    console.warn('⚡ Server fetch timeout, falling back to original checkForExistingData');
-                    // Fallback to original if timeout
-                    if (originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
-                        await originalCheckForExistingData.call(this);
-                    }
-                    return;
-                }
+                const response = await fetch('/api/initial-data?fast_load=1');
                 
                 if (response.ok) {
                     const data = await response.json();
@@ -304,60 +247,6 @@
         
         console.log('⚡ Page load optimization active');
     }
-    
-    // ULTRA-FAST RELOAD: Check cache immediately on script load (before DOM ready)
-    // This allows instant tag display even before TagManager is fully initialized
-    function earlyCacheCheck() {
-        try {
-            // Try to find any cached tags immediately
-            const storageBackends = [];
-            if (window.localStorage) storageBackends.push({ name: 'localStorage', storage: localStorage });
-            if (window.sessionStorage) storageBackends.push({ name: 'sessionStorage', storage: sessionStorage });
-            
-            if (storageBackends.length > 0) {
-                // Search for any valid cache keys
-                const allKeys = [];
-                for (const backend of storageBackends) {
-                    for (let i = 0; i < backend.storage.length; i++) {
-                        const key = backend.storage.key(i);
-                        if (key && key.startsWith('agt_available_tags_')) {
-                            allKeys.push({ key, storage: backend.storage });
-                        }
-                    }
-                }
-                
-                if (allKeys.length > 0) {
-                    console.log(`⚡ Early cache check: Found ${allKeys.length} potential cache keys`);
-                    // Try to find a valid cache entry
-                    for (const { key, storage } of allKeys) {
-                        try {
-                            const raw = storage.getItem(key);
-                            if (raw) {
-                                const payload = JSON.parse(raw);
-                                if (payload && Array.isArray(payload.tags) && payload.tags.length > 0) {
-                                    const age = Date.now() - (payload.timestamp || 0);
-                                    const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-                                    if (age <= CACHE_TTL_MS) {
-                                        console.log(`⚡ Early cache HIT: Found ${payload.tags.length} tags in ${storage === localStorage ? 'localStorage' : 'sessionStorage'}`);
-                                        // Store in window for TagManager to pick up
-                                        window._earlyCacheFound = { key, tags: payload.tags, storage: storage === localStorage ? 'localStorage' : 'sessionStorage' };
-                                        break;
-                                    }
-                                }
-                            }
-                        } catch (e) {
-                            continue;
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            console.warn('Early cache check failed:', error);
-        }
-    }
-    
-    // Run early cache check immediately
-    earlyCacheCheck();
     
     // Run optimization when DOM is ready
     if (document.readyState === 'loading') {

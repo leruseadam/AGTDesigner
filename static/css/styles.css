@@ -114,15 +114,8 @@ body > .container-fluid {
 
 /* Larger scaling for key UI elements - zoom responsive */
 .tag-item, .tag-entry {
-  font-size: 0.75rem !important; /* At least 8pt font, set to 9pt (0.75rem = 12px) for better readability */
+  font-size: 0.8rem !important; /* Reduced for more compact tag lists */
   min-height: 2.4rem !important;
-}
-
-/* Highlight items with 5 or more units */
-.tag-item.high-units {
-  background-color: rgba(255, 215, 0, 0.3) !important; /* Gold/yellow highlight */
-  border-left: 3px solid rgba(255, 215, 0, 0.8) !important;
-  font-weight: 600 !important;
 }
 
 .quick-start-guide, .help-text {
@@ -4950,21 +4943,6 @@ canvas#lava-lamp-canvas {
   
   .database-view .table tbody tr:hover {
     background: rgba(160, 132, 232, 0.1);
-  }
-  
-  /* Make name column wider in tags table */
-  .table .tag-name-header,
-  .table .tag-name-cell {
-    min-width: 250px !important;
-    width: 30% !important;
-    max-width: 400px !important;
-  }
-  
-  /* Make other columns appropriately sized */
-  .table thead th:not(.tag-name-header),
-  .table tbody td:not(.tag-name-cell) {
-    width: auto !important;
-    min-width: 80px !important;
   }
   
   /* Database buttons in control panel */
