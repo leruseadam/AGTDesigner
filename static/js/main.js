@@ -758,12 +758,14 @@ const AppLoadingSplash = {
         this.isVisible = true;
         this.currentStep = 0;
         // Emergency kill-switch: never let the splash sit indefinitely
+        // Reduced from 7s to 5s for faster recovery
         if (this._emergencyTimer) {
             clearTimeout(this._emergencyTimer);
         }
         this._emergencyTimer = setTimeout(() => {
+            console.warn('⚠️ Emergency timeout: Forcing splash to hide after 5 seconds');
             this.emergencyHide();
-        }, 7000);
+        }, 5000);
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');

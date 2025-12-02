@@ -612,17 +612,46 @@
       
       console.log('Fetching store status from backend...');
       const cacheBust = `ts=${Date.now()}`;
+      
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      
       fetch(`/api/check-store-required?${cacheBust}`, {
         credentials: 'same-origin',
-        cache: 'no-store'
+        cache: 'no-store',
+        signal: controller.signal
       })
         .then(response => {
+          clearTimeout(timeoutId);
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
           return response.json();
         })
+        .catch(error => {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            console.error('❌ Store check timed out after 5 seconds');
+            // Fallback: show modal anyway to allow user to proceed
+            console.log('⚠️ Showing store selection modal as fallback');
+            if (typeof showStoreSelectionModal === 'function') {
+              showStoreSelectionModal();
+            } else {
+              // If function doesn't exist, manually show modal
+              if (modalElement) {
+                modalElement.style.display = 'block';
+                modalElement.classList.add('show');
+                document.body.classList.add('modal-open');
+              }
+            }
+            window.checkingStoreRequired = false;
+            return null; // Return null to skip data processing
+          }
+          throw error;
+        })
         .then(data => {
+          if (!data) return; // Skip if error was handled (timeout)
           console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
           console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
           
