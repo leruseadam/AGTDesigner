@@ -1787,7 +1787,11 @@ class TemplateProcessor:
                                     self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         
                         # Keep weight on the same line as description with non-breaking space
-                        desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                        # For preroll template, use non-breaking hyphen to keep hyphen and weight together
+                        if self.template_type == 'preroll':
+                            desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
+                        else:
+                            desc_and_weight = f"{desc} -\u00A0{clean_weight}"
                         self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
                     else:
                         # Fallback to constructing from Weight* + Units
@@ -1803,7 +1807,11 @@ class TemplateProcessor:
                         
                         if weight_value and units_value:
                             clean_weight = f"{weight_value}{units_value}"
-                            desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                            # For preroll template, use non-breaking hyphen to keep hyphen and weight together
+                            if self.template_type == 'preroll':
+                                desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
+                            else:
+                                desc_and_weight = f"{desc} -\u00A0{clean_weight}"
                             self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             desc_and_weight = desc
@@ -2567,6 +2575,15 @@ class TemplateProcessor:
                         label_context['Description'] = universal_desc
                         self.logger.info(f"PREROLL DESC TRUNCATE: '{description}' -> '{universal_desc}'")
                         break
+            
+            # CRITICAL FIX: Apply non-breaking hyphens to Description for preroll templates
+            # This ensures entries like "Pre-Roll - 1g" (without "Assorted") have non-breaking hyphens
+            # Do this after truncation so the final Description has non-breaking hyphens
+            if self.template_type == 'preroll' and label_context.get('Description'):
+                from src.core.generation.text_processing import make_nonbreaking_hyphens
+                original_description = label_context['Description']
+                label_context['Description'] = make_nonbreaking_hyphens(label_context['Description'])
+                self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG (PREROLL): Description '{original_description}' -> '{label_context['Description']}'")
 
         # CRITICAL FIX: Apply non-breaking hyphens to ProductName to prevent "Pre-Roll" splitting
         if label_context.get('ProductName'):
