@@ -7692,16 +7692,29 @@
           });
         } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
           // Only log every 10th attempt to reduce console spam
-          if (window.fileUploadInitAttempts % 10 === 0) {
-            console.warn(`TagManager not ready yet, retrying... (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS})`);
+          if (window.fileUploadInitAttempts % 10 === 0 || window.fileUploadInitAttempts <= 5) {
+            const reason = !window.TagManager ? 'TagManager not loaded' :
+                          !window.TagManager.uploadFile ? 'uploadFile method not available' :
+                          !window.TagManager.state ? 'TagManager not initialized (waiting for store selection)' :
+                          window.STORE_MODAL_BLOCKING ? 'store selection in progress' : 'unknown';
+            console.warn(`⏳ TagManager not ready yet (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS}): ${reason}`);
           }
           // Retry after a short delay
           setTimeout(initializeFileUpload, 100);
         } else {
-          console.error('❌ Failed to initialize file upload after 5 seconds. TagManager may not be loaded.');
-          console.error('❌ TagManager available:', !!window.TagManager);
-          console.error('❌ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
-          // Don't set fileUploadInitialized to true so it can be retried later if TagManager loads
+          // Don't give up - keep retrying indefinitely but with longer intervals
+          // This handles cases where store selection takes longer than 5 seconds
+          console.warn('⚠️ File upload initialization delayed - TagManager not ready yet');
+          console.warn('⚠️ TagManager available:', !!window.TagManager);
+          console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
+          console.warn('⚠️ TagManager.state available:', !!(window.TagManager && window.TagManager.state));
+          console.warn('⚠️ Store modal blocking:', !!window.STORE_MODAL_BLOCKING);
+          console.warn('⚠️ Will continue retrying every 2 seconds until TagManager is ready...');
+          
+          // Reset counter and retry with longer interval (2 seconds instead of 100ms)
+          // This prevents console spam while still allowing recovery
+          window.fileUploadInitAttempts = 0;
+          setTimeout(initializeFileUpload, 2000);
         }
       }
       
