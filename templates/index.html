@@ -5684,6 +5684,151 @@
 
   <!-- Modals -->
   
+  <!-- CRITICAL: Ensure selectStore is always defined before modal HTML -->
+  <script>
+    // Ensure selectStore function exists before modal buttons are rendered
+    // This prevents "ReferenceError: selectStore is not defined" errors
+    (function() {
+      // Store the original function if it exists
+      const originalSelectStore = window.selectStore;
+      
+      // Define a complete fallback implementation
+      function fallbackSelectStore(storeValue) {
+        console.log('=== STORE SELECTION CLICKED ===');
+        console.log('Store value:', storeValue);
+        console.log('About to send fetch request to /api/set-store');
+
+        fetch('/api/set-store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ store: storeValue })
+        })
+        .then(response => {
+          console.log('✅ Fetch completed - Response status:', response.status);
+          if (!response.ok) {
+            console.error('❌ Response not OK:', response.status, response.statusText);
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          console.log('✅ JSON parsed successfully');
+          console.log('Response data:', data);
+          if (data.success) {
+            console.log('✅ Store set successfully:', storeValue);
+            sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
+            sessionStorage.setItem('store_just_selected', 'true');
+            sessionStorage.setItem('selected_store', storeValue);
+            window.checkingStoreRequired = false;
+
+            // Hide modal
+            const modalElement = document.getElementById('storeSelectionModal');
+            if (modalElement) {
+              try {
+                const modalInstance = (typeof bootstrap !== 'undefined')
+                  ? bootstrap.Modal.getInstance(modalElement)
+                  : null;
+                if (modalInstance) {
+                  modalInstance.hide();
+                }
+              } catch (hideError) {
+                console.warn('⚠️ Failed to hide modal via Bootstrap before reload', hideError);
+              }
+              modalElement.classList.remove('show');
+              modalElement.style.display = 'none';
+              document.body.classList.remove('modal-open');
+              document.body.style.overflow = '';
+              const backdrop = document.getElementById('storeModalBackdrop') || document.querySelector('.modal-backdrop');
+              if (backdrop) backdrop.remove();
+            }
+
+            console.log('🔄 Reloading page to apply store change...');
+            setTimeout(() => window.location.reload(), 500);
+          } else {
+            console.error('❌ Error setting store:', data.error || 'Unknown error');
+            alert('Error setting store: ' + (data.error || 'Please try again.'));
+          }
+        })
+        .catch(error => {
+          console.error('❌ Fetch error:', error);
+          console.error('Error stack:', error.stack);
+          alert('Error saving store selection: ' + error.message + '\nPlease check the console for details.');
+        });
+      }
+      
+      // If selectStore doesn't exist, create it now
+      if (typeof window.selectStore !== 'function') {
+        console.warn('⚠️ selectStore not yet defined in head, creating fallback now...');
+        window.selectStore = fallbackSelectStore;
+      } else {
+        console.log('✅ selectStore already defined, keeping original');
+      }
+      
+      // Ensure it stays defined - override if it gets cleared
+      const ensureSelectStore = function() {
+        if (typeof window.selectStore !== 'function') {
+          console.warn('⚠️ selectStore was cleared, restoring...');
+          window.selectStore = originalSelectStore || fallbackSelectStore;
+        }
+      };
+      
+      // Check periodically (but not too often to avoid performance issues)
+      setTimeout(ensureSelectStore, 100);
+      setTimeout(ensureSelectStore, 500);
+      setTimeout(ensureSelectStore, 1000);
+      
+      // Also check when modal is shown
+      document.addEventListener('DOMContentLoaded', function() {
+        const modalElement = document.getElementById('storeSelectionModal');
+        if (modalElement) {
+          modalElement.addEventListener('shown.bs.modal', ensureSelectStore);
+        }
+      });
+    })();
+    
+    // Add event delegation as PRIMARY handler for button clicks (more reliable than inline handlers)
+    // This ensures clicks are handled even if selectStore isn't defined when buttons are rendered
+    document.addEventListener('DOMContentLoaded', function() {
+      const storeOptionsGrid = document.querySelector('.store-options-grid');
+      if (storeOptionsGrid && !storeOptionsGrid.dataset.handlersAttached) {
+        storeOptionsGrid.dataset.handlersAttached = 'true';
+        
+        storeOptionsGrid.addEventListener('click', function(e) {
+          const button = e.target.closest('.btn-store-option');
+          if (button) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Get store value from data attribute
+            const storeValue = button.getAttribute('data-store');
+            
+            if (storeValue) {
+              console.log('🔄 Event delegation: calling selectStore for', storeValue);
+              if (typeof window.selectStore === 'function') {
+                window.selectStore(storeValue);
+              } else {
+                console.error('❌ selectStore function not available, retrying in 100ms...');
+                // Try again after a short delay in case function is being defined
+                setTimeout(function() {
+                  if (typeof window.selectStore === 'function') {
+                    console.log('✅ selectStore now available, calling...');
+                    window.selectStore(storeValue);
+                  } else {
+                    console.error('❌ selectStore still not available after retry');
+                    alert('Store selection function is not available. Please refresh the page.');
+                  }
+                }, 100);
+              }
+            }
+          }
+        }, true); // Use capture phase to catch clicks early
+        
+        console.log('✅ Store button event delegation handler attached');
+      }
+    });
+  </script>
+  
   <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
   <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
@@ -5701,49 +5846,49 @@
           <p class="mb-4 text-light" style="font-size: 1rem; font-weight: 500; color: rgba(255, 255, 255, 0.88);">Please select your store location to continue. This selection will be saved and remembered for future visits.</p>
           
           <div class="store-options-grid">
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Bothell')">
+            <button class="btn btn-store-option" data-store="AGT_Bothell">
               <div class="store-option-content">
                 <div class="store-name">AGT Bothell</div>
                 <div class="store-location">Bothell, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Burien')">
+            <button class="btn btn-store-option" data-store="AGT_Burien">
               <div class="store-option-content">
                 <div class="store-name">AGT Burien</div>
                 <div class="store-location">Burien, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Goldbar')">
+            <button class="btn btn-store-option" data-store="AGT_Goldbar">
               <div class="store-option-content">
                 <div class="store-name">AGT Goldbar</div>
                 <div class="store-location">Goldbar, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Lynnwood')">
+            <button class="btn btn-store-option" data-store="AGT_Lynnwood">
               <div class="store-option-content">
                 <div class="store-name">AGT Lynnwood</div>
                 <div class="store-location">Lynnwood, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Shoreline')">
+            <button class="btn btn-store-option" data-store="AGT_Shoreline">
               <div class="store-option-content">
                 <div class="store-name">AGT Shoreline</div>
                 <div class="store-location">Shoreline, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Seattle')">
+            <button class="btn btn-store-option" data-store="AGT_Seattle">
               <div class="store-option-content">
                 <div class="store-name">AGT Seattle</div>
                 <div class="store-location">Seattle, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Walla_Walla')">
+            <button class="btn btn-store-option" data-store="AGT_Walla_Walla">
               <div class="store-option-content">
                 <div class="store-name">AGT Walla Walla</div>
                 <div class="store-location">Walla Walla, WA</div>
