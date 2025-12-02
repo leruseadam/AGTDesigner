@@ -3389,14 +3389,6 @@ const TagManager = {
                             this._restoreAvailableScrollPosition(savedScroll);
                         });
                     });
-                            this.state.tags.find(t => t['Product Name*'] === name)
-                        ).filter(Boolean);
-                        this.updateSelectedTags(selectedTagObjects);
-                        this.efficientlyUpdateAvailableTagsDisplay();
-                        requestAnimationFrame(() => {
-                            this._restoreAvailableScrollPosition(savedScroll);
-                        });
-                    });
                     
                     productTypeHeader.appendChild(productTypeCheckbox);
                     productTypeHeader.appendChild(document.createTextNode(productType));
