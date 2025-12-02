@@ -238,8 +238,9 @@
         
         // UNIVERSAL SCALING: Adapt to any screen size
         // Calculate scale factor based on viewport width (1920px = baseline)
+        // Cap at 1.0 for larger screens to prevent excessive scaling on PC monitors
         const baseWidth = 1920;
-        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
+        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 1.0);
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         

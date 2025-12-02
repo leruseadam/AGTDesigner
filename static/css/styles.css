@@ -97,6 +97,17 @@ body > .container-fluid {
   max-width: 100% !important;
   margin: 0 auto !important;
 }
+
+/* Constrain width on very large PC monitors for better readability */
+@media (min-width: 2560px) {
+  body > .container,
+  body > .container-fluid,
+  .main-content {
+    max-width: 2400px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+}
   
 /* Tag lists and containers - ensure they scale with zoom */
 .tag-list-container,
