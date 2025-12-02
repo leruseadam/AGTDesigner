@@ -612,17 +612,46 @@
       
       console.log('Fetching store status from backend...');
       const cacheBust = `ts=${Date.now()}`;
+      
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      
       fetch(`/api/check-store-required?${cacheBust}`, {
         credentials: 'same-origin',
-        cache: 'no-store'
+        cache: 'no-store',
+        signal: controller.signal
       })
         .then(response => {
+          clearTimeout(timeoutId);
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
           return response.json();
         })
+        .catch(error => {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            console.error('❌ Store check timed out after 5 seconds');
+            // Fallback: show modal anyway to allow user to proceed
+            console.log('⚠️ Showing store selection modal as fallback');
+            if (typeof showStoreSelectionModal === 'function') {
+              showStoreSelectionModal();
+            } else {
+              // If function doesn't exist, manually show modal
+              if (modalElement) {
+                modalElement.style.display = 'block';
+                modalElement.classList.add('show');
+                document.body.classList.add('modal-open');
+              }
+            }
+            window.checkingStoreRequired = false;
+            return null; // Return null to skip data processing
+          }
+          throw error;
+        })
         .then(data => {
+          if (!data) return; // Skip if error was handled (timeout)
           console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
           console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
           
@@ -665,6 +694,14 @@
             if (window.STORE_MODAL_BLOCKING) {
               console.log('✅ Clearing STORE_MODAL_BLOCKING - TagManager can initialize');
               window.STORE_MODAL_BLOCKING = false;
+            }
+            
+            // CRITICAL FIX: Retry file upload initialization after store is confirmed
+            // This ensures file upload is initialized even if it failed earlier
+            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+              console.log('🔄 Store confirmed - retrying file upload initialization...');
+              window.fileUploadInitAttempts = 0; // Reset counter
+              setTimeout(window.initializeFileUpload, 200);
             }
             
             console.log('✅ Content shown, modal hidden');
@@ -4579,17 +4616,18 @@
       color: #fff !important;
       font-size: 16px !important;
       font-weight: 700 !important;
-      padding: 12px 20px !important; /* EXTRA padding */
+      padding: 10px 16px !important; /* Slightly smaller padding so more text fits */
       width: 100% !important;
       min-width: 250px !important; /* EVEN WIDER - 250px! */
       max-width: none !important; /* Allow expansion to fit content */
       border-radius: 10px !important;
-      min-height: 50px !important; /* TALLER - 50px! */
+      min-height: 52px !important; /* TALL enough for two lines */
       box-shadow: 0 6px 20px rgba(255, 0, 0, 0.5) !important; /* RED GLOW TO CONFIRM */
       transition: all 0.2s ease !important;
       overflow: visible !important; /* Prevent text truncation */
       text-overflow: clip !important; /* Don't use ellipsis */
-      white-space: nowrap !important; /* Keep text on one line */
+      white-space: normal !important; /* Allow wrapping to show full text */
+      line-height: 1.2 !important;
     }
     
     /* Override any Bootstrap or other framework constraints */
@@ -5482,8 +5520,8 @@
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
                   <option value="double">Double</option>
-                  <option value="inventory">Inventory</option>
                   <option value="preroll">Preroll</option>
+                  <option value="inventory">Inventory</option>
                 </select>
 
                 <button id="generateBtn" class="btn-generate-themed mt-2 w-100" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="max-width: 100% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important;">
@@ -7437,6 +7475,16 @@
             
             if (window.TagManager && typeof window.TagManager.init === 'function') {
               TagManager.init();
+              
+              // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
+              // Give it a moment for init to complete
+              setTimeout(() => {
+                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
+                  window.fileUploadInitAttempts = 0; // Reset counter
+                  setTimeout(window.initializeFileUpload, 200);
+                }
+              }, 500);
             } else {
               console.error('❌ TagManager.init is not available');
             }
@@ -7615,9 +7663,14 @@
           return;
         }
         
-        // Check if TagManager and uploadFile method are available
-        if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
-          console.log('✓ TagManager ready, attaching file upload listener');
+        // CRITICAL FIX: Check if TagManager is loaded and has uploadFile method
+        // uploadFile exists on TagManager even before init() is called
+        // We just need TagManager to be loaded from main.js
+        const tagManagerReady = window.TagManager && 
+                                typeof window.TagManager.uploadFile === 'function';
+        
+        if (tagManagerReady) {
+          console.log('✓ TagManager ready and initialized, attaching file upload listener');
           window.fileUploadInitialized = true; // Mark as initialized to prevent retries
           
           // Remove any existing listeners to prevent duplicates
@@ -7638,16 +7691,27 @@
           });
         } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
           // Only log every 10th attempt to reduce console spam
-          if (window.fileUploadInitAttempts % 10 === 0) {
-            console.warn(`TagManager not ready yet, retrying... (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS})`);
+          if (window.fileUploadInitAttempts % 10 === 0 || window.fileUploadInitAttempts <= 5) {
+            const reason = !window.TagManager ? 'TagManager not loaded from main.js' :
+                          !window.TagManager.uploadFile ? 'uploadFile method not available' : 'unknown';
+            console.warn(`⏳ TagManager not ready yet (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS}): ${reason}`);
           }
           // Retry after a short delay
           setTimeout(initializeFileUpload, 100);
         } else {
-          console.error('❌ Failed to initialize file upload after 5 seconds. TagManager may not be loaded.');
-          console.error('❌ TagManager available:', !!window.TagManager);
-          console.error('❌ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
-          // Don't set fileUploadInitialized to true so it can be retried later if TagManager loads
+          // Don't give up - keep retrying indefinitely but with longer intervals
+          // This handles cases where store selection takes longer than 5 seconds
+          console.warn('⚠️ File upload initialization delayed - TagManager not ready yet');
+          console.warn('⚠️ TagManager available:', !!window.TagManager);
+          console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
+          console.warn('⚠️ main.js loaded:', window.mainJsLoaded || false);
+          console.warn('⚠️ main.js error:', window.mainJsError || 'None');
+          console.warn('⚠️ Will continue retrying every 2 seconds until TagManager is ready...');
+          
+          // Reset counter and retry with longer interval (2 seconds instead of 100ms)
+          // This prevents console spam while still allowing recovery
+          window.fileUploadInitAttempts = 0;
+          setTimeout(initializeFileUpload, 2000);
         }
       }
       
