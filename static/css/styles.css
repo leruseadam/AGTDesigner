@@ -97,6 +97,31 @@ body > .container-fluid {
   max-width: 100% !important;
   margin: 0 auto !important;
 }
+
+/* Only constrain large monitors (PC) to match MacBook appearance - don't affect MacBook itself */
+@media (min-width: 1921px) {
+  body > .container,
+  body > .container-fluid,
+  .main-content {
+    max-width: 1920px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  
+  /* Ensure tag lists are scrollable and visible on large monitors */
+  #availableTags,
+  #selectedTags {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    max-height: calc(100vh - 200px) !important; /* Ensure they fit in viewport */
+  }
+  
+  [data-container-type="available"],
+  [data-container-type="selected"] {
+    overflow-y: auto !important;
+    max-height: calc(100vh - 200px) !important;
+  }
+}
   
 /* Tag lists and containers - ensure they scale with zoom */
 .tag-list-container,
