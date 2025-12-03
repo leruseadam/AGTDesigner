@@ -100,21 +100,17 @@ body > .container-fluid {
   margin: 0 auto !important;
 }
 
-/* Constrain large monitors to match MacBook appearance - prevent oversized UI */
+/* Constrain large monitors - reduce font sizes and spacing directly */
 @media (min-width: 1921px) {
   html {
-    transform: scale(0.7) !important; /* Scale down 30% on large monitors */
-    transform-origin: top left !important;
-    width: 142.857% !important; /* Compensate for scale (100/0.7) */
-    height: auto !important;
+    font-size: 14px !important; /* Reduce base font from 18px */
   }
   
   body {
-    overflow-y: auto !important; /* Force scrolling enabled */
+    overflow-y: auto !important;
     overflow-x: auto !important;
     height: auto !important;
     min-height: auto !important;
-    width: 100% !important;
   }
   
   body > .container,
@@ -123,68 +119,66 @@ body > .container-fluid {
     max-width: 1920px !important;
     margin-left: auto !important;
     margin-right: auto !important;
-    overflow-y: visible !important;
     height: auto !important;
     min-height: auto !important;
   }
   
-  /* Remove ALL height restrictions - allow natural scrolling */
+  /* Reduce all font sizes */
+  * {
+    font-size: 0.78em !important; /* Scale down all fonts by 22% */
+  }
+  
+  html {
+    font-size: 14px !important; /* Base size */
+  }
+  
+  /* Reduce padding and margins */
+  .btn-modern, .btn-modern2, .btn-modern3, .btn-glass {
+    padding: 6px 12px !important;
+    font-size: 0.9rem !important;
+    min-height: 36px !important;
+    min-width: 80px !important;
+  }
+  
+  /* Remove height restrictions - allow scrolling */
   #availableTags,
-  #selectedTags {
-    overflow-y: auto !important;
-    max-height: none !important;
-    height: auto !important;
-    min-height: auto !important;
-  }
-  
+  #selectedTags,
   [data-container-type="available"],
-  [data-container-type="selected"] {
-    overflow-y: auto !important;
-    max-height: none !important;
-    height: auto !important;
-    min-height: auto !important;
-  }
-  
-  .tag-list-container {
-    overflow-y: auto !important;
-    max-height: none !important;
-    height: auto !important;
-  }
-  
+  [data-container-type="selected"],
+  .tag-list-container,
   .main-content {
+    overflow-y: auto !important;
+    max-height: none !important;
     height: auto !important;
     min-height: auto !important;
-    overflow-y: visible !important;
-  }
-  
-  .btn-modern, .btn-modern2, .btn-modern3,
-  .btn-glass {
-    padding: 8px 16px !important;
-    font-size: 1.15rem !important;
-    min-height: 44px !important;
-    min-width: 100px !important;
-    border-radius: 10px !important;
-    gap: 5px !important;
-  }
-  
-  .btn-modern svg, .btn-modern2 svg, .btn-modern3 svg,
-  .btn-glass svg {
-    width: 18px !important;
-    height: 18px !important;
   }
 }
 
 @media (min-width: 2560px) {
   html {
-    transform: scale(0.55) !important; /* Scale down 45% on very large monitors */
-    width: 181.818% !important; /* Compensate for scale (100/0.55) */
+    font-size: 12px !important;
+  }
+  
+  * {
+    font-size: 0.67em !important; /* Scale down all fonts by 33% */
+  }
+  
+  html {
+    font-size: 12px !important;
   }
 }
 
 @media (min-width: 3840px) {
   html {
-    transform: scale(0.45) !important; /* Scale down 55% on 4K monitors */
-    width: 222.222% !important; /* Compensate for scale (100/0.45) */
+    font-size: 10px !important;
+  }
+  
+  * {
+    font-size: 0.56em !important; /* Scale down all fonts by 44% */
+  }
+  
+  html {
+    font-size: 10px !important;
   }
 }
   

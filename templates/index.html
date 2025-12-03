@@ -243,25 +243,15 @@
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
-        // For large monitors, apply transform scale to body to scale down and match MacBook appearance
+        // Ensure scrolling is enabled on large monitors
         if (window.innerWidth > baseWidth) {
-          const scaleLevel = baseWidth / window.innerWidth;
-          // Apply scale to body
           if (document.body) {
-            document.body.style.transform = `scale(${scaleLevel})`;
-            document.body.style.transformOrigin = 'top left';
-            document.body.style.width = `${100 / scaleLevel}%`;
-            document.body.style.height = 'auto';
             document.body.style.overflowY = 'auto';
             document.body.style.overflowX = 'auto';
+            document.body.style.height = 'auto';
+            document.body.style.minHeight = 'auto';
           }
-          console.log(`Large monitor detected: ${window.innerWidth}px, applying scale: ${scaleLevel.toFixed(2)}`);
-        } else {
-          if (document.body) {
-            document.body.style.transform = '';
-            document.body.style.width = '';
-            document.body.style.height = '';
-          }
+          console.log(`Large monitor detected: ${window.innerWidth}px, enabling scrolling`);
         }
         
         // Ensure body fills viewport (only if body exists)
