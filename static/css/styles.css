@@ -49,32 +49,6 @@ html {
   text-size-adjust: 100%;
 }
 
-/* Reduce base font size on large PC monitors to prevent oversized UI */
-@media (min-width: 2560px) {
-  body > .container,
-  body > .container-fluid,
-  .main-content,
-  #mainContent {
-    max-width: 1600px !important;
-  }
-  
-  html {
-    font-size: 13px !important; /* Smaller base font for large screens */
-  }
-}
-
-@media (min-width: 3840px) {
-  body > .container,
-  body > .container-fluid,
-  .main-content,
-  #mainContent {
-    max-width: 1400px !important;
-  }
-  
-  html {
-    font-size: 12px !important; /* Even smaller for 4K screens */
-  }
-}
 
 body {
   font-size: 1.1rem;
@@ -125,64 +99,35 @@ body > .container-fluid {
   margin: 0 auto !important;
 }
 
-/* Only constrain large monitors (PC) to match MacBook appearance - don't affect MacBook itself */
+/* Large screens (1921px and up) - allow natural scaling */
 @media (min-width: 1921px) {
-  body > .container,
-  body > .container-fluid,
-  .main-content {
-    max-width: 1920px !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
+  .btn-modern, .btn-modern2, .btn-modern3,
+  .btn-glass {
+    padding: 8px 16px !important;
+    font-size: 1.15rem !important;
+    min-height: 44px !important;
+    min-width: 100px !important;
+    border-radius: 10px !important;
+    gap: 5px !important;
   }
   
-  /* Cap height calculations for large monitors - use MacBook Pro height as reference (1117px typical) */
-  :root {
-    --tag-list-height: max(var(--tag-list-min-height), min(calc(100vh - var(--tag-list-vertical-offset)), 800px)) !important;
-    --center-panel-height: min(78rem, 800px) !important;
-  }
-  
-  /* Ensure tag lists are scrollable and visible on large monitors */
-  #availableTags,
-  #selectedTags {
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
-    max-height: 800px !important; /* Cap at reasonable height */
-    height: 800px !important;
-  }
-  
-  [data-container-type="available"],
-  [data-container-type="selected"] {
-    overflow-y: auto !important;
-    max-height: 800px !important;
-  }
-  
-  .control-panel,
-  .center-panel {
-    max-height: 800px !important;
+  .btn-modern svg, .btn-modern2 svg, .btn-modern3 svg,
+  .btn-glass svg {
+    width: 18px !important;
+    height: 18px !important;
   }
 }
 
-/* Additional constraints for very large monitors */
+/* Very large screens (2560px and up) - allow tag lists to expand */
 @media (min-width: 2560px) {
-  :root {
-    --tag-list-height: max(var(--tag-list-min-height), min(calc(100vh - var(--tag-list-vertical-offset)), 700px)) !important;
-    --center-panel-height: min(78rem, 700px) !important;
+  .tag-list-container {
+    max-height: none !important;
+    min-height: 700px !important;
+    width: 100% !important;
   }
   
-  #availableTags,
-  #selectedTags {
-    max-height: 700px !important;
-    height: 700px !important;
-  }
-  
-  [data-container-type="available"],
-  [data-container-type="selected"] {
-    max-height: 700px !important;
-  }
-  
-  .control-panel,
-  .center-panel {
-    max-height: 700px !important;
+  .glass-card.d-flex.flex-column {
+    max-height: none !important;
   }
 }
   

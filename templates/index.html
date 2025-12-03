@@ -236,24 +236,15 @@
         document.documentElement.style.setProperty('--vmin', vmin + 'px');
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
         
-        // DISABLE SCALING FOR LARGE SCREENS - Keep at 1.0 to prevent oversized viewport
+        // UNIVERSAL SCALING: Adapt to any screen size
+        // Calculate scale factor based on viewport width (1920px = baseline)
         const baseWidth = 1920;
-        let scaleFactor = 1.0;
-        
-        // Only scale DOWN for smaller screens, never scale up
-        if (window.innerWidth < baseWidth) {
-          scaleFactor = Math.max(window.innerWidth / baseWidth, 0.5);
-        }
-        
+        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
-        // NEVER apply body scaling - let CSS handle it
+        // Ensure body fills viewport (only if body exists)
         if (document.body) {
-          document.body.style.zoom = '';
-          document.body.style.transform = '';
-          document.body.style.width = '';
-          document.body.style.height = '';
           document.body.style.minHeight = '100vh';
           document.body.style.minWidth = '100vw';
         }
