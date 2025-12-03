@@ -237,9 +237,22 @@
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
         
         // UNIVERSAL SCALING: Adapt to any screen size
-        // Calculate scale factor based on viewport width (1920px = baseline)
-        const baseWidth = 1920;
-        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
+        // MacBook Pro 16" effective resolution (1728px) = baseline for consistent appearance
+        const baseWidth = 1728;
+        const baseHeight = 1117;
+        
+        // For larger screens, scale down to match MacBook Pro 16" appearance
+        let scaleFactor;
+        if (window.innerWidth > baseWidth || window.innerHeight > baseHeight) {
+          // Scale down proportionally on larger screens
+          const widthScale = baseWidth / window.innerWidth;
+          const heightScale = baseHeight / window.innerHeight;
+          scaleFactor = Math.min(widthScale, heightScale);
+        } else {
+          // For smaller screens, scale up proportionally (but cap at 2x)
+          scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
+        }
+        
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
