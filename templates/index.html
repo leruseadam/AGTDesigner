@@ -242,9 +242,10 @@
         const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
-        
+
         // FORCE fix for large monitors - wrap body content and scale it
-        if (window.innerWidth > baseWidth) {
+        // Include displays around 1915px (external monitors) that are close to 1920px
+        if (window.innerWidth >= 1900) {
           const scaleRatio = baseWidth / window.innerWidth;
           
           // Create wrapper if it doesn't exist
