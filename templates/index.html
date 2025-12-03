@@ -243,23 +243,48 @@
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
-        // Ensure scrolling is enabled on large monitors
+        // FORCE fix for large monitors - apply directly via JavaScript
         if (window.innerWidth > baseWidth) {
+          const scaleRatio = baseWidth / window.innerWidth;
+          
+          // Apply to html element
+          document.documentElement.style.fontSize = `${18 * scaleRatio}px`;
+          document.documentElement.style.setProperty('zoom', scaleRatio.toString(), 'important');
+          
+          // Force body scrolling
           if (document.body) {
-            document.body.style.overflowY = 'auto';
-            document.body.style.overflowX = 'auto';
-            document.body.style.height = 'auto';
-            document.body.style.minHeight = 'auto';
+            document.body.style.setProperty('overflow-y', 'auto', 'important');
+            document.body.style.setProperty('overflow-x', 'auto', 'important');
+            document.body.style.setProperty('height', 'auto', 'important');
+            document.body.style.setProperty('min-height', 'auto', 'important');
+            document.body.style.setProperty('max-height', 'none', 'important');
           }
-          console.log(`Large monitor detected: ${window.innerWidth}px, enabling scrolling`);
+          
+          // Force main content scrolling
+          const mainContent = document.querySelector('.main-content');
+          if (mainContent) {
+            mainContent.style.setProperty('overflow-y', 'auto', 'important');
+            mainContent.style.setProperty('height', 'auto', 'important');
+            mainContent.style.setProperty('max-height', 'none', 'important');
+          }
+          
+          // Force tag lists scrolling
+          const tagLists = document.querySelectorAll('#availableTags, #selectedTags');
+          tagLists.forEach(el => {
+            el.style.setProperty('overflow-y', 'auto', 'important');
+            el.style.setProperty('max-height', 'none', 'important');
+            el.style.setProperty('height', 'auto', 'important');
+          });
+          
+          console.log(`LARGE MONITOR FIX: ${window.innerWidth}px detected, applying zoom: ${scaleRatio.toFixed(2)}, font-size: ${18 * scaleRatio}px`);
+        } else {
+          // Ensure body fills viewport for normal screens
+          if (document.body) {
+            document.body.style.minHeight = '100vh';
+            document.body.style.minWidth = '100vw';
+          }
+          document.documentElement.style.minHeight = '100vh';
         }
-        
-        // Ensure body fills viewport (only if body exists)
-        if (document.body) {
-          document.body.style.minHeight = '100vh';
-          document.body.style.minWidth = '100vw';
-        }
-        document.documentElement.style.minHeight = '100vh';
         
         console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, scale: ${scaleFactor.toFixed(2)}x`);
       }
