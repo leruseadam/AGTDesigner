@@ -51,8 +51,28 @@ html {
 
 /* Reduce base font size on large PC monitors to prevent oversized UI */
 @media (min-width: 2560px) {
+  body > .container,
+  body > .container-fluid,
+  .main-content,
+  #mainContent {
+    max-width: 1600px !important;
+  }
+  
   html {
-    font-size: 14px !important; /* Smaller base font for large screens */
+    font-size: 13px !important; /* Smaller base font for large screens */
+  }
+}
+
+@media (min-width: 3840px) {
+  body > .container,
+  body > .container-fluid,
+  .main-content,
+  #mainContent {
+    max-width: 1400px !important;
+  }
+  
+  html {
+    font-size: 12px !important; /* Even smaller for 4K screens */
   }
 }
 
@@ -117,8 +137,8 @@ body > .container-fluid {
   
   /* Cap height calculations for large monitors - use MacBook Pro height as reference (1117px typical) */
   :root {
-    --tag-list-height: max(var(--tag-list-min-height), min(calc(100vh - var(--tag-list-vertical-offset)), 900px)) !important;
-    --center-panel-height: min(78rem, 900px) !important;
+    --tag-list-height: max(var(--tag-list-min-height), min(calc(100vh - var(--tag-list-vertical-offset)), 800px)) !important;
+    --center-panel-height: min(78rem, 800px) !important;
   }
   
   /* Ensure tag lists are scrollable and visible on large monitors */
@@ -126,19 +146,43 @@ body > .container-fluid {
   #selectedTags {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
-    max-height: 900px !important; /* Cap at reasonable height */
-    height: 900px !important;
+    max-height: 800px !important; /* Cap at reasonable height */
+    height: 800px !important;
   }
   
   [data-container-type="available"],
   [data-container-type="selected"] {
     overflow-y: auto !important;
-    max-height: 900px !important;
+    max-height: 800px !important;
   }
   
   .control-panel,
   .center-panel {
-    max-height: 900px !important;
+    max-height: 800px !important;
+  }
+}
+
+/* Additional constraints for very large monitors */
+@media (min-width: 2560px) {
+  :root {
+    --tag-list-height: max(var(--tag-list-min-height), min(calc(100vh - var(--tag-list-vertical-offset)), 700px)) !important;
+    --center-panel-height: min(78rem, 700px) !important;
+  }
+  
+  #availableTags,
+  #selectedTags {
+    max-height: 700px !important;
+    height: 700px !important;
+  }
+  
+  [data-container-type="available"],
+  [data-container-type="selected"] {
+    max-height: 700px !important;
+  }
+  
+  .control-panel,
+  .center-panel {
+    max-height: 700px !important;
   }
 }
   
