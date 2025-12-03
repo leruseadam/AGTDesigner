@@ -54,11 +54,12 @@ body {
   font-size: 1.1rem;
   line-height: 1.5;
   width: 100%;
-  height: 100%;
+  height: auto; /* Changed from 100% to allow scrolling */
   min-height: 100vh;
   margin: 0;
   padding: 0 0 0.5rem 0; /* Reduced bottom gutter from 1.5rem */
   overflow-x: hidden;
+  overflow-y: auto; /* Enable vertical scrolling */
   /* Ensure body doesn't interfere with fullscreen canvas */
   position: relative;
   /* Ensure smooth zoom scaling */
@@ -102,7 +103,13 @@ body > .container-fluid {
 /* Constrain large monitors to match MacBook appearance - prevent oversized UI */
 @media (min-width: 1921px) {
   html {
-    zoom: 0.75 !important; /* Scale down 25% on large monitors */
+    zoom: 0.7 !important; /* Scale down 30% on large monitors - more aggressive */
+    transform-origin: top left;
+  }
+  
+  body {
+    overflow-y: auto !important; /* Force scrolling enabled */
+    height: auto !important;
   }
   
   body > .container,
@@ -111,24 +118,27 @@ body > .container-fluid {
     max-width: 1920px !important;
     margin-left: auto !important;
     margin-right: auto !important;
+    overflow-y: visible !important;
   }
   
-  /* Cap heights to prevent vertical stretching */
-  :root {
-    --tag-list-height: max(var(--tag-list-min-height), min(calc(100vh - var(--tag-list-vertical-offset)), 1000px)) !important;
-    --center-panel-height: min(78rem, 1000px) !important;
-  }
-  
+  /* Remove height caps - allow natural scrolling */
   #availableTags,
   #selectedTags {
-    max-height: 1000px !important;
     overflow-y: auto !important;
+    max-height: none !important;
+    height: auto !important;
   }
   
   [data-container-type="available"],
   [data-container-type="selected"] {
-    max-height: 1000px !important;
     overflow-y: auto !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+  
+  .tag-list-container {
+    overflow-y: auto !important;
+    max-height: none !important;
   }
   
   .btn-modern, .btn-modern2, .btn-modern3,
@@ -150,13 +160,13 @@ body > .container-fluid {
 
 @media (min-width: 2560px) {
   html {
-    zoom: 0.6 !important; /* Scale down 40% on very large monitors */
+    zoom: 0.55 !important; /* Scale down 45% on very large monitors */
   }
 }
 
 @media (min-width: 3840px) {
   html {
-    zoom: 0.5 !important; /* Scale down 50% on 4K monitors */
+    zoom: 0.45 !important; /* Scale down 55% on 4K monitors */
   }
 }
   
