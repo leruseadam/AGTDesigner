@@ -49,6 +49,13 @@ html {
   text-size-adjust: 100%;
 }
 
+/* Reduce base font size on large PC monitors to prevent oversized UI */
+@media (min-width: 2560px) {
+  html {
+    font-size: 14px !important; /* Smaller base font for large screens */
+  }
+}
+
 body {
   font-size: 1.1rem;
   line-height: 1.5;
@@ -108,18 +115,30 @@ body > .container-fluid {
     margin-right: auto !important;
   }
   
+  /* Cap height calculations for large monitors - use MacBook Pro height as reference (1117px typical) */
+  :root {
+    --tag-list-height: max(var(--tag-list-min-height), min(calc(100vh - var(--tag-list-vertical-offset)), 900px)) !important;
+    --center-panel-height: min(78rem, 900px) !important;
+  }
+  
   /* Ensure tag lists are scrollable and visible on large monitors */
   #availableTags,
   #selectedTags {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
-    max-height: calc(100vh - 200px) !important; /* Ensure they fit in viewport */
+    max-height: 900px !important; /* Cap at reasonable height */
+    height: 900px !important;
   }
   
   [data-container-type="available"],
   [data-container-type="selected"] {
     overflow-y: auto !important;
-    max-height: calc(100vh - 200px) !important;
+    max-height: 900px !important;
+  }
+  
+  .control-panel,
+  .center-panel {
+    max-height: 900px !important;
   }
 }
   
