@@ -243,10 +243,12 @@
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
 
-        // FORCE fix for large monitors - wrap body content and scale it
+        // FORCE fix for large monitors - scale DOWN to match MacBook appearance
         // Include displays around 1915px (external monitors) that are close to 1920px
         if (window.innerWidth >= 1900) {
-          const scaleRatio = baseWidth / window.innerWidth;
+          // Scale to match MacBook Pro 13/14" appearance (1440px logical width)
+          const targetMacbookWidth = 1440;
+          const scaleRatio = targetMacbookWidth / window.innerWidth;
 
           // Create wrapper if it doesn't exist
           let wrapper = document.getElementById('large-monitor-wrapper');
@@ -257,7 +259,7 @@
               transform: scale(${scaleRatio}) !important;
               transform-origin: top left !important;
               width: ${100 / scaleRatio}% !important;
-              min-height: 100vh !important;
+              min-height: ${100 / scaleRatio}vh !important;
               overflow: visible !important;
               position: relative !important;
             `;
@@ -272,7 +274,7 @@
               transform: scale(${scaleRatio}) !important;
               transform-origin: top left !important;
               width: ${100 / scaleRatio}% !important;
-              min-height: 100vh !important;
+              min-height: ${100 / scaleRatio}vh !important;
               overflow: visible !important;
               position: relative !important;
             `;
@@ -291,7 +293,7 @@
             document.documentElement.style.setProperty('height', '100%', 'important');
           }
 
-          console.log(`LARGE MONITOR FIX APPLIED: ${window.innerWidth}px, scale: ${scaleRatio.toFixed(2)}`);
+          console.log(`LARGE MONITOR FIX APPLIED: ${window.innerWidth}px scaled to ${targetMacbookWidth}px (${scaleRatio.toFixed(3)}x)`);
         } else {
           // Remove wrapper for normal screens
           const wrapper = document.getElementById('large-monitor-wrapper');
