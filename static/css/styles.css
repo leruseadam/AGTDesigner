@@ -99,8 +99,34 @@ body > .container-fluid {
   margin: 0 auto !important;
 }
 
-/* Large screens (1921px and up) - allow natural scaling */
+/* Constrain large monitors to match MacBook appearance - prevent oversized UI */
 @media (min-width: 1921px) {
+  body > .container,
+  body > .container-fluid,
+  .main-content {
+    max-width: 1920px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  
+  /* Cap heights to prevent vertical stretching */
+  :root {
+    --tag-list-height: max(var(--tag-list-min-height), min(calc(100vh - var(--tag-list-vertical-offset)), 1000px)) !important;
+    --center-panel-height: min(78rem, 1000px) !important;
+  }
+  
+  #availableTags,
+  #selectedTags {
+    max-height: 1000px !important;
+    overflow-y: auto !important;
+  }
+  
+  [data-container-type="available"],
+  [data-container-type="selected"] {
+    max-height: 1000px !important;
+    overflow-y: auto !important;
+  }
+  
   .btn-modern, .btn-modern2, .btn-modern3,
   .btn-glass {
     padding: 8px 16px !important;
@@ -115,19 +141,6 @@ body > .container-fluid {
   .btn-glass svg {
     width: 18px !important;
     height: 18px !important;
-  }
-}
-
-/* Very large screens (2560px and up) - allow tag lists to expand */
-@media (min-width: 2560px) {
-  .tag-list-container {
-    max-height: none !important;
-    min-height: 700px !important;
-    width: 100% !important;
-  }
-  
-  .glass-card.d-flex.flex-column {
-    max-height: none !important;
   }
 }
   
