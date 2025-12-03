@@ -243,13 +243,37 @@
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
-        // FORCE fix for large monitors - apply directly via JavaScript
+        // FORCE fix for large monitors - wrap body content and scale it
         if (window.innerWidth > baseWidth) {
           const scaleRatio = baseWidth / window.innerWidth;
           
-          // Apply to html element
-          document.documentElement.style.fontSize = `${18 * scaleRatio}px`;
-          document.documentElement.style.setProperty('zoom', scaleRatio.toString(), 'important');
+          // Create wrapper if it doesn't exist
+          let wrapper = document.getElementById('large-monitor-wrapper');
+          if (!wrapper && document.body.firstChild) {
+            wrapper = document.createElement('div');
+            wrapper.id = 'large-monitor-wrapper';
+            wrapper.style.cssText = `
+              transform: scale(${scaleRatio}) !important;
+              transform-origin: top left !important;
+              width: ${100 / scaleRatio}% !important;
+              height: auto !important;
+              overflow: visible !important;
+            `;
+            
+            // Move all body children into wrapper
+            while (document.body.firstChild) {
+              wrapper.appendChild(document.body.firstChild);
+            }
+            document.body.appendChild(wrapper);
+          } else if (wrapper) {
+            wrapper.style.cssText = `
+              transform: scale(${scaleRatio}) !important;
+              transform-origin: top left !important;
+              width: ${100 / scaleRatio}% !important;
+              height: auto !important;
+              overflow: visible !important;
+            `;
+          }
           
           // Force body scrolling
           if (document.body) {
@@ -257,27 +281,19 @@
             document.body.style.setProperty('overflow-x', 'auto', 'important');
             document.body.style.setProperty('height', 'auto', 'important');
             document.body.style.setProperty('min-height', 'auto', 'important');
-            document.body.style.setProperty('max-height', 'none', 'important');
           }
           
-          // Force main content scrolling
-          const mainContent = document.querySelector('.main-content');
-          if (mainContent) {
-            mainContent.style.setProperty('overflow-y', 'auto', 'important');
-            mainContent.style.setProperty('height', 'auto', 'important');
-            mainContent.style.setProperty('max-height', 'none', 'important');
-          }
-          
-          // Force tag lists scrolling
-          const tagLists = document.querySelectorAll('#availableTags, #selectedTags');
-          tagLists.forEach(el => {
-            el.style.setProperty('overflow-y', 'auto', 'important');
-            el.style.setProperty('max-height', 'none', 'important');
-            el.style.setProperty('height', 'auto', 'important');
-          });
-          
-          console.log(`LARGE MONITOR FIX: ${window.innerWidth}px detected, applying zoom: ${scaleRatio.toFixed(2)}, font-size: ${18 * scaleRatio}px`);
+          console.log(`LARGE MONITOR FIX APPLIED: ${window.innerWidth}px, scale: ${scaleRatio.toFixed(2)}`);
         } else {
+          // Remove wrapper for normal screens
+          const wrapper = document.getElementById('large-monitor-wrapper');
+          if (wrapper && wrapper.parentNode) {
+            while (wrapper.firstChild) {
+              wrapper.parentNode.insertBefore(wrapper.firstChild, wrapper);
+            }
+            wrapper.remove();
+          }
+          
           // Ensure body fills viewport for normal screens
           if (document.body) {
             document.body.style.minHeight = '100vh';
