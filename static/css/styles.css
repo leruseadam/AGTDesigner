@@ -103,13 +103,18 @@ body > .container-fluid {
 /* Constrain large monitors to match MacBook appearance - prevent oversized UI */
 @media (min-width: 1921px) {
   html {
-    zoom: 0.7 !important; /* Scale down 30% on large monitors - more aggressive */
-    transform-origin: top left;
+    transform: scale(0.7) !important; /* Scale down 30% on large monitors */
+    transform-origin: top left !important;
+    width: 142.857% !important; /* Compensate for scale (100/0.7) */
+    height: auto !important;
   }
   
   body {
     overflow-y: auto !important; /* Force scrolling enabled */
+    overflow-x: auto !important;
     height: auto !important;
+    min-height: auto !important;
+    width: 100% !important;
   }
   
   body > .container,
@@ -119,14 +124,17 @@ body > .container-fluid {
     margin-left: auto !important;
     margin-right: auto !important;
     overflow-y: visible !important;
+    height: auto !important;
+    min-height: auto !important;
   }
   
-  /* Remove height caps - allow natural scrolling */
+  /* Remove ALL height restrictions - allow natural scrolling */
   #availableTags,
   #selectedTags {
     overflow-y: auto !important;
     max-height: none !important;
     height: auto !important;
+    min-height: auto !important;
   }
   
   [data-container-type="available"],
@@ -134,11 +142,19 @@ body > .container-fluid {
     overflow-y: auto !important;
     max-height: none !important;
     height: auto !important;
+    min-height: auto !important;
   }
   
   .tag-list-container {
     overflow-y: auto !important;
     max-height: none !important;
+    height: auto !important;
+  }
+  
+  .main-content {
+    height: auto !important;
+    min-height: auto !important;
+    overflow-y: visible !important;
   }
   
   .btn-modern, .btn-modern2, .btn-modern3,
@@ -160,13 +176,15 @@ body > .container-fluid {
 
 @media (min-width: 2560px) {
   html {
-    zoom: 0.55 !important; /* Scale down 45% on very large monitors */
+    transform: scale(0.55) !important; /* Scale down 45% on very large monitors */
+    width: 181.818% !important; /* Compensate for scale (100/0.55) */
   }
 }
 
 @media (min-width: 3840px) {
   html {
-    zoom: 0.45 !important; /* Scale down 55% on 4K monitors */
+    transform: scale(0.45) !important; /* Scale down 55% on 4K monitors */
+    width: 222.222% !important; /* Compensate for scale (100/0.45) */
   }
 }
   
