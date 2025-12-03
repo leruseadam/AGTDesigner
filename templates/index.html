@@ -280,17 +280,19 @@
             `;
           }
 
-          // Force body and html scrolling
+          // Lock body and html to prevent scrolling above/below content
           if (document.body) {
-            document.body.style.setProperty('overflow-y', 'scroll', 'important');
-            document.body.style.setProperty('overflow-x', 'hidden', 'important');
-            document.body.style.setProperty('height', '100%', 'important');
-            document.body.style.setProperty('min-height', '100vh', 'important');
+            document.body.style.setProperty('overflow', 'hidden', 'important');
+            document.body.style.setProperty('height', '100vh', 'important');
+            document.body.style.setProperty('width', '100vw', 'important');
+            document.body.style.setProperty('position', 'fixed', 'important');
+            document.body.style.setProperty('top', '0', 'important');
+            document.body.style.setProperty('left', '0', 'important');
           }
           if (document.documentElement) {
-            document.documentElement.style.setProperty('overflow-y', 'scroll', 'important');
-            document.documentElement.style.setProperty('overflow-x', 'hidden', 'important');
-            document.documentElement.style.setProperty('height', '100%', 'important');
+            document.documentElement.style.setProperty('overflow', 'hidden', 'important');
+            document.documentElement.style.setProperty('height', '100vh', 'important');
+            document.documentElement.style.setProperty('width', '100vw', 'important');
           }
 
           console.log(`LARGE MONITOR FIX APPLIED: ${window.innerWidth}px scaled to ${targetMacbookWidth}px (${scaleRatio.toFixed(3)}x)`);
