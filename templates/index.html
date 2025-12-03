@@ -236,19 +236,12 @@
         document.documentElement.style.setProperty('--vmin', vmin + 'px');
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
         
-        // Viewport normalization - consistent across all screens
-        const vw = window.innerWidth / 100;
-        const vh = window.innerHeight / 100;
-        const vmin = Math.min(vw, vh);
-        const vmax = Math.max(vw, vh);
-        
-        // Set normalized viewport units as CSS custom properties
-        document.documentElement.style.setProperty('--vw', vw + 'px');
-        document.documentElement.style.setProperty('--vh', vh + 'px');
-        document.documentElement.style.setProperty('--vmin', vmin + 'px');
-        document.documentElement.style.setProperty('--vmax', vmax + 'px');
-        
-        // Don't interfere with scaleAppToFit - let it handle all scaling consistently
+        // UNIVERSAL SCALING: Adapt to any screen size
+        // Calculate scale factor based on viewport width (1920px = baseline)
+        const baseWidth = 1920;
+        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
+        document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
+        document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
         // Ensure body fills viewport (only if body exists)
         if (document.body) {
@@ -619,46 +612,17 @@
       
       console.log('Fetching store status from backend...');
       const cacheBust = `ts=${Date.now()}`;
-      
-      // Add timeout to prevent hanging
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-      
       fetch(`/api/check-store-required?${cacheBust}`, {
         credentials: 'same-origin',
-        cache: 'no-store',
-        signal: controller.signal
+        cache: 'no-store'
       })
         .then(response => {
-          clearTimeout(timeoutId);
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
           return response.json();
         })
-        .catch(error => {
-          clearTimeout(timeoutId);
-          if (error.name === 'AbortError') {
-            console.error('❌ Store check timed out after 5 seconds');
-            // Fallback: show modal anyway to allow user to proceed
-            console.log('⚠️ Showing store selection modal as fallback');
-            if (typeof showStoreSelectionModal === 'function') {
-              showStoreSelectionModal();
-            } else {
-              // If function doesn't exist, manually show modal
-              if (modalElement) {
-                modalElement.style.display = 'block';
-                modalElement.classList.add('show');
-                document.body.classList.add('modal-open');
-              }
-            }
-            window.checkingStoreRequired = false;
-            return null; // Return null to skip data processing
-          }
-          throw error;
-        })
         .then(data => {
-          if (!data) return; // Skip if error was handled (timeout)
           console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
           console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
           
@@ -701,14 +665,6 @@
             if (window.STORE_MODAL_BLOCKING) {
               console.log('✅ Clearing STORE_MODAL_BLOCKING - TagManager can initialize');
               window.STORE_MODAL_BLOCKING = false;
-            }
-            
-            // CRITICAL FIX: Retry file upload initialization after store is confirmed
-            // This ensures file upload is initialized even if it failed earlier
-            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-              console.log('🔄 Store confirmed - retrying file upload initialization...');
-              window.fileUploadInitAttempts = 0; // Reset counter
-              setTimeout(window.initializeFileUpload, 200);
             }
             
             console.log('✅ Content shown, modal hidden');
@@ -4623,18 +4579,17 @@
       color: #fff !important;
       font-size: 16px !important;
       font-weight: 700 !important;
-      padding: 10px 16px !important; /* Slightly smaller padding so more text fits */
+      padding: 12px 20px !important; /* EXTRA padding */
       width: 100% !important;
       min-width: 250px !important; /* EVEN WIDER - 250px! */
       max-width: none !important; /* Allow expansion to fit content */
       border-radius: 10px !important;
-      min-height: 52px !important; /* TALL enough for two lines */
+      min-height: 50px !important; /* TALLER - 50px! */
       box-shadow: 0 6px 20px rgba(255, 0, 0, 0.5) !important; /* RED GLOW TO CONFIRM */
       transition: all 0.2s ease !important;
       overflow: visible !important; /* Prevent text truncation */
       text-overflow: clip !important; /* Don't use ellipsis */
-      white-space: normal !important; /* Allow wrapping to show full text */
-      line-height: 1.2 !important;
+      white-space: nowrap !important; /* Keep text on one line */
     }
     
     /* Override any Bootstrap or other framework constraints */
@@ -5527,8 +5482,8 @@
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
                   <option value="double">Double</option>
-                  <option value="preroll">Preroll</option>
                   <option value="inventory">Inventory</option>
+                  <option value="preroll">Preroll</option>
                 </select>
 
                 <button id="generateBtn" class="btn-generate-themed mt-2 w-100" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="max-width: 100% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important;">
@@ -5684,151 +5639,6 @@
 
   <!-- Modals -->
   
-  <!-- CRITICAL: Ensure selectStore is always defined before modal HTML -->
-  <script>
-    // Ensure selectStore function exists before modal buttons are rendered
-    // This prevents "ReferenceError: selectStore is not defined" errors
-    (function() {
-      // Store the original function if it exists
-      const originalSelectStore = window.selectStore;
-      
-      // Define a complete fallback implementation
-      function fallbackSelectStore(storeValue) {
-        console.log('=== STORE SELECTION CLICKED ===');
-        console.log('Store value:', storeValue);
-        console.log('About to send fetch request to /api/set-store');
-
-        fetch('/api/set-store', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ store: storeValue })
-        })
-        .then(response => {
-          console.log('✅ Fetch completed - Response status:', response.status);
-          if (!response.ok) {
-            console.error('❌ Response not OK:', response.status, response.statusText);
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then(data => {
-          console.log('✅ JSON parsed successfully');
-          console.log('Response data:', data);
-          if (data.success) {
-            console.log('✅ Store set successfully:', storeValue);
-            sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
-            sessionStorage.setItem('store_just_selected', 'true');
-            sessionStorage.setItem('selected_store', storeValue);
-            window.checkingStoreRequired = false;
-
-            // Hide modal
-            const modalElement = document.getElementById('storeSelectionModal');
-            if (modalElement) {
-              try {
-                const modalInstance = (typeof bootstrap !== 'undefined')
-                  ? bootstrap.Modal.getInstance(modalElement)
-                  : null;
-                if (modalInstance) {
-                  modalInstance.hide();
-                }
-              } catch (hideError) {
-                console.warn('⚠️ Failed to hide modal via Bootstrap before reload', hideError);
-              }
-              modalElement.classList.remove('show');
-              modalElement.style.display = 'none';
-              document.body.classList.remove('modal-open');
-              document.body.style.overflow = '';
-              const backdrop = document.getElementById('storeModalBackdrop') || document.querySelector('.modal-backdrop');
-              if (backdrop) backdrop.remove();
-            }
-
-            console.log('🔄 Reloading page to apply store change...');
-            setTimeout(() => window.location.reload(), 500);
-          } else {
-            console.error('❌ Error setting store:', data.error || 'Unknown error');
-            alert('Error setting store: ' + (data.error || 'Please try again.'));
-          }
-        })
-        .catch(error => {
-          console.error('❌ Fetch error:', error);
-          console.error('Error stack:', error.stack);
-          alert('Error saving store selection: ' + error.message + '\nPlease check the console for details.');
-        });
-      }
-      
-      // If selectStore doesn't exist, create it now
-      if (typeof window.selectStore !== 'function') {
-        console.warn('⚠️ selectStore not yet defined in head, creating fallback now...');
-        window.selectStore = fallbackSelectStore;
-      } else {
-        console.log('✅ selectStore already defined, keeping original');
-      }
-      
-      // Ensure it stays defined - override if it gets cleared
-      const ensureSelectStore = function() {
-        if (typeof window.selectStore !== 'function') {
-          console.warn('⚠️ selectStore was cleared, restoring...');
-          window.selectStore = originalSelectStore || fallbackSelectStore;
-        }
-      };
-      
-      // Check periodically (but not too often to avoid performance issues)
-      setTimeout(ensureSelectStore, 100);
-      setTimeout(ensureSelectStore, 500);
-      setTimeout(ensureSelectStore, 1000);
-      
-      // Also check when modal is shown
-      document.addEventListener('DOMContentLoaded', function() {
-        const modalElement = document.getElementById('storeSelectionModal');
-        if (modalElement) {
-          modalElement.addEventListener('shown.bs.modal', ensureSelectStore);
-        }
-      });
-    })();
-    
-    // Add event delegation as PRIMARY handler for button clicks (more reliable than inline handlers)
-    // This ensures clicks are handled even if selectStore isn't defined when buttons are rendered
-    document.addEventListener('DOMContentLoaded', function() {
-      const storeOptionsGrid = document.querySelector('.store-options-grid');
-      if (storeOptionsGrid && !storeOptionsGrid.dataset.handlersAttached) {
-        storeOptionsGrid.dataset.handlersAttached = 'true';
-        
-        storeOptionsGrid.addEventListener('click', function(e) {
-          const button = e.target.closest('.btn-store-option');
-          if (button) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            // Get store value from data attribute
-            const storeValue = button.getAttribute('data-store');
-            
-            if (storeValue) {
-              console.log('🔄 Event delegation: calling selectStore for', storeValue);
-              if (typeof window.selectStore === 'function') {
-                window.selectStore(storeValue);
-              } else {
-                console.error('❌ selectStore function not available, retrying in 100ms...');
-                // Try again after a short delay in case function is being defined
-                setTimeout(function() {
-                  if (typeof window.selectStore === 'function') {
-                    console.log('✅ selectStore now available, calling...');
-                    window.selectStore(storeValue);
-                  } else {
-                    console.error('❌ selectStore still not available after retry');
-                    alert('Store selection function is not available. Please refresh the page.');
-                  }
-                }, 100);
-              }
-            }
-          }
-        }, true); // Use capture phase to catch clicks early
-        
-        console.log('✅ Store button event delegation handler attached');
-      }
-    });
-  </script>
-  
   <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
   <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
@@ -5846,49 +5656,49 @@
           <p class="mb-4 text-light" style="font-size: 1rem; font-weight: 500; color: rgba(255, 255, 255, 0.88);">Please select your store location to continue. This selection will be saved and remembered for future visits.</p>
           
           <div class="store-options-grid">
-            <button class="btn btn-store-option" data-store="AGT_Bothell">
+            <button class="btn btn-store-option" onclick="selectStore('AGT_Bothell')">
               <div class="store-option-content">
                 <div class="store-name">AGT Bothell</div>
                 <div class="store-location">Bothell, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" data-store="AGT_Burien">
+            <button class="btn btn-store-option" onclick="selectStore('AGT_Burien')">
               <div class="store-option-content">
                 <div class="store-name">AGT Burien</div>
                 <div class="store-location">Burien, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" data-store="AGT_Goldbar">
+            <button class="btn btn-store-option" onclick="selectStore('AGT_Goldbar')">
               <div class="store-option-content">
                 <div class="store-name">AGT Goldbar</div>
                 <div class="store-location">Goldbar, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" data-store="AGT_Lynnwood">
+            <button class="btn btn-store-option" onclick="selectStore('AGT_Lynnwood')">
               <div class="store-option-content">
                 <div class="store-name">AGT Lynnwood</div>
                 <div class="store-location">Lynnwood, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" data-store="AGT_Shoreline">
+            <button class="btn btn-store-option" onclick="selectStore('AGT_Shoreline')">
               <div class="store-option-content">
                 <div class="store-name">AGT Shoreline</div>
                 <div class="store-location">Shoreline, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" data-store="AGT_Seattle">
+            <button class="btn btn-store-option" onclick="selectStore('AGT_Seattle')">
               <div class="store-option-content">
                 <div class="store-name">AGT Seattle</div>
                 <div class="store-location">Seattle, WA</div>
               </div>
             </button>
             
-            <button class="btn btn-store-option" data-store="AGT_Walla_Walla">
+            <button class="btn btn-store-option" onclick="selectStore('AGT_Walla_Walla')">
               <div class="store-option-content">
                 <div class="store-name">AGT Walla Walla</div>
                 <div class="store-location">Walla Walla, WA</div>
@@ -7627,16 +7437,6 @@
             
             if (window.TagManager && typeof window.TagManager.init === 'function') {
               TagManager.init();
-              
-              // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
-              // Give it a moment for init to complete
-              setTimeout(() => {
-                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
-                  window.fileUploadInitAttempts = 0; // Reset counter
-                  setTimeout(window.initializeFileUpload, 200);
-                }
-              }, 500);
             } else {
               console.error('❌ TagManager.init is not available');
             }
@@ -7815,14 +7615,9 @@
           return;
         }
         
-        // CRITICAL FIX: Check if TagManager is loaded and has uploadFile method
-        // uploadFile exists on TagManager even before init() is called
-        // We just need TagManager to be loaded from main.js
-        const tagManagerReady = window.TagManager && 
-                                typeof window.TagManager.uploadFile === 'function';
-        
-        if (tagManagerReady) {
-          console.log('✓ TagManager ready and initialized, attaching file upload listener');
+        // Check if TagManager and uploadFile method are available
+        if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+          console.log('✓ TagManager ready, attaching file upload listener');
           window.fileUploadInitialized = true; // Mark as initialized to prevent retries
           
           // Remove any existing listeners to prevent duplicates
@@ -7843,27 +7638,16 @@
           });
         } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
           // Only log every 10th attempt to reduce console spam
-          if (window.fileUploadInitAttempts % 10 === 0 || window.fileUploadInitAttempts <= 5) {
-            const reason = !window.TagManager ? 'TagManager not loaded from main.js' :
-                          !window.TagManager.uploadFile ? 'uploadFile method not available' : 'unknown';
-            console.warn(`⏳ TagManager not ready yet (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS}): ${reason}`);
+          if (window.fileUploadInitAttempts % 10 === 0) {
+            console.warn(`TagManager not ready yet, retrying... (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS})`);
           }
           // Retry after a short delay
           setTimeout(initializeFileUpload, 100);
         } else {
-          // Don't give up - keep retrying indefinitely but with longer intervals
-          // This handles cases where store selection takes longer than 5 seconds
-          console.warn('⚠️ File upload initialization delayed - TagManager not ready yet');
-          console.warn('⚠️ TagManager available:', !!window.TagManager);
-          console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
-          console.warn('⚠️ main.js loaded:', window.mainJsLoaded || false);
-          console.warn('⚠️ main.js error:', window.mainJsError || 'None');
-          console.warn('⚠️ Will continue retrying every 2 seconds until TagManager is ready...');
-          
-          // Reset counter and retry with longer interval (2 seconds instead of 100ms)
-          // This prevents console spam while still allowing recovery
-          window.fileUploadInitAttempts = 0;
-          setTimeout(initializeFileUpload, 2000);
+          console.error('❌ Failed to initialize file upload after 5 seconds. TagManager may not be loaded.');
+          console.error('❌ TagManager available:', !!window.TagManager);
+          console.error('❌ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
+          // Don't set fileUploadInitialized to true so it can be retried later if TagManager loads
         }
       }
       

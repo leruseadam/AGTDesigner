@@ -134,40 +134,11 @@ function createTagRow(tag) {
     }
     
     const brand = tag['Product Brand'] || tag.Brand || '';
-    
-    // Extract weight units from multiple possible sources
-    let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
-                           tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '').toString().trim();
-    
-    // Format weight to remove .0 decimals (e.g., "1.0g" -> "1g", but "1.5g" stays "1.5g")
-    if (weightWithUnits) {
-        // Match pattern: number with optional decimal, followed by unit
-        const weightMatch = weightWithUnits.match(/^([\d.]+)([a-zA-Z]+.*)$/);
-        if (weightMatch) {
-            const weightValue = weightMatch[1];
-            const unit = weightMatch[2];
-            // Try to parse as float
-            const weightFloat = parseFloat(weightValue);
-            if (!isNaN(weightFloat)) {
-                if (weightFloat % 1 === 0) {
-                    // It's a whole number, remove decimal point (e.g., "1.0" -> "1")
-                    weightWithUnits = `${Math.round(weightFloat)}${unit}`;
-                } else {
-                    // It's a decimal number, remove trailing zeros (e.g., "1.50" -> "1.5", "1.0" -> "1")
-                    // Convert to string and remove trailing zeros and decimal point if needed
-                    let formatted = weightFloat.toString();
-                    formatted = formatted.replace(/\.0+$/, ''); // Remove .0, .00, etc.
-                    formatted = formatted.replace(/(\.\d*?)0+$/, '$1'); // Remove trailing zeros after decimal
-                    formatted = formatted.replace(/\.$/, ''); // Remove trailing decimal point
-                    weightWithUnits = `${formatted}${unit}`;
-                }
-            }
-        }
-    }
+    const type = tag['Product Type*'] || tag.Type || '';
 
     return `
         <tr class="tag-row" data-tag-name="${tagName}" data-lineage="${lineage}" data-doh="${dohStatus}">
-            <td class="align-middle tag-name-cell">${tagName}</td>
+            <td class="align-middle">${tagName}</td>
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
@@ -209,7 +180,7 @@ function createTagRow(tag) {
                 </div>
             </td>
             <td class="align-middle">${brand}</td>
-            <td class="align-middle">${weightWithUnits || ''}</td>
+            <td class="align-middle">${type}</td>
         </tr>
     `;
 }
@@ -284,36 +255,6 @@ class TagsTable {
     const brand = tag['Product Brand'] || tag.Brand || '';
     const vendor = tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || tag['Supplier'] || tag['Vendor*'] || tag['Supplier*'] || '';
     const type = tag['Product Type*'] || tag.Type || '';
-    // Extract weight units from multiple possible sources
-    let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
-                           tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '').toString().trim();
-    
-    // Format weight to remove .0 decimals (e.g., "1.0g" -> "1g", but "1.5g" stays "1.5g")
-    if (weightWithUnits) {
-        // Match pattern: number with optional decimal, followed by unit
-        const weightMatch = weightWithUnits.match(/^([\d.]+)([a-zA-Z]+.*)$/);
-        if (weightMatch) {
-            const weightValue = weightMatch[1];
-            const unit = weightMatch[2];
-            // Try to parse as float
-            const weightFloat = parseFloat(weightValue);
-            if (!isNaN(weightFloat)) {
-                if (weightFloat % 1 === 0) {
-                    // It's a whole number, remove decimal point (e.g., "1.0" -> "1")
-                    weightWithUnits = `${Math.round(weightFloat)}${unit}`;
-                } else {
-                    // It's a decimal number, remove trailing zeros (e.g., "1.50" -> "1.5", "1.0" -> "1")
-                    // Convert to string and remove trailing zeros and decimal point if needed
-                    let formatted = weightFloat.toString();
-                    formatted = formatted.replace(/\.0+$/, ''); // Remove .0, .00, etc.
-                    formatted = formatted.replace(/(\.\d*?)0+$/, '$1'); // Remove trailing zeros after decimal
-                    formatted = formatted.replace(/\.$/, ''); // Remove trailing decimal point
-                    weightWithUnits = `${formatted}${unit}`;
-                }
-            }
-        }
-    }
-    
     const safeTagName = tagName.replace(/"/g, '&quot;');
     const safeId = `tag_${safeTagName.replace(/[^a-zA-Z0-9]/g, '_')}`;
     
@@ -446,7 +387,7 @@ class TagsTable {
               ${dohDropdownOptions}
             </select>
           </div>
-          <small class="text-muted d-block mt-1">${brand}${vendor ? ` (${vendor})` : ''} | ${type}${weightWithUnits ? ` | ${weightWithUnits}` : ''} | DOH: ${dohStatus}</small>
+          <small class="text-muted d-block mt-1">${brand}${vendor ? ` (${vendor})` : ''} | ${type} | DOH: ${dohStatus}</small>
         </div>
       </div>
     `;
@@ -1046,11 +987,11 @@ class TagsTable {
           <table class="table table-hover">
               <thead>
                   <tr>
-                      <th class="tag-name-header">Name</th>
+                      <th>Name</th>
                       <th>Lineage</th>
                       <th>DOH</th>
                       <th>${brandHeaderText}</th>
-                      <th>Weight</th>
+                      <th>Type</th>
                       <th></th>
                   </tr>
               </thead>
@@ -1137,19 +1078,88 @@ class TagsTable {
   }
 
   static addEventListeners(container) {
-    // Add lightweight checkbox change listeners (UI-only; heavy work is centralized in TagManager)
+    // Add checkbox change listeners
     container.querySelectorAll('.tag-checkbox').forEach(checkbox => {
       checkbox.addEventListener('change', function(e) {
         try {
-          // Keep this handler minimal so checkbox toggles feel instant.
-          // TagManager's delegated handlers will manage state, counts, and
-          // any cross-list synchronization.
+          // CRITICAL FIX: Don't process during deselection to prevent filter clearing
+          if (TagManager.state.isProcessingDeselection) {
+            console.log('🚫 TagsTable: Skipping checkbox handler - currently processing deselection');
+            return;
+          }
+          
+          if (this.checked) {
+            TagManager.state.selectedTags.add(this.value);
+          } else {
+            const tagName = this.value;
+            console.log(`🔄 Deselecting tag: ${tagName}`);
+            
+            TagManager.state.selectedTags.delete(tagName);
+            // Also remove from persistent selections to avoid drift
+            const idx = TagManager.state.persistentSelectedTags.indexOf(tagName);
+            if (idx > -1) TagManager.state.persistentSelectedTags.splice(idx, 1);
+            
+            // CRITICAL: Also uncheck the corresponding checkbox in available tags
+            // Try multiple selector approaches to be more robust
+            let availableCheckbox = document.querySelector(`#availableTags .tag-checkbox[value="${tagName}"]`);
+            if (!availableCheckbox) {
+              // Try escaping special characters in the value
+              const escapedValue = tagName.replace(/"/g, '\\"');
+              availableCheckbox = document.querySelector(`#availableTags .tag-checkbox[value="${escapedValue}"]`);
+            }
+            if (!availableCheckbox) {
+              // Try finding by iterating through checkboxes
+              const allAvailableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
+              for (let cb of allAvailableCheckboxes) {
+                if (cb.value === tagName) {
+                  availableCheckbox = cb;
+                  break;
+                }
+              }
+            }
+            
+            if (availableCheckbox) {
+              availableCheckbox.checked = false;
+              console.log(`✅ Unchecked available tags checkbox for ${tagName}`);
+              
+              // Also update the UI state if the checkbox element has a handler
+              if (availableCheckbox._changeHandler) {
+                console.log('Found checkbox handler, triggering update');
+                // Don't trigger the handler, just ensure UI consistency
+              }
+              
+              // Immediately update hierarchical checkboxes after unchecking
+              requestAnimationFrame(() => {
+                if (TagManager.updateSelectAllCheckboxes) {
+                  TagManager.updateSelectAllCheckboxes();
+                }
+              });
+            } else {
+              console.warn(`⚠️ Could not find available tags checkbox for: ${tagName}`);
+            }
+            
+            // Remove DOM row when in selected list without triggering big re-render
+            const row = this.closest('.tag-item, .tag-row');
+            if (row) {
+              // Look for an ancestor that is the selected tags container
+              const selectedContainer = row.closest('#selectedTags');
+              if (selectedContainer) {
+                row.remove();
+                if (TagManager && typeof TagManager.updateTagCount === 'function') {
+                  TagManager.updateTagCount('selected', TagManager.state.persistentSelectedTags.length);
+                }
+              }
+            }
+          }
+          // Halt further propagation to avoid any global listeners that might reload data
           if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
           e.stopPropagation();
+          e.preventDefault();
         } catch (error) {
-          console.error('Error in lightweight checkbox change handler:', error);
+          console.error('Error in checkbox change handler:', error);
+          // Prevent the error from causing the page to exit
         }
-      }, { passive: true });
+      });
     });
 
     // Require explicit checkbox clicks; do not toggle selection on tag body clicks

@@ -12,7 +12,6 @@ from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from flask import session
 from flask_caching import Cache
-from src.core.constants import PREROLL_ALLOWED_BRANDS
 
 
 def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -> Optional[Document]:
@@ -68,71 +67,48 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
         
         # Only create list document if we have groups
         if preroll_groups:
-            # Create a section for each preroll group, separated by brand
+            # Create a section for each preroll group
             for group_id, group_data in preroll_groups.items():
                 group_info = group_data['info']
                 group_items = group_data['items']
                 display_name = group_info.get('display_name', f'Group {group_id}')
                 
-                # Filter items by allowed brands if configured
-                filtered_items = group_items
-                if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
-                    allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
-                    original_item_count = len(filtered_items)
-                    filtered_items = [
-                        item for item in group_items
-                        if str(item.get('brand', '')).strip().lower() in allowed_brands_lower
-                    ]
-                    if len(filtered_items) < original_item_count:
-                        logging.info(f"PREROLL LIST: Filtered {original_item_count} items to {len(filtered_items)} items for group '{display_name}' based on allowed brands")
+                # Add group heading
+                heading = list_doc.add_heading(display_name, level=1)
+                heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 
-                # Group items by brand within this category
-                items_by_brand = {}
-                for item in filtered_items:
-                    brand = str(item.get('brand', '')).strip() or 'Unknown Brand'
-                    if brand not in items_by_brand:
-                        items_by_brand[brand] = []
-                    items_by_brand[brand].append(item)
+                # Create a table for the items (6 columns: add DOH status)
+                table = list_doc.add_table(rows=1, cols=6)
+                table.style = 'Light Grid Accent 1'
                 
-                # Create a separate table for each brand
-                for brand, brand_items in sorted(items_by_brand.items()):
-                    # Add group heading with brand
-                    heading_text = f"{display_name} - {brand}"
-                    heading = list_doc.add_heading(heading_text, level=1)
-                    heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                    
-                    # Create a table for the items (6 columns: add DOH status)
-                    table = list_doc.add_table(rows=1, cols=6)
-                    table.style = 'Light Grid Accent 1'
-                    
-                    # Header row
-                    header_cells = table.rows[0].cells
-                    header_cells[0].text = 'Product Name'
-                    header_cells[1].text = 'Brand'
-                    header_cells[2].text = 'Price'
-                    header_cells[3].text = 'Weight'
-                    header_cells[4].text = 'Lineage'
-                    header_cells[5].text = 'DOH'
-                    
-                    # Make header row bold
-                    for cell in header_cells:
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                run.font.bold = True
-                                run.font.size = Pt(11)
-                    
-                    # Add items to table
-                    for item in brand_items:
-                        row_cells = table.add_row().cells
-                        row_cells[0].text = item.get('product_name', '')
-                        row_cells[1].text = item.get('brand', '')
-                        row_cells[2].text = item.get('price', '')
-                        row_cells[3].text = item.get('weight', '')
-                        row_cells[4].text = item.get('lineage', '')
-                        row_cells[5].text = item.get('doh', '')
-                    
-                    # Add spacing after each brand table
-                    list_doc.add_paragraph('')
+                # Header row
+                header_cells = table.rows[0].cells
+                header_cells[0].text = 'Product Name'
+                header_cells[1].text = 'Brand'
+                header_cells[2].text = 'Price'
+                header_cells[3].text = 'Weight'
+                header_cells[4].text = 'Lineage'
+                header_cells[5].text = 'DOH'
+                
+                # Make header row bold
+                for cell in header_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.bold = True
+                            run.font.size = Pt(11)
+                
+                # Add items to table
+                for item in group_items:
+                    row_cells = table.add_row().cells
+                    row_cells[0].text = item.get('product_name', '')
+                    row_cells[1].text = item.get('brand', '')
+                    row_cells[2].text = item.get('price', '')
+                    row_cells[3].text = item.get('weight', '')
+                    row_cells[4].text = item.get('lineage', '')
+                    row_cells[5].text = item.get('doh', '')
+                
+                # Add spacing after each group
+                list_doc.add_paragraph('')
             
             # Log summary of items in list
             total_items_in_list = sum(len(group_data['items']) for group_data in preroll_groups.values())

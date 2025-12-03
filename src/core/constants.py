@@ -183,14 +183,3 @@ PRODUCT_TYPE_EMOJIS = {
     "rso/co2 tankers": "",
     # Add more as needed
 }
-
-# Allowed brands for preroll lists and output
-# Only preroll products with these brands will be included in lists and QR code pages
-# Set to None or empty list to allow all brands
-PREROLL_ALLOWED_BRANDS = [
-    # Add allowed brand names here (case-insensitive matching)
-    # Example:
-    # "DANK CZAR",
-    # "COOKIES",
-    # "PHAT PANDA",
-]

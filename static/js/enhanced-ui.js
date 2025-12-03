@@ -882,10 +882,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let scale = Math.min(vw / contentWidth, vh / contentHeight);
     if (!isFinite(scale) || scale <= 0) scale = 1;
-    // Force scale to be less than 1 if content is larger than viewport
-    if (contentWidth > vw || contentHeight > vh) {
-      scale = Math.min(scale, 0.95); // Start more aggressively
-    }
     scale = Math.min(scale, 1);
 
     // Apply to body with width/height compensation so layout reflows to fit
@@ -897,24 +893,14 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     let appliedScale = scale;
-    const minScale = 0.4; // Lower minimum for more aggressive scaling
-    const step = 0.02; // Smaller steps for finer control
-    let attempts = 0;
-    const maxAttempts = 50;
-    
-    while (appliedScale >= minScale && attempts < maxAttempts) {
+    const minScale = 0.6;
+    const step = 0.05;
+    while (appliedScale >= minScale) {
       applyScaleToBody(appliedScale);
-      // Force a reflow
-      void page.offsetHeight;
-      
       const r = main.getBoundingClientRect();
-      // Check if content fits with some padding
-      if (r.width <= vw * 0.98 && r.height <= vh * 0.98) break;
-      
+      if (r.width <= vw && r.height <= vh) break;
       appliedScale = Math.max(minScale, +(appliedScale - step).toFixed(3));
-      attempts++;
-      
-      if (appliedScale === minScale || attempts >= maxAttempts) {
+      if (appliedScale === minScale) {
         applyScaleToBody(appliedScale);
         break;
       }
@@ -937,71 +923,35 @@ document.addEventListener('DOMContentLoaded', function() {
   // Expose for other scripts
   window.scaleAppToFit = scaleAppToFit;
 
-  // Apply scaleAppToFit on ALL screens for consistent scaling (MacBook and PC)
-  // Force immediate execution and multiple retries to ensure it works
-  function forceScaleAppToFit() {
-    const main = document.getElementById('mainContent');
-    if (main) {
-      scaleAppToFit();
-    }
-  }
-  
+  // Apply on ready (after content becomes visible), and on resize/orientation
   document.addEventListener('DOMContentLoaded', function() {
     const main = document.getElementById('mainContent');
-    if (!main) {
-      // Retry if mainContent doesn't exist yet
-      setTimeout(() => {
-        forceScaleAppToFit();
-      }, 100);
-      return;
-    }
+    if (!main) return;
 
-    // Apply immediately
-    forceScaleAppToFit();
-    
-    // Apply multiple times to catch late-loading content
-    setTimeout(forceScaleAppToFit, 100);
-    setTimeout(forceScaleAppToFit, 300);
-    setTimeout(forceScaleAppToFit, 500);
-    setTimeout(forceScaleAppToFit, 1000);
+    const tryApply = () => {
+      const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
+      if (visible) {
+        requestAnimationFrame(scaleAppToFit);
+      } else {
+        setTimeout(tryApply, 200);
+      }
+    };
+    tryApply();
   });
 
-  // Ensure after full load (fonts/images) we re-calc multiple times
+  // Ensure after full load (fonts/images) we re-calc
   window.addEventListener('load', () => {
-    forceScaleAppToFit();
-    setTimeout(forceScaleAppToFit, 0);
-    setTimeout(forceScaleAppToFit, 100);
-    setTimeout(forceScaleAppToFit, 250);
-    setTimeout(forceScaleAppToFit, 500);
+    requestAnimationFrame(scaleAppToFit);
+    setTimeout(scaleAppToFit, 0);
+    setTimeout(scaleAppToFit, 250);
   });
 
   let resizeTimer;
   window.addEventListener('resize', () => {
     cancelAnimationFrame(resizeTimer);
-    resizeTimer = requestAnimationFrame(() => {
-      forceScaleAppToFit();
-      // Also apply after a short delay to catch any layout changes
-      setTimeout(forceScaleAppToFit, 100);
-    });
+    resizeTimer = requestAnimationFrame(scaleAppToFit);
   });
-  
-  window.addEventListener('orientationchange', () => {
-    setTimeout(forceScaleAppToFit, 0);
-    setTimeout(forceScaleAppToFit, 300);
-  });
-  
-  // Also run on any content changes
-  if (typeof MutationObserver !== 'undefined') {
-    const observer = new MutationObserver(() => {
-      setTimeout(forceScaleAppToFit, 50);
-    });
-    document.addEventListener('DOMContentLoaded', () => {
-      const main = document.getElementById('mainContent');
-      if (main) {
-        observer.observe(main, { childList: true, subtree: true });
-      }
-    });
-  }
+  window.addEventListener('orientationchange', () => setTimeout(scaleAppToFit, 0));
 })();
 
 // Expose manual control in console
