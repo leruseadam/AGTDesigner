@@ -247,7 +247,7 @@
         // Include displays around 1915px (external monitors) that are close to 1920px
         if (window.innerWidth >= 1900) {
           const scaleRatio = baseWidth / window.innerWidth;
-          
+
           // Create wrapper if it doesn't exist
           let wrapper = document.getElementById('large-monitor-wrapper');
           if (!wrapper && document.body.firstChild) {
@@ -257,10 +257,11 @@
               transform: scale(${scaleRatio}) !important;
               transform-origin: top left !important;
               width: ${100 / scaleRatio}% !important;
-              height: auto !important;
+              min-height: 100vh !important;
               overflow: visible !important;
+              position: relative !important;
             `;
-            
+
             // Move all body children into wrapper
             while (document.body.firstChild) {
               wrapper.appendChild(document.body.firstChild);
@@ -271,19 +272,25 @@
               transform: scale(${scaleRatio}) !important;
               transform-origin: top left !important;
               width: ${100 / scaleRatio}% !important;
-              height: auto !important;
+              min-height: 100vh !important;
               overflow: visible !important;
+              position: relative !important;
             `;
           }
-          
-          // Force body scrolling
+
+          // Force body and html scrolling
           if (document.body) {
-            document.body.style.setProperty('overflow-y', 'auto', 'important');
-            document.body.style.setProperty('overflow-x', 'auto', 'important');
-            document.body.style.setProperty('height', 'auto', 'important');
-            document.body.style.setProperty('min-height', 'auto', 'important');
+            document.body.style.setProperty('overflow-y', 'scroll', 'important');
+            document.body.style.setProperty('overflow-x', 'hidden', 'important');
+            document.body.style.setProperty('height', '100%', 'important');
+            document.body.style.setProperty('min-height', '100vh', 'important');
           }
-          
+          if (document.documentElement) {
+            document.documentElement.style.setProperty('overflow-y', 'scroll', 'important');
+            document.documentElement.style.setProperty('overflow-x', 'hidden', 'important');
+            document.documentElement.style.setProperty('height', '100%', 'important');
+          }
+
           console.log(`LARGE MONITOR FIX APPLIED: ${window.innerWidth}px, scale: ${scaleRatio.toFixed(2)}`);
         } else {
           // Remove wrapper for normal screens

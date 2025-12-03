@@ -1748,13 +1748,26 @@ class TemplateProcessor:
                     self.logger.info(f"🔍 DOUBLE TEMPLATE DESC: Using primary text '{primary_text}'")
                     label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
                 elif self.template_type == 'preroll':
-                    # PREROLL TEMPLATE: Use group display name ONLY (no weight, no individual product details)
+                    # PREROLL TEMPLATE: Use group display name with JointRatio-derived weight
                     # Check if we already set DescAndWeight for grouped preroll (above)
                     if not (record.get('_group_id') and label_context.get('DescAndWeight')):
                         # Use description (should be group name if grouping worked) or product_name_display as fallback
                         primary_text = (desc or product_name_display or '').strip()
-                        self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' (no weight)")
-                        label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
+                        
+                        # Get JointRatio-derived weight from WeightUnits (set earlier for preroll products)
+                        weight_units = label_context.get('WeightUnits', '') or record.get('WeightUnits', '')
+                        if weight_units:
+                            # Remove newline prefix if present, and strip whitespace
+                            clean_weight = weight_units.replace('\n', '').strip()
+                            # Add non-breaking hyphen and weight to description (use \u2011 for non-breaking hyphen)
+                            desc_and_weight = f"{primary_text} \u2011\u00A0{clean_weight}"
+                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' with weight '{clean_weight}' -> '{desc_and_weight}'")
+                        else:
+                            # No weight available, use description only
+                            desc_and_weight = primary_text
+                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' (no weight available)")
+                        
+                        label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
                     else:
                         self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Already set to group name, skipping reconstruction")
                 else:
