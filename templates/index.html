@@ -238,15 +238,18 @@
         
         // UNIVERSAL SCALING: Adapt to any screen size
         // Calculate scale factor based on viewport width (1920px = baseline)
-        // NEVER scale up on large monitors - keep at 1.0 to match MacBook appearance
         const baseWidth = 1920;
-        let scaleFactor = 1.0;
-        // Only scale DOWN for smaller screens
-        if (window.innerWidth < baseWidth) {
-          scaleFactor = Math.max(window.innerWidth / baseWidth, 0.5);
-        }
+        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
+        
+        // For large monitors, apply CSS zoom to scale down and match MacBook appearance
+        if (window.innerWidth > baseWidth) {
+          const zoomLevel = baseWidth / window.innerWidth;
+          document.body.style.zoom = zoomLevel;
+        } else {
+          document.body.style.zoom = '';
+        }
         
         // Ensure body fills viewport (only if body exists)
         if (document.body) {
