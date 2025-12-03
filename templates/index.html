@@ -237,9 +237,11 @@
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
         
         // UNIVERSAL SCALING: Adapt to any screen size
-        // Calculate scale factor based on viewport width (1920px = baseline)
-        const baseWidth = 1920;
-        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
+        // Calculate scale factor based on viewport width (1728px = MacBook Pro 16" baseline)
+        // This ensures the app looks proportional on all screen sizes, using MacBook as reference
+        const baseWidth = 1728; // MacBook Pro 16" typical scaled width
+        // Don't scale up on larger monitors - keep at 1.0 max, scale down for smaller screens
+        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 1.0);
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         

@@ -72,10 +72,35 @@ body {
   box-sizing: border-box;
 }
 
-/* MONITOR CONSISTENCY - Allow natural layout with reasonable max-width */
+/* MONITOR CONSISTENCY - Proportional scaling based on MacBook Pro 16" reference */
+/* MacBook Pro 16" typical scaled width: ~1728px */
+/* This ensures the app looks proportional on all screen sizes */
+
+/* Main app container - constrain width on large monitors, center on extra-large screens */
+body > .container,
+body > .container-fluid,
+.main-content {
+  max-width: min(1728px, 100%) !important; /* Match MacBook Pro width, but don't exceed viewport */
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+  width: 100% !important;
+}
+
+/* On screens wider than MacBook Pro, center the content */
+@media (min-width: 1729px) {
+  body > .container,
+  body > .container-fluid,
+  .main-content {
+    max-width: 1728px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+}
+
 .container,
 .container-fluid,
-.main-content,
 .centerframe,
 .row.fade-in.g-1 {
   max-width: 100% !important;
@@ -89,13 +114,6 @@ body {
 .d-flex.fade-in[style*="gap: 4rem"] {
   padding-left: 0.5rem !important;
   padding-right: 0.5rem !important;
-}
-
-/* Ensure the entire app stays centered and has breathing room */
-body > .container,
-body > .container-fluid {
-  max-width: 100% !important;
-  margin: 0 auto !important;
 }
   
 /* Tag lists and containers - ensure they scale with zoom */
@@ -7770,14 +7788,14 @@ canvas#lava-lamp-canvas {
   /* Ensure proper expansion for wide screens */
   .container-fluid {
     width: 100%;
-    max-width: none;
+    max-width: min(1728px, 100%) !important; /* Constrain to MacBook Pro width for proportional scaling */
     padding-left: 1rem;
     padding-right: 1rem;
   }
   
   .main-content {
     width: 100%;
-    max-width: none;
+    max-width: min(1728px, 100%) !important; /* Constrain to MacBook Pro width for proportional scaling */
   }
   
   .row {
