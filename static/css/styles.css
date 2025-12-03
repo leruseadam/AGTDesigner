@@ -101,6 +101,10 @@ body > .container-fluid {
 
 /* Constrain large monitors to match MacBook appearance - prevent oversized UI */
 @media (min-width: 1921px) {
+  html {
+    zoom: 0.75 !important; /* Scale down 25% on large monitors */
+  }
+  
   body > .container,
   body > .container-fluid,
   .main-content {
@@ -141,6 +145,18 @@ body > .container-fluid {
   .btn-glass svg {
     width: 18px !important;
     height: 18px !important;
+  }
+}
+
+@media (min-width: 2560px) {
+  html {
+    zoom: 0.6 !important; /* Scale down 40% on very large monitors */
+  }
+}
+
+@media (min-width: 3840px) {
+  html {
+    zoom: 0.5 !important; /* Scale down 50% on 4K monitors */
   }
 }
   

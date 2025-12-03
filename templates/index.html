@@ -243,12 +243,12 @@
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
         
-        // For large monitors, apply CSS zoom to scale down and match MacBook appearance
+        // For large monitors, apply CSS zoom to html element to scale down and match MacBook appearance
         if (window.innerWidth > baseWidth) {
           const zoomLevel = baseWidth / window.innerWidth;
-          document.body.style.zoom = zoomLevel;
+          document.documentElement.style.zoom = zoomLevel;
         } else {
-          document.body.style.zoom = '';
+          document.documentElement.style.zoom = '';
         }
         
         // Ensure body fills viewport (only if body exists)
