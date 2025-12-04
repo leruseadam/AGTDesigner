@@ -2386,6 +2386,30 @@ const TagManager = {
                 weightWithUnits = `${weight}g`;
             }
             
+            // CRITICAL FIX: Normalize weight to remove .0 decimals (e.g., "1.0g" -> "1g", "1.0G" -> "1g")
+            // This ensures "1.0g" and "1g" are treated as the same weight group
+            if (weightWithUnits) {
+                const weightMatch = weightWithUnits.match(/^([\d.]+)([a-zA-Z]+.*)$/i);
+                if (weightMatch) {
+                    const weightValue = weightMatch[1];
+                    const unit = weightMatch[2].toLowerCase(); // Normalize unit to lowercase
+                    const weightFloat = parseFloat(weightValue);
+                    if (!isNaN(weightFloat)) {
+                        if (weightFloat % 1 === 0) {
+                            // It's a whole number, remove decimal point (e.g., "1.0" -> "1")
+                            weightWithUnits = `${Math.round(weightFloat)}${unit}`;
+                        } else {
+                            // It's a decimal number, remove trailing zeros (e.g., "1.50" -> "1.5")
+                            let formatted = weightFloat.toString();
+                            formatted = formatted.replace(/\.0+$/, ''); // Remove .0, .00, etc.
+                            formatted = formatted.replace(/(\.\d*?)0+$/, '$1'); // Remove trailing zeros after decimal
+                            formatted = formatted.replace(/\.$/, ''); // Remove trailing decimal point
+                            weightWithUnits = `${formatted}${unit}`;
+                        }
+                    }
+                }
+            }
+            
             // Extract price for grouping - try multiple possible price fields
             const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag['Product Price'] || tag.price || '';
             // Format price for grouping - use actual price values, not ranges
