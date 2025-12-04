@@ -25,6 +25,7 @@ def _get_product_name(record: Dict[str, Any]) -> str:
     - Start from Product Name* / ProductName / Description / DescAndWeight
     - Remove everything from ' by ' onward
     - Then remove trailing weight info after ' - ' when it looks like weight.
+    - Fallback: Create name from Brand + Product Type if available
     """
     name = (
         record.get("Product Name*")
@@ -36,9 +37,34 @@ def _get_product_name(record: Dict[str, Any]) -> str:
         or ""
     )
     full_name = str(name).strip()
+    
+    # If still no name, try to construct one from available fields
+    if not full_name or full_name.lower() in ['none', 'null', 'nan', '']:
+        # Try to create a name from Brand + Product Type
+        brand = _get_brand(record)
+        product_type = _get_product_type(record)
+        if brand and product_type:
+            full_name = f"{brand} {product_type}"
+            logger.debug(f"INVENTORY LIST: Constructed product name from Brand + Type: '{full_name}'")
+        elif brand:
+            full_name = brand
+            logger.debug(f"INVENTORY LIST: Using brand as product name: '{full_name}'")
+        elif product_type:
+            full_name = product_type
+            logger.debug(f"INVENTORY LIST: Using product type as product name: '{full_name}'")
+        else:
+            # Last resort: use any non-empty string field
+            for key, value in record.items():
+                if isinstance(value, str) and value.strip() and value.strip().lower() not in ['none', 'null', 'nan', '']:
+                    # Skip technical fields
+                    if key.lower() not in ['source', 'id', 'idx', 'index', 'barcode', 'room']:
+                        full_name = value.strip()
+                        logger.debug(f"INVENTORY LIST: Using field '{key}' as product name: '{full_name[:50]}'")
+                        break
+    
     if not full_name or full_name.lower() in ['none', 'null', 'nan', '']:
         # Log which fields were checked for debugging
-        logger.debug(f"INVENTORY LIST: No product name found in record. Available keys: {list(record.keys())[:10]}")
+        logger.debug(f"INVENTORY LIST: No product name found in record. Available keys: {list(record.keys())[:15]}")
         return ""
 
     # Reuse the same logic as excel_processor._extract_product_name_from_full_name
@@ -171,24 +197,39 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             logger.info("INVENTORY LIST: No records provided, skipping list generation")
             return None
 
+        logger.info(f"INVENTORY LIST: Received {len(records)} records for processing")
+        
+        # Log first few records to understand structure
+        if records:
+            logger.info(f"INVENTORY LIST: Sample record 1 keys: {list(records[0].keys())[:15]}")
+            logger.info(f"INVENTORY LIST: Sample record 1 - Product Name*: '{records[0].get('Product Name*', 'N/A')}', ProductName: '{records[0].get('ProductName', 'N/A')}', Description: '{str(records[0].get('Description', 'N/A'))[:80]}'")
+
         # Build groups by category
         grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         total_rows = 0
+        skipped_count = 0
 
-        for record in records:
+        for idx, record in enumerate(records):
             name = _get_product_name(record)
             if not name:
                 # Log why record was skipped for debugging
-                logger.warning(f"INVENTORY LIST: Skipping record with no product name. Record keys: {list(record.keys())[:10]}")
-                logger.warning(f"INVENTORY LIST: Record values: Product Name*={record.get('Product Name*', 'N/A')}, ProductName={record.get('ProductName', 'N/A')}, Description={record.get('Description', 'N/A')[:50]}")
+                skipped_count += 1
+                if skipped_count <= 5:  # Only log first 5 skipped records to avoid spam
+                    logger.warning(f"INVENTORY LIST: Skipping record {idx+1} with no product name. Record keys: {list(record.keys())[:15]}")
+                    logger.warning(f"INVENTORY LIST: Record {idx+1} values - Product Name*: '{record.get('Product Name*', 'N/A')}', ProductName: '{record.get('ProductName', 'N/A')}', Description: '{str(record.get('Description', 'N/A'))[:80]}', DescAndWeight: '{str(record.get('DescAndWeight', 'N/A'))[:80]}'")
                 continue
             category = _get_category(record)
             grouped[category].append(record)
             total_rows += 1
 
+        if skipped_count > 0:
+            logger.warning(f"INVENTORY LIST: Skipped {skipped_count} records out of {len(records)} due to missing product names")
+
         if not grouped:
             logger.error(f"INVENTORY LIST: No groupable records found after processing {len(records)} records")
             logger.error(f"INVENTORY LIST: All records were filtered out because they lacked product names")
+            if records:
+                logger.error(f"INVENTORY LIST: First record full dump: {dict(list(records[0].items())[:20])}")
             return None
 
         doc = Document()
