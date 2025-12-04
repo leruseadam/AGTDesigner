@@ -243,108 +243,8 @@
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
 
-        // UNIVERSAL VIEWPORT SCALING: Ensure EXACT same experience on ALL screens
-        // Scale ALL displays to match MacBook Pro 16" (1728px) for uniform UX
-        const targetViewportWidth = 1728;
-        const needsScaling = window.innerWidth !== targetViewportWidth;
-
-        if (needsScaling) {
-          const scaleRatio = targetViewportWidth / window.innerWidth;
-
-          // Create wrapper if it doesn't exist
-          let wrapper = document.getElementById('viewport-scaler-wrapper');
-          if (!wrapper && document.body.firstChild) {
-            wrapper = document.createElement('div');
-            wrapper.id = 'viewport-scaler-wrapper';
-            wrapper.style.cssText = `
-              transform: scale(${scaleRatio}) !important;
-              transform-origin: top left !important;
-              width: ${100 / scaleRatio}% !important;
-              min-height: ${100 / scaleRatio}vh !important;
-              overflow: visible !important;
-              position: relative !important;
-            `;
-
-            // Move all body children into wrapper
-            while (document.body.firstChild) {
-              wrapper.appendChild(document.body.firstChild);
-            }
-            document.body.appendChild(wrapper);
-          } else if (wrapper) {
-            wrapper.style.cssText = `
-              transform: scale(${scaleRatio}) !important;
-              transform-origin: top left !important;
-              width: ${100 / scaleRatio}% !important;
-              min-height: ${100 / scaleRatio}vh !important;
-              overflow: visible !important;
-              position: relative !important;
-            `;
-          }
-
-          // Lock body and html to prevent scrolling above/below content
-          // But allow internal elements to scroll normally
-          if (document.body) {
-            document.body.style.setProperty('overflow', 'hidden', 'important');
-            document.body.style.setProperty('height', '100vh', 'important');
-            document.body.style.setProperty('width', '100vw', 'important');
-            document.body.style.setProperty('margin', '0', 'important');
-            document.body.style.setProperty('padding', '0', 'important');
-          }
-          if (document.documentElement) {
-            document.documentElement.style.setProperty('overflow', 'hidden', 'important');
-            document.documentElement.style.setProperty('height', '100vh', 'important');
-            document.documentElement.style.setProperty('width', '100vw', 'important');
-          }
-
-          // Force all internal scrollable elements to work properly
-          document.querySelectorAll('.tag-list-container, [data-container-type], .modal-body, .table-responsive').forEach(el => {
-            el.style.setProperty('overflow-y', 'auto', 'important');
-            el.style.setProperty('pointer-events', 'auto', 'important');
-          });
-
-          console.log(`UNIVERSAL VIEWPORT SCALING: ${window.innerWidth}px → ${targetViewportWidth}px (${scaleRatio.toFixed(3)}x scale)`);
-        } else {
-          // Target viewport width - no scaling needed
-          const wrapper = document.getElementById('viewport-scaler-wrapper');
-          if (wrapper && wrapper.parentNode) {
-            while (wrapper.firstChild) {
-              wrapper.parentNode.insertBefore(wrapper.firstChild, wrapper);
-            }
-            wrapper.remove();
-          }
-
-          // Lock viewport to prevent unwanted scrolling
-          if (document.body) {
-            document.body.style.setProperty('overflow', 'hidden', 'important');
-            document.body.style.setProperty('height', '100vh', 'important');
-            document.body.style.setProperty('width', '100vw', 'important');
-            document.body.style.setProperty('margin', '0', 'important');
-            document.body.style.setProperty('padding', '0', 'important');
-          }
-          if (document.documentElement) {
-            document.documentElement.style.setProperty('overflow', 'hidden', 'important');
-            document.documentElement.style.setProperty('height', '100vh', 'important');
-            document.documentElement.style.setProperty('width', '100vw', 'important');
-          }
-
-          // Ensure internal scrollable elements work properly
-          document.querySelectorAll('.tag-list-container, [data-container-type], .modal-body, .table-responsive').forEach(el => {
-            el.style.setProperty('overflow-y', 'auto', 'important');
-            el.style.setProperty('pointer-events', 'auto', 'important');
-          });
-
-          console.log(`NATIVE VIEWPORT: ${window.innerWidth}px (no scaling needed)`);
-        }
-        
         console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, scale: ${scaleFactor.toFixed(2)}x`);
       }
-      
-      // Debounce function to prevent excessive calls
-      let resizeTimeout;
-      const debouncedNormalize = () => {
-        clearTimeout(resizeTimeout);
-        resizeTimeout = setTimeout(normalizeViewport, 150);
-      };
 
       // Run normalization after DOM is loaded
       if (document.readyState === 'loading') {
@@ -352,8 +252,8 @@
       } else {
         normalizeViewport();
       }
-      window.addEventListener('resize', debouncedNormalize);
-      window.addEventListener('orientationchange', debouncedNormalize);
+      window.addEventListener('resize', normalizeViewport);
+      window.addEventListener('orientationchange', normalizeViewport);
 
       // Re-normalize after a short delay to catch any late-loading elements
       setTimeout(normalizeViewport, 100);
