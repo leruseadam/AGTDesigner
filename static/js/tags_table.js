@@ -857,8 +857,10 @@ class TagsTable {
         }
       }
     };
-    
-    setTimeout(updateLineageUI, 2000);
+
+    // REMOVED: This setTimeout was causing selected tags to randomly disappear 2 seconds after lineage changes
+    // The lineage is already updated immediately in the database and state, no need for delayed UI update
+    // setTimeout(updateLineageUI, 2000);
 
     // Show brief visual feedback
     selectElement.style.backgroundColor = '#d4edda';
@@ -1066,7 +1068,7 @@ class TagsTable {
   static updateTagsList(containerId, tags, isSelected = false) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    
+
     // Clear existing content
     container.innerHTML = '';
     
