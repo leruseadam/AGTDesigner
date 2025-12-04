@@ -22,7 +22,7 @@ def _get_product_name(record: Dict[str, Any]) -> str:
     """
     Best-effort extraction of product name from a record using the same
     shortening rules as Excel tag processing:
-    - Start from Product Name* / ProductName / Description
+    - Start from Product Name* / ProductName / Description / DescAndWeight
     - Remove everything from ' by ' onward
     - Then remove trailing weight info after ' - ' when it looks like weight.
     """
@@ -30,10 +30,15 @@ def _get_product_name(record: Dict[str, Any]) -> str:
         record.get("Product Name*")
         or record.get("ProductName")
         or record.get("Description")
+        or record.get("DescAndWeight")
+        or record.get("product_name")
+        or record.get("displayName")
         or ""
     )
     full_name = str(name).strip()
-    if not full_name:
+    if not full_name or full_name.lower() in ['none', 'null', 'nan', '']:
+        # Log which fields were checked for debugging
+        logger.debug(f"INVENTORY LIST: No product name found in record. Available keys: {list(record.keys())[:10]}")
         return ""
 
     # Reuse the same logic as excel_processor._extract_product_name_from_full_name
@@ -173,14 +178,17 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
         for record in records:
             name = _get_product_name(record)
             if not name:
-                # Skip completely nameless records
+                # Log why record was skipped for debugging
+                logger.warning(f"INVENTORY LIST: Skipping record with no product name. Record keys: {list(record.keys())[:10]}")
+                logger.warning(f"INVENTORY LIST: Record values: Product Name*={record.get('Product Name*', 'N/A')}, ProductName={record.get('ProductName', 'N/A')}, Description={record.get('Description', 'N/A')[:50]}")
                 continue
             category = _get_category(record)
             grouped[category].append(record)
             total_rows += 1
 
         if not grouped:
-            logger.info("INVENTORY LIST: No groupable records found")
+            logger.error(f"INVENTORY LIST: No groupable records found after processing {len(records)} records")
+            logger.error(f"INVENTORY LIST: All records were filtered out because they lacked product names")
             return None
 
         doc = Document()
