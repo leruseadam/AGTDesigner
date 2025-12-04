@@ -6499,10 +6499,7 @@ def clear_generation_cache():
 def generate_labels():
     try:
         logging.info("=== GENERATE LABELS ACTION START ===")
-        logging.info(f"Generate labels request at {datetime.now().strftime('%H:%M:%S')}")
-        logging.info(f"Request method: {request.method}")
-        logging.info(f"Request URL: {request.url}")
-        logging.info(f"Request headers: {dict(request.headers)}")
+        # PERFORMANCE: Reduced excessive logging
         
         # TRACE: Check current store at start of generation
         current_store_at_start = get_current_store_name()
@@ -6933,21 +6930,6 @@ def generate_labels():
                 store_name = get_current_store_name() or 'AGT_Bothell'
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # LOG: Check DOH values in database for first selected tag
-                    if selected_tags_from_request and len(selected_tags_from_request) > 0:
-                        first_tag = selected_tags_from_request[0]
-                        conn = product_db._get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT "DOH", "DOH Compliant (Yes/No)", "Product Name*" FROM products WHERE normalized_name = ?', (product_db._normalize_product_name(first_tag),))
-                        row = cursor.fetchone()
-                        if row:
-                            logging.info(f"🔍 DOH in database for {first_tag}: DOH='{row[0]}', Compliant='{row[1]}'")
-                        else:
-                            logging.info(f"🔍 Product {first_tag} not found in database")
-                    else:
-                        logging.info(f"🔍 No selected tags to check DOH values for")
-                
-                if product_db:
                     # Check if database is empty
                     try:
                         conn = product_db._get_connection()
@@ -6968,32 +6950,22 @@ def generate_labels():
                     
                     if has_database:
                         # ENHANCED: Replace JSON matched tags with database data
-                        logging.info(f"Original valid_selected_tags: {valid_selected_tags}")
                         enhanced_tags = _replace_json_tags_with_database_data(valid_selected_tags, product_db)
-                        logging.info(f"Enhanced {len(valid_selected_tags)} tags with database data, result: {len(enhanced_tags)} tags")
-                        
+
                         # Get products from database using the enhanced tags
-                        logging.info(f"Looking up products for enhanced tags: {enhanced_tags}")
                         db_records = product_db.get_products_by_names(enhanced_tags)
-                        logging.info(f"Found {len(db_records)} database records")
                     if db_records:
                         # Filter out products with None or empty ProductName
                         valid_db_records = [record for record in db_records if record.get('Product Name*') and record.get('Product Name*') != 'None']
-                        logging.info(f"Filtered {len(db_records)} database records to {len(valid_db_records)} valid records")
-                        
+
                         if not valid_db_records:
                             # CRITICAL FIX: When database is empty, fall back to Excel data
                             logging.warning("⚠️ Database returned 0 valid records - falling back to Excel data")
-                            logging.info(f"Switching to Excel data for {len(valid_selected_tags)} tags")
                             has_database = False  # Force Excel fallback
                         else:
                             # Convert database records to the format expected by TemplateProcessor
                             records = []
                             for db_record in valid_db_records:
-                                product_name_for_record = db_record.get('Product Name*', '')
-                                logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
-                                logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
-                                
                                 # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                 processed_record = process_database_product_for_api(db_record)
                                 
@@ -7063,20 +7035,12 @@ def generate_labels():
                                     'Barcode': processed_record.get('Barcode*', ''),
                                     'Quantity': processed_record.get('Quantity*', '1')
                                 }
-                                print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
-                                print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
-                                print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
                                 records.append(record)
-                        logging.info(f"✅ Generated {len(records)} records from database")
-                        
+
                         # PERFORMANCE FIX: Batch lineage override to avoid N+1 queries
-                        logging.info("LINEAGE OVERRIDE: Batch checking for updated lineage in database...")
                         store_name = get_current_store_name()
                         product_db = get_product_database(store_name)
-                        # Log which database path is being used for override
-                        override_db_path = getattr(product_db, 'db_path', 'Unknown')
-                        logging.info(f"🔄 LINEAGE OVERRIDE: Using database at {override_db_path} for store {store_name}")
-                        
+
                         if product_db:
                             # PERFORMANCE: Batch query all product lineages at once
                             product_names = [r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')]
@@ -7104,11 +7068,6 @@ def generate_labels():
                                         product_name = record.get('Product Name*', record.get('ProductName', ''))
                                         if product_name and product_name in lineage_map:
                                             db_lineage_clean = lineage_map[product_name]
-                                            original_lineage = record.get('Lineage', '')
-                                            original_lineage_clean = str(original_lineage).strip().upper()
-                                            
-                                            if db_lineage_clean != original_lineage_clean:
-                                                logging.debug(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
                                             record['Lineage'] = db_lineage_clean
                                     
                                     # PERFORMANCE: Batch query strain lineages for records without product-level lineage
@@ -7135,7 +7094,6 @@ def generate_labels():
                                                     for record in strain_record_map[strain_name]:
                                                         if not record.get('Lineage') or record.get('Lineage') in ['', 'None', 'nan']:
                                                             record['Lineage'] = db_lineage
-                                                            logging.debug(f"LINEAGE OVERRIDE (strain): '{record.get('Product Name*', 'Unknown')}' (strain: '{strain_name}') -> '{db_lineage}'")
                                             except Exception as e:
                                                 logging.warning(f"Error checking strain lineage for '{strain_name}': {e}")
                                 except Exception as batch_err:

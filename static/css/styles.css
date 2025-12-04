@@ -5827,6 +5827,18 @@ canvas#lava-lamp-canvas {
     background-size: 18px 18px !important;
   }
   
+  /* Fix template dropdown on large monitors (Windows PC) */
+  @media (min-width: 1921px) {
+    #templateSelect,
+    #templateSelectModal {
+      font-size: 0.8em !important; /* Smaller font on large monitors */
+      margin: 0.5rem auto !important; /* Ensure centered */
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+  }
+  
   /* Ensure control-section centers its children */
   .control-section {
     align-items: center !important;
