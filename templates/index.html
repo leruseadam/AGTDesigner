@@ -281,19 +281,25 @@
           }
 
           // Lock body and html to prevent scrolling above/below content
+          // But allow internal elements to scroll normally
           if (document.body) {
             document.body.style.setProperty('overflow', 'hidden', 'important');
             document.body.style.setProperty('height', '100vh', 'important');
             document.body.style.setProperty('width', '100vw', 'important');
-            document.body.style.setProperty('position', 'fixed', 'important');
-            document.body.style.setProperty('top', '0', 'important');
-            document.body.style.setProperty('left', '0', 'important');
+            document.body.style.setProperty('margin', '0', 'important');
+            document.body.style.setProperty('padding', '0', 'important');
           }
           if (document.documentElement) {
             document.documentElement.style.setProperty('overflow', 'hidden', 'important');
             document.documentElement.style.setProperty('height', '100vh', 'important');
             document.documentElement.style.setProperty('width', '100vw', 'important');
           }
+
+          // Force all internal scrollable elements to work properly
+          document.querySelectorAll('.tag-list-container, [data-container-type], .modal-body, .table-responsive').forEach(el => {
+            el.style.setProperty('overflow-y', 'auto', 'important');
+            el.style.setProperty('pointer-events', 'auto', 'important');
+          });
 
           console.log(`LARGE MONITOR FIX APPLIED: ${window.innerWidth}px scaled to ${targetMacbookWidth}px (${scaleRatio.toFixed(3)}x)`);
         } else {
@@ -317,15 +323,22 @@
         console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, scale: ${scaleFactor.toFixed(2)}x`);
       }
       
+      // Debounce function to prevent excessive calls
+      let resizeTimeout;
+      const debouncedNormalize = () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(normalizeViewport, 150);
+      };
+
       // Run normalization after DOM is loaded
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', normalizeViewport);
       } else {
         normalizeViewport();
       }
-      window.addEventListener('resize', normalizeViewport);
-      window.addEventListener('orientationchange', normalizeViewport);
-      
+      window.addEventListener('resize', debouncedNormalize);
+      window.addEventListener('orientationchange', debouncedNormalize);
+
       // Re-normalize after a short delay to catch any late-loading elements
       setTimeout(normalizeViewport, 100);
       setTimeout(normalizeViewport, 500);
