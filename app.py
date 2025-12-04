@@ -7397,10 +7397,60 @@ def generate_labels():
                 logging.error(f"INVENTORY LIST: Failed to import generator: {import_err}")
                 return jsonify({'error': 'Inventory list generator is unavailable.'}), 500
 
+            # CRITICAL FIX: Ensure all records have product names before generating inventory list
+            logging.info(f"INVENTORY LIST: Preparing {len(records)} records for inventory list generation")
+            records_with_names = []
+            for idx, record in enumerate(records):
+                # Check if record has a product name
+                product_name = (
+                    record.get('Product Name*') or
+                    record.get('ProductName') or
+                    record.get('Description') or
+                    record.get('DescAndWeight') or
+                    ''
+                )
+                product_name = str(product_name).strip()
+                
+                # If no product name, try to construct one from available fields
+                if not product_name or product_name.lower() in ['none', 'null', 'nan', '']:
+                    # Try Brand + Product Type
+                    brand = record.get('Product Brand') or record.get('Brand') or ''
+                    product_type = record.get('Product Type*') or record.get('ProductType') or ''
+                    if brand and product_type:
+                        product_name = f"{brand} {product_type}"
+                    elif brand:
+                        product_name = brand
+                    elif product_type:
+                        product_name = product_type
+                    else:
+                        # Last resort: use any non-empty string field
+                        for key, value in record.items():
+                            if isinstance(value, str) and value.strip() and value.strip().lower() not in ['none', 'null', 'nan', '']:
+                                if key.lower() not in ['source', 'id', 'idx', 'index', 'barcode', 'room']:
+                                    product_name = value.strip()
+                                    break
+                
+                # Ensure the record has both Product Name* and ProductName fields
+                if product_name and product_name.lower() not in ['none', 'null', 'nan', '']:
+                    record['Product Name*'] = product_name
+                    record['ProductName'] = product_name
+                    records_with_names.append(record)
+                else:
+                    logging.warning(f"INVENTORY LIST: Skipping record {idx+1} - no product name found. Keys: {list(record.keys())[:10]}")
+            
+            logging.info(f"INVENTORY LIST: {len(records_with_names)} records have valid product names out of {len(records)} total")
+            
+            if not records_with_names:
+                logging.error(f"INVENTORY LIST: No records with valid product names. Original record count: {len(records)}")
+                if records:
+                    logging.error(f"INVENTORY LIST: Sample record keys: {list(records[0].keys())[:20]}")
+                    logging.error(f"INVENTORY LIST: Sample record values: {dict(list(records[0].items())[:10])}")
+                return jsonify({'error': 'No inventory items found for the selected products. All records are missing product names.'}), 400
+
             logging.info("INVENTORY LIST: Generating inventory list from selected Excel products")
-            inventory_doc = generate_inventory_list(records)
+            inventory_doc = generate_inventory_list(records_with_names)
             if inventory_doc is None:
-                logging.error("INVENTORY LIST: No inventory items to generate")
+                logging.error("INVENTORY LIST: No inventory items to generate after processing")
                 return jsonify({'error': 'No inventory items found for the selected products.'}), 400
 
             # Enforce Arial Bold formatting for consistency
