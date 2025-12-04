@@ -243,18 +243,19 @@
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
 
-        // FORCE fix for large monitors - scale DOWN to match MacBook appearance
-        // Include displays around 1915px (external monitors) that are close to 1920px
-        if (window.innerWidth >= 1900) {
-          // Scale to match MacBook Pro 13/14" appearance (1440px logical width)
-          const targetMacbookWidth = 1440;
-          const scaleRatio = targetMacbookWidth / window.innerWidth;
+        // UNIVERSAL VIEWPORT SCALING: Ensure EXACT same experience on ALL screens
+        // Scale ALL displays to match MacBook Pro 16" (1728px) for uniform UX
+        const targetViewportWidth = 1728;
+        const needsScaling = window.innerWidth !== targetViewportWidth;
+
+        if (needsScaling) {
+          const scaleRatio = targetViewportWidth / window.innerWidth;
 
           // Create wrapper if it doesn't exist
-          let wrapper = document.getElementById('large-monitor-wrapper');
+          let wrapper = document.getElementById('viewport-scaler-wrapper');
           if (!wrapper && document.body.firstChild) {
             wrapper = document.createElement('div');
-            wrapper.id = 'large-monitor-wrapper';
+            wrapper.id = 'viewport-scaler-wrapper';
             wrapper.style.cssText = `
               transform: scale(${scaleRatio}) !important;
               transform-origin: top left !important;
@@ -301,23 +302,38 @@
             el.style.setProperty('pointer-events', 'auto', 'important');
           });
 
-          console.log(`LARGE MONITOR FIX APPLIED: ${window.innerWidth}px scaled to ${targetMacbookWidth}px (${scaleRatio.toFixed(3)}x)`);
+          console.log(`UNIVERSAL VIEWPORT SCALING: ${window.innerWidth}px → ${targetViewportWidth}px (${scaleRatio.toFixed(3)}x scale)`);
         } else {
-          // Remove wrapper for normal screens
-          const wrapper = document.getElementById('large-monitor-wrapper');
+          // Target viewport width - no scaling needed
+          const wrapper = document.getElementById('viewport-scaler-wrapper');
           if (wrapper && wrapper.parentNode) {
             while (wrapper.firstChild) {
               wrapper.parentNode.insertBefore(wrapper.firstChild, wrapper);
             }
             wrapper.remove();
           }
-          
-          // Ensure body fills viewport for normal screens
+
+          // Lock viewport to prevent unwanted scrolling
           if (document.body) {
-            document.body.style.minHeight = '100vh';
-            document.body.style.minWidth = '100vw';
+            document.body.style.setProperty('overflow', 'hidden', 'important');
+            document.body.style.setProperty('height', '100vh', 'important');
+            document.body.style.setProperty('width', '100vw', 'important');
+            document.body.style.setProperty('margin', '0', 'important');
+            document.body.style.setProperty('padding', '0', 'important');
           }
-          document.documentElement.style.minHeight = '100vh';
+          if (document.documentElement) {
+            document.documentElement.style.setProperty('overflow', 'hidden', 'important');
+            document.documentElement.style.setProperty('height', '100vh', 'important');
+            document.documentElement.style.setProperty('width', '100vw', 'important');
+          }
+
+          // Ensure internal scrollable elements work properly
+          document.querySelectorAll('.tag-list-container, [data-container-type], .modal-body, .table-responsive').forEach(el => {
+            el.style.setProperty('overflow-y', 'auto', 'important');
+            el.style.setProperty('pointer-events', 'auto', 'important');
+          });
+
+          console.log(`NATIVE VIEWPORT: ${window.innerWidth}px (no scaling needed)`);
         }
         
         console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, scale: ${scaleFactor.toFixed(2)}x`);
