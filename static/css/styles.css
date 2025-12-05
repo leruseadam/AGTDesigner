@@ -5832,16 +5832,44 @@ canvas#lava-lamp-canvas {
     #templateSelect,
     #templateSelectModal {
       font-size: 0.8em !important; /* Smaller font on large monitors */
-      margin: 0.5rem auto !important; /* Ensure centered */
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
+      margin: 0.5rem auto 0.75rem auto !important; /* Ensure centered */
     }
   }
   
-  /* Ensure control-section centers its children */
+  /* Ensure control-section centers its children - CRITICAL for PC centering */
   .control-section {
     align-items: center !important;
+    justify-content: flex-start !important;
+  }
+  
+  /* PC-specific: Ensure template dropdown is centered in control-section */
+  @media (min-width: 992px) {
+    /* Center the control-section itself */
+    .control-section {
+      align-items: center !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+    
+    /* Center the template dropdown within control-section - allow it to be narrower than 100% so it can center */
+    .control-section #templateSelect,
+    .control-section #templateSelectModal {
+      margin-left: auto !important;
+      margin-right: auto !important;
+      display: block !important;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+    
+    /* Ensure control-panel centers its content on PC - override base stretch alignment */
+    .control-panel {
+      align-items: center !important;
+    }
+    
+    /* Ensure the center column container properly centers its children */
+    [data-container-type="center"] {
+      align-items: center !important;
+    }
   }
   
   /* Override inline styles on template select */

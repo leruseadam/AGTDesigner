@@ -148,7 +148,7 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     max-width: 100% !important;
     min-height: 60px !important;
     height: 60px !important;
-    margin: 0.5rem 0 0.75rem 0 !important;
+    margin: 0.5rem auto 0.75rem auto !important; /* Center horizontally */
     
     /* Text alignment - perfectly centered */
     text-align: center !important;
