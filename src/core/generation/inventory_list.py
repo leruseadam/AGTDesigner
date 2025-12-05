@@ -194,52 +194,62 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
     """
     try:
         if not records:
-            logger.info("INVENTORY LIST: No records provided, skipping list generation")
+            logger.error("INVENTORY LIST: No records provided")
             return None
 
         logger.info(f"INVENTORY LIST: Received {len(records)} records for processing")
         
-        # Log first few records to understand structure
+        # Log first record to understand structure
         if records:
-            logger.info(f"INVENTORY LIST: Sample record 1 keys: {list(records[0].keys())[:15]}")
-            logger.info(f"INVENTORY LIST: Sample record 1 - Product Name*: '{records[0].get('Product Name*', 'N/A')}', ProductName: '{records[0].get('ProductName', 'N/A')}', Description: '{str(records[0].get('Description', 'N/A'))[:80]}'")
+            logger.info(f"INVENTORY LIST: Sample record 1 keys: {list(records[0].keys())[:20]}")
+            logger.info(f"INVENTORY LIST: Sample record 1 values: {dict(list(records[0].items())[:10])}")
 
-        # Build groups by category
+        # Build groups by category - ALWAYS process ALL records, no exceptions
         grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         total_rows = 0
-        skipped_count = 0
 
         for idx, record in enumerate(records):
+            # Get or create product name - NEVER skip a record
             name = _get_product_name(record)
             if not name:
-                # Instead of skipping, try to create a fallback name
-                # Use Barcode, or create a generic identifier
                 barcode = _get_barcode(record)
                 if barcode:
                     name = f"Item {barcode}"
-                    logger.info(f"INVENTORY LIST: Using barcode as fallback name for record {idx+1}: '{name}'")
                 else:
-                    # Last resort: use index-based identifier
                     name = f"Product {idx + 1}"
-                    logger.warning(f"INVENTORY LIST: Using generic identifier for record {idx+1} with no product name. Record keys: {list(record.keys())[:15]}")
-                    logger.warning(f"INVENTORY LIST: Record {idx+1} values - Product Name*: '{record.get('Product Name*', 'N/A')}', ProductName: '{record.get('ProductName', 'N/A')}', Description: '{str(record.get('Description', 'N/A'))[:80]}', DescAndWeight: '{str(record.get('DescAndWeight', 'N/A'))[:80]}'")
-                    skipped_count += 1
-                    # Still include the record but with a generic name
+                logger.info(f"INVENTORY LIST: Record {idx+1} - Created fallback name: '{name}'")
+            
+            # Get or create category - NEVER empty
             category = _get_category(record)
-            # Store the resolved name in the record for display
+            if not category:
+                category = "Uncategorized"
+            
+            # Store the resolved name
             record['_resolved_product_name'] = name
+            
+            # ALWAYS add to grouped - no exceptions
             grouped[category].append(record)
             total_rows += 1
 
-        if skipped_count > 0:
-            logger.warning(f"INVENTORY LIST: Skipped {skipped_count} records out of {len(records)} due to missing product names")
+        logger.info(f"INVENTORY LIST: Processed {total_rows} records into {len(grouped)} categories: {list(grouped.keys())}")
 
-        if not grouped:
-            logger.error(f"INVENTORY LIST: No groupable records found after processing {len(records)} records")
-            logger.error(f"INVENTORY LIST: All records were filtered out because they lacked product names")
+        # CRITICAL: If we processed records, we MUST have grouped them
+        # This should never happen, but if it does, create a minimal document
+        if not grouped or total_rows == 0:
+            logger.error(f"INVENTORY LIST: CRITICAL ERROR - Processed {total_rows} records but grouped is empty!")
+            logger.error(f"INVENTORY LIST: Records count: {len(records)}, Total rows: {total_rows}, Grouped keys: {list(grouped.keys())}")
+            # Create a minimal document with at least one row to prevent failure
             if records:
-                logger.error(f"INVENTORY LIST: First record full dump: {dict(list(records[0].items())[:20])}")
-            return None
+                # Force create a category with the first record
+                first_record = records[0]
+                name = _get_product_name(first_record) or f"Product 1"
+                category = _get_category(first_record) or "Uncategorized"
+                first_record['_resolved_product_name'] = name
+                grouped[category] = [first_record]
+                total_rows = 1
+                logger.warning(f"INVENTORY LIST: Created emergency fallback - 1 record in category '{category}'")
+            else:
+                return None
 
         doc = Document()
 
@@ -404,7 +414,10 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
         )
         return doc
     except Exception as e:
-        logger.warning(f"INVENTORY LIST: Failed to create inventory list document: {e}")
+        logger.error(f"INVENTORY LIST: Failed to create inventory list document: {e}")
+        logger.error(f"INVENTORY LIST: Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"INVENTORY LIST: Traceback: {traceback.format_exc()}")
         return None
 
 

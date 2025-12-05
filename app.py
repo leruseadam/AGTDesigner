@@ -7358,11 +7358,23 @@ def generate_labels():
             # Let the inventory_list generator handle all record processing and name resolution
             # It's now more lenient and will create fallback names for records without product names
             logging.info(f"INVENTORY LIST: Preparing {len(records)} records for inventory list generation")
+            
+            # CRITICAL: Ensure records is not empty
+            if not records or len(records) == 0:
+                logging.error(f"INVENTORY LIST: No records to process! Records count: {len(records) if records else 0}")
+                return jsonify({'error': 'No products selected. Please select products before generating inventory list.'}), 400
+            
+            # Log sample record structure
+            if records:
+                logging.info(f"INVENTORY LIST: Sample record keys: {list(records[0].keys())[:15]}")
+                logging.info(f"INVENTORY LIST: Sample record - Product Name*: '{records[0].get('Product Name*', 'N/A')}', ProductName: '{records[0].get('ProductName', 'N/A')}'")
+            
             logging.info("INVENTORY LIST: Generating inventory list from selected Excel products")
             inventory_doc = generate_inventory_list(records)
             if inventory_doc is None:
-                logging.error("INVENTORY LIST: No inventory items to generate after processing")
-                return jsonify({'error': 'No inventory items found for the selected products.'}), 400
+                logging.error(f"INVENTORY LIST: Generator returned None for {len(records)} records")
+                logging.error("INVENTORY LIST: This should never happen - generator should always create a document if records exist")
+                return jsonify({'error': 'Failed to generate inventory list. Please check server logs for details.'}), 500
 
             # Enforce Arial Bold formatting for consistency
             try:
