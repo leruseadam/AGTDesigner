@@ -5045,8 +5045,16 @@ class ExcelProcessor:
             return common_oz_weights[product_type_lower][0]  # Return the first (most common) weight
         
         # Try partial matches for product types that might have variations
+        # Improved matching: check if key components are present (handles "edible solid" vs "edible (solid)")
         for key, weights in common_oz_weights.items():
-            if key != 'default' and key in product_type_lower:
+            if key == 'default':
+                continue
+            # For "edible (solid)", check if both "edible" and "solid" are in the product type
+            # This handles "High CBD Edible Solid" and "High THC Edible Solid" as well
+            if key == 'edible (solid)':
+                if 'edible' in product_type_lower and 'solid' in product_type_lower:
+                    return weights[0]
+            elif key in product_type_lower:
                 return weights[0]
         
         # Special handling for Moonshot products (they seem to be 2.5oz or 3.53oz based on the image)
@@ -5370,11 +5378,30 @@ class ExcelProcessor:
             except Exception:
                 weight_float = None
 
-            # Apply unit conversion for ALL nonclassic product types
+            # Only convert if weight is in grams and needs conversion to ounces
+            # Skip conversion entirely if already in ounces or other correct units
             if (allow_nonclassic_conversion and
                 weight_float is not None and units_val and 
                 is_nonclassic and 
                 units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm']):
+                
+                # For High CBD/THC edible solids, always use actual weight conversion (don't use defaults)
+                product_type_lower = product_type.lower().strip()
+                is_high_cbd_thc_edible_solid = ('high cbd edible solid' in product_type_lower or 
+                                                  'high thc edible solid' in product_type_lower)
+                
+                if is_high_cbd_thc_edible_solid:
+                    # Skip default lookup, go straight to actual conversion
+                    try:
+                        oz_val = round(weight_float / 28.3495, 2)
+                        if oz_val.is_integer():
+                            result = f"{int(oz_val)}oz"
+                        else:
+                            result = f"{oz_val:.2f}".rstrip("0").rstrip(".") + "oz"
+                        self.logger.info(f"High CBD/THC edible solid conversion for {product_name}: {weight_float}g -> {result}")
+                        return result
+                    except (ValueError, TypeError):
+                        pass
                 
                 # FIRST: Check if there are identical products with existing ounce weights
                 if product_name:
@@ -5405,6 +5432,17 @@ class ExcelProcessor:
                             return result
                         except (ValueError, TypeError):
                             pass
+            # If weight is already in ounces or other correct units, skip conversion and use as-is
+            elif (weight_float is not None and units_val and 
+                  units_val.lower() in ['oz', 'ounce', 'ounces']):
+                # Weight is already in ounces, no conversion needed
+                if weight_float.is_integer():
+                    weight_str = f"{int(weight_float)}"
+                else:
+                    weight_str = f"{weight_float:.2f}".rstrip("0").rstrip(".")
+                result = f"{weight_str}oz"
+                self.logger.debug(f"Using existing ounce weight for {product_name}: {result} (no conversion needed)")
+                return result
 
             # Now combine weight and units properly
             if weight_float is not None and units_val:
