@@ -319,14 +319,17 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             if tblGrid is None:
                 tblGrid = OxmlElement('w:tblGrid')
                 tbl.insert(0, tblGrid)
-            
+
             # Clear existing grid columns and add optimized ones
             for existing_col in tblGrid.findall(qn('w:gridCol')):
                 tblGrid.remove(existing_col)
-            
-            for width in column_widths:
+
+            for width_emu in column_widths:
                 gridCol = OxmlElement('w:gridCol')
-                gridCol.set(qn('w:w'), str(int(width * 1440)))  # Convert inches to twips (1 inch = 1440 twips)
+                # Inches() returns EMUs (914400 per inch), need to convert to twips (1440 per inch)
+                # 1 EMU = 1/914400 inches, 1 twip = 1/1440 inches, so 1 EMU = 1440/914400 twips
+                width_twips = int(width_emu / 635)  # 914400 / 1440 = 635
+                gridCol.set(qn('w:w'), str(width_twips))
                 tblGrid.append(gridCol)
             
             # CRITICAL: Also set cell widths explicitly to ensure columns respect the grid

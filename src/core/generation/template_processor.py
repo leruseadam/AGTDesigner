@@ -158,7 +158,7 @@ class TemplateProcessor:
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
         elif self.template_type == 'preroll':
-            self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page (same as mini)
+            self.chunk_size = min(16, CHUNK_SIZE_LIMIT)  # Fixed: 4x4 grid = 16 labels per page (1.5" x 1.9")
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for preroll template")
         elif self.template_type == 'double':
@@ -209,7 +209,7 @@ class TemplateProcessor:
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
             elif self.template_type == 'preroll':
-                required_labels = 20  # 4x5 grid (same as mini)
+                required_labels = 16  # 4x4 grid (1.5" x 1.9" labels)
             else:
                 required_labels = 9   # 3x3 grid
             
@@ -228,9 +228,9 @@ class TemplateProcessor:
                     self.logger.info("Calling 4x3 expansion method")
                     return self._expand_template_to_4x3_fixed_double()
                 elif self.template_type == 'preroll':
-                    # Preroll uses 4x5 grid like mini template
-                    self.logger.info("Calling 4x5 expansion method for preroll template")
-                    return self._expand_template_to_4x5_fixed_scaled()
+                    # Preroll uses 4x4 grid for 1.5" x 1.9" labels
+                    self.logger.info("Calling 4x4 expansion method for preroll template")
+                    return self._expand_template_to_4x4_fixed_preroll()
                 else:
                     # horizontal and vertical templates expand to 3x3 grid
                     self.logger.info(f"Calling 3x3 expansion method for template type: '{self.template_type}'")
@@ -612,6 +612,148 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Failed to create dynamic template: {e}")
             return False
+
+    def _expand_template_to_4x4_fixed_preroll(self, num_products=None):
+        """Expand template to 4x4 grid for preroll templates (1.5" x 1.9" labels)."""
+        from docx import Document
+        from docx.shared import Pt
+        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from io import BytesIO
+        from copy import deepcopy
+
+        num_cols, num_rows = 4, 4  # 4x4 grid for 16 labels
+        col_width_twips = str(int(1.5 * 1440))  # 1.5 inches width per column
+        row_height_pts = Pt(1.9 * 72)  # 1.9 inches height per row
+        cut_line_twips = int(0.001 * 1440)
+
+        template_path = self._get_template_path()
+        doc = Document(template_path)
+        if not doc.tables:
+            raise RuntimeError("Template must contain at least one table.")
+
+        # Get the original table and its properties
+        original_table = doc.tables[0]
+        original_table_xml = original_table._element
+
+        # Extract original table properties (colors, borders, styling)
+        original_tblPr = original_table_xml.find(qn('w:tblPr'))
+        original_shd = original_tblPr.find(qn('w:shd')) if original_tblPr is not None else None
+        original_borders = original_tblPr.find(qn('w:tblBorders')) if original_tblPr is not None else None
+
+        # Get the original cell structure and content
+        original_cell = original_table.cell(0, 0)
+        src_tc = deepcopy(original_cell._tc)
+
+        # Remove the original table
+        original_table._element.getparent().remove(original_table._element)
+
+        # Remove empty paragraphs
+        while doc.paragraphs and not doc.paragraphs[0].text.strip():
+            doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
+
+        # Create new 4x4 table
+        tbl = doc.add_table(rows=num_rows, cols=num_cols)
+        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        # Set up table properties
+        tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+
+        # Preserve original shading if it exists
+        if original_shd is not None:
+            shd = deepcopy(original_shd)
+            tblPr.insert(0, shd)
+        else:
+            # Default shading
+            shd = OxmlElement('w:shd')
+            shd.set(qn('w:val'), 'clear')
+            shd.set(qn('w:color'), 'auto')
+            shd.set(qn('w:fill'), 'D3D3D3')
+            tblPr.insert(0, shd)
+
+        # Set table layout
+        layout = OxmlElement('w:tblLayout')
+        layout.set(qn('w:type'), 'fixed')
+        tblPr.append(layout)
+        tbl._element.insert(0, tblPr)
+
+        # Set up grid columns
+        grid = OxmlElement('w:tblGrid')
+        for _ in range(num_cols):
+            gc = OxmlElement('w:gridCol')
+            gc.set(qn('w:w'), col_width_twips)
+            grid.append(gc)
+        tbl._element.insert(0, grid)
+
+        # Set row heights and individual cell widths
+        for row in tbl.rows:
+            row.height = row_height_pts
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+
+            # Set individual cell widths to ensure exact 1.5" x 1.9" dimensions
+            for cell in row.cells:
+                tcPr = cell._tc.get_or_add_tcPr()
+                tcW = tcPr.find(qn('w:tcW'))
+                if tcW is None:
+                    tcW = OxmlElement('w:tcW')
+                    tcPr.append(tcW)
+                tcW.set(qn('w:w'), col_width_twips)
+                tcW.set(qn('w:type'), 'dxa')
+
+        # Add cut line borders if original had them
+        if original_borders is not None:
+            borders = deepcopy(original_borders)
+            tblPr.append(borders)
+
+        # Populate cells with original content, updating labels
+        cnt = 1
+        max_cells = num_products if num_products else (num_rows * num_cols)
+
+        for r in range(num_rows):
+            for c in range(num_cols):
+                if cnt > max_cells:
+                    # Clear extra cells completely and set white background
+                    cell = tbl.cell(r, c)
+                    for paragraph in cell.paragraphs:
+                        paragraph.clear()
+                    # Set white background for empty cells
+                    tcPr = cell._tc.get_or_add_tcPr()
+                    shd = tcPr.find(qn('w:shd'))
+                    if shd is None:
+                        shd = OxmlElement('w:shd')
+                        tcPr.append(shd)
+                    shd.set(qn('w:val'), 'clear')
+                    shd.set(qn('w:fill'), 'FFFFFF')
+                else:
+                    # Copy original cell content
+                    cell = tbl.cell(r, c)
+                    dest_tc = cell._tc
+
+                    # Replace destination tc with a deep copy of source tc
+                    new_tc = deepcopy(src_tc)
+                    dest_tc.getparent().replace(dest_tc, new_tc)
+
+                    # Update label placeholders (e.g., {{Label1}} -> {{Label16}})
+                    for paragraph in tbl.cell(r, c).paragraphs:
+                        for run in paragraph.runs:
+                            if run.text:
+                                run.text = run.text.replace('{{Label1}}', f'{{{{Label{cnt}}}}}')
+                cnt += 1
+
+        # Add cell spacing (cut lines)
+        tblPr2 = tbl._element.find(qn('w:tblPr'))
+        spacing = OxmlElement('w:tblCellSpacing')
+        spacing.set(qn('w:w'), str(cut_line_twips))
+        spacing.set(qn('w:type'), 'dxa')
+        tblPr2.append(spacing)
+
+        # Save and return
+        buf = BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        return buf
+
     def _expand_template_to_4x3_fixed_double(self, num_products=None):
         """Expand template to 4x3 grid for double templates (4 columns, 3 rows)."""
         from docx import Document
@@ -1139,8 +1281,10 @@ class TemplateProcessor:
             context = {}
             
             # Determine required label count based on template type
-            if self.template_type == 'mini' or self.template_type == 'preroll':
+            if self.template_type == 'mini':
                 required_labels = 20  # Fixed grid: 4x5 = 20 labels
+            elif self.template_type == 'preroll':
+                required_labels = 16  # Fixed grid: 4x4 = 16 labels (1.5" x 1.9")
             elif self.template_type == 'double':
                 required_labels = 12  # Fixed grid: 3x4 = 12 labels
             elif self.template_type == 'inventory':
