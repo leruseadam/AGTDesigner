@@ -199,13 +199,34 @@ function createTagRow(tag) {
             </td>
             <td class="align-middle">
                 <div class="d-flex align-items-center">
-                    <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini" 
-                            onchange="TagsTable.handleDohChange(this, '${tagName}')">
-                        <option value="NONE" ${(!dohStatus || dohStatus === 'No' || dohStatus === 'NONE') ? 'selected' : ''}>None</option>
-                        <option value="DOH" ${dohStatus === 'DOH' || dohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
-                        <option value="THC" ${dohStatus === 'THC' ? 'selected' : ''}>THC</option>
-                        <option value="CBD" ${dohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
-                    </select>
+                    ${(() => {
+                      const productType = tag['Product Type*'] || tag.Type || '';
+                      const productTypeLower = productType.toLowerCase();
+                      const isHighCbdProduct = productTypeLower.startsWith('high cbd') || productTypeLower.includes('doh high cbd');
+                      
+                      if (isHighCbdProduct) {
+                        // High CBD products get High CBD dropdown instead of DOH dropdown
+                        const highCbdStatus = (dohStatus === 'CBD' || dohStatus === 'Yes' || dohStatus === 'DOH') ? 'High CBD' : 'None';
+                        return `
+                          <select class="form-select form-select-sm high-cbd-dropdown high-cbd-dropdown-mini" 
+                                  onchange="TagsTable.handleHighCbdChange(this, '${tagName}')">
+                            <option value="None" ${highCbdStatus === 'None' ? 'selected' : ''}>None</option>
+                            <option value="High CBD" ${highCbdStatus === 'High CBD' ? 'selected' : ''}>High CBD</option>
+                          </select>
+                        `;
+                      } else {
+                        // Non-High CBD products get normal DOH dropdown
+                        return `
+                          <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini" 
+                                  onchange="TagsTable.handleDohChange(this, '${tagName}')">
+                            <option value="NONE" ${(!dohStatus || dohStatus === 'No' || dohStatus === 'NONE') ? 'selected' : ''}>None</option>
+                            <option value="DOH" ${dohStatus === 'DOH' || dohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
+                            <option value="THC" ${dohStatus === 'THC' ? 'selected' : ''}>THC</option>
+                            <option value="CBD" ${dohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
+                          </select>
+                        `;
+                      }
+                    })()}
                 </div>
             </td>
             <td class="align-middle">${brand}</td>
@@ -407,10 +428,12 @@ class TagsTable {
     // Add DOH and High CBD images if applicable
     const dohValue = (tag.DOH || '').toString().toUpperCase();
     const productTypeLower = productType.toLowerCase();
+    const isHighCbdProduct = productTypeLower.startsWith('high cbd') || productTypeLower.includes('doh high cbd');
     let dohImageHtml = '';
     
-    // CRITICAL FIX: Check for High CBD products first (regardless of DOH status)
-    if (productTypeLower.startsWith('high cbd') || productTypeLower.includes('doh high cbd')) {
+    // CRITICAL FIX: High CBD products should ONLY show High CBD badge (not DOH badge)
+    if (isHighCbdProduct) {
+      // High CBD products get only the High CBD badge, regardless of DOH status
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 24px; width: auto; margin-left: 6px; vertical-align: middle;">';
     } else if (dohValue === 'YES') {
       if (tagName.toLowerCase().includes('high thc')) {
@@ -419,7 +442,7 @@ class TagsTable {
         dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 21px; width: auto; margin-left: 6px; vertical-align: middle;">';
       }
     } else if (dohValue === 'CBD') {
-      // DOH status is CBD - show High CBD badge
+      // DOH status is CBD - show High CBD badge (only for non-High CBD product types)
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 24px; width: auto; margin-left: 6px; vertical-align: middle;">';
     } else if (dohValue === 'THC') {
       dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 24px; width: auto; margin-left: 6px; vertical-align: middle;">';
@@ -448,11 +471,31 @@ class TagsTable {
                     onchange="TagsTable.handleLineageChange(this, '${safeTagName}')">
               ${dropdownOptions}
             </select>
-            <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini ms-2" 
-                    onchange="TagsTable.handleDohChange(this, '${safeTagName}')"
-                    title="DOH Status">
-              ${dohDropdownOptions}
-            </select>
+            ${(() => {
+              const productType = tag['Product Type*'] || tag.Type || '';
+              const productTypeLower = productType.toLowerCase();
+              const isHighCbdProduct = productTypeLower.startsWith('high cbd') || productTypeLower.includes('doh high cbd');
+              
+              if (isHighCbdProduct) {
+                const highCbdStatus = (dohStatus === 'CBD' || dohStatus === 'Yes' || dohStatus === 'DOH') ? 'High CBD' : 'None';
+                return `
+                  <select class="form-select form-select-sm high-cbd-dropdown high-cbd-dropdown-mini ms-2" 
+                          onchange="TagsTable.handleHighCbdChange(this, '${safeTagName}')"
+                          title="High CBD Status">
+                    <option value="None" ${highCbdStatus === 'None' ? 'selected' : ''}>None</option>
+                    <option value="High CBD" ${highCbdStatus === 'High CBD' ? 'selected' : ''}>High CBD</option>
+                  </select>
+                `;
+              } else {
+                return `
+                  <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini ms-2" 
+                          onchange="TagsTable.handleDohChange(this, '${safeTagName}')"
+                          title="DOH Status">
+                    ${dohDropdownOptions}
+                  </select>
+                `;
+              }
+            })()}
           </div>
           <small class="text-muted d-block mt-1">${brand}${vendor ? ` (${vendor})` : ''} | ${type}${weightWithUnits ? ` | ${weightWithUnits}` : ''} | DOH: ${dohStatus}</small>
         </div>
@@ -558,6 +601,90 @@ class TagsTable {
       
       // Revert the dropdown to the old value
       selectElement.value = oldDohStatus;
+      
+      // Show error feedback
+      selectElement.style.backgroundColor = '#f8d7da';
+      setTimeout(() => {
+        selectElement.style.backgroundColor = '';
+      }, 1000);
+      
+      // Show user-friendly error message
+    }
+  }
+
+  static async handleHighCbdChange(selectElement, tagName) {
+    const newHighCbdStatus = selectElement.value;
+    // Map "High CBD" to "CBD" for backend storage, "None" to "No"
+    const newDohStatus = newHighCbdStatus === 'High CBD' ? 'CBD' : (newHighCbdStatus === 'None' ? 'No' : 'No');
+    const tagRow = selectElement.closest(".tag-item") || selectElement.closest(".tag-row");
+    const oldDohStatus = tagRow?.dataset.doh || 'No';
+
+    console.log(`🔄 Updating High CBD for ${tagName}: ${oldDohStatus} → ${newDohStatus} (display: ${newHighCbdStatus})`);
+
+    try {
+      const response = await fetch("/api/update-doh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag_name: tagName, doh: newDohStatus })
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        console.error(`❌ API Error: ${data.error || "Failed to update High CBD"}`);
+        throw new Error(data.error || "Failed to update High CBD");
+      }
+      
+      if (!data.success) {
+        console.error(`❌ Update failed: ${data.message || data.error || "Unknown error"}`);
+        throw new Error(data.message || data.error || "Failed to update High CBD status");
+      }
+      
+      // Update the local UI dataset - store as CBD for High CBD, No for None
+      if (tagRow) {
+        tagRow.dataset.doh = newDohStatus;
+      }
+      
+      // Show success message
+      console.log(`✅ Successfully updated High CBD for ${tagName} (${oldDohStatus} → ${newDohStatus}), stored as: ${newDohStatus}`);
+      
+      // Update the tag in TagManager state if it exists
+      if (typeof TagManager !== 'undefined' && TagManager.state) {
+        const tag = TagManager.state.tags?.find(t => t['Product Name*'] === tagName);
+        if (tag) {
+          tag.DOH = newDohStatus;
+          tag.doh = newDohStatus;
+          tag['DOH Compliant (Yes/No)'] = newDohStatus;
+          console.log(`📝 Updated tag High CBD in TagManager.state.tags to: ${newDohStatus}`);
+        }
+        
+        const originalTag = TagManager.state.originalTags?.find(t => t['Product Name*'] === tagName);
+        if (originalTag) {
+          originalTag.DOH = newDohStatus;
+          originalTag.doh = newDohStatus;
+          originalTag['DOH Compliant (Yes/No)'] = newDohStatus;
+          console.log(`📝 Updated tag High CBD in TagManager.state.originalTags to: ${newDohStatus}`);
+        }
+        
+        // Update High CBD in all displays (available and selected tags)
+        if (typeof TagManager.updateDohInAllDisplays === 'function') {
+          TagManager.updateDohInAllDisplays(tagName, newDohStatus);
+          console.log(`📝 Propagated High CBD update to all displays`);
+        }
+      }
+
+      // Show brief visual feedback
+      selectElement.style.backgroundColor = '#d4edda';
+      setTimeout(() => {
+        selectElement.style.backgroundColor = '';
+      }, 500);
+
+    } catch (error) {
+      console.error(`❌ Error updating High CBD for ${tagName}:`, error);
+      
+      // Revert the dropdown to the old value
+      const oldHighCbdStatus = oldDohStatus === 'CBD' || oldDohStatus === 'Yes' || oldDohStatus === 'DOH' ? 'High CBD' : 'None';
+      selectElement.value = oldHighCbdStatus;
       
       // Show error feedback
       selectElement.style.backgroundColor = '#f8d7da';
