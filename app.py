@@ -6358,9 +6358,17 @@ def _create_desc_and_weight(product_name, weight_units):
     import re
     description = re.sub(r' - [\d.].*$', '', description)
     
-    # Get weight units, clean them up
+    # Get weight units, clean them up and normalize abbreviations
     weight = str(weight_units).strip() if weight_units else ''
     if weight and weight.lower() not in ['nan', 'none', 'null', '']:
+        # CRITICAL FIX: Normalize unit abbreviations (grams -> g, ounces -> oz)
+        # Handle patterns like "1grams", "1 grams", "1ounces", "1 ounces", etc.
+        weight_normalized = re.sub(r'(\d+(?:\.\d+)?)\s*grams?\b', r'\1g', weight, flags=re.IGNORECASE)
+        weight_normalized = re.sub(r'(\d+(?:\.\d+)?)\s*ounces?\b', r'\1oz', weight_normalized, flags=re.IGNORECASE)
+        weight_normalized = re.sub(r'(\d+(?:\.\d+)?)\s*milligrams?\b', r'\1mg', weight_normalized, flags=re.IGNORECASE)
+        weight_normalized = re.sub(r'(\d+(?:\.\d+)?)\s*milliliters?\b', r'\1ml', weight_normalized, flags=re.IGNORECASE)
+        weight = weight_normalized
+        
         # Combine product name and weight with hyphen staying with weight (space after hyphen)
         # Use same format as Excel processor: -\u00A0 (hyphen + non-breaking space)
         return f"{description} -\u00A0{weight}"
