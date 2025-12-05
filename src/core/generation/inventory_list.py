@@ -212,13 +212,22 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
         for idx, record in enumerate(records):
             name = _get_product_name(record)
             if not name:
-                # Log why record was skipped for debugging
-                skipped_count += 1
-                if skipped_count <= 5:  # Only log first 5 skipped records to avoid spam
-                    logger.warning(f"INVENTORY LIST: Skipping record {idx+1} with no product name. Record keys: {list(record.keys())[:15]}")
+                # Instead of skipping, try to create a fallback name
+                # Use Barcode, or create a generic identifier
+                barcode = _get_barcode(record)
+                if barcode:
+                    name = f"Item {barcode}"
+                    logger.info(f"INVENTORY LIST: Using barcode as fallback name for record {idx+1}: '{name}'")
+                else:
+                    # Last resort: use index-based identifier
+                    name = f"Product {idx + 1}"
+                    logger.warning(f"INVENTORY LIST: Using generic identifier for record {idx+1} with no product name. Record keys: {list(record.keys())[:15]}")
                     logger.warning(f"INVENTORY LIST: Record {idx+1} values - Product Name*: '{record.get('Product Name*', 'N/A')}', ProductName: '{record.get('ProductName', 'N/A')}', Description: '{str(record.get('Description', 'N/A'))[:80]}', DescAndWeight: '{str(record.get('DescAndWeight', 'N/A'))[:80]}'")
-                continue
+                    skipped_count += 1
+                    # Still include the record but with a generic name
             category = _get_category(record)
+            # Store the resolved name in the record for display
+            record['_resolved_product_name'] = name
             grouped[category].append(record)
             total_rows += 1
 
@@ -350,7 +359,7 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             # Sort items within category alphabetically by product name
             items_sorted = sorted(
                 items,
-                key=lambda r: _get_product_name(r).lower(),
+                key=lambda r: (r.get('_resolved_product_name') or _get_product_name(r) or '').lower(),
             )
 
             for record in items_sorted:
@@ -363,7 +372,9 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                 
                 # Weight, Product Name, Quantity, Product Type, Vendor, Brand, Barcode, Accepted Date, Room
                 row_cells[0].text = _get_weight(record)
-                row_cells[1].text = _get_product_name(record)
+                # Use resolved name if available, otherwise get it fresh
+                product_name = record.get('_resolved_product_name') or _get_product_name(record) or f"Product {total_rows}"
+                row_cells[1].text = product_name
                 row_cells[2].text = _get_quantity(record)
                 row_cells[3].text = _get_product_type(record)
                 row_cells[4].text = _get_vendor(record)
