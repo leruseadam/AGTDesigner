@@ -5378,60 +5378,25 @@ class ExcelProcessor:
             except Exception:
                 weight_float = None
 
-            # Only convert if weight is in grams and needs conversion to ounces
-            # Skip conversion entirely if already in ounces or other correct units
+            # CRITICAL FIX: Non-classic types (including high CBD) should stay in grams, not convert to ounces
+            # Non-classic types should display in grams, not be converted to ounces
+            # Skip the conversion logic entirely for non-classic types - they should keep grams
+            # This applies to high CBD products and all other non-classic types
+            product_type_lower = product_type.lower().strip()
+            is_high_cbd_thc_edible_solid = ('high cbd edible solid' in product_type_lower or 
+                                              'high thc edible solid' in product_type_lower or
+                                              'high cbd' in product_type_lower)
+            
+            # CRITICAL: Do NOT convert non-classic types from grams to ounces
+            # They should stay in grams. Skip the conversion block entirely.
+            # Only classic types should be converted (and that logic is handled elsewhere)
             if (allow_nonclassic_conversion and
                 weight_float is not None and units_val and 
                 is_nonclassic and 
                 units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm']):
-                
-                # For High CBD/THC edible solids, always use actual weight conversion (don't use defaults)
-                product_type_lower = product_type.lower().strip()
-                is_high_cbd_thc_edible_solid = ('high cbd edible solid' in product_type_lower or 
-                                                  'high thc edible solid' in product_type_lower)
-                
-                if is_high_cbd_thc_edible_solid:
-                    # Skip default lookup, go straight to actual conversion
-                    try:
-                        oz_val = round(weight_float / 28.3495, 2)
-                        if oz_val.is_integer():
-                            result = f"{int(oz_val)}oz"
-                        else:
-                            result = f"{oz_val:.2f}".rstrip("0").rstrip(".") + "oz"
-                        self.logger.info(f"High CBD/THC edible solid conversion for {product_name}: {weight_float}g -> {result}")
-                        return result
-                    except (ValueError, TypeError):
-                        pass
-                
-                # FIRST: Check if there are identical products with existing ounce weights
-                if product_name:
-                    identical_ounce_weight = self._find_identical_product_ounce_weight(product_name, product_type)
-                    if identical_ounce_weight:
-                        self.logger.info(f"Using identical product ounce weight for {product_name}: {identical_ounce_weight}")
-                        return identical_ounce_weight
-                
-                # If no identical product found, use most likely ounce weight
-                most_likely_oz_weight = self._find_most_likely_ounce_weight(product_name, product_type)
-                if most_likely_oz_weight:
-                    self.logger.info(f"Using most likely ounce weight for {product_name}: {most_likely_oz_weight}")
-                    return most_likely_oz_weight
-                else:
-                    # Fallback: force conversion for Moonshot products
-                    if 'moonshot' in product_name.lower():
-                        self.logger.info(f"Forcing Moonshot conversion for {product_name}: 2.5oz")
-                        return "2.5oz"
-                    else:
-                        # CRITICAL FIX: Apply standard conversion for nonclassic types
-                        try:
-                            oz_val = round(weight_float / 28.3495, 2)
-                            if oz_val.is_integer():
-                                result = f"{int(oz_val)}oz"
-                            else:
-                                result = f"{oz_val:.2f}".rstrip("0").rstrip(".") + "oz"
-                            self.logger.info(f"Standard nonclassic conversion for {product_name}: {weight_float}g -> {result}")
-                            return result
-                        except (ValueError, TypeError):
-                            pass
+                # Skip conversion - non-classic types should stay in grams
+                # Fall through to the normal weight formatting below
+                self.logger.debug(f"Keeping non-classic type '{product_name}' in grams: {weight_float}g (no conversion to ounces)")
             # If weight is already in ounces or other correct units, skip conversion and use as-is
             elif (weight_float is not None and units_val and 
                   units_val.lower() in ['oz', 'ounce', 'ounces']):
