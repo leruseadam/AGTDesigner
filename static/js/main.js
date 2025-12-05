@@ -10932,13 +10932,13 @@ const TagManager = {
             // Load tags instantly using fast_load=1 and bypass cache to get fresh data
             // Try multiple times with increasing delays to handle backend processing
             let tagsLoaded = false;
-            const maxRetries = 3;
-            
+            const maxRetries = 5;  // Increased retries for more reliability
+
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
-                    // PERFORMANCE: Try immediately on first attempt, then back off on retries
-                    // 0ms initial delay (instant), then 1500ms, 3000ms
-                    const delay = attempt === 0 ? 0 : attempt === 1 ? 1500 : 3000;
+                    // PERFORMANCE: Progressive backoff for reliability
+                    // 500ms, 1000ms, 2000ms, 3000ms, 5000ms delays
+                    const delay = attempt === 0 ? 500 : attempt === 1 ? 1000 : attempt === 2 ? 2000 : attempt === 3 ? 3000 : 5000;
                     if (delay > 0) {
                         await new Promise(resolve => setTimeout(resolve, delay));
                         verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload (waiting ${delay}ms for backend processing)...`);

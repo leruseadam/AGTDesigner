@@ -3076,7 +3076,7 @@ def upload_file():
             # CRITICAL: Also clear cache to ensure old Excel data doesn't persist
             _excel_processor = None
             logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
-            
+
             # CRITICAL: Clear cache again after marking as ready to ensure old data is gone
             try:
                 cache_key = get_session_cache_key('available_tags')
@@ -3085,10 +3085,9 @@ def upload_file():
             except Exception as e:
                 logging.warning(f"⚠️ Error clearing cache after marking ready: {e}")
 
-            # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
-            # Background processing will handle database storage and cache clearing
-            update_processing_status(file.filename, 'ready')
-            logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
+            # NOTE: DON'T mark as ready yet - wait for background thread to finish loading
+            # This prevents race condition where frontend tries to fetch tags before file is loaded
+            logging.info(f"⏳ File saved, waiting for background thread to load before marking ready")
 
             def process_in_background():
                 # CRITICAL FIX: Use application context for background thread
@@ -3115,7 +3114,12 @@ def upload_file():
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
-                            
+
+                            # CRITICAL: Mark as ready NOW after file is loaded but before DB storage
+                            # This ensures frontend can fetch tags as soon as Excel data is available
+                            update_processing_status(original_filename, 'ready')
+                            logging.info(f"✅ [BACKGROUND] Marked {original_filename} as ready after loading")
+
                             # Update preroll items from newly loaded Excel data
                             if hasattr(processor, 'df') and processor.df is not None:
                                 # Pass session_id from outer scope since we're in background thread
@@ -3171,13 +3175,13 @@ def upload_file():
             thread.start()
 
             upload_time = time.time() - start_time
-            logging.info(f"=== UPLOAD COMPLETE (ready immediately, processing in background): {upload_time:.3f}s ===")
+            logging.info(f"=== UPLOAD COMPLETE (processing in background): {upload_time:.3f}s ===")
 
             response_data = {
                 'success': True,
-                'message': 'File uploaded and ready',
+                'message': 'File uploaded successfully, loading in background...',
                 'filename': file.filename,
-                'processing': False  # CHANGED: Marked as not processing so frontend loads immediately
+                'processing': True  # Mark as processing so frontend knows to wait/poll
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
