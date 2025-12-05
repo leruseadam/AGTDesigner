@@ -7379,11 +7379,18 @@ def generate_labels():
                 logging.info(f"INVENTORY LIST: Sample record - Product Name*: '{records[0].get('Product Name*', 'N/A')}', ProductName: '{records[0].get('ProductName', 'N/A')}'")
 
             logging.info("INVENTORY LIST: Generating inventory list from selected Excel products")
-            inventory_doc = generate_inventory_list(records)
-            if inventory_doc is None:
-                logging.error(f"INVENTORY LIST: Generator returned None for {len(records)} records")
-                logging.error("INVENTORY LIST: This should never happen - generator should always create a document if records exist")
-                return jsonify({'error': 'Failed to generate inventory list. Please check server logs for details.'}), 500
+            try:
+                inventory_doc = generate_inventory_list(records)
+                if inventory_doc is None:
+                    logging.error(f"INVENTORY LIST: Generator returned None for {len(records)} records")
+                    logging.error("INVENTORY LIST: This should never happen - generator should always create a document if records exist")
+                    return jsonify({'error': 'Failed to generate inventory list. Check logs for details - generator returned None.'}), 500
+            except Exception as gen_error:
+                logging.error(f"INVENTORY LIST: Exception during generation: {gen_error}")
+                logging.error(f"INVENTORY LIST: Exception type: {type(gen_error).__name__}")
+                import traceback
+                logging.error(f"INVENTORY LIST: Traceback: {traceback.format_exc()}")
+                return jsonify({'error': f'Failed to generate inventory list: {str(gen_error)}'}), 500
 
             # Enforce Arial Bold formatting for consistency
             try:
