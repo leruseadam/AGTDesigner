@@ -2401,7 +2401,15 @@ const TagManager = {
             let brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || this.extractBrand(tag) || '';
             const rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
             const normalizedProductType = normalizeProductType(rawProductType.trim());
-            const productType = VALID_PRODUCT_TYPES.includes(normalizedProductType.toLowerCase())
+            const normalizedLower = normalizedProductType.toLowerCase();
+            
+            // CRITICAL FIX: Accept High CBD and High THC product types (any product type starting with "high cbd" or "high thc")
+            // Also accept any product type that's in VALID_PRODUCT_TYPES
+            const isHighCbdType = normalizedLower.startsWith('high cbd');
+            const isHighThcType = normalizedLower.startsWith('high thc');
+            const isValidType = VALID_PRODUCT_TYPES.includes(normalizedLower) || isHighCbdType || isHighThcType;
+            
+            const productType = isValidType
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
               : 'Unknown Type';
             // CRITICAL FIX: Always prioritize database lineage fields (currentLineage/canonical_lineage) over Excel Lineage
@@ -4633,6 +4641,12 @@ const TagManager = {
         
         // Set initial image based on current DOH status
         let initialDohStatus = 'NONE'; // Default to NONE
+        let showHighCbdBadge = false; // Separate flag for High CBD badge
+        
+        // Check if product type indicates High CBD (regardless of DOH status)
+        if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
+            showHighCbdBadge = true;
+        }
         
         // Check explicit DOH field first
         if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
@@ -4641,18 +4655,33 @@ const TagManager = {
             initialDohStatus = 'THC';
         } else if (dohValue === 'CBD') {
             initialDohStatus = 'CBD';
+            showHighCbdBadge = true; // Also show High CBD badge if DOH is CBD
         } else if (dohValue === 'NO' || dohValue === 'NONE') {
-            // Explicitly no DOH image
+            // Explicitly no DOH image, but still check for High CBD badge
             initialDohStatus = 'NONE';
         } 
         // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
         else if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
             initialDohStatus = 'CBD';
+            showHighCbdBadge = true;
         } else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
             initialDohStatus = 'THC';
         }
         
         updateDohImage(initialDohStatus);
+        
+        // CRITICAL FIX: Add High CBD badge separately if product type indicates High CBD
+        // This ensures High CBD products show the badge even if DOH status is NONE
+        if (showHighCbdBadge && initialDohStatus !== 'CBD') {
+            const highCbdImg = document.createElement('img');
+            highCbdImg.src = '/static/img/HighCBD.png';
+            highCbdImg.alt = 'High CBD';
+            highCbdImg.title = 'High CBD Product';
+            highCbdImg.loading = 'lazy';
+            highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+            imageContainer.appendChild(highCbdImg);
+        }
+        
         tagInfo.appendChild(imageContainer);
         
         // Add JSON match indicator if this tag came from JSON matching or educated guessing

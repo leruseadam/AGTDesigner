@@ -588,14 +588,24 @@ class TemplateProcessor:
                     cell._tc.append(deepcopy(el))
                 
                 cnt += 1
-        
+
         # Add cell spacing
         tblPr2 = tbl._element.find(qn('w:tblPr'))
         spacing = OxmlElement('w:tblCellSpacing')
         spacing.set(qn('w:w'), str(cut_line_twips))
         spacing.set(qn('w:type'), 'dxa')
         tblPr2.append(spacing)
-        
+
+        # PREROLL: Add 0.2" buffer spacing below table
+        if self.template_type == 'preroll':
+            # Add paragraph after table with 0.2" spacing
+            paragraph = doc.add_paragraph()
+            pPr = paragraph._element.get_or_add_pPr()
+            # Add spacing after paragraph (0.2 inches = 0.2 * 1440 twips = 288 twips)
+            spacing_elem = OxmlElement('w:spacing')
+            spacing_elem.set(qn('w:after'), '288')  # 0.2" in twips
+            pPr.append(spacing_elem)
+
         # Save and return
         buf = BytesIO()
         doc.save(buf)
