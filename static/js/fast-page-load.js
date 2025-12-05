@@ -170,10 +170,11 @@
             
             // INSTANT RELOAD FIX: Load data from server with timeout and show UI immediately
             try {
-                // Use Promise.race to timeout after 2 seconds
+                // CRITICAL FIX: Increased timeout to 10 seconds to prevent premature restarts
+                // Use Promise.race to timeout after 10 seconds (was 2 seconds)
                 const fetchPromise = fetch('/api/initial-data?fast_load=1&stream=1');
                 const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Server timeout')), 2000)
+                    setTimeout(() => reject(new Error('Server timeout')), 10000)
                 );
                 
                 let response;
@@ -181,8 +182,16 @@
                     response = await Promise.race([fetchPromise, timeoutPromise]);
                 } catch (timeoutError) {
                     console.warn('⚡ Server fetch timeout, falling back to original checkForExistingData');
-                    // Fallback to original if timeout
-                    if (originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
+                    // CRITICAL FIX: Don't restart - just hide splash and show error
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                    // Only fallback if we have no tags at all
+                    if (!hasExistingTags && originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
                         await originalCheckForExistingData.call(this);
                     }
                     return;

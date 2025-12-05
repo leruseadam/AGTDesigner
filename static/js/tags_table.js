@@ -210,28 +210,26 @@ function createTagRow(tag) {
                                                productTypeLower.includes('high cbd solid') ||
                                                productTypeLower.includes('high cbd topical');
                       
+                      // For high CBD products, CBD trumps DOH (High CBD implies DOH compliance)
+                      let effectiveDohStatus = dohStatus;
                       if (isHighCbdProduct) {
-                        // High CBD products get High CBD dropdown instead of DOH dropdown
-                        const highCbdStatus = (dohStatus === 'CBD' || dohStatus === 'Yes' || dohStatus === 'DOH') ? 'High CBD' : 'None';
-                        return `
-                          <select class="form-select form-select-sm high-cbd-dropdown high-cbd-dropdown-mini" 
-                                  onchange="TagsTable.handleHighCbdChange(this, '${tagName}')">
-                            <option value="None" ${highCbdStatus === 'None' ? 'selected' : ''}>None</option>
-                            <option value="High CBD" ${highCbdStatus === 'High CBD' ? 'selected' : ''}>High CBD</option>
-                          </select>
-                        `;
-                      } else {
-                        // Non-High CBD products get normal DOH dropdown
-                        return `
-                          <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini" 
-                                  onchange="TagsTable.handleDohChange(this, '${tagName}')">
-                            <option value="NONE" ${(!dohStatus || dohStatus === 'No' || dohStatus === 'NONE') ? 'selected' : ''}>None</option>
-                            <option value="DOH" ${dohStatus === 'DOH' || dohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
-                            <option value="THC" ${dohStatus === 'THC' ? 'selected' : ''}>THC</option>
-                            <option value="CBD" ${dohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
-                          </select>
-                        `;
+                        // If no status or DOH/Yes, default to CBD (High CBD trumps DOH)
+                        if (!dohStatus || dohStatus === 'No' || dohStatus === 'NONE' || dohStatus === 'DOH' || dohStatus === 'Yes') {
+                          effectiveDohStatus = 'CBD';
+                        }
+                        // Otherwise keep existing status (e.g., if explicitly set to THC)
                       }
+                      
+                      // All products get normal DOH dropdown
+                      return `
+                        <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini" 
+                                onchange="TagsTable.handleDohChange(this, '${tagName}')">
+                          <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}>None</option>
+                          <option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
+                          <option value="THC" ${effectiveDohStatus === 'THC' ? 'selected' : ''}>THC</option>
+                          <option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
+                        </select>
+                      `;
                     })()}
                 </div>
             </td>
@@ -495,34 +493,31 @@ class TagsTable {
                                        productTypeLower.includes('high cbd solid') ||
                                        productTypeLower.includes('high cbd topical');
               
+              // For high CBD products, CBD trumps DOH (High CBD implies DOH compliance)
+              let effectiveDohStatus = dohStatus;
               if (isHighCbdProduct) {
-                // High CBD products get High CBD dropdown instead of DOH dropdown
-                const highCbdStatus = (dohStatus === 'CBD' || dohStatus === 'Yes' || dohStatus === 'DOH') ? 'High CBD' : 'None';
-                return `
-                  <select class="form-select form-select-sm high-cbd-dropdown high-cbd-dropdown-mini ms-2" 
-                          onchange="TagsTable.handleHighCbdChange(this, '${safeTagName}')"
-                          title="High CBD Status">
-                    <option value="None" ${highCbdStatus === 'None' ? 'selected' : ''}>None</option>
-                    <option value="High CBD" ${highCbdStatus === 'High CBD' ? 'selected' : ''}>High CBD</option>
-                  </select>
-                `;
-              } else {
-                // Non-High CBD products get normal DOH dropdown
-                const dohOptions = [
-                  `<option value="NONE" ${(!dohStatus || dohStatus === 'No' || dohStatus === 'NONE') ? 'selected' : ''}>None</option>`,
-                  `<option value="DOH" ${dohStatus === 'DOH' || dohStatus === 'Yes' ? 'selected' : ''}>DOH</option>`,
-                  `<option value="THC" ${dohStatus === 'THC' ? 'selected' : ''}>THC</option>`,
-                  `<option value="CBD" ${dohStatus === 'CBD' ? 'selected' : ''}>CBD</option>`
-                ].join('');
-                
-                return `
-                  <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini ms-2" 
-                          onchange="TagsTable.handleDohChange(this, '${safeTagName}')"
-                          title="DOH Status">
-                    ${dohOptions}
-                  </select>
-                `;
+                // If no status or DOH/Yes, default to CBD (High CBD trumps DOH)
+                if (!dohStatus || dohStatus === 'No' || dohStatus === 'NONE' || dohStatus === 'DOH' || dohStatus === 'Yes') {
+                  effectiveDohStatus = 'CBD';
+                }
+                // Otherwise keep existing status (e.g., if explicitly set to THC)
               }
+              
+              // All products get normal DOH dropdown
+              const dohOptions = [
+                `<option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}>None</option>`,
+                `<option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>`,
+                `<option value="THC" ${effectiveDohStatus === 'THC' ? 'selected' : ''}>THC</option>`,
+                `<option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>`
+              ].join('');
+              
+              return `
+                <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini ms-2" 
+                        onchange="TagsTable.handleDohChange(this, '${safeTagName}')"
+                        title="DOH Status">
+                  ${dohOptions}
+                </select>
+              `;
             })()}
           </div>
         </div>

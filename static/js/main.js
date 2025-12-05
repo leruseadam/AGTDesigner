@@ -3323,6 +3323,26 @@ const TagManager = {
             console.error('Available tags container not found');
             return;
         }
+        
+        // CRITICAL FIX: Preserve checkbox selections from DOM before re-rendering
+        // This prevents selections made during initial load from being lost
+        const currentlyCheckedCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox:checked');
+        const currentlySelectedTagNames = Array.from(currentlyCheckedCheckboxes).map(cb => cb.value).filter(Boolean);
+        
+        // Merge DOM selections with persistentSelectedTags to ensure nothing is lost
+        if (currentlySelectedTagNames.length > 0) {
+            const currentSet = new Set(this.state.persistentSelectedTags || []);
+            currentlySelectedTagNames.forEach(tagName => {
+                if (!currentSet.has(tagName)) {
+                    console.log(`🔍 Preserving selection from DOM: ${tagName}`);
+                    this.state.persistentSelectedTags.push(tagName);
+                }
+            });
+            // Update selectedTags set to match
+            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+            verboseLog(`✅ Preserved ${currentlySelectedTagNames.length} selections from DOM before re-render`);
+        }
+        
         // Preserve scroll position during re-render
         const savedScroll = this._saveAvailableScrollPosition();
 
@@ -3547,6 +3567,9 @@ const TagManager = {
                     requestAnimationFrame(() => {
                         availableTagsContainer.innerHTML = '';
                         availableTagsContainer.appendChild(tagList);
+                        
+                        // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
+                        this._restoreCheckboxStates();
                         
                         // After tags are in DOM, restore scroll and initialize
                         this._restoreAvailableScrollPosition(savedScroll);
@@ -4903,11 +4926,9 @@ const TagManager = {
         });
         tagInfo.appendChild(lineageSelect);
 
-        // Create DOH or High CBD dropdown (same style as lineage dropdown)
+        // Create DOH dropdown (same style as lineage dropdown) - all products use regular DOH dropdown
         const dohSelect = document.createElement('select');
-        dohSelect.className = isHighCbdProduct 
-            ? 'form-select form-select-sm doh-select high-cbd-dropdown high-cbd-dropdown-mini'
-            : 'form-select form-select-sm doh-select doh-dropdown doh-dropdown-mini';
+        dohSelect.className = 'form-select form-select-sm doh-select doh-dropdown doh-dropdown-mini';
         dohSelect.style.height = '28px';
         dohSelect.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
         dohSelect.style.border = '1px solid rgba(255, 255, 255, 0.2)';
@@ -4922,40 +4943,31 @@ const TagManager = {
 
         let currentDropdownStatus = 'NONE'; // Default to NONE
         
+        // All products get normal DOH dropdown
+        const dohOptions = [
+            { value: 'NONE', label: 'no DOH' },
+            { value: 'DOH', label: 'DOH' },
+            { value: 'THC', label: 'THC' },
+            { value: 'CBD', label: 'CBD' }
+        ];
+        
+        // Use the same logic as initialDohStatus to determine current dropdown state
+        // For high CBD products, CBD trumps DOH (High CBD implies DOH compliance)
         if (isHighCbdProduct) {
-            // High CBD products get High CBD dropdown with "None" and "High CBD" options
-            const highCbdOptions = [
-                { value: 'None', label: 'None' },
-                { value: 'High CBD', label: 'High CBD' }
-            ];
-            
-            // Determine current High CBD status
-            if (dohValue === 'CBD' || dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
-                currentDropdownStatus = 'High CBD';
+            // If DOH/Yes status exists, CBD trumps it for High CBD products
+            if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
+                currentDropdownStatus = 'CBD';
+            } else if (dohValue === 'THC') {
+                // Keep THC if explicitly set
+                currentDropdownStatus = 'THC';
+            } else if (dohValue === 'CBD') {
+                currentDropdownStatus = 'CBD';
             } else {
-                currentDropdownStatus = 'None';
+                // Default to CBD for High CBD products (no status, No, or NONE)
+                currentDropdownStatus = 'CBD';
             }
-            
-            highCbdOptions.forEach(option => {
-                const optionElement = document.createElement('option');
-                optionElement.value = option.value;
-                optionElement.textContent = option.label;
-                if (currentDropdownStatus === option.value) {
-                    optionElement.selected = true;
-                }
-                dohSelect.appendChild(optionElement);
-            });
         } else {
-            // Non-High CBD products get normal DOH dropdown
-            const dohOptions = [
-                { value: 'NONE', label: 'no DOH' },
-                { value: 'DOH', label: 'DOH' },
-                { value: 'THC', label: 'THC' },
-                { value: 'CBD', label: 'CBD' }
-            ];
-            
-            // Use the same logic as initialDohStatus to determine current dropdown state
-            // Check explicit DOH field first
+            // Non-High CBD products: Check explicit DOH field first
             if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
                 currentDropdownStatus = 'DOH';
             } else if (dohValue === 'THC') {
@@ -4970,17 +4982,17 @@ const TagManager = {
             else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
                 currentDropdownStatus = 'THC';
             }
-            
-            dohOptions.forEach(option => {
-                const optionElement = document.createElement('option');
-                optionElement.value = option.value;
-                optionElement.textContent = option.label;
-                if (currentDropdownStatus === option.value) {
-                    optionElement.selected = true;
-                }
-                dohSelect.appendChild(optionElement);
-            });
         }
+        
+        dohOptions.forEach(option => {
+            const optionElement = document.createElement('option');
+            optionElement.value = option.value;
+            optionElement.textContent = option.label;
+            if (currentDropdownStatus === option.value) {
+                optionElement.selected = true;
+            }
+            dohSelect.appendChild(optionElement);
+        });
 
         // Prevent DOH dropdown interactions from triggering drag/sort on parent
         // Stop propagation on multiple pointer events to ensure the native select opens reliably
@@ -5000,21 +5012,11 @@ const TagManager = {
             let newDohStatus = e.target.value;
             const prevValue = currentDropdownStatus;
             
-            // For High CBD dropdown, map UI values to backend values
-            let backendDohStatus = newDohStatus;
-            if (isHighCbdProduct) {
-                // Map "High CBD" to "CBD" for backend, "None" to "No"
-                backendDohStatus = (newDohStatus === 'High CBD') ? 'CBD' : (newDohStatus === 'None' ? 'No' : 'No');
-            } else {
-                // For regular DOH dropdown, map NONE to No for backend
-                backendDohStatus = (newDohStatus === 'NONE') ? 'No' : newDohStatus;
-            }
+            // For regular DOH dropdown, map NONE to No for backend
+            let backendDohStatus = (newDohStatus === 'NONE') ? 'No' : newDohStatus;
             
             // Immediate UI feedback - update image first for responsiveness
-            // For High CBD products, don't update DOH image (they only show High CBD badge)
-            if (!isHighCbdProduct) {
-                updateDohImage(newDohStatus);
-            }
+            updateDohImage(newDohStatus);
             
             dohSelect.disabled = true;
             
@@ -5048,33 +5050,28 @@ const TagManager = {
                     tag.doh = backendDohStatus;
                     tag['DOH Compliant (Yes/No)'] = backendDohStatus;
                     dohSelect.value = newDohStatus;  // Keep dropdown showing UI value
-                    verboseLog(`✅ ${isHighCbdProduct ? 'High CBD' : 'DOH'} status updated for "${displayName}" to: ${backendDohStatus} (frontend dropdown: ${newDohStatus})`);
+                    verboseLog(`✅ DOH status updated for "${displayName}" to: ${backendDohStatus} (frontend dropdown: ${newDohStatus})`);
                     
-                    // Image already updated above for immediate feedback (or skipped for High CBD)
+                    // Image already updated above for immediate feedback
                     
                     // Update DOH in both available and selected tags displays
-                    // For High CBD, pass the UI value; for regular DOH, pass the dropdown value
-                    this.updateDohInAllDisplays(displayName, isHighCbdProduct ? backendDohStatus : newDohStatus);
+                    this.updateDohInAllDisplays(displayName, newDohStatus);
                     
                 } else {
-                    // Revert image on failure (only for non-High CBD products)
-                    if (!isHighCbdProduct) {
-                        updateDohImage(prevValue);
-                    }
+                    // Revert image on failure
+                    updateDohImage(prevValue);
                     throw new Error(data.message || 'Failed to update DOH status');
                 }
                 
                 // Remove saving option
                 dohSelect.removeChild(savingOption);
             } catch (error) {
-                console.error(`Failed to update ${isHighCbdProduct ? 'High CBD' : 'DOH'} status:`, error);
+                console.error(`Failed to update DOH status:`, error);
                 // On failure, revert to previous value
                 dohSelect.value = prevValue;
-                // Revert image only for non-High CBD products
-                if (!isHighCbdProduct) {
-                    updateDohImage(prevValue);
-                }
-                alert(`Failed to update ${isHighCbdProduct ? 'High CBD' : 'DOH'} status: ` + error.message);
+                // Revert image
+                updateDohImage(prevValue);
+                alert(`Failed to update DOH status: ` + error.message);
                 // Remove saving option
                 if (savingOption.parentNode) {
                     dohSelect.removeChild(savingOption);
@@ -7621,6 +7618,15 @@ const TagManager = {
     },
 
     async fetchAndUpdateAvailableTags() {
+        // CRITICAL FIX: Prevent multiple simultaneous calls to avoid restarts
+        if (this._fetchingAvailableTags) {
+            console.log('⏸️ Tag fetch already in progress, skipping duplicate call');
+            return false;
+        }
+        
+        // Set flag to prevent concurrent calls
+        this._fetchingAvailableTags = true;
+        
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
             // Ensure flag is initialized
@@ -7639,6 +7645,7 @@ const TagManager = {
                     console.warn('⚠️ Failed to refresh lineage from database (using cached values):', lineageError);
                     // Continue with cached tags even if lineage refresh fails
                 }
+                this._fetchingAvailableTags = false;
                 return true;
             }
             
@@ -7676,14 +7683,15 @@ const TagManager = {
             });
             
             // Rate limiting: prevent rapid successive calls
-            // Reduced from 2000ms to 500ms to allow faster retries while still preventing abuse
+            // Increased to 1000ms to prevent restarts from multiple rapid calls
             const now = Date.now();
-            if (this._lastFetchTime && (now - this._lastFetchTime) < 500) {
+            if (this._lastFetchTime && (now - this._lastFetchTime) < 1000) {
                 verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
                 // Hide splash if we're skipping
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this._fetchingAvailableTags = false;
                 return false;
             }
             this._lastFetchTime = now;
@@ -7730,17 +7738,18 @@ const TagManager = {
             const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
+            // CRITICAL FIX: Reduced retries to prevent multiple restarts
             let response;
             let responseData;
-            const maxRetries = 3;
+            const maxRetries = 1; // Reduced from 3 to 1 to prevent multiple restarts
             let retryCount = 0;
             let lastError;
             
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // PERFORMANCE FIX: Reduced timeout to 8s - fast_load should make this fast enough
-                    const timeoutId = setTimeout(() => controller.abort(), 8000);
+                    // PERFORMANCE FIX: Increased timeout to 15s to reduce timeouts and restarts
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
@@ -7824,6 +7833,7 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this._fetchingAvailableTags = false;
                 return false;
             }
             
@@ -7837,6 +7847,7 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this._fetchingAvailableTags = false;
                 return false;
             }
             
@@ -7962,7 +7973,8 @@ const TagManager = {
             this.validateSelectedTags();
             
             // OPTIMIZATION: If this was a fast load, optionally refresh with lineage alignment in background
-            // This allows tags to appear immediately while lineage is updated asynchronously
+            // CRITICAL FIX: Disabled background refresh to prevent restarts - lineage is already aligned in main fetch
+            // This allows tags to appear immediately without triggering another load
             if (responseData && responseData.source === 'cache-fast' && tags.length > 0) {
                 verboseLog('Fast load completed - tags displayed immediately');
                 // Update UI immediately with fast-loaded tags
@@ -7973,51 +7985,12 @@ const TagManager = {
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
                 
-                // Optionally refresh with lineage alignment in background (non-blocking)
-                // This ensures lineage is eventually aligned without blocking initial display
-                setTimeout(async () => {
-                    try {
-                        verboseLog('Background: Refreshing tags with lineage alignment...');
-                        const lineageResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=0`);
-                        if (lineageResponse.ok) {
-                            const lineageData = await lineageResponse.json();
-                            if (lineageData.tags && lineageData.tags.length > 0) {
-                                // Update tags with lineage-aligned data (source will be 'cache+db-lineage' or 'excel+db-lineage')
-                                if (lineageData.source && (lineageData.source.includes('lineage') || lineageData.source.includes('db-lineage'))) {
-                                    verboseLog(`Background: Updated ${lineageData.tags.length} tags with lineage alignment`);
-                                    this.state.tags = [...lineageData.tags];
-                                    this.state.originalTags = [...lineageData.tags];
-                                    // Only re-render if lineage data actually changed (to avoid flicker)
-                                    // Compare lineage values, not just tag names
-                                    let lineageChanged = false;
-                                    if (tags.length === lineageData.tags.length) {
-                                        for (let i = 0; i < tags.length; i++) {
-                                            const oldLin = (tags[i].Lineage || tags[i].canonical_lineage || '').toString().trim();
-                                            const newLin = (lineageData.tags[i].Lineage || lineageData.tags[i].canonical_lineage || '').toString().trim();
-                                            if (oldLin !== newLin) {
-                                                lineageChanged = true;
-                                                break;
-                                            }
-                                        }
-                                    } else {
-                                        lineageChanged = true;
-                                    }
-                                    
-                                    if (lineageChanged) {
-                                        // Update only the lineage fields in existing DOM without full re-render
-                                        // This is faster and avoids flicker
-                                        this._updateAvailableTags(lineageData.tags);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (bgError) {
-                        verboseLog('Background lineage alignment failed (non-critical):', bgError);
-                    }
-                }, 500); // Small delay to let UI settle
+                // REMOVED: Background refresh was causing multiple restarts
+                // Lineage is already aligned in the main fetch, no need for background refresh
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');
+                this._fetchingAvailableTags = false;
                 return true;
             }
             
@@ -8032,10 +8005,13 @@ const TagManager = {
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
             // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
+            this._fetchingAvailableTags = false;
             return true;
         } catch (error) {
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
+            // Clear flag on error so retries can happen
+            this._fetchingAvailableTags = false;
             // CRITICAL FIX: savedScroll may not be defined if error occurs early - save it now if needed
             const savedScrollForFallback = typeof savedScroll !== 'undefined' ? savedScroll : this._saveAvailableScrollPosition();
             // If this is just a timeout/AbortError and we already have tags on screen,
@@ -8046,6 +8022,7 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                this._fetchingAvailableTags = false;
                 return true;
             }
 
@@ -8055,6 +8032,7 @@ const TagManager = {
                 : await this._fallbackToLiteAvailableTags(error, savedScrollForFallback);
             if (fallbackLoaded) {
                 verboseLog('✅ Fallback lite tags loaded successfully');
+                this._fetchingAvailableTags = false;
                 return true;
             }
             // Hide splash on error
@@ -8079,6 +8057,7 @@ const TagManager = {
                 `;
             }
 
+            this._fetchingAvailableTags = false;
             return false;
         }
     },
