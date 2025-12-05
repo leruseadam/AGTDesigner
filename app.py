@@ -20900,9 +20900,18 @@ def display_preroll_items(group_id):
             group_key = f"{group_id}|{vendor_normalized}"
             logging.info(f"PREROLL ROUTE: Looking up vendor-specific cache with key: 'preroll_group_latest_{group_key}'")
             
-            # Try session-independent key first (most recent items for this vendor+group)
-            preroll_items = cache.get(f"preroll_group_latest_{group_key}")
-            logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            # CRITICAL FIX: Try database first for persistence across site refreshes
+            from src.core.generation.preroll_tag_generator import _get_preroll_group_from_database
+            preroll_items, group_info_from_db = _get_preroll_group_from_database(group_key=group_key)
+            if preroll_items:
+                logging.info(f"PREROLL ROUTE: Retrieved {len(preroll_items)} items from database for group_key '{group_key}'")
+                # Also update cache for faster future access
+                cache.set(f"preroll_group_latest_{group_key}", preroll_items, timeout=86400)
+            
+            # If not in database, try session-independent cache key
+            if not preroll_items:
+                preroll_items = cache.get(f"preroll_group_latest_{group_key}")
+                logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
             
             # If not found, try current session
             if not preroll_items:
@@ -20920,9 +20929,18 @@ def display_preroll_items(group_id):
         
         # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
         if not preroll_items:
-            # Try session-independent key first (most recent items for this group)
-            preroll_items = cache.get(f"preroll_group_latest_{group_id}")
-            logging.info(f"PREROLL ROUTE: Cache lookup for 'preroll_group_latest_{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            # CRITICAL FIX: Try database first for persistence across site refreshes
+            from src.core.generation.preroll_tag_generator import _get_preroll_group_from_database
+            preroll_items, group_info_from_db = _get_preroll_group_from_database(group_id=group_id)
+            if preroll_items:
+                logging.info(f"PREROLL ROUTE: Retrieved {len(preroll_items)} items from database for group_id '{group_id}'")
+                # Also update cache for faster future access
+                cache.set(f"preroll_group_latest_{group_id}", preroll_items, timeout=86400)
+            
+            # If not in database, try session-independent cache key
+            if not preroll_items:
+                preroll_items = cache.get(f"preroll_group_latest_{group_id}")
+                logging.info(f"PREROLL ROUTE: Cache lookup for 'preroll_group_latest_{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
             
             # If not found, try current session
             if not preroll_items:
@@ -20936,8 +20954,16 @@ def display_preroll_items(group_id):
         # Get group display name from group_id or items
         group_display_name = "Preroll Items"
         if group_id:
-            # Try session-independent group info first
-            group_info = cache.get(f"preroll_group_info_latest_{group_id}")
+            # CRITICAL FIX: Try database first for persistence
+            if 'group_info_from_db' in locals() and group_info_from_db:
+                group_info = group_info_from_db
+            else:
+                from src.core.generation.preroll_tag_generator import _get_preroll_group_from_database
+                _, group_info = _get_preroll_group_from_database(group_id=group_id)
+            
+            # If not in database, try session-independent cache
+            if not group_info:
+                group_info = cache.get(f"preroll_group_info_latest_{group_id}")
             
             # If not found, try current session
             if not group_info:

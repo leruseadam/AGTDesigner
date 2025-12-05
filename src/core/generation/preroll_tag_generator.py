@@ -7,10 +7,97 @@ It groups preroll products by category and creates representative records for la
 
 import re
 import logging
+import json
 from typing import List, Dict, Any, Optional
 from flask import session
 from flask_caching import Cache
 from src.core.constants import PREROLL_ALLOWED_BRANDS
+
+
+def _store_preroll_group_in_database(group_key: str, group_id: str, group_items: List[Dict], group_info: Dict):
+    """Store preroll group data in database for persistence across site refreshes."""
+    try:
+        from app import get_product_database, get_current_store_name
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not product_db:
+            logging.warning("PREROLL DB: Product database not available")
+            return
+        
+        conn = product_db._get_connection()
+        if not conn:
+            logging.warning("PREROLL DB: Could not get database connection")
+            return
+        
+        cursor = conn.cursor()
+        
+        # Create preroll_groups table if it doesn't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS preroll_groups (
+                group_key TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL,
+                group_items TEXT NOT NULL,
+                group_info TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        
+        # Store group data as JSON
+        items_json = json.dumps(group_items)
+        info_json = json.dumps(group_info)
+        from datetime import datetime
+        updated_at = datetime.now().isoformat()
+        
+        # Insert or replace (upsert)
+        cursor.execute("""
+            INSERT OR REPLACE INTO preroll_groups 
+            (group_key, group_id, group_items, group_info, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (group_key, group_id, items_json, info_json, updated_at))
+        
+        conn.commit()
+        logging.info(f"PREROLL DB: Stored group '{group_key}' in database")
+        
+    except Exception as e:
+        logging.error(f"PREROLL DB: Error storing group in database: {e}")
+        # Don't raise - allow cache to work as fallback
+
+
+def _get_preroll_group_from_database(group_key: str = None, group_id: str = None) -> tuple:
+    """Retrieve preroll group data from database. Returns (group_items, group_info) or (None, None)."""
+    try:
+        from app import get_product_database, get_current_store_name
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not product_db:
+            return None, None
+        
+        conn = product_db._get_connection()
+        if not conn:
+            return None, None
+        
+        cursor = conn.cursor()
+        
+        # Try group_key first, then group_id
+        if group_key:
+            cursor.execute("SELECT group_items, group_info FROM preroll_groups WHERE group_key = ?", (group_key,))
+            result = cursor.fetchone()
+            if result:
+                return json.loads(result[0]), json.loads(result[1])
+        
+        if group_id:
+            cursor.execute("SELECT group_items, group_info FROM preroll_groups WHERE group_id = ? LIMIT 1", (group_id,))
+            result = cursor.fetchone()
+            if result:
+                return json.loads(result[0]), json.loads(result[1])
+        
+        return None, None
+        
+    except Exception as e:
+        logging.warning(f"PREROLL DB: Error retrieving group from database: {e}")
+        return None, None
 
 
 def identify_preroll_product_group(description: str, product_name: str = '') -> Dict[str, str]:
@@ -348,7 +435,14 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
         cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
         cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
-        logging.info(f"PREROLL: Stored {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_key: {group_key}, group_id: {original_group_id}) with session-independent key")
+        
+        # CRITICAL FIX: Store in database for persistence across site refreshes
+        try:
+            _store_preroll_group_in_database(group_key, original_group_id, group_items, group_info)
+        except Exception as db_error:
+            logging.warning(f"PREROLL: Failed to store in database (using cache only): {db_error}")
+        
+        logging.info(f"PREROLL: Stored {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_key: {group_key}, group_id: {original_group_id}) with session-independent key and database")
     
     original_count = len(records)
     

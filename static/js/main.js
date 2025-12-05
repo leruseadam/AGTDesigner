@@ -1361,6 +1361,40 @@ const TagManager = {
         }
     },
 
+    _extractFiltersFromTags(tags) {
+        // Extract unique filter values from tags array
+        const vendors = new Set();
+        const brands = new Set();
+        const productTypes = new Set();
+        const lineages = new Set();
+        const weights = new Set();
+        const strains = new Set();
+        const doh = new Set();
+        const highCbd = new Set();
+
+        tags.forEach(tag => {
+            if (tag.Vendor) vendors.add(tag.Vendor);
+            if (tag.ProductBrand || tag['Product Brand']) brands.add(tag.ProductBrand || tag['Product Brand']);
+            if (tag.ProductType || tag['Product Type*']) productTypes.add(tag.ProductType || tag['Product Type*']);
+            if (tag.Lineage) lineages.add(tag.Lineage);
+            if (tag.WeightUnits || tag.CombinedWeight) weights.add(tag.WeightUnits || tag.CombinedWeight);
+            if (tag.ProductStrain || tag['Product Strain']) strains.add(tag.ProductStrain || tag['Product Strain']);
+            if (tag.DOH || tag['DOH Compliant (Yes/No)']) doh.add(tag.DOH || tag['DOH Compliant (Yes/No)']);
+            if (tag.Ratio) highCbd.add(tag.Ratio);
+        });
+
+        return {
+            vendor: Array.from(vendors).filter(Boolean).sort(),
+            brand: Array.from(brands).filter(Boolean).sort(),
+            productType: Array.from(productTypes).filter(Boolean).sort(),
+            lineage: Array.from(lineages).filter(Boolean).sort(),
+            weight: Array.from(weights).filter(Boolean).sort(),
+            strain: Array.from(strains).filter(Boolean).sort(),
+            doh: Array.from(doh).filter(Boolean).sort(),
+            highCbd: Array.from(highCbd).filter(Boolean).sort()
+        };
+    },
+
     updateFilters(filters, preserveExistingValues = true) {
         if (!filters) return;
         
@@ -10965,20 +10999,28 @@ const TagManager = {
                         const tagsData = await tagsResponse.json();
                         if (tagsData.tags && tagsData.tags.length > 0) {
                             verboseLog(`✅ Loaded ${tagsData.tags.length} tags instantly after upload (attempt ${attempt + 1})`);
-                            
+
                             // Update tags immediately
                             this.state.tags = [...tagsData.tags];
                             this.state.originalTags = [...tagsData.tags];
                             this._updateAvailableTags(tagsData.tags);
-                            
-                            // Load filters and selected tags in parallel (non-blocking)
+
+                            // CRITICAL: Extract and populate filters from tags data immediately
+                            // This ensures filters appear instantly without waiting for separate API call
+                            if (tagsData.tags && tagsData.tags.length > 0) {
+                                const extractedFilters = this._extractFiltersFromTags(tagsData.tags);
+                                this.updateFilters(extractedFilters);
+                                verboseLog('✅ Filters extracted from tags immediately:', extractedFilters);
+                            }
+
+                            // Load filters and selected tags in parallel (non-blocking) to refresh with full options
                             Promise.allSettled([
                                 this.fetchAndPopulateFilters(),
                                 this.fetchAndUpdateSelectedTags()
                             ]).then(() => {
-                                verboseLog('✅ Filters and selected tags loaded');
+                                verboseLog('✅ Filters and selected tags refreshed');
                             }).catch(err => {
-                                console.warn('Filter/selected tag loading failed:', err);
+                                console.warn('Filter/selected tag loading failed (non-critical):', err);
                             });
                             
                             // Wait for tags to appear, then hide splash
