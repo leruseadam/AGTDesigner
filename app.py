@@ -3098,7 +3098,19 @@ def upload_file():
                         logging.info(f"[BACKGROUND] Processing file: {file_path}")
 
                         processor = get_excel_processor()
-                        success = processor.load_file(file_path)
+                        # PERFORMANCE: Use fast_load_file instead of load_file for much faster processing
+                        # fast_load_file skips heavy normalization and processing
+                        if hasattr(processor, 'fast_load_file'):
+                            success = processor.fast_load_file(file_path)
+                            logging.info("[BACKGROUND] Using fast_load_file for optimized performance")
+                        else:
+                            # Fallback to minimal_load_file if fast_load_file doesn't exist
+                            if hasattr(processor, 'minimal_load_file'):
+                                success = processor.minimal_load_file(file_path)
+                                logging.info("[BACKGROUND] Using minimal_load_file (fallback)")
+                            else:
+                                success = processor.load_file(file_path)
+                                logging.info("[BACKGROUND] Using standard load_file (slower)")
 
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
@@ -7341,12 +7353,9 @@ def generate_labels():
                 price = record.get('Price', 'NOT_FOUND')
                 price_star = record.get('Price*', 'NOT_FOUND')
                 logging.info(f"🔍 PRICE DEBUG Record {i+1}: '{product_name}' - Price={price}, Price*={price_star}")
-        
-        if not records:
-            logging.error("No selected tags found in the data or failed to process records.")
-            return jsonify({'error': 'No selected tags found in the data or failed to process records. Please ensure you have selected tags and they exist in the loaded data.'}), 400
 
         # SPECIAL CASE: Inventory template now generates inventory lists directly from Excel
+        # CRITICAL: Check inventory template BEFORE the general no-records check
         if template_type == 'inventory':
             try:
                 from src.core.generation.inventory_list import generate_inventory_list
@@ -7358,17 +7367,17 @@ def generate_labels():
             # Let the inventory_list generator handle all record processing and name resolution
             # It's now more lenient and will create fallback names for records without product names
             logging.info(f"INVENTORY LIST: Preparing {len(records)} records for inventory list generation")
-            
+
             # CRITICAL: Ensure records is not empty
             if not records or len(records) == 0:
                 logging.error(f"INVENTORY LIST: No records to process! Records count: {len(records) if records else 0}")
                 return jsonify({'error': 'No products selected. Please select products before generating inventory list.'}), 400
-            
+
             # Log sample record structure
             if records:
                 logging.info(f"INVENTORY LIST: Sample record keys: {list(records[0].keys())[:15]}")
                 logging.info(f"INVENTORY LIST: Sample record - Product Name*: '{records[0].get('Product Name*', 'N/A')}', ProductName: '{records[0].get('ProductName', 'N/A')}'")
-            
+
             logging.info("INVENTORY LIST: Generating inventory list from selected Excel products")
             inventory_doc = generate_inventory_list(records)
             if inventory_doc is None:
@@ -7404,6 +7413,11 @@ def generate_labels():
             response = set_download_filename(response, filename)
             response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             return response
+
+        # General check for other templates - ensure we have records
+        if not records:
+            logging.error("No selected tags found in the data or failed to process records.")
+            return jsonify({'error': 'No selected tags found in the data or failed to process records. Please ensure you have selected tags and they exist in the loaded data.'}), 400
 
         # PREROLL TEMPLATE: Group by unique vendor + description combination
         if template_type == 'preroll':

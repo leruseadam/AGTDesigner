@@ -1501,18 +1501,13 @@ class ExcelProcessor:
                 try:
                     self.logger.debug(f"Attempting to read with engine: {engine}")
                     
-                    # Use optimized reading settings - minimal dtype specification for speed
-                    dtype_dict = {
-                        "Product Name*": "string",
-                        "Product Type*": "string",
-                        "Lineage": "string"
-                    }
-                    
+                    # PERFORMANCE: Read as string dtype for all columns to avoid type inference overhead
+                    # This is much faster than pandas trying to infer types for each column
                     # Read with minimal processing - no NA filtering for speed
                     df = pd.read_excel(
                         file_path, 
                         engine=engine,
-                        dtype=dtype_dict,
+                        dtype=str,  # Read all columns as strings for maximum speed
                         na_filter=False,  # Don't filter NA values for speed
                         keep_default_na=False  # Don't use default NA values
                     )
@@ -1719,19 +1714,21 @@ class ExcelProcessor:
             self.df = df
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
             
-            # Duplicate Product Strain column to "Strain Names" for processing
+            # PERFORMANCE OPTIMIZATION: Skip heavy operations during fast load
+            # These can be done lazily when needed instead of blocking upload
+            # Duplicate Product Strain column to "Strain Names" for processing (minimal operation)
             if 'Product Strain' in self.df.columns:
                 self.df['Strain Names'] = self.df['Product Strain'].copy()
                 self.logger.info("Duplicated 'Product Strain' column to 'Strain Names' for processing")
             
-            # Apply strain extraction for Moonshot products
-            self.apply_strain_extraction()
+            # SKIP: Heavy strain extraction - defer to lazy processing
+            # self.apply_strain_extraction()
             
-            # Process Description values using our established formula
-            self._process_descriptions_from_product_names()
+            # SKIP: Heavy description processing - defer to lazy processing  
+            # self._process_descriptions_from_product_names()
             
             self._on_dataset_updated(file_path)
-            self.logger.info(f"Ultra-fast load successful: {len(self.df)} rows, {len(self.df.columns)} columns")
+            self.logger.info(f"Ultra-fast load successful: {len(self.df)} rows, {len(self.df.columns)} columns (heavy processing deferred)")
             return True
                 
         except Exception as e:
@@ -1767,13 +1764,13 @@ class ExcelProcessor:
                 import gc
                 gc.collect()
             
-            # Minimal Excel reading - just get the data
+            # Minimal Excel reading - just get the data (no row limit for full file loading)
             df = pd.read_excel(
                 file_path, 
                 engine='openpyxl',
                 na_filter=False,
-                keep_default_na=False,
-                nrows=5000  # Limit rows for speed
+                keep_default_na=False
+                # Removed nrows limit to allow full file loading
             )
             
             if df is None or df.empty:
