@@ -2757,6 +2757,35 @@ const TagManager = {
         }
     },
 
+    // CRITICAL FIX: Restore checkbox states after re-render to preserve selections made during initial load
+    _restoreCheckboxStates() {
+        if (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0) {
+            return;
+        }
+        
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (!availableTagsContainer) {
+            return;
+        }
+        
+        // Restore checkbox states based on persistentSelectedTags
+        const checkboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
+        let restoredCount = 0;
+        checkboxes.forEach(checkbox => {
+            const tagName = checkbox.value;
+            if (tagName && this.state.persistentSelectedTags.includes(tagName)) {
+                if (!checkbox.checked) {
+                    checkbox.checked = true;
+                    restoredCount++;
+                }
+            }
+        });
+        
+        if (restoredCount > 0) {
+            verboseLog(`✅ Restored ${restoredCount} checkbox states after re-render`);
+        }
+    },
+
     _saveAvailableScrollPosition() {
         const container = document.getElementById('availableTags');
         if (!container) return null;
@@ -4073,6 +4102,9 @@ const TagManager = {
         // Replace container content with built tags (this replaces any loading indicator)
         availableTagsContainer.innerHTML = '';
         availableTagsContainer.appendChild(tagList);
+
+        // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
+        this._restoreCheckboxStates();
 
         // Restore previous scroll position after full rebuild
         this._restoreAvailableScrollPosition(savedScroll);

@@ -6687,12 +6687,15 @@ canvas#lava-lamp-canvas {
     font-weight: 700 !important; /* Match tag column header weight */
     color: #ffffff !important; /* Match tag column header color */
     margin-bottom: 0.4rem !important; /* Reduced from 0.75rem */
+    padding-bottom: 0.1rem !important; /* Extra padding to prevent bottom cutoff */
     text-transform: uppercase !important;
     letter-spacing: 0.5px !important;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7) !important; /* Match tag column styling */
     white-space: nowrap !important; /* Prevent label wrapping */
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
+    overflow: visible !important; /* Changed from hidden to visible to prevent cutoff */
+    text-overflow: clip !important; /* Changed from ellipsis to clip to show full text */
+    line-height: 1.5 !important; /* Increased line-height to prevent bottom cutoff */
+    min-height: 1.2rem !important; /* Ensure minimum height for text visibility */
   }
 
   /* Filter dropdowns styling - updated to match overall theme and equal sizing */
@@ -7076,7 +7079,10 @@ canvas#lava-lamp-canvas {
     margin-top: 0 !important;
     margin-bottom: 0 !important;
     padding-top: 0 !important;
-    padding-bottom: 0 !important;
+    padding-bottom: 0.15rem !important; /* Allow padding to prevent bottom cutoff */
+    line-height: 1.5 !important; /* Ensure proper line-height for text visibility */
+    overflow: visible !important; /* Prevent text cutoff */
+    min-height: 1.2rem !important; /* Ensure minimum height */
   }
   .sticky-filter-bar .form-select,
   .sticky-filter-bar select,
@@ -7101,7 +7107,9 @@ canvas#lava-lamp-canvas {
   .sticky-filter-bar .form-label,
   .sticky-filter-bar .filter-label {
     font-size: 0.92em !important;
-    padding: 0 0 2px 0 !important;
+    padding: 0 0 0.15rem 0 !important; /* Increased bottom padding to prevent cutoff */
+    line-height: 1.5 !important; /* Ensure proper line-height */
+    overflow: visible !important; /* Prevent text cutoff */
   }
   .sticky-filter-bar select,
   .sticky-filter-bar .form-select,
