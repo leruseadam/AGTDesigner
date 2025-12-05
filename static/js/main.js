@@ -2062,10 +2062,11 @@ const TagManager = {
         // Ensure we always use originalTags for filtering to preserve the full dataset
         const tagsToFilter = this.state.originalTags.length > 0 ? this.state.originalTags : this.state.tags;
         
-        // If we don't have original tags, we can't filter properly
-        if (this.state.originalTags.length === 0) {
-            console.warn('No original tags available for filtering');
-            return;
+        // If we don't have any tags to filter, log warning but don't fail silently
+        if (tagsToFilter.length === 0) {
+            console.warn('No tags available for filtering - originalTags:', this.state.originalTags.length, 'tags:', this.state.tags.length);
+            // Don't return early - allow filter to run with empty array so UI updates correctly
+            // This prevents filters from appearing broken when tags are still loading
         }
         
         verboseLog('applyFilters - tagsToFilter length:', tagsToFilter.length);
@@ -2153,7 +2154,18 @@ const TagManager = {
             if (dohFilter && dohFilter.trim() !== '' && dohFilter.toLowerCase() !== 'all') {
                 const tagDoh = (tag.DOH || tag.doh || '').toString().trim().toUpperCase();
                 const filterDoh = dohFilter.toString().trim().toUpperCase();
-                if (tagDoh !== filterDoh) {
+                
+                // Normalize DOH values for comparison
+                // Map common variations: "Yes" -> "DOH", "No" -> "NONE"
+                let normalizedTagDoh = tagDoh;
+                if (tagDoh === 'YES') {
+                    normalizedTagDoh = 'DOH';
+                } else if (tagDoh === 'NO') {
+                    normalizedTagDoh = 'NONE';
+                }
+                
+                // Check if filter matches (exact match or normalized match)
+                if (normalizedTagDoh !== filterDoh && tagDoh !== filterDoh) {
                     return false;
                 }
             }
@@ -2161,7 +2173,8 @@ const TagManager = {
             // Check High CBD filter - only apply if not empty and not "All"
             if (highCbdFilter && highCbdFilter.trim() !== '' && highCbdFilter.toLowerCase() !== 'all') {
                 const tagProductType = (tag.productType || tag['Product Type*'] || '').toString().trim().toLowerCase();
-                const isHighCbd = tagProductType.startsWith('high cbd');
+                // Check for all high CBD variations: "high cbd", "doh high cbd", etc.
+                const isHighCbd = tagProductType.startsWith('high cbd') || tagProductType.includes('doh high cbd');
                 
                 if (highCbdFilter === 'High CBD Products' && !isHighCbd) {
                     return false;
@@ -2178,12 +2191,25 @@ const TagManager = {
             originalTagsCount: tagsToFilter.length,
             filteredTagsCount: filteredTags.length,
             productTypeFilter: productTypeFilter,
+            vendorFilter: vendorFilter,
+            brandFilter: brandFilter,
+            lineageFilter: lineageFilter,
+            weightFilter: weightFilter,
+            dohFilter: dohFilter,
+            highCbdFilter: highCbdFilter,
             prerollTags: filteredTags.filter(tag => {
                 const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
                 const normalizedType = normalizeProductType(tagProductType);
                 return normalizedType.toLowerCase() === 'pre-roll';
             }).length
         });
+        
+        // If filtering resulted in empty array but we had tags to filter, log warning
+        if (filteredTags.length === 0 && tagsToFilter.length > 0) {
+            console.warn('🔍 Filter resulted in 0 tags but had', tagsToFilter.length, 'tags to filter. Active filters:', {
+                vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter
+            });
+        }
         
         // Cache the results
         this.state.filterCache = {
@@ -4639,15 +4665,27 @@ const TagManager = {
             performanceUtils.endTiming(startTime, 'DOH image update');
         };
         
-        // Check if product type indicates High CBD
-        const isHighCbdProduct = productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd');
+        // Check if product type indicates High CBD (more robust check)
+        // Check both the original product type and normalized version
+        const productTypeOriginal = (tag['Product Type*'] || tag.productType || tag.Type || '').toString().toLowerCase().trim();
+        const isHighCbdProduct = productTypeForImages.startsWith('high cbd') || 
+                                 productTypeForImages.includes('doh high cbd') ||
+                                 productTypeOriginal.startsWith('high cbd') ||
+                                 productTypeOriginal.includes('doh high cbd') ||
+                                 productTypeForImages.includes('high cbd edible') ||
+                                 productTypeOriginal.includes('high cbd edible');
         
         // Set initial image based on current DOH status
         let initialDohStatus = 'NONE'; // Default to NONE
         
         // For High CBD products, only show High CBD badge (not DOH badge)
+        // CRITICAL: This check must happen BEFORE any DOH status checks
         if (isHighCbdProduct) {
             // High CBD products should only show High CBD badge, not DOH badge
+            // Clear any existing images first
+            while (imageContainer.firstChild) {
+                imageContainer.removeChild(imageContainer.firstChild);
+            }
             const highCbdImg = document.createElement('img');
             highCbdImg.src = '/static/img/HighCBD.png';
             highCbdImg.alt = 'High CBD';
@@ -4655,7 +4693,7 @@ const TagManager = {
             highCbdImg.loading = 'lazy';
             highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
             imageContainer.appendChild(highCbdImg);
-            // Don't call updateDohImage for High CBD products
+            // Don't call updateDohImage for High CBD products - skip DOH logic entirely
         } else {
             // For non-High CBD products, use normal DOH logic
             // Check explicit DOH field first
@@ -11471,7 +11509,18 @@ const TagManager = {
             
             // Call applyFilters with immediate flag to skip debounce
             if (self.applyFilters) {
-                self.applyFilters(true); // Pass true to indicate immediate update
+                try {
+                    self.applyFilters(true); // Pass true to indicate immediate update
+                } catch (filterError) {
+                    console.error('Error applying filters:', filterError);
+                    // Retry after a short delay if filters fail (might be timing issue)
+                    setTimeout(() => {
+                        if (self.applyFilters && (self.state.originalTags.length > 0 || self.state.tags.length > 0)) {
+                            console.log('Retrying filter application after error...');
+                            self.applyFilters(true);
+                        }
+                    }, 100);
+                }
             } else {
                 console.error('applyFilters method not found on TagManager');
             }
