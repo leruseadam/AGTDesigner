@@ -1926,6 +1926,10 @@ const TagManager = {
             highCbd: 'highCbdFilter'
         };
 
+        // Excluded product types and patterns (should never appear in dropdowns)
+        const excludedProductTypes = ['x-deactivated 1', 'x-deactivated 2', 'samples - educational', 'sample - vendor'];
+        const excludedPatterns = ['deactivated', 'trade sample'];
+
         Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
                 const filterElement = document.getElementById(filterId);
                 if (!filterElement) {
@@ -1933,9 +1937,35 @@ const TagManager = {
                 }
 
                 const currentValue = filterElement.value;
-                const newOptions = Array.from(availableOptions[filterType]);
+                let newOptions = Array.from(availableOptions[filterType] || []);
                 
-                // Sort options consistently
+                // CRITICAL FIX: Filter out deactivated/hidden values BEFORE sorting
+                // This prevents the flash of unwanted values by ensuring they never appear
+                if (filterType === 'productType') {
+                    newOptions = newOptions.filter(option => {
+                        if (!option) return false;
+                        const optionLower = String(option).toLowerCase().trim();
+                        
+                        // Check against excluded product types (exact match)
+                        if (excludedProductTypes.some(excluded => excluded === optionLower)) {
+                            return false;
+                        }
+                        
+                        // Check for excluded patterns in the value
+                        if (excludedPatterns.some(pattern => optionLower.includes(pattern))) {
+                            return false;
+                        }
+                        
+                        // Check for "x-deactivated" pattern (case-insensitive)
+                        if (optionLower.startsWith('x-deactivated') || optionLower.includes('x-deactivated')) {
+                            return false;
+                        }
+                        
+                        return true;
+                    });
+                }
+                
+                // Sort options consistently (only valid options after filtering)
                 const sortedOptions = [...newOptions].sort((a, b) => {
                     // Special handling for lineage to maintain logical order
                     if (filterType === 'lineage') {
@@ -1956,6 +1986,7 @@ const TagManager = {
                 
                 if (optionsChanged) {
                     // Create new options HTML with special formatting for RSO/CO2 Tanker
+                    // sortedOptions already has deactivated values filtered out
                     const optionsHtml = `
                         <option value="">All</option>
                         ${sortedOptions.map(value => {
@@ -1967,7 +1998,7 @@ const TagManager = {
                         }).join('')}
                     `;
                     
-                    // Update the dropdown options
+                    // Update the dropdown options atomically to prevent flash
                     filterElement.innerHTML = optionsHtml;
                     
                     // Try to restore the previous selection if it's still valid
