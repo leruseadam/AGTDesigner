@@ -5815,7 +5815,8 @@ canvas#lava-lamp-canvas {
     margin: 0.5rem 0 0.75rem 0 !important; /* Vertical margin only - horizontal centering handled by parent flex container */
     text-align: center !important;
     text-align-last: center !important;
-    padding: 12px 40px 12px 40px !important; /* Symmetric padding for centered text */
+    direction: ltr !important; /* Ensure left-to-right for proper centering */
+    padding: 12px 50px 12px 50px !important; /* Symmetric padding for proper centering */
     font-size: 0.95em !important; /* Reduced from 1.1em for better PC UI */
     font-weight: 700 !important;
     color: #e0d6f6 !important;

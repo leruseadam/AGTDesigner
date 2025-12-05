@@ -153,8 +153,9 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     /* Text alignment - perfectly centered */
     text-align: center !important;
     text-align-last: center !important;
+    direction: ltr !important; /* Ensure left-to-right for proper centering */
     
-    /* Padding - symmetric for centered text, extra right padding for arrow */
+    /* Padding - symmetric for visual centering (account for arrow visually) */
     padding: 12px 50px 12px 50px !important; /* Symmetric padding for proper centering */
     
     /* Font styling - larger and more readable for PC */
