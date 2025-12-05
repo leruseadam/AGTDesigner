@@ -4903,9 +4903,11 @@ const TagManager = {
         });
         tagInfo.appendChild(lineageSelect);
 
-        // Create DOH dropdown (same style as lineage dropdown)
+        // Create DOH or High CBD dropdown (same style as lineage dropdown)
         const dohSelect = document.createElement('select');
-        dohSelect.className = 'form-select form-select-sm doh-select doh-dropdown doh-dropdown-mini';
+        dohSelect.className = isHighCbdProduct 
+            ? 'form-select form-select-sm doh-select high-cbd-dropdown high-cbd-dropdown-mini'
+            : 'form-select form-select-sm doh-select doh-dropdown doh-dropdown-mini';
         dohSelect.style.height = '28px';
         dohSelect.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
         dohSelect.style.border = '1px solid rgba(255, 255, 255, 0.2)';
@@ -4918,44 +4920,67 @@ const TagManager = {
         dohSelect.style.marginLeft = '4px';
         dohSelect.style.minWidth = '60px';
 
-        // Add DOH options
-        const dohOptions = [
-            { value: 'NONE', label: 'no DOH' },
-            { value: 'DOH', label: 'DOH' },
-            { value: 'THC', label: 'THC' },
-            { value: 'CBD', label: 'CBD' }
-        ];
-        
-        // Use the same logic as initialDohStatus to determine current dropdown state
         let currentDropdownStatus = 'NONE'; // Default to NONE
         
-        // Check explicit DOH field first
-        if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
-            currentDropdownStatus = 'DOH';
-        } else if (dohValue === 'THC') {
-            currentDropdownStatus = 'THC';
-        } else if (dohValue === 'CBD') {
-            currentDropdownStatus = 'CBD';
-        } else if (dohValue === 'NO' || dohValue === 'NONE') {
-            // Explicitly no DOH image
-            currentDropdownStatus = 'NONE';
-        } 
-        // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
-        else if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
-            currentDropdownStatus = 'CBD';
-        } else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
-            currentDropdownStatus = 'THC';
-        }
-        
-        dohOptions.forEach(option => {
-            const optionElement = document.createElement('option');
-            optionElement.value = option.value;
-            optionElement.textContent = option.label;
-            if (currentDropdownStatus === option.value) {
-                optionElement.selected = true;
+        if (isHighCbdProduct) {
+            // High CBD products get High CBD dropdown with "None" and "High CBD" options
+            const highCbdOptions = [
+                { value: 'None', label: 'None' },
+                { value: 'High CBD', label: 'High CBD' }
+            ];
+            
+            // Determine current High CBD status
+            if (dohValue === 'CBD' || dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
+                currentDropdownStatus = 'High CBD';
+            } else {
+                currentDropdownStatus = 'None';
             }
-            dohSelect.appendChild(optionElement);
-        });
+            
+            highCbdOptions.forEach(option => {
+                const optionElement = document.createElement('option');
+                optionElement.value = option.value;
+                optionElement.textContent = option.label;
+                if (currentDropdownStatus === option.value) {
+                    optionElement.selected = true;
+                }
+                dohSelect.appendChild(optionElement);
+            });
+        } else {
+            // Non-High CBD products get normal DOH dropdown
+            const dohOptions = [
+                { value: 'NONE', label: 'no DOH' },
+                { value: 'DOH', label: 'DOH' },
+                { value: 'THC', label: 'THC' },
+                { value: 'CBD', label: 'CBD' }
+            ];
+            
+            // Use the same logic as initialDohStatus to determine current dropdown state
+            // Check explicit DOH field first
+            if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
+                currentDropdownStatus = 'DOH';
+            } else if (dohValue === 'THC') {
+                currentDropdownStatus = 'THC';
+            } else if (dohValue === 'CBD') {
+                currentDropdownStatus = 'CBD';
+            } else if (dohValue === 'NO' || dohValue === 'NONE') {
+                // Explicitly no DOH image
+                currentDropdownStatus = 'NONE';
+            } 
+            // Then check product type for High THC indicators (DOH High THC)
+            else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
+                currentDropdownStatus = 'THC';
+            }
+            
+            dohOptions.forEach(option => {
+                const optionElement = document.createElement('option');
+                optionElement.value = option.value;
+                optionElement.textContent = option.label;
+                if (currentDropdownStatus === option.value) {
+                    optionElement.selected = true;
+                }
+                dohSelect.appendChild(optionElement);
+            });
+        }
 
         // Prevent DOH dropdown interactions from triggering drag/sort on parent
         // Stop propagation on multiple pointer events to ensure the native select opens reliably
@@ -4972,11 +4997,24 @@ const TagManager = {
         }
         
         dohSelect.addEventListener('change', async (e) => {
-            const newDohStatus = e.target.value;
+            let newDohStatus = e.target.value;
             const prevValue = currentDropdownStatus;
             
+            // For High CBD dropdown, map UI values to backend values
+            let backendDohStatus = newDohStatus;
+            if (isHighCbdProduct) {
+                // Map "High CBD" to "CBD" for backend, "None" to "No"
+                backendDohStatus = (newDohStatus === 'High CBD') ? 'CBD' : (newDohStatus === 'None' ? 'No' : 'No');
+            } else {
+                // For regular DOH dropdown, map NONE to No for backend
+                backendDohStatus = (newDohStatus === 'NONE') ? 'No' : newDohStatus;
+            }
+            
             // Immediate UI feedback - update image first for responsiveness
-            updateDohImage(newDohStatus);
+            // For High CBD products, don't update DOH image (they only show High CBD badge)
+            if (!isHighCbdProduct) {
+                updateDohImage(newDohStatus);
+            }
             
             dohSelect.disabled = true;
             
@@ -4994,7 +5032,7 @@ const TagManager = {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         product_name: displayName,
-                        doh_status: newDohStatus
+                        doh_status: backendDohStatus
                     })
                 });
                 
@@ -5006,32 +5044,37 @@ const TagManager = {
                 const data = await response.json();
                 if (data.success) {
                     // On success, update tag DOH status in state
-                    // CRITICAL: Map NONE to No for storage
-                    const normalizedDoh = newDohStatus === 'NONE' ? 'No' : newDohStatus;
-                    tag.DOH = normalizedDoh;
-                    tag.doh = normalizedDoh;
-                    tag['DOH Compliant (Yes/No)'] = normalizedDoh;
-                    dohSelect.value = newDohStatus;  // Keep dropdown showing NONE even though we store No
-                    verboseLog(`✅ DOH status updated for "${displayName}" to: ${normalizedDoh} (frontend dropdown: ${newDohStatus})`);
+                    tag.DOH = backendDohStatus;
+                    tag.doh = backendDohStatus;
+                    tag['DOH Compliant (Yes/No)'] = backendDohStatus;
+                    dohSelect.value = newDohStatus;  // Keep dropdown showing UI value
+                    verboseLog(`✅ ${isHighCbdProduct ? 'High CBD' : 'DOH'} status updated for "${displayName}" to: ${backendDohStatus} (frontend dropdown: ${newDohStatus})`);
                     
-                    // Image already updated above for immediate feedback
+                    // Image already updated above for immediate feedback (or skipped for High CBD)
                     
-                    // Update DOH in both available and selected tags displays - use NONE for UI dropdown display
-                    this.updateDohInAllDisplays(displayName, newDohStatus);
+                    // Update DOH in both available and selected tags displays
+                    // For High CBD, pass the UI value; for regular DOH, pass the dropdown value
+                    this.updateDohInAllDisplays(displayName, isHighCbdProduct ? backendDohStatus : newDohStatus);
                     
                 } else {
-                    // Revert image on failure
-                    updateDohImage(prevValue);
+                    // Revert image on failure (only for non-High CBD products)
+                    if (!isHighCbdProduct) {
+                        updateDohImage(prevValue);
+                    }
                     throw new Error(data.message || 'Failed to update DOH status');
                 }
                 
                 // Remove saving option
                 dohSelect.removeChild(savingOption);
             } catch (error) {
-                console.error('Failed to update DOH status:', error);
+                console.error(`Failed to update ${isHighCbdProduct ? 'High CBD' : 'DOH'} status:`, error);
                 // On failure, revert to previous value
                 dohSelect.value = prevValue;
-                alert('Failed to update DOH status: ' + error.message);
+                // Revert image only for non-High CBD products
+                if (!isHighCbdProduct) {
+                    updateDohImage(prevValue);
+                }
+                alert(`Failed to update ${isHighCbdProduct ? 'High CBD' : 'DOH'} status: ` + error.message);
                 // Remove saving option
                 if (savingOption.parentNode) {
                     dohSelect.removeChild(savingOption);

@@ -5378,27 +5378,17 @@ class ExcelProcessor:
             except Exception:
                 weight_float = None
 
-            # CRITICAL FIX: Non-classic types (including high CBD) should stay in grams, not convert to ounces
-            # Non-classic types should display in grams, not be converted to ounces
-            # Skip the conversion logic entirely for non-classic types - they should keep grams
-            # This applies to high CBD products and all other non-classic types
+            # Check if this is a High CBD/THC edible product (non-classic but should show in ounces)
             product_type_lower = product_type.lower().strip()
-            is_high_cbd_thc_edible_solid = ('high cbd edible solid' in product_type_lower or 
-                                              'high thc edible solid' in product_type_lower or
-                                              'high cbd' in product_type_lower)
+            is_high_cbd_thc_edible = ('high cbd edible solid' in product_type_lower or 
+                                       'high thc edible solid' in product_type_lower or
+                                       'high cbd edible' in product_type_lower or
+                                       'high thc edible' in product_type_lower or
+                                       'high cbd liquid' in product_type_lower or
+                                       'high thc liquid' in product_type_lower)
             
-            # CRITICAL: Do NOT convert non-classic types from grams to ounces
-            # They should stay in grams. Skip the conversion block entirely.
-            # Only classic types should be converted (and that logic is handled elsewhere)
-            if (allow_nonclassic_conversion and
-                weight_float is not None and units_val and 
-                is_nonclassic and 
-                units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm']):
-                # Skip conversion - non-classic types should stay in grams
-                # Fall through to the normal weight formatting below
-                self.logger.debug(f"Keeping non-classic type '{product_name}' in grams: {weight_float}g (no conversion to ounces)")
-            # If weight is already in ounces or other correct units, skip conversion and use as-is
-            elif (weight_float is not None and units_val and 
+            # If weight is already in ounces, skip conversion and use as-is
+            if (weight_float is not None and units_val and 
                   units_val.lower() in ['oz', 'ounce', 'ounces']):
                 # Weight is already in ounces, no conversion needed
                 if weight_float.is_integer():
@@ -5408,6 +5398,32 @@ class ExcelProcessor:
                 result = f"{weight_str}oz"
                 self.logger.debug(f"Using existing ounce weight for {product_name}: {result} (no conversion needed)")
                 return result
+            
+            # Special handling: High CBD/THC edible products should convert from grams to ounces
+            if (is_high_cbd_thc_edible and
+                allow_nonclassic_conversion and
+                weight_float is not None and units_val and 
+                units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm']):
+                # Convert grams to ounces for High CBD/THC edibles
+                oz_weight = weight_float / 28.3495
+                if oz_weight.is_integer():
+                    weight_str = f"{int(oz_weight)}"
+                else:
+                    weight_str = f"{oz_weight:.2f}".rstrip("0").rstrip(".")
+                result = f"{weight_str}oz"
+                self.logger.info(f"Converting High CBD/THC edible '{product_name}' from {weight_float}g to {result}")
+                return result
+            
+            # CRITICAL: Do NOT convert other non-classic types from grams to ounces
+            # They should stay in grams. Skip the conversion block entirely.
+            # Only classic types and High CBD/THC edibles should be converted
+            if (allow_nonclassic_conversion and
+                weight_float is not None and units_val and 
+                is_nonclassic and 
+                units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm']):
+                # Skip conversion - non-classic types should stay in grams
+                # Fall through to the normal weight formatting below
+                self.logger.debug(f"Keeping non-classic type '{product_name}' in grams: {weight_float}g (no conversion to ounces)")
 
             # Now combine weight and units properly
             if weight_float is not None and units_val:
