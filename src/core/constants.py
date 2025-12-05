@@ -102,7 +102,7 @@ GRID_LAYOUTS: Dict[str, Dict[str, int]] = {
     'single': {'rows': 1, 'cols': 1},  # Single label template
     'double': {'rows': 3, 'cols': 4},  # 3 rows, 4 columns for 12 labels total
     'inventory': {'rows': 2, 'cols': 2},
-    'preroll': {'rows': 4, 'cols': 4}  # 4 rows, 4 columns for 16 labels total (1.5" x 1.9" labels)
+    'preroll': {'rows': 5, 'cols': 4}  # 5 rows, 4 columns for 20 labels total (same as mini)
 }
 
 # Product type classifications
