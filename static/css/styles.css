@@ -178,7 +178,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 22px !important; /* Even larger for better readability on big monitors */
+    font-size: 30px !important; /* Increased from 22px for better readability on big monitors */
   }
   
   /* Reduce padding and margins */
@@ -239,7 +239,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 26px !important; /* Even larger for very large screens */
+    font-size: 34px !important; /* Increased from 26px for very large screens */
   }
 }
 
@@ -279,7 +279,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 30px !important; /* Even larger for ultra-large screens */
+    font-size: 38px !important; /* Increased from 30px for ultra-large screens */
   }
 }
   
@@ -299,7 +299,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 
 /* Larger scaling for key UI elements - zoom responsive */
 .tag-item, .tag-entry {
-  font-size: 20px !important; /* Even larger font size for better readability */
+  font-size: 28px !important; /* Increased from 20px for better readability */
   min-height: 2.4rem !important;
 }
 
@@ -746,7 +746,19 @@ canvas#lava-lamp-canvas {
 /* FORCE control-section to center its children, especially template select */
 .control-panel .control-section,
 .control-section {
+  display: flex !important;
+  flex-direction: column !important;
   align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+}
+
+/* Ensure control-panel also centers its content */
+.control-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: 100% !important;
 }
 
 .control-panel > * {
@@ -2824,6 +2836,16 @@ canvas#lava-lamp-canvas {
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
   }
   
+  /* CRITICAL: Override for template select specifically to ensure centering */
+  .control-panel #templateSelect.form-select-modern,
+  .control-panel #templateSelectModal.form-select-modern {
+    margin: 0.5rem auto 0.75rem auto !important;
+    text-align: center !important;
+    text-align-last: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  
   /* Generate button - Professional and Prominent */
   .control-panel #generateBtn {
     margin: 0.2rem auto !important;
@@ -3168,7 +3190,7 @@ canvas#lava-lamp-canvas {
   }
   
   .tag-name {
-    font-size: 0.8rem !important;
+    font-size: inherit !important; /* Use inherited font size from parent tag-item */
     line-height: 1.3 !important;
     margin-right: 8px !important;
     white-space: normal !important;
@@ -5941,10 +5963,7 @@ canvas#lava-lamp-canvas {
     max-width: 100% !important;
     min-height: 60px !important;
     height: 60px !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    margin-top: 0.5rem !important;
-    margin-bottom: 0.75rem !important;
+    margin: 0.5rem auto 0.75rem auto !important; /* Center with auto margins */
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important; /* Ensure left-to-right for proper centering */
@@ -5963,11 +5982,39 @@ canvas#lava-lamp-canvas {
     white-space: nowrap !important; /* Prevent text wrapping */
     text-overflow: ellipsis !important;
     
+    /* CRITICAL: Force centering - override any conflicting rules */
+    margin-left: auto !important;
+    margin-right: auto !important;
+    float: none !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    transform: none !important;
+    
     /* Ensure consistent arrow across platforms - positioned to not interfere with centering */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
     background-position: right 14px center !important;
     background-size: 18px 18px !important;
+  }
+  
+  /* OVERRIDE form-select-modern class for template select */
+  #templateSelect.form-select-modern,
+  #templateSelectModal.form-select-modern {
+    margin: 0.5rem auto 0.75rem auto !important;
+    text-align: center !important;
+    text-align-last: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 50px !important; /* Match right padding to center text accounting for arrow */
+    padding-right: 50px !important;
+  }
+  
+  /* CRITICAL: Force text centering by adjusting padding to account for arrow */
+  #templateSelect option,
+  #templateSelectModal option {
+    text-align: center !important;
+    text-align-last: center !important;
   }
   
   /* FORCE CENTERING - Override any conflicting rules - UNIVERSAL RULE */
@@ -5997,8 +6044,12 @@ canvas#lava-lamp-canvas {
   
   /* CRITICAL: Ensure control-section centers ALL its content including template select */
   .control-section {
+    display: flex !important;
+    flex-direction: column !important;
     align-items: center !important;
+    justify-content: center !important;
     text-align: center !important;
+    width: 100% !important;
   }
   
   /* Ensure the Template label is also centered */
@@ -6008,6 +6059,18 @@ canvas#lava-lamp-canvas {
     text-align: center !important;
     width: 100% !important;
     display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  
+  /* FORCE template select to be centered within control-section */
+  .control-section #templateSelect,
+  .control-section #templateSelectModal {
+    margin-left: auto !important;
+    margin-right: auto !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
   }
   
   /* Fix template dropdown on large monitors (Windows PC) */
@@ -6016,6 +6079,18 @@ canvas#lava-lamp-canvas {
     #templateSelectModal {
       font-size: 0.8em !important; /* Smaller font on large monitors */
       margin: 0.5rem auto 0.75rem auto !important; /* Ensure centered */
+      margin-left: auto !important;
+      margin-right: auto !important;
+      display: block !important;
+      width: 100% !important;
+    }
+    
+    /* Force control-section to center on large monitors */
+    .control-section {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
     }
   }
   
