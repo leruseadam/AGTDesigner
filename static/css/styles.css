@@ -5992,6 +5992,22 @@ canvas#lava-lamp-canvas {
     position: relative !important;
     left: auto !important;
     right: auto !important;
+    transform: none !important;
+  }
+  
+  /* CRITICAL: Ensure control-section centers ALL its content including template select */
+  .control-section {
+    align-items: center !important;
+    text-align: center !important;
+  }
+  
+  /* Ensure the Template label is also centered */
+  .control-section .filter-label,
+  .control-section label[for="templateSelect"],
+  .control-section > label:first-child {
+    text-align: center !important;
+    width: 100% !important;
+    display: block !important;
   }
   
   /* Fix template dropdown on large monitors (Windows PC) */
@@ -6003,6 +6019,15 @@ canvas#lava-lamp-canvas {
     }
   }
   
+  /* PC-specific: Reduce template select font size on Windows/PC screens */
+  /* Target larger screens (typically PC monitors) - Mac screens are usually smaller */
+  @media screen and (min-width: 1400px) {
+    #templateSelect,
+    #templateSelectModal {
+      font-size: 0.75em !important; /* Smaller font size for PC */
+    }
+  }
+  
   /* PC-specific: Ensure template dropdown is centered in control-section */
   @media (min-width: 992px) {
     /* CRITICAL: Override control-panel's stretch alignment to center content on PC */
@@ -6010,6 +6035,7 @@ canvas#lava-lamp-canvas {
       align-items: center !important;
       display: flex !important;
       flex-direction: column !important;
+      justify-content: flex-start !important;
     }
     
     /* Center the control-section itself - ensure it centers its children */
@@ -6018,6 +6044,8 @@ canvas#lava-lamp-canvas {
       display: flex !important;
       flex-direction: column !important;
       width: 100% !important;
+      text-align: center !important;
+      justify-content: center !important;
     }
     
     /* FORCE template dropdown to be centered - override everything */
@@ -6031,11 +6059,13 @@ canvas#lava-lamp-canvas {
       margin-right: auto !important;
       text-align: center !important;
       text-align-last: center !important;
+      transform: none !important;
     }
     
     /* Ensure the center column container properly centers its children */
     [data-container-type="center"] {
       align-items: center !important;
+      text-align: center !important;
     }
     
     /* Force center alignment for template select in center container */
@@ -6045,6 +6075,15 @@ canvas#lava-lamp-canvas {
       margin-right: auto !important;
       text-align: center !important;
       text-align-last: center !important;
+    }
+    
+    /* Ensure Template label is centered */
+    .control-section .filter-label,
+    .control-section label:first-child {
+      text-align: center !important;
+      width: 100% !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
     }
   }
   
