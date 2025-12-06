@@ -7089,7 +7089,7 @@ canvas#lava-lamp-canvas {
 
   /* Explicit filter column styling */
   .sticky-filter-bar .filter-column {
-    padding: 1rem !important;
+    padding: 0.5rem 0.5rem 0.75rem 0.5rem !important; /* Increased bottom padding to prevent cutoff */
     margin: 0 0.5rem !important;
     background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
     border-radius: 12px !important; /* Slightly smaller than parent */
@@ -7098,6 +7098,7 @@ canvas#lava-lamp-canvas {
     flex: 1 1 auto !important; /* Allow growth to fit content */
     min-width: 140px !important; /* Prevent shrinking below content size */
     max-width: none !important; /* Remove max-width constraints */
+    overflow: visible !important; /* Prevent content cutoff */
   }
 
   .sticky-filter-bar .filter-column:hover {
