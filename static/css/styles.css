@@ -39,10 +39,10 @@ html {
   width: 100%;
   height: 100%;
   min-height: 100vh;
-  max-height: 100vh; /* Prevent exceeding viewport */
   margin: 0;
   padding: 0;
-  overflow: hidden; /* Prevent html scrolling */
+  overflow-x: hidden; /* Prevent horizontal scrolling */
+  overflow-y: auto; /* Allow vertical scrolling when needed */
   /* Ensure no browser defaults interfere with fullscreen canvas */
   box-sizing: border-box;
   /* Enable smooth zoom scaling */
@@ -60,13 +60,11 @@ body {
   font-size: 1.1rem;
   line-height: 1.5;
   width: 100%;
-  height: 100vh; /* Fixed height to viewport */
   min-height: 100vh;
-  max-height: 100vh; /* Prevent exceeding viewport */
   margin: 0;
   padding: 0; /* Remove all padding to prevent white bars */
   overflow-x: hidden;
-  overflow-y: hidden; /* Disable page scrolling - content should scroll within containers */
+  overflow-y: auto; /* Allow vertical scrolling when content exceeds viewport */
   /* Ensure body doesn't interfere with fullscreen canvas */
   position: relative;
   /* Ensure smooth zoom scaling */
@@ -109,22 +107,22 @@ body > .container,
 body > .container-fluid {
   max-width: 100% !important;
   margin: 0 auto !important;
-  max-height: 100vh !important; /* Prevent exceeding viewport */
-  overflow: hidden; /* Prevent page-level scrolling */
+  overflow-x: hidden !important;
+  overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
 }
 
 /* CRITICAL FIX: Prevent any direct child of body from causing white space at bottom */
 /* But allow internal scrollable containers (like tag lists) to work */
 body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
-  max-height: 100vh !important;
+  /* Removed max-height restriction to allow full content visibility */
 }
 
-/* Ensure main content containers don't exceed viewport but allow internal scrolling */
+/* Ensure main content containers allow scrolling when needed */
 .main-content,
 .main-container,
 #main-container {
-  max-height: 100vh !important;
-  overflow: hidden !important; /* Prevent page scrolling, but tag lists can scroll internally */
+  overflow-x: hidden !important;
+  overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
 }
 
 /* Constrain large monitors - reduce font sizes and spacing directly */
@@ -134,10 +132,8 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   }
   
   body {
-    overflow-y: hidden !important; /* Disable page scrolling on large monitors */
+    overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
     overflow-x: hidden !important;
-    height: 100vh !important; /* Fixed to viewport */
-    max-height: 100vh !important; /* Prevent exceeding viewport */
     min-height: 100vh !important;
   }
   
