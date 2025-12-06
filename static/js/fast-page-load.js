@@ -159,13 +159,17 @@
             
             // No cache available - show loading UI
             console.log('⏳ No cache found - loading from server...');
-            if (typeof AppLoadingSplash !== 'undefined') {
-                AppLoadingSplash.updateProgress(50, 'Loading tags...');
-            }
-            
-            // Show loading splash while fetching
-            if (this.showActionSplash) {
-                this.showActionSplash('Loading tags from server...');
+            // CRITICAL FIX: Don't show splash if TagManager.init already showed it
+            // Only show if we're not already initializing
+            if (!this.state || !this.state.initialized) {
+                if (typeof AppLoadingSplash !== 'undefined' && !AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.updateProgress(50, 'Loading tags...');
+                }
+                
+                // Show loading splash while fetching (only if not already shown)
+                if (this.showActionSplash && typeof this.showActionSplash === 'function') {
+                    this.showActionSplash('Loading tags from server...');
+                }
             }
             
             // INSTANT RELOAD FIX: Load data from server with timeout and show UI immediately
@@ -191,6 +195,7 @@
                         AppLoadingSplash.complete();
                     }
                     // Only fallback if we have no tags at all
+                    const hasExistingTags = Array.isArray(this.state?.tags) && this.state.tags.length > 0;
                     if (!hasExistingTags && originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
                         await originalCheckForExistingData.call(this);
                     }

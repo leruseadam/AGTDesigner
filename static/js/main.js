@@ -8613,6 +8613,13 @@ const TagManager = {
 
     // Initialize the tag manager
     init() {
+        // CRITICAL FIX: Prevent multiple initialization calls
+        if (this.state.initialized || this._initializing) {
+            console.log('⚠️ TagManager already initialized or initializing, skipping duplicate init call');
+            return;
+        }
+        this._initializing = true;
+        
         console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
         console.log('⚡ TagManager initializing...');
         const availableTagsContainer = document.getElementById('availableTags');
@@ -8632,17 +8639,67 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
         
+        // CRITICAL FIX: Check cache FIRST before showing splash screen
+        const cachedTags = this.loadAvailableTagsFromCache();
+        if (cachedTags && cachedTags.length > 0) {
+            console.log(`⚡ INSTANT CACHE: Found ${cachedTags.length} tags in cache, loading immediately...`);
+            // Load from cache immediately without splash
+            this.state.hydratedFromCache = true;
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            this.state.initialized = true;
+            this._initializing = false;
+            
+            // Render immediately
+            requestAnimationFrame(() => {
+                if (this._updateAvailableTags) {
+                    this._updateAvailableTags(cachedTags, null);
+                }
+                console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags displayed from cache`);
+                
+                // Hide any splash screens
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                
+                // Load selected tags and filters in background
+                this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
+                if (this.fetchAndPopulateFilters) {
+                    this.fetchAndPopulateFilters();
+                }
+            });
+            
+            // Continue with rest of initialization (filters, etc.) but skip splash
+            this._continueInitWithoutSplash();
+            return;
+        }
+        
+        // No cache - show splash screen and load from server
         // Show application splash screen
         AppLoadingSplash.show();
         AppLoadingSplash.startAutoAdvance();
         
-        // Initialize empty state first
+        // Initialize empty state first (but don't clear if we have tags)
         this.clearInitialDataRetry();
-        this.initializeEmptyState();
+        // CRITICAL FIX: Only initialize empty state if we don't have tags already
+        if (!this.state.tags || this.state.tags.length === 0) {
+            this.initializeEmptyState();
+        }
         AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
-        this.checkForExistingData();
+        this.checkForExistingData().then(() => {
+            this.state.initialized = true;
+            this._initializing = false;
+        }).catch(err => {
+            console.error('Error during initialization:', err);
+            this.state.initialized = true;
+            this._initializing = false;
+        });
         
         // GUARANTEED FIX: Restore filters from localStorage on page load
         const savedFilters = this.loadFiltersFromStorage();
@@ -8745,6 +8802,64 @@ const TagManager = {
                 }
             }, 20000); // 20 second emergency timeout
         });
+    },
+
+    // Continue initialization without showing splash (for cache hits)
+    _continueInitWithoutSplash() {
+        // GUARANTEED FIX: Restore filters from localStorage on page load
+        const savedFilters = this.loadFiltersFromStorage();
+        this.state.filters = savedFilters || {
+            vendor: 'All',
+            brand: 'All',
+            productType: 'All',
+            lineage: 'All',
+            weight: 'All'
+        };
+        
+        // Set each filter dropdown to saved value or 'All' (or '')
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const filterMap = {
+            'vendorFilter': 'vendor',
+            'brandFilter': 'brand',
+            'productTypeFilter': 'productType',
+            'lineageFilter': 'lineage',
+            'weightFilter': 'weight',
+            'dohFilter': 'doh',
+            'highCbdFilter': 'highCbd'
+        };
+        filterIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                const filterKey = filterMap[id];
+                const savedValue = this.state.filters[filterKey];
+                if (savedValue && savedValue !== 'All') {
+                    el.value = savedValue;
+                } else {
+                    el.value = '';
+                }
+            }
+        });
+        
+        // Add filter change event listeners immediately
+        verboseLog('=== SETTING UP FILTER EVENT LISTENERS ===');
+        this.setupFilterEventListeners();
+        verboseLog('=== FILTER EVENT LISTENERS SETUP COMPLETE ===');
+        
+        // Add search event listeners
+        this.setupSearchEventListeners();
+        
+        // Start memory optimization
+        this.startMemoryOptimization();
+        
+        // Start periodic filter refresh
+        this.startPeriodicFilterRefresh();
+        
+        // Update table header if TagsTable is available
+        setTimeout(() => {
+            if (typeof TagsTable !== 'undefined' && TagsTable.updateTableHeader) {
+                TagsTable.updateTableHeader();
+            }
+        }, 100);
     },
 
     // CRITICAL FIX: Setup reload protection to wait for pending lineage updates
@@ -8913,6 +9028,13 @@ const TagManager = {
             verboseLog('checkForExistingData already in progress, skipping...');
             return;
         }
+        
+        // CRITICAL FIX: If we already have tags from cache, skip this to prevent clearing them
+        if (this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0) {
+            verboseLog('✅ Tags already loaded from cache, skipping checkForExistingData to prevent clearing');
+            return;
+        }
+        
         this._checkingExistingData = true;
 
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
