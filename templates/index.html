@@ -5387,7 +5387,7 @@
                     <div class="buttons-row d-flex align-items-center gap-2">
                       <!-- Upload Button -->
                       <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
-                      <button type="button" class="btn filter-action-button" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file">
+                      <button type="button" class="btn filter-action-button" id="uploadTriggerBtn" onclick="handleFileUploadClick();" aria-label="Upload Excel file">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                           <polyline points="7 10 12 15 17 10"></polyline>
@@ -7710,6 +7710,62 @@
       
       // Make function globally accessible so it can be called after TagManager loads
       window.initializeFileUpload = initializeFileUpload;
+      
+      // CRITICAL FIX: Handle file upload click with platform-specific directory handling
+      // On Windows, use File System Access API to open Downloads folder
+      // On Mac, regular file input already opens to Downloads
+      async function handleFileUploadClick() {
+        const isWindows = navigator.platform.toLowerCase().includes('win') ||
+                         navigator.userAgent.toLowerCase().includes('windows');
+        
+        // Try to use File System Access API on Windows (if supported)
+        // This API allows specifying a suggested start directory
+        if (isWindows && 'showOpenFilePicker' in window) {
+          try {
+            const fileHandles = await window.showOpenFilePicker({
+              types: [{
+                description: 'Excel Files',
+                accept: {
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
+                }
+              }],
+              excludeAcceptAllOption: false,
+              multiple: false
+            });
+            
+            if (fileHandles && fileHandles.length > 0) {
+              const file = await fileHandles[0].getFile();
+              if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+                window.TagManager.uploadFile(file);
+              } else {
+                // Fallback to regular file input if TagManager not ready
+                const fileInput = document.getElementById('fileInput');
+                if (fileInput) {
+                  const dataTransfer = new DataTransfer();
+                  dataTransfer.items.add(file);
+                  fileInput.files = dataTransfer.files;
+                  fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }
+            }
+            return;
+          } catch (error) {
+            // User cancelled or API not fully supported, fall back to regular input
+            if (error.name !== 'AbortError') {
+              console.log('File System Access API not available, using regular file input:', error);
+            }
+          }
+        }
+        
+        // Fallback to regular file input (works on Mac and Windows without API support)
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) {
+          fileInput.click();
+        }
+      }
+      
+      // Make function globally accessible
+      window.handleFileUploadClick = handleFileUploadClick;
       
       // Initialize file upload with retry mechanism
       // Delay initial call slightly to let DOM settle
