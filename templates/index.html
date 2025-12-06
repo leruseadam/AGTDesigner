@@ -2741,27 +2741,84 @@
             // Export Database Function
             window.exportDatabase = function() {
               const exportBtn = document.querySelector('button[onclick="exportDatabase()"]');
+              let originalBtnText = '';
               
-              // Show loading state
-              const originalBtnText = exportBtn.innerHTML;
-              exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Exporting...';
-              exportBtn.disabled = true;
+              // Show splash screen using TagManager's splash if available, otherwise use database-sync splash
+              if (typeof showExportSplash === 'function') {
+                showExportSplash();
+              } else if (window.TagManager && typeof window.TagManager.showActionSplash === 'function') {
+                window.TagManager.showActionSplash('Exporting database...');
+              } else {
+                // Fallback: Show loading state on button
+                if (exportBtn) {
+                  originalBtnText = exportBtn.innerHTML;
+                  exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Exporting...';
+                  exportBtn.disabled = true;
+                }
+              }
               
-              // Create a temporary link to trigger download
-              const link = document.createElement('a');
-              link.href = '/api/database-export';
-              link.download = `AGT_Product_Database_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
-              
-              // Trigger download
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-              
-              // Reset button state after a short delay
-              setTimeout(() => {
-                exportBtn.innerHTML = originalBtnText;
-                exportBtn.disabled = false;
-              }, 1000);
+              // Fetch the export file
+              fetch('/api/database-export')
+                .then(response => {
+                  if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                  }
+                  return response.blob();
+                })
+                .then(blob => {
+                  // Create download link
+                  const url = window.URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `AGT_Product_Database_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+                  
+                  // Trigger download
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  window.URL.revokeObjectURL(url);
+                  
+                  // Hide splash screen
+                  if (typeof hideExportSplash === 'function') {
+                    hideExportSplash();
+                  } else if (window.TagManager && typeof window.TagManager.hideActionSplash === 'function') {
+                    window.TagManager.hideActionSplash();
+                  } else {
+                    // Fallback: Reset button state
+                    if (exportBtn) {
+                      exportBtn.innerHTML = originalBtnText || 'Export Database';
+                      exportBtn.disabled = false;
+                    }
+                  }
+                  
+                  // Show success message
+                  if (window.showToast) {
+                    window.showToast('Database exported successfully', 'success');
+                  }
+                })
+                .catch(error => {
+                  console.error('Error exporting database:', error);
+                  
+                  // Hide splash screen
+                  if (typeof hideExportSplash === 'function') {
+                    hideExportSplash();
+                  } else if (window.TagManager && typeof window.TagManager.hideActionSplash === 'function') {
+                    window.TagManager.hideActionSplash();
+                  } else {
+                    // Fallback: Reset button state
+                    if (exportBtn) {
+                      exportBtn.innerHTML = originalBtnText || 'Export Database';
+                      exportBtn.disabled = false;
+                    }
+                  }
+                  
+                  // Show error message
+                  if (window.showToast) {
+                    window.showToast('Failed to export database: ' + error.message, 'error');
+                  } else {
+                    alert('Failed to export database: ' + error.message);
+                  }
+                });
             };
             
             // Refresh Database Stats Function
@@ -7509,7 +7566,16 @@
       document.addEventListener('click', function(e) {
         const target = e.target;
         const tagName = target.tagName.toLowerCase();
-        const targetInfo = `${tagName}${target.id ? '#' + target.id : ''}${target.className ? '.' + target.className.split(' ').join('.') : ''}`;
+        // CRITICAL FIX: Handle className safely - it might be a DOMTokenList or undefined
+        let classNameStr = '';
+        if (target.className) {
+          if (typeof target.className === 'string') {
+            classNameStr = '.' + target.className.split(' ').join('.');
+          } else if (target.className instanceof DOMTokenList) {
+            classNameStr = '.' + Array.from(target.className).join('.');
+          }
+        }
+        const targetInfo = `${tagName}${target.id ? '#' + target.id : ''}${classNameStr}`;
         
         // Log all button and link clicks
         if (tagName === 'button' || tagName === 'a' || target.closest('button') || target.closest('a')) {

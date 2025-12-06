@@ -165,27 +165,78 @@
                 if (typeof AppLoadingSplash !== 'undefined' && !AppLoadingSplash.isVisible) {
                     AppLoadingSplash.updateProgress(50, 'Loading tags...');
                 }
-                
+
                 // Show loading splash while fetching (only if not already shown)
                 if (this.showActionSplash && typeof this.showActionSplash === 'function') {
                     this.showActionSplash('Loading tags from server...');
                 }
             }
-            
-            // INSTANT RELOAD FIX: Load data from server with timeout and show UI immediately
+
+            // OPTIMIZED: Try direct /api/available-tags FIRST (it's faster than /api/initial-data)
+            // Then fall back to /api/initial-data if needed
+            console.log('⚡ Trying fast /api/available-tags endpoint first...');
             try {
-                // CRITICAL FIX: Increased timeout to 30 seconds to prevent premature restarts
-                // Use Promise.race to timeout after 30 seconds (was 10 seconds)
+                const quickResponse = await fetch('/api/available-tags');
+                if (quickResponse.ok) {
+                    const quickData = await quickResponse.json();
+                    if (quickData && quickData.tags && Array.isArray(quickData.tags) && quickData.tags.length > 0) {
+                        console.log(`✅ Fast load successful: ${quickData.tags.length} tags from /api/available-tags`);
+
+                        // Save to cache for next time
+                        if (this.saveAvailableTagsToCache) {
+                            this.saveAvailableTagsToCache(quickData.tags);
+                        }
+
+                        // Update state
+                        this.state.tags = [...quickData.tags];
+                        this.state.originalTags = [...quickData.tags];
+
+                        // Render immediately
+                        if (this._updateAvailableTags) {
+                            this._updateAvailableTags(quickData.tags, null);
+                        }
+
+                        // Hide splash
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }
+
+                        // Load selected tags and filters in background
+                        Promise.allSettled([
+                            this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
+                            this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
+                        ]).then(() => {
+                            console.log('✅ Background: Selected tags and filters loaded');
+                        }).catch(err => {
+                            console.warn('⚠️ Background load error (non-critical):', err);
+                        });
+
+                        return; // Success! Exit early
+                    }
+                }
+            } catch (quickError) {
+                console.warn('⚠️ Fast /api/available-tags failed, falling back to /api/initial-data:', quickError);
+            }
+
+            // FALLBACK: If /api/available-tags didn't work, try /api/initial-data with timeout
+            try {
+                console.log('⏳ Trying /api/initial-data as fallback...');
+                // CRITICAL FIX: Reduced timeout to 5 seconds - if server takes longer, use direct API fallback
+                // This makes the page feel much faster
                 const fetchPromise = fetch('/api/initial-data?fast_load=1&stream=1');
                 const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Server timeout')), 30000)
+                    setTimeout(() => reject(new Error('Server timeout')), 5000)
                 );
-                
+
                 let response;
                 try {
                     response = await Promise.race([fetchPromise, timeoutPromise]);
                 } catch (timeoutError) {
-                    console.error('❌ Server fetch timeout after 30 seconds:', timeoutError);
+                    console.warn('⚠️ Server fetch timeout after 5 seconds, using fast fallback');
                     console.log('📊 Current state - tags:', this.state?.tags?.length || 0, 'hasExistingTags:', Array.isArray(this.state?.tags) && this.state.tags.length > 0);
 
                     // CRITICAL FIX: Don't restart - just hide splash and show error

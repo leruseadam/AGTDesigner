@@ -375,8 +375,21 @@ class LibraryBrowser {
     }
 
     async exportData() {
+        // Show splash screen
+        if (typeof showExportSplash === 'function') {
+            showExportSplash();
+        } else if (window.TagManager && typeof window.TagManager.showActionSplash === 'function') {
+            window.TagManager.showActionSplash('Exporting library data...');
+        } else {
+            this.showLoading(true);
+        }
+        
         try {
             const response = await fetch('/api/library/export');
+            if (!response.ok) {
+                throw new Error(`Export failed: ${response.statusText}`);
+            }
+            
             const blob = await response.blob();
             
             const url = window.URL.createObjectURL(blob);
@@ -388,8 +401,26 @@ class LibraryBrowser {
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
             
+            // Hide splash screen
+            if (typeof hideExportSplash === 'function') {
+                hideExportSplash();
+            } else if (window.TagManager && typeof window.TagManager.hideActionSplash === 'function') {
+                window.TagManager.hideActionSplash();
+            } else {
+                this.showLoading(false);
+            }
+            
             this.showSuccess('Data exported successfully');
         } catch (error) {
+            // Hide splash screen
+            if (typeof hideExportSplash === 'function') {
+                hideExportSplash();
+            } else if (window.TagManager && typeof window.TagManager.hideActionSplash === 'function') {
+                window.TagManager.hideActionSplash();
+            } else {
+                this.showLoading(false);
+            }
+            
             this.showError('Error exporting data: ' + error.message);
         }
     }
