@@ -198,7 +198,7 @@ body > .container-fluid {
 
 /* Larger scaling for key UI elements - zoom responsive */
 .tag-item, .tag-entry {
-  font-size: 0.75rem !important; /* At least 8pt font, set to 9pt (0.75rem = 12px) for better readability */
+  font-size: 5.5pt !important; /* 5.5pt font size for inventory list */
   min-height: 2.4rem !important;
 }
 
@@ -1943,11 +1943,20 @@ canvas#lava-lamp-canvas {
     display: block !important;
     position: relative !important;
     pointer-events: auto !important;
+    font-size: 5.5pt !important; /* 5.5pt font size for inventory list */
   }
   
   /* Force all content to fill the container */
   #availableTags * {
     box-sizing: border-box !important;
+  }
+  
+  /* Ensure all text in inventory list uses 5.5pt */
+  #availableTags .tag-item,
+  #availableTags .tag-entry,
+  #availableTags .tag-name,
+  #availableTags .tag-text {
+    font-size: 5.5pt !important;
   }
   
   /* Fix selected tags container height */
@@ -5442,7 +5451,7 @@ canvas#lava-lamp-canvas {
     gap: 4px !important;
   }
   .tag-name {
-      font-size: 0.95rem !important;
+      font-size: 5.5pt !important; /* 5.5pt font size for inventory list */
       line-height: 1.4 !important;
     white-space: normal !important;
     word-break: break-word !important;
