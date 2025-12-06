@@ -174,18 +174,20 @@
             
             // INSTANT RELOAD FIX: Load data from server with timeout and show UI immediately
             try {
-                // CRITICAL FIX: Increased timeout to 10 seconds to prevent premature restarts
-                // Use Promise.race to timeout after 10 seconds (was 2 seconds)
+                // CRITICAL FIX: Increased timeout to 30 seconds to prevent premature restarts
+                // Use Promise.race to timeout after 30 seconds (was 10 seconds)
                 const fetchPromise = fetch('/api/initial-data?fast_load=1&stream=1');
-                const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Server timeout')), 10000)
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Server timeout')), 30000)
                 );
                 
                 let response;
                 try {
                     response = await Promise.race([fetchPromise, timeoutPromise]);
                 } catch (timeoutError) {
-                    console.warn('⚡ Server fetch timeout, falling back to original checkForExistingData');
+                    console.error('❌ Server fetch timeout after 30 seconds:', timeoutError);
+                    console.log('📊 Current state - tags:', this.state?.tags?.length || 0, 'hasExistingTags:', Array.isArray(this.state?.tags) && this.state.tags.length > 0);
+
                     // CRITICAL FIX: Don't restart - just hide splash and show error
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
@@ -196,8 +198,59 @@
                     }
                     // Only fallback if we have no tags at all
                     const hasExistingTags = Array.isArray(this.state?.tags) && this.state.tags.length > 0;
-                    if (!hasExistingTags && originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
-                        await originalCheckForExistingData.call(this);
+                    console.log('🔄 Attempting fallback to originalCheckForExistingData...', {
+                        hasExistingTags,
+                        hasFallbackFunction: !!originalCheckForExistingData
+                    });
+                    if (!hasExistingTags) {
+                        // Try direct API call to /api/available-tags as last resort
+                        console.log('⚡ Attempting direct /api/available-tags call as emergency fallback');
+                        try {
+                            const directResponse = await fetch('/api/available-tags?nocache=1');
+                            if (directResponse.ok) {
+                                const tagsData = await directResponse.json();
+                                if (tagsData && tagsData.tags && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
+                                    console.log(`✅ Emergency fallback successful: loaded ${tagsData.tags.length} tags`);
+
+                                    // Update state
+                                    this.state.tags = [...tagsData.tags];
+                                    this.state.originalTags = [...tagsData.tags];
+
+                                    // Save to cache
+                                    if (this.saveAvailableTagsToCache) {
+                                        this.saveAvailableTagsToCache(tagsData.tags);
+                                    }
+
+                                    // Render immediately
+                                    if (this._updateAvailableTags) {
+                                        this._updateAvailableTags(tagsData.tags, null);
+                                    }
+
+                                    // Hide splash
+                                    if (this.hideActionSplash) {
+                                        this.hideActionSplash();
+                                    }
+                                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                                        AppLoadingSplash.stopAutoAdvance();
+                                        AppLoadingSplash.complete();
+                                    }
+
+                                    return;
+                                }
+                            }
+                        } catch (directError) {
+                            console.error('❌ Direct /api/available-tags fallback failed:', directError);
+                        }
+
+                        // If direct fallback failed, try originalCheckForExistingData
+                        if (originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
+                            console.log('⚡ Calling originalCheckForExistingData as final fallback');
+                            await originalCheckForExistingData.call(this);
+                        } else {
+                            console.warn('⚠️ All fallbacks exhausted - no tags loaded');
+                        }
+                    } else {
+                        console.warn('⚠️ Skipping fallback - already have tags');
                     }
                     return;
                 }
