@@ -38,6 +38,44 @@ if (isWindows) {
     verboseLog('Windows performance optimizations enabled');
 }
 
+// CRITICAL: Prevent multiple simultaneous page reloads
+let _reloadInProgress = false;
+let _reloadTimeout = null;
+
+const safeReload = (delay = 0) => {
+    // Prevent multiple reloads
+    if (_reloadInProgress) {
+        console.log('⏭️ Reload already in progress, skipping duplicate reload request');
+        return;
+    }
+    
+    _reloadInProgress = true;
+    
+    // Clear any existing reload timeout
+    if (_reloadTimeout) {
+        clearTimeout(_reloadTimeout);
+        _reloadTimeout = null;
+    }
+    
+    const doReload = () => {
+        console.log('🔄 Executing safe page reload...');
+        _reloadInProgress = false;
+        // Use original reload method to bypass any interceptors
+        const originalReload = window.location.reload.bind(window.location);
+        originalReload();
+    };
+    
+    if (delay > 0) {
+        _reloadTimeout = setTimeout(doReload, delay);
+    } else {
+        doReload();
+    }
+};
+
+// Make safeReload available globally
+window.safeReload = safeReload;
+window._reloadInProgress = false; // Make flag accessible
+
 // Memory-optimized performance utilities
 const performanceUtils = {
     // Memory-efficient debounce with cleanup - optimized for Windows
@@ -8711,16 +8749,28 @@ const TagManager = {
 
     // CRITICAL FIX: Setup reload protection to wait for pending lineage updates
     _setupLineageUpdateReloadProtection() {
-        // Intercept page reload attempts
+        // Intercept page reload attempts - but use safeReload to prevent multiple reloads
         const originalReload = window.location.reload.bind(window.location);
         window.location.reload = (force) => {
-            this._waitForPendingLineageUpdates().then(() => {
-                console.log('✅ All lineage updates completed, proceeding with reload...');
-                originalReload(force);
-            }).catch((error) => {
-                console.warn('⚠️ Error waiting for lineage updates, reloading anyway:', error);
-                originalReload(force);
-            });
+            // Use safeReload if available to prevent multiple reloads
+            if (window.safeReload && !_reloadInProgress) {
+                this._waitForPendingLineageUpdates().then(() => {
+                    console.log('✅ All lineage updates completed, proceeding with reload...');
+                    safeReload(0);
+                }).catch((error) => {
+                    console.warn('⚠️ Error waiting for lineage updates, reloading anyway:', error);
+                    safeReload(0);
+                });
+            } else {
+                // Fallback to original behavior if safeReload not available
+                this._waitForPendingLineageUpdates().then(() => {
+                    console.log('✅ All lineage updates completed, proceeding with reload...');
+                    originalReload(force);
+                }).catch((error) => {
+                    console.warn('⚠️ Error waiting for lineage updates, reloading anyway:', error);
+                    originalReload(force);
+                });
+            }
         };
         
         // Add beforeunload handler to warn if updates are pending
@@ -11173,10 +11223,7 @@ const TagManager = {
                             console.error('⚠️ Standard tag loading also failed:', fallbackError);
                             // Only reload as absolute last resort, and show user-friendly message first
                             this.updateUploadUI('Tags are loading slowly. The page will refresh in a moment...', 'warning');
-                            setTimeout(() => {
-                                verboseLog('🔄 Reloading page as last resort...');
-                                window.location.reload();
-                            }, 3000); // Give user time to see the message
+                            safeReload(3000); // Give user time to see the message
                         }
                         return;
                     }
@@ -11196,10 +11243,7 @@ const TagManager = {
                     console.error('⚠️ Standard tag loading failed:', fallbackError);
                     // Only reload as absolute last resort
                     this.updateUploadUI('Tags are loading slowly. The page will refresh in a moment...', 'warning');
-                    setTimeout(() => {
-                        verboseLog('🔄 Reloading page as last resort...');
-                        window.location.reload();
-                    }, 3000); // Give user time to see the message
+                    safeReload(3000); // Give user time to see the message
                 }
             }
             
@@ -11242,7 +11286,7 @@ const TagManager = {
                 verboseLog('Fallback upload successful');
                 this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
                 // Refresh the page to load the new file
-                window.location.reload();
+                safeReload(500); // Small delay to ensure UI updates
                 return true;
             } else {
                 console.error('Fallback upload failed:', data.error);
@@ -13002,9 +13046,7 @@ async function clearStuckUploads() {
             }
             
             // Refresh the page to reset the UI state
-            setTimeout(() => {
-                window.location.reload();
-            }, 1000);
+            safeReload(1000);
         } else {
             console.error('Failed to clear upload status:', response.statusText);
             alert('Failed to clear stuck uploads. Please try again.');
@@ -13883,9 +13925,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 150);
             
             // Reload the page after a brief delay for visual feedback
-            setTimeout(() => {
-                window.location.reload();
-            }, 200);
+            safeReload(200);
         });
     }
 });

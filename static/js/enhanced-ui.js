@@ -195,9 +195,16 @@ async function handleFiles(files) {
             pollUploadStatus(data.filename || file.name);
           } else {
             console.warn('pollUploadStatus function not available; falling back to manual reload');
-            setTimeout(() => {
-              window.location.reload();
-            }, 2000);
+            if (window.safeReload) {
+              window.safeReload(2000);
+            } else {
+              setTimeout(() => {
+                if (!window._reloadInProgress) {
+                  window._reloadInProgress = true;
+                  window.location.reload();
+                }
+              }, 2000);
+            }
           }
           return;
         }
@@ -249,9 +256,16 @@ async function handleFiles(files) {
                     }).catch(fallbackErr => {
                       console.error('All tag loading methods failed, reloading as last resort', fallbackErr);
                       // Only reload as absolute last resort after all methods fail
-                      setTimeout(() => {
-                        window.location.reload();
-                      }, 2000);
+                      if (window.safeReload) {
+                        window.safeReload(2000);
+                      } else {
+                        setTimeout(() => {
+                          if (!window._reloadInProgress) {
+                            window._reloadInProgress = true;
+                            window.location.reload();
+                          }
+                        }, 2000);
+                      }
                     });
                   });
               } else {
@@ -273,9 +287,16 @@ async function handleFiles(files) {
               console.log('✅ Fallback tag loading completed');
             }).catch(fallbackErr => {
               console.error('All tag loading methods failed, reloading as last resort', fallbackErr);
-              setTimeout(() => {
-                window.location.reload();
-              }, 2000);
+              if (window.safeReload) {
+                window.safeReload(2000);
+              } else {
+                setTimeout(() => {
+                  if (!window._reloadInProgress) {
+                    window._reloadInProgress = true;
+                    window.location.reload();
+                  }
+                }, 2000);
+              }
             });
           }
         } else {
@@ -289,7 +310,14 @@ async function handleFiles(files) {
               TagManager.fetchAndPopulateFilters?.();
             } else {
               console.warn('TagManager still not available, reloading as last resort');
-              window.location.reload();
+              if (window.safeReload) {
+                window.safeReload(1000);
+              } else {
+                if (!window._reloadInProgress) {
+                  window._reloadInProgress = true;
+                  window.location.reload();
+                }
+              }
             }
           }, 2000);
         }
@@ -546,7 +574,14 @@ function pollUploadStatus(filename) {
                 TagManager.refreshTagLists({ preserveFilters: true, force: true })
                   .catch(err => {
                     console.error('refreshTagLists failed after poll-ready', err);
-                    window.location.reload();
+                    if (window.safeReload) {
+                      window.safeReload(1000);
+                    } else {
+                      if (!window._reloadInProgress) {
+                        window._reloadInProgress = true;
+                        window.location.reload();
+                      }
+                    }
                   });
               } else {
                 TagManager.fetchAndUpdateAvailableTags?.();
@@ -556,10 +591,24 @@ function pollUploadStatus(filename) {
             }, 0);
           } catch (e) {
             console.error('Async refresh setup failed after poll-ready', e);
-            window.location.reload();
+            if (window.safeReload) {
+              window.safeReload(1000);
+            } else {
+              if (!window._reloadInProgress) {
+                window._reloadInProgress = true;
+                window.location.reload();
+              }
+            }
           }
         } else {
-          window.location.reload();
+          if (window.safeReload) {
+            window.safeReload(500);
+          } else {
+            if (!window._reloadInProgress) {
+              window._reloadInProgress = true;
+              window.location.reload();
+            }
+          }
         }
         
         return; // Stop polling
