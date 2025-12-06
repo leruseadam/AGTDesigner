@@ -123,8 +123,8 @@ body > .container-fluid {
     min-height: auto !important;
   }
   
-  /* Reduce all font sizes */
-  * {
+  /* Reduce all font sizes - EXCEPT tag lists */
+  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
     font-size: 0.78em !important; /* Scale down all fonts by 22% */
   }
   
@@ -132,7 +132,7 @@ body > .container-fluid {
     font-size: 14px !important; /* Base size */
   }
   
-  /* Override: Keep inventory list at readable size on large screens */
+  /* Override: Keep inventory list at readable size on large screens - use absolute px to avoid scaling issues */
   #availableTags,
   #availableTags *,
   #availableTags .tag-item,
@@ -147,12 +147,14 @@ body > .container-fluid {
   #selectedTags .tag-name,
   #selectedTags .tag-text,
   #selectedTags .tag-info,
+  .tag-list-container,
+  .tag-list-container *,
   .tag-list-container .tag-item,
   .tag-list-container .tag-entry,
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 0.95rem !important; /* Increased from 5.5pt for better readability on widescreen */
+    font-size: 14px !important; /* Absolute size - not affected by global scaling */
   }
   
   /* Reduce padding and margins */
@@ -182,8 +184,8 @@ body > .container-fluid {
     font-size: 12px !important;
   }
   
-  /* Reduce font sizes */
-  * {
+  /* Reduce font sizes - EXCEPT tag lists */
+  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
     font-size: 0.67em !important; /* Scale down all fonts by 33% */
   }
   
@@ -191,7 +193,7 @@ body > .container-fluid {
     font-size: 12px !important;
   }
   
-  /* Override: Keep inventory list at readable size on very large screens */
+  /* Override: Keep inventory list at readable size on very large screens - use absolute px */
   #availableTags,
   #availableTags *,
   #availableTags .tag-item,
@@ -206,12 +208,14 @@ body > .container-fluid {
   #selectedTags .tag-name,
   #selectedTags .tag-text,
   #selectedTags .tag-info,
+  .tag-list-container,
+  .tag-list-container *,
   .tag-list-container .tag-item,
   .tag-list-container .tag-entry,
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 1rem !important; /* Increased from 5.5pt for better readability on very large screens */
+    font-size: 15px !important; /* Absolute size - larger for very large screens */
   }
 }
 
@@ -220,8 +224,8 @@ body > .container-fluid {
     font-size: 10px !important;
   }
   
-  /* Reduce font sizes */
-  * {
+  /* Reduce font sizes - EXCEPT tag lists */
+  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
     font-size: 0.56em !important; /* Scale down all fonts by 44% */
   }
   
@@ -229,7 +233,7 @@ body > .container-fluid {
     font-size: 10px !important;
   }
   
-  /* Override: Keep inventory list at readable size on ultra-large screens */
+  /* Override: Keep inventory list at readable size on ultra-large screens - use absolute px */
   #availableTags,
   #availableTags *,
   #availableTags .tag-item,
@@ -244,12 +248,14 @@ body > .container-fluid {
   #selectedTags .tag-name,
   #selectedTags .tag-text,
   #selectedTags .tag-info,
+  .tag-list-container,
+  .tag-list-container *,
   .tag-list-container .tag-item,
   .tag-list-container .tag-entry,
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 1.05rem !important; /* Increased from 5.5pt for better readability on ultra-large screens */
+    font-size: 16px !important; /* Absolute size - largest for ultra-large screens */
   }
 }
   
@@ -269,7 +275,7 @@ body > .container-fluid {
 
 /* Larger scaling for key UI elements - zoom responsive */
 .tag-item, .tag-entry {
-  font-size: 5.5pt !important; /* 5.5pt font size for inventory list */
+  font-size: 14px !important; /* Readable font size */
   min-height: 2.4rem !important;
 }
 
@@ -2014,7 +2020,7 @@ canvas#lava-lamp-canvas {
     display: block !important;
     position: relative !important;
     pointer-events: auto !important;
-    font-size: 5.5pt !important; /* 5.5pt font size for inventory list */
+    font-size: 14px !important; /* Readable font size */
   }
   
   /* Force all content to fill the container */
@@ -2022,12 +2028,12 @@ canvas#lava-lamp-canvas {
     box-sizing: border-box !important;
   }
   
-  /* Ensure all text in inventory list uses 5.5pt */
+  /* Ensure all text in inventory list uses readable size */
   #availableTags .tag-item,
   #availableTags .tag-entry,
   #availableTags .tag-name,
   #availableTags .tag-text {
-    font-size: 5.5pt !important;
+    font-size: 14px !important;
   }
   
   /* Fix selected tags container height */
@@ -5522,7 +5528,7 @@ canvas#lava-lamp-canvas {
     gap: 4px !important;
   }
   .tag-name {
-      font-size: 5.5pt !important; /* 5.5pt font size for inventory list */
+      font-size: 14px !important; /* Readable font size */
       line-height: 1.4 !important;
     white-space: normal !important;
     word-break: break-word !important;
