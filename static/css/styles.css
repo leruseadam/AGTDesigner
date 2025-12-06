@@ -132,6 +132,29 @@ body > .container-fluid {
     font-size: 14px !important; /* Base size */
   }
   
+  /* Override: Keep inventory list at readable size on large screens */
+  #availableTags,
+  #availableTags *,
+  #availableTags .tag-item,
+  #availableTags .tag-entry,
+  #availableTags .tag-name,
+  #availableTags .tag-text,
+  #availableTags .tag-info,
+  #selectedTags,
+  #selectedTags *,
+  #selectedTags .tag-item,
+  #selectedTags .tag-entry,
+  #selectedTags .tag-name,
+  #selectedTags .tag-text,
+  #selectedTags .tag-info,
+  .tag-list-container .tag-item,
+  .tag-list-container .tag-entry,
+  .tag-list-container .tag-name,
+  .tag-list-container .tag-text,
+  .tag-list-container .tag-info {
+    font-size: 0.95rem !important; /* Increased from 5.5pt for better readability on widescreen */
+  }
+  
   /* Reduce padding and margins */
   .btn-modern, .btn-modern2, .btn-modern3, .btn-glass {
     padding: 6px 12px !important;
@@ -159,12 +182,36 @@ body > .container-fluid {
     font-size: 12px !important;
   }
   
+  /* Reduce font sizes */
   * {
     font-size: 0.67em !important; /* Scale down all fonts by 33% */
   }
   
   html {
     font-size: 12px !important;
+  }
+  
+  /* Override: Keep inventory list at readable size on very large screens */
+  #availableTags,
+  #availableTags *,
+  #availableTags .tag-item,
+  #availableTags .tag-entry,
+  #availableTags .tag-name,
+  #availableTags .tag-text,
+  #availableTags .tag-info,
+  #selectedTags,
+  #selectedTags *,
+  #selectedTags .tag-item,
+  #selectedTags .tag-entry,
+  #selectedTags .tag-name,
+  #selectedTags .tag-text,
+  #selectedTags .tag-info,
+  .tag-list-container .tag-item,
+  .tag-list-container .tag-entry,
+  .tag-list-container .tag-name,
+  .tag-list-container .tag-text,
+  .tag-list-container .tag-info {
+    font-size: 1rem !important; /* Increased from 5.5pt for better readability on very large screens */
   }
 }
 
@@ -173,12 +220,36 @@ body > .container-fluid {
     font-size: 10px !important;
   }
   
+  /* Reduce font sizes */
   * {
     font-size: 0.56em !important; /* Scale down all fonts by 44% */
   }
   
   html {
     font-size: 10px !important;
+  }
+  
+  /* Override: Keep inventory list at readable size on ultra-large screens */
+  #availableTags,
+  #availableTags *,
+  #availableTags .tag-item,
+  #availableTags .tag-entry,
+  #availableTags .tag-name,
+  #availableTags .tag-text,
+  #availableTags .tag-info,
+  #selectedTags,
+  #selectedTags *,
+  #selectedTags .tag-item,
+  #selectedTags .tag-entry,
+  #selectedTags .tag-name,
+  #selectedTags .tag-text,
+  #selectedTags .tag-info,
+  .tag-list-container .tag-item,
+  .tag-list-container .tag-entry,
+  .tag-list-container .tag-name,
+  .tag-list-container .tag-text,
+  .tag-list-container .tag-info {
+    font-size: 1.05rem !important; /* Increased from 5.5pt for better readability on ultra-large screens */
   }
 }
   
