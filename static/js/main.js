@@ -2652,19 +2652,10 @@ const TagManager = {
                 }
             }
 
-            // If no vendor found, try to extract from product name
-            if (!vendor) {
-                const productName = tag['Product Name*'] || tag.ProductName || tag.Description || '';
-                // Look for "by [Brand]" pattern
-                const byMatch = productName.match(/by\s+([A-Za-z0-9\s]+)(?:\s|$)/i);
-                if (byMatch) {
-                    vendor = byMatch[1].trim();
-                }
-            }
-
             // CRITICAL FIX: Never use brand as vendor - available tags list should only show vendors
-            // If still no vendor, use a default
-            if (!vendor) {
+            // Never try to extract vendor from product names (they might contain brand names, not vendor names)
+            // If vendor is not in the database, use a default - don't try to guess from product name
+            if (!vendor || vendor.trim() === '') {
                 vendor = 'Unknown Vendor';
             }
 

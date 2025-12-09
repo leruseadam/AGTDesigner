@@ -3056,8 +3056,8 @@ def upload_file():
             logging.error(f"❌ SESSION VERIFICATION FAILED: file_path={verify_file_path}, filename={verify_filename}")
             logging.error(f"❌ Expected file_path={file_path}, filename={file.filename}")
         
-        # Mark as processing
-        update_processing_status(file.filename, 'processing')
+        # PERFORMANCE: Return immediately after file save - defer all processing
+        # This makes upload feel instant to the user
         
         # Check if we're on PythonAnywhere - if so, use background processing
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
@@ -3072,28 +3072,27 @@ def upload_file():
             # Capture session_id for preroll items update
             background_session_id = session.get('session_id', 'default')
 
-            # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
-            # CRITICAL: Also clear cache to ensure old Excel data doesn't persist
+            # PERFORMANCE: Clear processor and cache in background thread, not here
+            # This allows upload to return immediately
             _excel_processor = None
             logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
-
-            # CRITICAL: Clear cache again after marking as ready to ensure old data is gone
-            try:
-                cache_key = get_session_cache_key('available_tags')
-                cache.delete(cache_key)
-                logging.info(f"✅ Cleared available_tags cache after marking ready: {cache_key}")
-            except Exception as e:
-                logging.warning(f"⚠️ Error clearing cache after marking ready: {e}")
-
-            # NOTE: DON'T mark as ready yet - wait for background thread to finish loading
-            # This prevents race condition where frontend tries to fetch tags before file is loaded
-            logging.info(f"⏳ File saved, waiting for background thread to load before marking ready")
 
             def process_in_background():
                 # CRITICAL FIX: Use application context for background thread
                 # Flask's g object and session require application context
                 with app.app_context():
                     try:
+                        # Mark as processing in background
+                        update_processing_status(original_filename, 'processing')
+                        
+                        # Clear cache in background (not blocking upload response)
+                        try:
+                            cache_key = get_session_cache_key('available_tags')
+                            cache.delete(cache_key)
+                            logging.info(f"[BACKGROUND] Cleared available_tags cache: {cache_key}")
+                        except Exception as e:
+                            logging.warning(f"[BACKGROUND] Error clearing cache: {e}")
+                        
                         logging.info(f"[BACKGROUND] Processing file: {file_path}")
 
                         processor = get_excel_processor()
@@ -3168,18 +3167,19 @@ def upload_file():
                         logging.error(traceback.format_exc())
                         update_processing_status(original_filename, f'error: {str(e)}')
 
-            # Start background thread
+            # Start background thread (non-blocking)
             import threading
             thread = threading.Thread(target=process_in_background)
             thread.daemon = True
             thread.start()
 
+            # PERFORMANCE: Return immediately - don't wait for any processing
             upload_time = time.time() - start_time
-            logging.info(f"=== UPLOAD COMPLETE (processing in background): {upload_time:.3f}s ===")
+            logging.info(f"=== UPLOAD COMPLETE (instant return, processing in background): {upload_time:.3f}s ===")
 
             response_data = {
                 'success': True,
-                'message': 'File uploaded successfully, loading in background...',
+                'message': 'File uploaded successfully, processing in background...',
                 'filename': file.filename,
                 'processing': True  # Mark as processing so frontend knows to wait/poll
             }
@@ -3190,52 +3190,49 @@ def upload_file():
             return jsonify(response_data)
             
         else:
-            # Local development: FAST UPLOAD - save file only
-            # Let the first tag/filter request lazily load the Excel file instead of blocking the upload.
-            logging.info("[LOCAL] Fast upload mode - saving file only (lazy Excel load on first tag request)")
+            # Local development: ULTRA-FAST UPLOAD - return immediately after file save
+            # Defer all processing (cache clearing, processor clearing) to background or first request
+            logging.info("[LOCAL] Ultra-fast upload mode - instant return (lazy Excel load on first tag request)")
             
-            # Ensure any existing in‑memory processor doesn't hold on to the old file
-            try:
-                _excel_processor = None  # type: ignore[name-defined]
-                logging.info("✅ Cleared in‑memory Excel processor; new file will be loaded lazily")
-            except Exception as load_error:
-                logging.warning(f"⚠️ Could not clear in‑memory Excel processor: {load_error}")
-            
-            # CRITICAL: Clear ALL caches to force complete refresh
-            try:
-                # Clear file-specific cache (uses file path in key)
-                session_file_path = session.get('file_path', '')
-                cache_keys_to_clear = [
-                    f'available_tags_{session_file_path}',
-                    'selected_tags', 
-                    'vendor_tags', 
-                    'initial_data'
-                ]
-                
-                # Also clear any old available_tags caches (from previous uploads)
-                # Try to delete with empty path (legacy cache key)
+            # PERFORMANCE: Clear processor and cache in background thread to avoid blocking
+            def clear_in_background():
                 try:
-                    legacy_cache_key = get_session_cache_key('available_tags_')
-                    cache.delete(legacy_cache_key)
-                    logging.info(f"✅ Cleared legacy cache: available_tags_")
-                except:
-                    pass
-                
-                for key_base in cache_keys_to_clear:
-                    cache_key = get_session_cache_key(key_base)
-                    cache.delete(cache_key)
-                    logging.info(f"✅ Cleared cache: {key_base}")
-            except Exception as cache_err:
-                logging.warning(f"Failed to clear cache: {cache_err}")
+                    _excel_processor = None  # type: ignore[name-defined]
+                    logging.info("[BACKGROUND] Cleared in‑memory Excel processor")
+                    
+                    # Clear caches in background
+                    session_file_path = session.get('file_path', '')
+                    cache_keys_to_clear = [
+                        f'available_tags_{session_file_path}',
+                        'selected_tags', 
+                        'vendor_tags', 
+                        'initial_data'
+                    ]
+                    
+                    try:
+                        legacy_cache_key = get_session_cache_key('available_tags_')
+                        cache.delete(legacy_cache_key)
+                    except:
+                        pass
+                    
+                    for key_base in cache_keys_to_clear:
+                        cache_key = get_session_cache_key(key_base)
+                        cache.delete(cache_key)
+                        logging.info(f"[BACKGROUND] Cleared cache: {key_base}")
+                except Exception as bg_err:
+                    logging.warning(f"[BACKGROUND] Cache clear error: {bg_err}")
             
-            # CRITICAL: Verify session file path is set correctly
-            logging.info(f"✅ Session file_path after upload: {session.get('file_path')}")
-            logging.info(f"✅ Uploaded file saved at: {file_path}")
-
+            # Start background thread for cache clearing (non-blocking)
+            import threading
+            clear_thread = threading.Thread(target=clear_in_background)
+            clear_thread.daemon = True
+            clear_thread.start()
+            
+            # Mark as ready immediately (processing happens on first request)
             update_processing_status(file.filename, 'ready')
             
             upload_time = time.time() - start_time
-            logging.info(f"=== UPLOAD COMPLETE (instant): {upload_time:.3f}s ===")
+            logging.info(f"=== UPLOAD COMPLETE (instant return): {upload_time:.3f}s ===")
             
             response_data = {
                 'success': True,
@@ -9395,16 +9392,15 @@ def get_available_tags():
                                         
                                         # CRITICAL FIX: Ensure vendor field is set correctly (not brand)
                                         # Frontend expects 'Vendor' or 'vendor', not 'Product Brand'
-                                        if 'Vendor' not in product_dict or not product_dict.get('Vendor'):
-                                            # Try to get vendor from various possible fields
-                                            vendor = (product_dict.get('Vendor/Supplier*') or 
-                                                     product_dict.get('Vendor/Supplier') or 
-                                                     product_dict.get('Vendor') or 
-                                                     product_dict.get('vendor') or 
-                                                     '')
-                                            if vendor:
-                                                product_dict['Vendor'] = vendor
-                                                product_dict['vendor'] = vendor
+                                        # NEVER use Product Brand as vendor - they are different fields
+                                        vendor = (product_dict.get('Vendor/Supplier*') or 
+                                                 product_dict.get('Vendor/Supplier') or 
+                                                 product_dict.get('Vendor') or 
+                                                 product_dict.get('vendor') or 
+                                                 '')
+                                        # Ensure vendor is set (use empty string if not found, never use brand)
+                                        product_dict['Vendor'] = vendor
+                                        product_dict['vendor'] = vendor
                                         
                                         # CRITICAL: Use preferred_lineage (same pipeline as other queries)
                                         # Set all lineage fields to the same DB value for consistency
@@ -9529,16 +9525,15 @@ def get_available_tags():
                                     
                                     # CRITICAL FIX: Ensure vendor field is set correctly (not brand)
                                     # Frontend expects 'Vendor' or 'vendor', not 'Product Brand'
-                                    if 'Vendor' not in product_dict or not product_dict.get('Vendor'):
-                                        # Try to get vendor from various possible fields
-                                        vendor = (product_dict.get('Vendor/Supplier*') or 
-                                                 product_dict.get('Vendor/Supplier') or 
-                                                 product_dict.get('Vendor') or 
-                                                 product_dict.get('vendor') or 
-                                                 '')
-                                        if vendor:
-                                            product_dict['Vendor'] = vendor
-                                            product_dict['vendor'] = vendor
+                                    # NEVER use Product Brand as vendor - they are different fields
+                                    vendor = (product_dict.get('Vendor/Supplier*') or 
+                                             product_dict.get('Vendor/Supplier') or 
+                                             product_dict.get('Vendor') or 
+                                             product_dict.get('vendor') or 
+                                             '')
+                                    # Ensure vendor is set (use empty string if not found, never use brand)
+                                    product_dict['Vendor'] = vendor
+                                    product_dict['vendor'] = vendor
                                     
                                     # CRITICAL: Use get_product_lineage() for EXACT same lineage as output generation
                                     # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
