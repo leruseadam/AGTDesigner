@@ -38,6 +38,119 @@ if (isWindows) {
     verboseLog('Windows performance optimizations enabled');
 }
 
+// CRITICAL FIX: Keep splash animations running even when tab loses focus
+// This prevents animations from freezing, which looks unprofessional
+(function keepAnimationsRunning() {
+    // Force all animations to continue running
+    const forceAnimationsRunning = () => {
+        // Find all animated elements in splash screens
+        const animatedSelectors = [
+            '.loading-progress',
+            '.loading-progress::after',
+            '.logo-icon',
+            '.logo-icon::before',
+            '.dot',
+            '.status-dot',
+            '.background-pattern',
+            '.generation-splash-modal::before',
+            '.app-loading-logo',
+            '.app-loading-fill::after',
+            '.app-loading-dot',
+            '.app-loading-status-dot',
+            '.app-loading-splash::before',
+            '.excel-loading-icon',
+            '.excel-loading-dots span',
+            '.excel-loading-container',
+            '.excel-loading-splash::before'
+        ];
+        
+        // Apply to all splash-related animated elements
+        const allAnimatedElements = document.querySelectorAll([
+            '.loading-progress',
+            '.logo-icon',
+            '.dot',
+            '.status-dot',
+            '.background-pattern',
+            '.app-loading-logo',
+            '.app-loading-fill',
+            '.app-loading-dot',
+            '.app-loading-status-dot',
+            '.excel-loading-icon',
+            '.excel-loading-dots span',
+            '.excel-loading-container'
+        ].join(','));
+        
+        allAnimatedElements.forEach(el => {
+            if (el) {
+                const style = window.getComputedStyle(el);
+                const animationName = style.animationName;
+                if (animationName && animationName !== 'none') {
+                    el.style.animationPlayState = 'running';
+                    el.style.webkitAnimationPlayState = 'running';
+                }
+            }
+        });
+        
+        // Force pseudo-elements via style injection
+        const styleSheet = document.getElementById('force-animations-running') || (() => {
+            const style = document.createElement('style');
+            style.id = 'force-animations-running';
+            document.head.appendChild(style);
+            return style;
+        })();
+        
+        // Update stylesheet with forced running animations
+        styleSheet.textContent = `
+            .loading-progress,
+            .loading-progress::after,
+            .logo-icon,
+            .logo-icon::before,
+            .dot,
+            .status-dot,
+            .background-pattern,
+            .generation-splash-modal::before,
+            .app-loading-logo,
+            .app-loading-fill::after,
+            .app-loading-dot,
+            .app-loading-status-dot,
+            .app-loading-splash::before,
+            .excel-loading-icon,
+            .excel-loading-dots span,
+            .excel-loading-container,
+            .excel-loading-splash::before {
+                animation-play-state: running !important;
+                -webkit-animation-play-state: running !important;
+            }
+        `;
+    };
+    
+    // Apply immediately
+    forceAnimationsRunning();
+    
+    // Re-apply on visibility change (when tab becomes visible again)
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            forceAnimationsRunning();
+        }
+    });
+    
+    // Re-apply periodically to ensure animations stay running
+    setInterval(forceAnimationsRunning, 1000);
+    
+    // Re-apply when splash screens are shown
+    const observer = new MutationObserver(() => {
+        forceAnimationsRunning();
+    });
+    
+    // Observe for splash screen appearance
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+    });
+})();
+
 // CRITICAL: Prevent multiple simultaneous page reloads
 let _reloadInProgress = false;
 let _reloadTimeout = null;
@@ -2549,11 +2662,7 @@ const TagManager = {
                 }
             }
 
-            // If still no vendor, use brand as vendor
-            if (!vendor && brand) {
-                vendor = brand;
-            }
-
+            // CRITICAL FIX: Never use brand as vendor - available tags list should only show vendors
             // If still no vendor, use a default
             if (!vendor) {
                 vendor = 'Unknown Vendor';

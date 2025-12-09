@@ -4357,7 +4357,9 @@ canvas#lava-lamp-canvas {
     z-index: -1;
     background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
     background-size: 400% 400%;
-    animation: lava-placeholder-fade 3s ease-in-out infinite;
+    animation: lava-placeholder-fade 3s ease-in-out infinite !important;
+    animation-play-state: running !important;
+    will-change: background-position;
     pointer-events: none;
   }
 
@@ -6636,7 +6638,9 @@ canvas#lava-lamp-canvas {
     z-index: -1;
     background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
     background-size: 400% 400%;
-    animation: lava-placeholder-fade 3s ease-in-out infinite;
+    animation: lava-placeholder-fade 3s ease-in-out infinite !important;
+    animation-play-state: running !important;
+    will-change: background-position;
     pointer-events: none;
   }
 
@@ -6648,7 +6652,9 @@ canvas#lava-lamp-canvas {
       radial-gradient(circle at 60% 40%, rgba(102, 0, 255, 0.2) 0%, transparent 50%),
       linear-gradient(45deg, rgba(26, 0, 51, 0.9), rgba(51, 0, 102, 0.9), rgba(102, 0, 204, 0.9), rgba(153, 0, 255, 0.9));
     background-size: 200% 200%, 150% 150%, 180% 180%, 220% 220%, 100% 100%;
-    animation: excelLoadingBackground 30s ease-in-out infinite;
+    animation: excelLoadingBackground 30s ease-in-out infinite !important;
+    animation-play-state: running !important;
+    will-change: background-position, filter;
     padding: 80px 100px; /* Increased for BIGGER splash */
     max-width: 900px; /* Increased container size */
     border: 1px solid rgba(160, 132, 232, 0.5);
@@ -6669,7 +6675,9 @@ canvas#lava-lamp-canvas {
 
   .excel-loading-icon {
     margin-bottom: 40px; /* Increased for bigger spacing */
-    animation: excelIconPulse 4s ease-in-out infinite;
+    animation: excelIconPulse 4s ease-in-out infinite !important;
+    animation-play-state: running !important;
+    will-change: transform, opacity;
   }
 
   .excel-loading-icon svg {
@@ -6749,9 +6757,11 @@ canvas#lava-lamp-canvas {
     height: 16px; /* Increased from 12px */
     background: #00d4aa;
     border-radius: 50%;
-    animation: excelDotPulse 2.5s ease-in-out infinite;
+    animation: excelDotPulse 2.5s ease-in-out infinite !important;
+    animation-play-state: running !important;
+    will-change: transform, opacity;
   }
-
+  
   .excel-loading-dots span:nth-child(1) { animation-delay: 0s; }
   .excel-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
   .excel-loading-dots span:nth-child(3) { animation-delay: 0.4s; }

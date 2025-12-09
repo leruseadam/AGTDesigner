@@ -195,7 +195,9 @@ class GenerationSplash {
                 z-index: -1;
                 background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
                 background-size: 400% 400%;
-                animation: lava-placeholder-fade 3s ease-in-out infinite;
+                animation: lava-placeholder-fade 3s ease-in-out infinite !important;
+                animation-play-state: running !important;
+                will-change: background-position;
                 pointer-events: none;
             }
             
@@ -227,7 +229,9 @@ class GenerationSplash {
                     radial-gradient(circle at 20% 80%, #00d4aa 0%, transparent 50%),
                     radial-gradient(circle at 80% 20%, #00d4aa 0%, transparent 50%),
                     radial-gradient(circle at 40% 40%, #00d4aa 0%, transparent 50%);
-                animation: background-shift 8s ease-in-out infinite;
+                animation: background-shift 8s ease-in-out infinite !important;
+                animation-play-state: running !important;
+                will-change: transform;
             }
             
             @keyframes background-shift {
@@ -282,7 +286,9 @@ class GenerationSplash {
                 box-shadow: 
                     0 15px 35px rgba(0, 212, 170, 0.3),
                     0 0 0 1px rgba(0, 212, 170, 0.2);
-                animation: logo-float 3s ease-in-out infinite;
+                animation: logo-float 3s ease-in-out infinite !important;
+                animation-play-state: running !important;
+                will-change: transform;
                 position: relative;
             }
             
@@ -296,7 +302,9 @@ class GenerationSplash {
                 background: linear-gradient(45deg, #00d4aa, #0099cc, #00d4aa);
                 border-radius: 22px;
                 z-index: -1;
-                animation: logo-glow 2s ease-in-out infinite alternate;
+                animation: logo-glow 2s ease-in-out infinite alternate !important;
+                animation-play-state: running !important;
+                will-change: opacity;
             }
             
             @keyframes logo-float {
@@ -390,7 +398,9 @@ class GenerationSplash {
                 height: 100%;
                 background: linear-gradient(90deg, #00d4aa, #0099cc, #00d4aa);
                 border-radius: 3px;
-                animation: loading-animation 3s ease-in-out infinite;
+                animation: loading-animation 3s ease-in-out infinite !important;
+                animation-play-state: running !important;
+                will-change: width;
                 position: relative;
             }
             
@@ -402,7 +412,9 @@ class GenerationSplash {
                 right: 0;
                 bottom: 0;
                 background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-                animation: shimmer 2s ease-in-out infinite;
+                animation: shimmer 2s ease-in-out infinite !important;
+                animation-play-state: running !important;
+                will-change: transform;
             }
             
             @keyframes loading-animation {
@@ -436,7 +448,9 @@ class GenerationSplash {
                 height: 8px;
                 border-radius: 50%;
                 background: rgba(0, 212, 170, 0.6);
-                animation: dot-pulse 1.6s ease-in-out infinite both;
+                animation: dot-pulse 1.6s ease-in-out infinite both !important;
+                animation-play-state: running !important;
+                will-change: transform, opacity;
             }
             
             .dot:nth-child(1) { animation-delay: -0.32s; }
@@ -492,7 +506,9 @@ class GenerationSplash {
                 height: 6px;
                 border-radius: 50%;
                 background: #00d4aa;
-                animation: status-pulse 2s ease-in-out infinite;
+                animation: status-pulse 2s ease-in-out infinite !important;
+                animation-play-state: running !important;
+                will-change: opacity;
             }
             
             @keyframes status-pulse {

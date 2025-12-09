@@ -9448,9 +9448,8 @@ def get_available_tags():
                             
                             # PERFORMANCE: Use simpler query without strain join for faster loading
                             # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
-                            # CRITICAL: Only query products that match Excel file, limit to 2000 for performance
+                            # CRITICAL: Only query products that match Excel file when Excel is loaded
                             # If we have Excel tags, only get matching products from database
-                            limit_clause = "LIMIT 2000"
                             excel_product_names = []
                             name_filter = ""
                             
@@ -9462,7 +9461,6 @@ def get_available_tags():
                                     # Build WHERE clause to match Excel product names
                                     placeholders = ','.join(['?' for _ in excel_product_names])
                                     name_filter = f'AND p."Product Name*" IN ({placeholders})'
-                                    limit_clause = ""  # No limit when filtering by Excel names
                                     logging.info(f"Filtering database query to {len(excel_product_names)} Excel product names")
                             
                             lineage_query_join_by_name = f'''
@@ -9472,7 +9470,6 @@ def get_available_tags():
                                 LEFT JOIN strains s ON p.strain_id = s.id
                                 WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes') {name_filter}
                                 ORDER BY p.id DESC
-                                {limit_clause}
                             '''
                             
                             # Fallback query if strains table/join fails - use this first for speed
@@ -9482,7 +9479,6 @@ def get_available_tags():
                                 FROM products p
                                 WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes') {name_filter}
                                 ORDER BY p.id DESC
-                                {limit_clause}
                             '''
                             
                             # PERFORMANCE: Use simpler fallback query first (no join) for faster loading
