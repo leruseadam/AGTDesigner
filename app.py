@@ -8486,8 +8486,12 @@ def get_available_tags():
             except Exception as db_fast_err:
                 logging.warning(f"ULTRA-FAST DB path failed, falling back to Excel/standard flow: {db_fast_err}")
 
+        # Check if excel_only filter is requested - if so, skip fast paths to check for DB matches
+        excel_only_no_db = request.args.get('excel_only', '').lower() in ('1', 'true', 'yes')
+        
         # --- 2) EXCEL-ONLY FAST PATH (fallback when DB path not available) -------
-        if (fast_load and not prefer_db and not force_full_refresh and not cached_tags and (not product_db or not hasattr(product_db, 'get_available_tags_fast'))):
+        # Skip fast path if excel_only filter is requested (need to check for DB matches)
+        if (fast_load and not prefer_db and not force_full_refresh and not cached_tags and not excel_only_no_db and (not product_db or not hasattr(product_db, 'get_available_tags_fast'))):
             try:
                 excel_diag_start = time.time()
                 excel_processor = get_session_excel_processor()
@@ -8495,6 +8499,10 @@ def get_available_tags():
                     logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for initial fast_load request (no DB lineage alignment).")
                     tags_start = time.time()
                     excel_tags = excel_processor.get_available_tags()
+                    # Mark all Excel tags
+                    for tag in excel_tags:
+                        tag['_is_excel_tag'] = True
+                        tag['_has_db_match'] = False  # No DB check in fast path
                     tags_elapsed = (time.time() - tags_start) * 1000
                     logging.info(f"[PERF] excel_processor.get_available_tags() took {tags_elapsed:.1f}ms (rows={len(excel_tags)})")
                     safe_all_tags = make_json_safe(excel_tags)
@@ -9037,12 +9045,14 @@ def get_available_tags():
                     import traceback
                     logging.error(traceback.format_exc())
             
-            # CRITICAL FIX: If no Excel data and prefer_db not set, fall back to database instead of returning empty
+            # If no Excel data loaded, return empty instead of falling back to database
             if not all_tags:
-                logging.info("⚠️ No Excel data loaded - falling back to database products")
-                # Don't return empty - continue to database query below
-                prefer_db = True  # Force database query when Excel is empty
-                logging.info(f"✅ Set prefer_db=True to force database query")
+                logging.info("⚠️ No Excel data loaded - returning empty tag list (database not available without Excel file)")
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'excel-empty'
+                })
         
         # PERFORMANCE: Query database for lineage for ALL tags using optimized batch query
         # Database lineage is the source of truth and overrides Excel/cached lineage
@@ -9231,6 +9241,11 @@ def get_available_tags():
         # This ensures web version shows all database products, not just Excel products
         if all_tags and not prefer_db:
             excel_tags = all_tags.copy()  # Save Excel tags for merging
+            # Mark all existing tags as Excel tags if not already marked
+            for tag in all_tags:
+                if '_is_excel_tag' not in tag:
+                    tag['_is_excel_tag'] = True
+                    tag['_has_db_match'] = False  # Will be updated if database match found
             logging.debug(f"✅ Excel tags processed ({len(excel_tags)}), now merging database products...")
         
         # Database path (either because prefer_db is set, or Excel had no data, or we want to merge DB products)
@@ -9264,6 +9279,10 @@ def get_available_tags():
                 try:
                     excel_tags = excel_processor.get_available_tags()
                     logging.info(f"Excel processor returned {len(excel_tags)} tags")
+                    # Mark all Excel tags
+                    for tag in excel_tags:
+                        tag['_is_excel_tag'] = True
+                        tag['_has_db_match'] = False  # Will be updated if database match found
                     all_tags.extend(excel_tags)
                 except Exception as e:
                     logging.warning(f"Error getting Excel processor tags: {e}")
@@ -9273,29 +9292,37 @@ def get_available_tags():
             excel_tags = all_tags.copy()
             logging.info(f"Using {len(excel_tags)} Excel tags already in all_tags for merging with database")
         
-        # 2. Get products from database - ALWAYS run this to merge database products with Excel tags
-        # This ensures web version shows all database products, not just Excel products
+        # 2. Get products from database - only when Excel data exists or prefer_db is set
+        # Database should only be available when Excel file is loaded
         database_tags = []
-        try:
-            store_name = get_current_store_name()
-            product_db = get_product_database(store_name)
-            logging.info(f"Got product database: {product_db}")
-            if product_db:
-                logging.info(f"📦 FRESH DB QUERY: path={product_db.db_path} store={getattr(product_db, '_store_name', 'unknown')}")
-                
-                # SIMPLIFIED: Use the existing get_all_products() method instead of raw SQL
-                # But skip it for now and use raw SQL directly - get_all_products() may be too slow
-                logging.info("🔄 Using direct SQL query (skipping get_all_products() for performance)")
-                # Fall back to raw SQL query directly
-                import sqlite3
-                # Note: os is already imported at top of file, don't re-import here
-                if os.path.exists(product_db.db_path):
-                    logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
-                    with db_connection(product_db.db_path) as conn:
-                        cursor = conn.cursor()
-                        
-                        # First check if products table exists
-                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+        # Only query database if we have Excel tags or prefer_db is explicitly set
+        if not prefer_db and len(all_tags) == 0:
+            logging.info("⚠️ No Excel data and prefer_db not set - skipping database query")
+        else:
+            try:
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                logging.info(f"Got product database: {product_db}")
+                if not product_db:
+                    logging.error(f"product_db is None or False - cannot query database")
+                elif not os.path.exists(product_db.db_path):
+                    logging.error(f"Database file does not exist: {product_db.db_path}")
+                else:
+                    logging.info(f"📦 FRESH DB QUERY: path={product_db.db_path} store={getattr(product_db, '_store_name', 'unknown')}")
+                    
+                    # SIMPLIFIED: Use the existing get_all_products() method instead of raw SQL
+                    # But skip it for now and use raw SQL directly - get_all_products() may be too slow
+                    logging.info("🔄 Using direct SQL query (skipping get_all_products() for performance)")
+                    # Fall back to raw SQL query directly
+                    import sqlite3
+                    # Note: os is already imported at top of file, don't re-import here
+                    if os.path.exists(product_db.db_path):
+                        logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
+                        with db_connection(product_db.db_path) as conn:
+                            cursor = conn.cursor()
+                            
+                            # First check if products table exists
+                            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                         if not cursor.fetchone():
                             logging.error(f"Products table not found in database at {product_db.db_path}")
                             # If store-specific database doesn't have products table, fall back to main database
@@ -9534,14 +9561,10 @@ def get_available_tags():
                             ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
                             hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
                             logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
-                else:
-                    logging.error(f"Database file does not exist: {product_db.db_path}")
-            else:
-                logging.error(f"product_db is None or False - cannot query database")
-        except Exception as e:
-            logging.error(f"Error getting database products: {e}")
-            logging.error(traceback.format_exc())
-            database_tags = []
+            except Exception as e:
+                logging.error(f"Error getting database products: {e}")
+                logging.error(traceback.format_exc())
+                database_tags = []
         
         # CRITICAL: If prefer_db is True but database_tags is empty, log a warning
         if prefer_db and len(database_tags) == 0:
@@ -9555,9 +9578,9 @@ def get_available_tags():
                 pass
         
         # 3. Combine and deduplicate products
-        # CRITICAL FIX: Always use database if we have no Excel tags, regardless of prefer_db flag
-        # If we have database tags and no Excel tags, use database
-        use_database_only = prefer_db or (len(all_tags) == 0 and len(database_tags) > 0)
+        # Only use database when prefer_db is explicitly set - don't auto-fallback when no Excel tags
+        # Database should only be available when Excel file is loaded
+        use_database_only = prefer_db
         
         logging.info(f"Tag combination decision: prefer_db={prefer_db}, all_tags={len(all_tags)}, database_tags={len(database_tags)}, use_database_only={use_database_only}")
         
@@ -9722,10 +9745,15 @@ def get_available_tags():
             
             # CRITICAL FIX: Update ALL Excel tags with database lineage if database product exists
             # Use fuzzy matching to find products even if names don't match exactly
+            # Track which Excel tags have database matches for filtering
+            excel_tags_with_db_match = set()
             for excel_tag in all_tags:
                 product_name = excel_tag.get('Product Name*', '')
                 if not product_name:
                     continue
+                
+                # Mark as Excel-derived tag
+                excel_tag['_is_excel_tag'] = True
                 
                 # Try exact match first
                 db_lineage_data = None
@@ -9764,6 +9792,9 @@ def get_available_tags():
                         logging.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {method_err}")
                 
                 if db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
+                    # Mark as having database match
+                    excel_tags_with_db_match.add(product_name)
+                    excel_tag['_has_db_match'] = True
                     # Use get_product_lineage() result (same as output generation)
                     db_lineage_clean = str(db_lineage_from_method).strip().upper()
                     old_lineage = str(excel_tag.get('Lineage', '') or excel_tag.get('currentLineage', '') or excel_tag.get('canonical_lineage', '')).strip().upper()
@@ -9788,6 +9819,9 @@ def get_available_tags():
                         logging.debug(f"✅ UI LINEAGE UPDATE (get_product_lineage): '{product_name}' - '{old_lineage}' → '{db_lineage_clean}'")
                     continue  # Skip fallback lookup since we got lineage from get_product_lineage()
                 elif db_lineage_data:
+                    # Mark as having database match
+                    excel_tags_with_db_match.add(product_name)
+                    excel_tag['_has_db_match'] = True
                     # Fallback: Update Excel tag with database lineage from lookup (database is source of truth)
                     old_lineage = str(excel_tag.get('Lineage', '') or excel_tag.get('currentLineage', '') or excel_tag.get('canonical_lineage', '')).strip().upper()
                     db_lineage_clean = str(db_lineage_data['Lineage']).strip().upper()
@@ -9821,6 +9855,9 @@ def get_available_tags():
                 if product_name and product_name not in existing_product_names:
                     # Process database product to ensure it has proper weight formatting
                     processed_db_tag = process_database_product_for_api(db_tag)
+                    
+                    # Mark as database tag (not Excel)
+                    processed_db_tag['_is_excel_tag'] = False
                     
                     # CRITICAL FIX: Ensure database lineage fields are preserved after processing
                     db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
@@ -9918,6 +9955,18 @@ def get_available_tags():
                 
                 if final_lineage_check_count > 0:
                     logging.info(f"✅ FINAL CHECK: Set database lineage on {final_lineage_check_count} tags that were missing it")
+        
+        # Filter to show only Excel-derived tags without database matches if requested
+        if excel_only_no_db:
+            # Filter to only Excel tags that don't have database matches
+            original_count = len(all_tags)
+            filtered_tags = []
+            for tag in all_tags:
+                # Only include Excel tags that don't have database matches
+                if tag.get('_is_excel_tag', False) and not tag.get('_has_db_match', False):
+                    filtered_tags.append(tag)
+            all_tags = filtered_tags
+            logging.info(f"🔍 EXCEL_ONLY filter: Showing {len(all_tags)} Excel-derived tags without database matches (filtered from {original_count} total)")
         
         safe_all_tags = make_json_safe(all_tags)
         # Cache the results for faster subsequent requests (unless nocache requested)
