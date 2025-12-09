@@ -8447,6 +8447,17 @@ def get_available_tags():
         #    fall back to Excel-only tags without database lineage alignment.
         #    This keeps something on screen quickly while DB ingest catches up.
 
+        # CRITICAL: If no file is uploaded, return empty tags (unless prefer_db is explicitly set)
+        if not session_file_path or not file_exists:
+            if not prefer_db:
+                logging.info("⚠️ No uploaded file in session - returning empty tags (use prefer_db=1 to load database tags)")
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'no-file',
+                    'message': 'No Excel file uploaded. Please upload a file to see tags.'
+                })
+        
         # --- 1) DB-FIRST FAST PATH -------------------------------------------------
         try:
             store_name = get_current_store_name()
@@ -8459,7 +8470,8 @@ def get_available_tags():
         # the database already holds the canonical lineage values. It's safe and
         # desirable to serve tags directly from DB here instead of falling back
         # to the slower Excel/lineage-alignment path.
-        if fast_load and not prefer_db and product_db and hasattr(product_db, 'get_available_tags_fast'):
+        # CRITICAL: Only use DB fast path if prefer_db is set OR if file is uploaded
+        if fast_load and (prefer_db or (session_file_path and file_exists)) and product_db and hasattr(product_db, 'get_available_tags_fast'):
             try:
                 db_fast_start = time.time()
                 logging.info("⚡ ULTRA-FAST DB: Using ProductDatabase.get_available_tags_fast() for available-tags")
@@ -8541,7 +8553,8 @@ def get_available_tags():
         # per-file cached tags. The cache key already includes the uploaded file
         # path, so using it here will not leak tags from a previous upload.
         # This makes repeated fast_load retries after upload much cheaper.
-        if cached_tags and (not nocache or fast_load):
+        # CRITICAL: Don't serve cached tags if no file is uploaded (unless prefer_db is set)
+        if cached_tags and (not nocache or fast_load) and (prefer_db or (session_file_path and file_exists)):
             # SUPER FAST PATH: If this is a fast-load request and we have cached tags,
             # return them immediately without any additional database work.
             # Full lineage alignment will still be done later by non-fast-load or
@@ -9295,8 +9308,17 @@ def get_available_tags():
         # 2. Get products from database - only when Excel data exists or prefer_db is set
         # Database should only be available when Excel file is loaded
         database_tags = []
-        # Only query database if we have Excel tags or prefer_db is explicitly set
+        # CRITICAL: Only query database if we have Excel tags or prefer_db is explicitly set
+        # Also check that a file is uploaded (unless prefer_db is set)
         if not prefer_db and len(all_tags) == 0:
+            if not session_file_path or not file_exists:
+                logging.info("⚠️ No Excel file uploaded and prefer_db not set - returning empty tags")
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'no-file',
+                    'message': 'No Excel file uploaded. Please upload a file to see tags.'
+                })
             logging.info("⚠️ No Excel data and prefer_db not set - skipping database query")
         else:
             try:
