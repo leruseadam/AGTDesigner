@@ -9392,6 +9392,20 @@ def get_available_tags():
                                     
                                     for row in rows:
                                         product_dict = dict(zip(columns, row))
+                                        
+                                        # CRITICAL FIX: Ensure vendor field is set correctly (not brand)
+                                        # Frontend expects 'Vendor' or 'vendor', not 'Product Brand'
+                                        if 'Vendor' not in product_dict or not product_dict.get('Vendor'):
+                                            # Try to get vendor from various possible fields
+                                            vendor = (product_dict.get('Vendor/Supplier*') or 
+                                                     product_dict.get('Vendor/Supplier') or 
+                                                     product_dict.get('Vendor') or 
+                                                     product_dict.get('vendor') or 
+                                                     '')
+                                            if vendor:
+                                                product_dict['Vendor'] = vendor
+                                                product_dict['vendor'] = vendor
+                                        
                                         # CRITICAL: Use preferred_lineage (same pipeline as other queries)
                                         # Set all lineage fields to the same DB value for consistency
                                         pref_lin = product_dict.pop('preferred_lineage', None)
@@ -9434,14 +9448,31 @@ def get_available_tags():
                             
                             # PERFORMANCE: Use simpler query without strain join for faster loading
                             # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
-                            # Removed LIMIT to show all products
+                            # CRITICAL: Only query products that match Excel file, limit to 2000 for performance
+                            # If we have Excel tags, only get matching products from database
+                            limit_clause = "LIMIT 2000"
+                            excel_product_names = []
+                            name_filter = ""
+                            
+                            # Check if we have Excel tags to filter by
+                            if 'excel_tags' in locals() and excel_tags and len(excel_tags) > 0:
+                                # Get product names from Excel to match against database
+                                excel_product_names = [tag.get('Product Name*') or tag.get('ProductName', '') for tag in excel_tags if tag.get('Product Name*') or tag.get('ProductName')]
+                                if excel_product_names:
+                                    # Build WHERE clause to match Excel product names
+                                    placeholders = ','.join(['?' for _ in excel_product_names])
+                                    name_filter = f'AND p."Product Name*" IN ({placeholders})'
+                                    limit_clause = ""  # No limit when filtering by Excel names
+                                    logging.info(f"Filtering database query to {len(excel_product_names)} Excel product names")
+                            
                             lineage_query_join_by_name = f'''
                                 SELECT {quoted_columns}, 
                                        COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                 FROM products p
                                 LEFT JOIN strains s ON p.strain_id = s.id
-                                WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes')
+                                WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes') {name_filter}
                                 ORDER BY p.id DESC
+                                {limit_clause}
                             '''
                             
                             # Fallback query if strains table/join fails - use this first for speed
@@ -9449,8 +9480,9 @@ def get_available_tags():
                                 SELECT {quoted_columns}, 
                                        p."Lineage" AS preferred_lineage
                                 FROM products p
-                                WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes')
+                                WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes') {name_filter}
                                 ORDER BY p.id DESC
+                                {limit_clause}
                             '''
                             
                             # PERFORMANCE: Use simpler fallback query first (no join) for faster loading
@@ -9460,14 +9492,20 @@ def get_available_tags():
                             
                             # Try fallback first (faster, no join)
                             try:
-                                cursor.execute(lineage_query_fallback)
+                                if excel_product_names and name_filter:
+                                    cursor.execute(lineage_query_fallback, excel_product_names)
+                                else:
+                                    cursor.execute(lineage_query_fallback)
                                 rows = cursor.fetchall()
                                 columns = columns_to_query + ['preferred_lineage']
                                 logging.info(f"✅ Fast query (no join) returned {len(rows)} rows")
                             except Exception as fallback_err:
                                 logging.warning(f"Fallback query failed, trying with strain join: {fallback_err}")
                                 try:
-                                    cursor.execute(lineage_query_join_by_name)
+                                    if excel_product_names and name_filter:
+                                        cursor.execute(lineage_query_join_by_name, excel_product_names)
+                                    else:
+                                        cursor.execute(lineage_query_join_by_name)
                                     rows = cursor.fetchall()
                                     columns = columns_to_query + ['preferred_lineage']
                                     logging.info(f"✅ Query with strain join returned {len(rows)} rows")
@@ -9492,6 +9530,19 @@ def get_available_tags():
                                     logging.debug(f"  Processed {i}/{len(rows)} rows in {elapsed:.2f}s...")
                                 try:
                                     product_dict = dict(zip(columns, row))
+                                    
+                                    # CRITICAL FIX: Ensure vendor field is set correctly (not brand)
+                                    # Frontend expects 'Vendor' or 'vendor', not 'Product Brand'
+                                    if 'Vendor' not in product_dict or not product_dict.get('Vendor'):
+                                        # Try to get vendor from various possible fields
+                                        vendor = (product_dict.get('Vendor/Supplier*') or 
+                                                 product_dict.get('Vendor/Supplier') or 
+                                                 product_dict.get('Vendor') or 
+                                                 product_dict.get('vendor') or 
+                                                 '')
+                                        if vendor:
+                                            product_dict['Vendor'] = vendor
+                                            product_dict['vendor'] = vendor
                                     
                                     # CRITICAL: Use get_product_lineage() for EXACT same lineage as output generation
                                     # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
