@@ -157,6 +157,27 @@
                 return; // Exit early - we have cached data
             }
             
+            // CRITICAL: Check if a file has been uploaded before loading tags
+            const fileInfoText = document.getElementById('fileInfoText');
+            const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded') && fileInfoText.textContent.trim() !== '';
+            
+            if (!hasUploadedFile) {
+                console.log('⚠️ No file uploaded - skipping tag load');
+                // Hide any loading splash
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                // Initialize empty state
+                if (this.initializeEmptyState) {
+                    this.initializeEmptyState();
+                }
+                return; // Exit early - don't load tags
+            }
+            
             // No cache available - show loading UI
             console.log('⏳ No cache found - loading from server...');
             // CRITICAL FIX: Don't show splash if TagManager.init already showed it

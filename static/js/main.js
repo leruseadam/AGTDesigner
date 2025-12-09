@@ -7607,6 +7607,15 @@ const TagManager = {
     // while the full /api/available-tags endpoint continues to load in the background.
     async _prefetchLiteAvailableTags(savedScrollPosition) {
         try {
+            // CRITICAL: Check if a file has been uploaded before loading tags
+            const fileInfoText = document.getElementById('fileInfoText');
+            const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded') && fileInfoText.textContent.trim() !== '';
+            
+            if (!hasUploadedFile) {
+                verboseLog('⚠️ No file uploaded - skipping lite tags prefetch');
+                return;
+            }
+            
             // If we already rendered lite or full tags, don't overwrite them
             if (this._liteTagsRendered || (Array.isArray(this.state.tags) && this.state.tags.length > 0)) {
                 return;
@@ -7688,6 +7697,15 @@ const TagManager = {
     },
 
     async fetchAndUpdateAvailableTags() {
+        // CRITICAL: Check if a file has been uploaded before loading tags
+        const fileInfoText = document.getElementById('fileInfoText');
+        const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded') && fileInfoText.textContent.trim() !== '';
+        
+        if (!hasUploadedFile) {
+            console.log('⚠️ No file uploaded - skipping tag fetch');
+            return false;
+        }
+        
         // CRITICAL FIX: Prevent multiple simultaneous calls to avoid restarts
         if (this._fetchingAvailableTags) {
             console.log('⏸️ Tag fetch already in progress, skipping duplicate call');
