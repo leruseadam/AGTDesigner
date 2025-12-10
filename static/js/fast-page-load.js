@@ -11,20 +11,23 @@
     
     // CRITICAL: Clear cache if no file uploaded
     // Prevents showing stale cached data from previous sessions
+    // NOTE: Only clear sessionStorage, keep localStorage for faster reloads
     const fileInfoText = document.getElementById('fileInfoText');
     const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded');
-    if (!hasUploadedFile && window.sessionStorage) {
-        console.log('🗑️ No uploaded file detected - clearing stale cache');
-        // Clear all tag-related cache entries
-        const keysToRemove = [];
-        for (let i = 0; i < sessionStorage.length; i++) {
-            const key = sessionStorage.key(i);
-            if (key && key.includes('agt_available_tags')) {
-                keysToRemove.push(key);
+    if (!hasUploadedFile) {
+        console.log('🗑️ No uploaded file detected - clearing stale sessionStorage cache (keeping localStorage)');
+        // Clear all tag-related cache entries from sessionStorage only
+        if (window.sessionStorage) {
+            const keysToRemove = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key && key.includes('agt_available_tags')) {
+                    keysToRemove.push(key);
+                }
             }
+            keysToRemove.forEach(key => sessionStorage.removeItem(key));
+            console.log(`✅ Cleared ${keysToRemove.length} stale sessionStorage cache entries`);
         }
-        keysToRemove.forEach(key => sessionStorage.removeItem(key));
-        console.log(`✅ Cleared ${keysToRemove.length} stale cache entries`);
     }
     
     // Store original checkForExistingData function
@@ -79,6 +82,9 @@
             
             if (cachedTags && cachedTags.length > 0) {
                 console.log(`⚡ INSTANT CACHE HIT: ${cachedTags.length} tags available`);
+                // CRITICAL FIX: Preserve selected tags before rendering
+                const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
+                
                 // Render cached tags IMMEDIATELY
                 this.state.tags = [...cachedTags];
                 this.state.originalTags = [...cachedTags];
@@ -91,6 +97,30 @@
                         this._updateAvailableTags(cachedTags, null);
                     }
                     console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
+                    
+                    // CRITICAL FIX: Restore selected tags after rendering
+                    if (savedSelectedTags.length > 0) {
+                        this.state.persistentSelectedTags = [...savedSelectedTags];
+                        this.state.selectedTags = new Set(savedSelectedTags);
+                        // Restore checkboxes
+                        requestAnimationFrame(() => {
+                            savedSelectedTags.forEach(tagName => {
+                                const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+                                checkboxes.forEach(cb => {
+                                    if (!cb.checked) {
+                                        cb.checked = true;
+                                    }
+                                });
+                            });
+                            // Restore selected tags display
+                            if (this.getSelectedTagObjects && this.updateSelectedTags) {
+                                const selectedTagObjects = this.getSelectedTagObjects();
+                                if (selectedTagObjects.length > 0) {
+                                    this.updateSelectedTags(selectedTagObjects);
+                                }
+                            }
+                        });
+                    }
                     
                     // Hide splash immediately
                     if (this.hideActionSplash) {
@@ -109,6 +139,17 @@
                     this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
                 ]).then(() => {
                     console.log('✅ Background: Selected tags and filters loaded');
+                    // CRITICAL FIX: Ensure selected tags are still preserved after background fetch
+                    if (savedSelectedTags.length > 0 && this.state.persistentSelectedTags.length === 0) {
+                        this.state.persistentSelectedTags = [...savedSelectedTags];
+                        this.state.selectedTags = new Set(savedSelectedTags);
+                        if (this.getSelectedTagObjects && this.updateSelectedTags) {
+                            const selectedTagObjects = this.getSelectedTagObjects();
+                            if (selectedTagObjects.length > 0) {
+                                this.updateSelectedTags(selectedTagObjects);
+                            }
+                        }
+                    }
                 }).catch(err => {
                     console.warn('⚠️ Background load error (non-critical):', err);
                 });
@@ -118,18 +159,237 @@
             
             // No cache available - show loading UI
             console.log('⏳ No cache found - loading from server...');
-            if (typeof AppLoadingSplash !== 'undefined') {
-                AppLoadingSplash.updateProgress(50, 'Loading tags...');
+            // CRITICAL FIX: Don't show splash if TagManager.init already showed it
+            // Only show if we're not already initializing
+            if (!this.state || !this.state.initialized) {
+                if (typeof AppLoadingSplash !== 'undefined' && !AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.updateProgress(50, 'Loading tags...');
+                }
+
+                // Show loading splash while fetching (only if not already shown)
+                if (this.showActionSplash && typeof this.showActionSplash === 'function') {
+                    this.showActionSplash('Loading tags from server...');
+                }
             }
-            
-            // Show loading splash while fetching
-            if (this.showActionSplash) {
-                this.showActionSplash('Loading tags from server...');
-            }
-            
-            // Load data from server
+
+            // OPTIMIZED: Try direct /api/available-tags FIRST (it's faster than /api/initial-data)
+            // Then fall back to /api/initial-data if needed
+            console.log('⚡ Trying fast /api/available-tags endpoint first...');
+            let timeoutId = null;
             try {
-                const response = await fetch('/api/initial-data?fast_load=1');
+                // CRITICAL FIX: Add timeout to prevent hangs - 10 seconds max
+                const controller = new AbortController();
+                timeoutId = setTimeout(() => {
+                    controller.abort();
+                    console.warn('⚠️ /api/available-tags timeout after 10 seconds, falling back...');
+                }, 10000);
+                
+                const quickResponse = await fetch('/api/available-tags?fast_load=1', {
+                    signal: controller.signal
+                });
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                
+                // CRITICAL FIX: Handle non-OK responses (including 503, 202) gracefully - fall through to fallback
+                if (!quickResponse.ok || quickResponse.status === 503 || quickResponse.status === 202) {
+                    // 503 = Service Unavailable (memory high, processing, etc.)
+                    // 202 = Accepted (still processing or memory high - use fallback)
+                    const statusText = quickResponse.statusText || 'Service unavailable';
+                    console.warn(`⚠️ /api/available-tags returned ${quickResponse.status} (${statusText}), falling back to /api/initial-data`);
+                    // Don't throw yet - try to parse response to get message
+                    try {
+                        const errorData = await quickResponse.json();
+                        if (errorData.message) {
+                            console.warn(`   Message: ${errorData.message}`);
+                        }
+                    } catch (e) {
+                        // Ignore JSON parse errors
+                    }
+                    throw new Error(`Service unavailable (${quickResponse.status}: ${statusText})`);
+                }
+                
+                if (quickResponse.ok) {
+                    const quickData = await quickResponse.json();
+                    if (quickData && quickData.tags && Array.isArray(quickData.tags) && quickData.tags.length > 0) {
+                        console.log(`✅ Fast load successful: ${quickData.tags.length} tags from /api/available-tags`);
+
+                        // Save to cache for next time
+                        if (this.saveAvailableTagsToCache) {
+                            this.saveAvailableTagsToCache(quickData.tags);
+                        }
+
+                        // Update state
+                        this.state.tags = [...quickData.tags];
+                        this.state.originalTags = [...quickData.tags];
+
+                        // Render immediately
+                        if (this._updateAvailableTags) {
+                            this._updateAvailableTags(quickData.tags, null);
+                        }
+
+                        // Hide splash
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }
+
+                        // Load selected tags and filters in background
+                        Promise.allSettled([
+                            this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
+                            this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
+                        ]).then(() => {
+                            console.log('✅ Background: Selected tags and filters loaded');
+                        }).catch(err => {
+                            console.warn('⚠️ Background load error (non-critical):', err);
+                        });
+
+                        return; // Success! Exit early
+                    }
+                }
+            } catch (quickError) {
+                // Clear timeout if it was set
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                
+                // CRITICAL FIX: Hide splash on timeout/error to prevent UI hang
+                if (quickError.name === 'AbortError' || quickError.message?.includes('timeout')) {
+                    console.warn('⚠️ Fast /api/available-tags timed out, falling back to /api/initial-data');
+                    // Hide splash immediately on timeout
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                } else {
+                console.warn('⚠️ Fast /api/available-tags failed, falling back to /api/initial-data:', quickError);
+                }
+            }
+
+            // FALLBACK: If /api/available-tags didn't work, try /api/initial-data with timeout
+            try {
+                console.log('⏳ Trying /api/initial-data as fallback...');
+                // CRITICAL FIX: Reduced timeout to 5 seconds - if server takes longer, use direct API fallback
+                // This makes the page feel much faster
+                const fetchPromise = fetch('/api/initial-data?fast_load=1&stream=1');
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Server timeout')), 5000)
+                );
+
+                let response;
+                try {
+                    response = await Promise.race([fetchPromise, timeoutPromise]);
+                } catch (timeoutError) {
+                    console.warn('⚠️ Server fetch timeout after 5 seconds, using fast fallback');
+                    console.log('📊 Current state - tags:', this.state?.tags?.length || 0, 'hasExistingTags:', Array.isArray(this.state?.tags) && this.state.tags.length > 0);
+
+                    // CRITICAL FIX: Don't restart - just hide splash and show error
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                    // Only fallback if we have no tags at all
+                    const hasExistingTags = Array.isArray(this.state?.tags) && this.state.tags.length > 0;
+                    console.log('🔄 Attempting fallback to originalCheckForExistingData...', {
+                        hasExistingTags,
+                        hasFallbackFunction: !!originalCheckForExistingData
+                    });
+                    if (!hasExistingTags) {
+                        // Try direct API call to /api/available-tags as last resort
+                        console.log('⚡ Attempting direct /api/available-tags call as emergency fallback');
+                        let emergencyTimeoutId = null;
+                        try {
+                            // CRITICAL FIX: Add timeout to emergency fallback to prevent hangs
+                            const emergencyController = new AbortController();
+                            emergencyTimeoutId = setTimeout(() => {
+                                emergencyController.abort();
+                                console.warn('⚠️ Emergency /api/available-tags timeout after 8 seconds');
+                            }, 8000);
+                            
+                            const directResponse = await fetch('/api/available-tags?nocache=1&fast_load=1', {
+                                signal: emergencyController.signal
+                            });
+                            if (emergencyTimeoutId) {
+                                clearTimeout(emergencyTimeoutId);
+                                emergencyTimeoutId = null;
+                            }
+                            
+                            if (directResponse.ok) {
+                                const tagsData = await directResponse.json();
+                                if (tagsData && tagsData.tags && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
+                                    console.log(`✅ Emergency fallback successful: loaded ${tagsData.tags.length} tags`);
+
+                                    // Update state
+                                    this.state.tags = [...tagsData.tags];
+                                    this.state.originalTags = [...tagsData.tags];
+
+                                    // Save to cache
+                                    if (this.saveAvailableTagsToCache) {
+                                        this.saveAvailableTagsToCache(tagsData.tags);
+                                    }
+
+                                    // Render immediately
+                                    if (this._updateAvailableTags) {
+                                        this._updateAvailableTags(tagsData.tags, null);
+                                    }
+
+                                    // Hide splash
+                                    if (this.hideActionSplash) {
+                                        this.hideActionSplash();
+                                    }
+                                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                                        AppLoadingSplash.stopAutoAdvance();
+                                        AppLoadingSplash.complete();
+                                    }
+
+                                    return;
+                                }
+                            }
+                        } catch (directError) {
+                            // Clear timeout if it was set
+                            if (emergencyTimeoutId) {
+                                clearTimeout(emergencyTimeoutId);
+                                emergencyTimeoutId = null;
+                            }
+                            
+                            // CRITICAL FIX: Hide splash on timeout/error
+                            if (directError.name === 'AbortError' || directError.message?.includes('timeout')) {
+                                console.error('❌ Direct /api/available-tags fallback timed out');
+                                if (this.hideActionSplash) {
+                                    this.hideActionSplash();
+                                }
+                                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                                    AppLoadingSplash.stopAutoAdvance();
+                                    AppLoadingSplash.complete();
+                                }
+                            } else {
+                            console.error('❌ Direct /api/available-tags fallback failed:', directError);
+                            }
+                        }
+
+                        // If direct fallback failed, try originalCheckForExistingData
+                        if (originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
+                            console.log('⚡ Calling originalCheckForExistingData as final fallback');
+                            await originalCheckForExistingData.call(this);
+                        } else {
+                            console.warn('⚠️ All fallbacks exhausted - no tags loaded');
+                        }
+                    } else {
+                        console.warn('⚠️ Skipping fallback - already have tags');
+                    }
+                    return;
+                }
                 
                 if (response.ok) {
                     const data = await response.json();
@@ -247,6 +507,60 @@
         
         console.log('⚡ Page load optimization active');
     }
+    
+    // ULTRA-FAST RELOAD: Check cache immediately on script load (before DOM ready)
+    // This allows instant tag display even before TagManager is fully initialized
+    function earlyCacheCheck() {
+        try {
+            // Try to find any cached tags immediately
+            const storageBackends = [];
+            if (window.localStorage) storageBackends.push({ name: 'localStorage', storage: localStorage });
+            if (window.sessionStorage) storageBackends.push({ name: 'sessionStorage', storage: sessionStorage });
+            
+            if (storageBackends.length > 0) {
+                // Search for any valid cache keys
+                const allKeys = [];
+                for (const backend of storageBackends) {
+                    for (let i = 0; i < backend.storage.length; i++) {
+                        const key = backend.storage.key(i);
+                        if (key && key.startsWith('agt_available_tags_')) {
+                            allKeys.push({ key, storage: backend.storage });
+                        }
+                    }
+                }
+                
+                if (allKeys.length > 0) {
+                    console.log(`⚡ Early cache check: Found ${allKeys.length} potential cache keys`);
+                    // Try to find a valid cache entry
+                    for (const { key, storage } of allKeys) {
+                        try {
+                            const raw = storage.getItem(key);
+                            if (raw) {
+                                const payload = JSON.parse(raw);
+                                if (payload && Array.isArray(payload.tags) && payload.tags.length > 0) {
+                                    const age = Date.now() - (payload.timestamp || 0);
+                                    const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+                                    if (age <= CACHE_TTL_MS) {
+                                        console.log(`⚡ Early cache HIT: Found ${payload.tags.length} tags in ${storage === localStorage ? 'localStorage' : 'sessionStorage'}`);
+                                        // Store in window for TagManager to pick up
+                                        window._earlyCacheFound = { key, tags: payload.tags, storage: storage === localStorage ? 'localStorage' : 'sessionStorage' };
+                                        break;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            continue;
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('Early cache check failed:', error);
+        }
+    }
+    
+    // Run early cache check immediately
+    earlyCacheCheck();
     
     // Run optimization when DOM is ready
     if (document.readyState === 'loading') {

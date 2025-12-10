@@ -25,8 +25,16 @@ else:
 
 # Set environment variables for PythonAnywhere optimization
 os.environ['PYTHONANYWHERE_SITE'] = 'True'
+os.environ['PYTHONANYWHERE_DOMAIN'] = 'pythonanywhere.com'
 os.environ['FLASK_ENV'] = 'production'
 os.environ['FLASK_DEBUG'] = 'False'
+
+# CRITICAL PERFORMANCE OPTIMIZATIONS for PythonAnywhere
+os.environ['FORCE_FAST_LOAD'] = 'True'  # Always use fast database queries
+os.environ['DISABLE_STARTUP_FILE_LOADING'] = 'True'  # Skip heavy Excel parsing on startup
+os.environ['MAX_MEMORY_MB'] = '450'  # Allow more memory before cleanup
+os.environ['CACHE_SIZE_LIMIT'] = '100'  # Increase cache size for better hit rates
+os.environ['BATCH_SIZE_LIMIT'] = '500'  # Larger batches for faster processing
 
 # Configure logging to prevent verbose output and "Message too long" errors
 logging.basicConfig(
@@ -50,6 +58,9 @@ try:
         TEMPLATES_AUTO_RELOAD=False,
         SEND_FILE_MAX_AGE_DEFAULT=31536000,  # 1 year cache for static files
         MAX_CONTENT_LENGTH=50 * 1024 * 1024,  # 50MB max file size
+        # Performance optimizations
+        JSON_SORT_KEYS=False,  # Don't sort JSON keys (faster)
+        JSONIFY_PRETTYPRINT_REGULAR=False,  # Compact JSON (faster)
     )
     
     logging.info("WSGI application loaded successfully with recovered database")

@@ -46,8 +46,10 @@ class DragAndDropManager {
     }
 
     setupTagDragAndDrop() {
-        // Only setup for selected tags (reordering only)
+        // PERFORMANCE: Only setup drag for selected tags - available tags don't need drag handles
+        // This prevents scanning through thousands of tags unnecessarily
         this.setupDragZone('#selectedTags');
+        // this.setupDragZone('#availableTags'); // DISABLED - not needed, improves performance
         
         // Add checkbox change prevention during drag
         this.setupCheckboxProtection();
@@ -324,11 +326,31 @@ class DragAndDropManager {
             console.log('Drag start coordinates:', this.dragStartCoords);
         }
         
-        // Store original index and element reference
-        const container = document.querySelector('#selectedTags');
-        const tagRows = this.getDraggableTagItems(container);
-        this.originalIndex = tagRows.indexOf(tagRow);
-        console.log('Original index:', this.originalIndex);
+        // Store original container and index
+        const selectedContainer = document.querySelector('#selectedTags');
+        const availableContainer = document.querySelector('#availableTags');
+        
+        // Determine which container the tag is in
+        let sourceContainer = null;
+        let sourceContainerId = null;
+        
+        if (selectedContainer && selectedContainer.contains(tagRow)) {
+            sourceContainer = selectedContainer;
+            sourceContainerId = 'selectedTags';
+        } else if (availableContainer && availableContainer.contains(tagRow)) {
+            sourceContainer = availableContainer;
+            sourceContainerId = 'availableTags';
+        }
+        
+        this.sourceContainer = sourceContainer;
+        this.sourceContainerId = sourceContainerId;
+        
+        // Store original index
+        if (sourceContainer) {
+            const tagRows = this.getDraggableTagItems(sourceContainer);
+            this.originalIndex = tagRows.indexOf(tagRow);
+            console.log('Original index:', this.originalIndex, 'in container:', sourceContainerId);
+        }
         
         // Store a reference to the element's text content for validation
         this.draggedElementText = tagRow.textContent.trim();
@@ -425,8 +447,46 @@ class DragAndDropManager {
         this.draggedElement.style.zIndex = '10000';
         this.draggedElement.style.transition = 'none';
         
-        // Find the target position for reordering
-        this.findDropPosition(e.clientY);
+        // Detect which container we're over
+        const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
+        const selectedContainer = document.querySelector('#selectedTags');
+        const availableContainer = document.querySelector('#availableTags');
+        
+        let targetContainer = null;
+        let targetContainerId = null;
+        
+        if (selectedContainer && selectedContainer.contains(elementUnderMouse)) {
+            targetContainer = selectedContainer;
+            targetContainerId = 'selectedTags';
+        } else if (availableContainer && availableContainer.contains(elementUnderMouse)) {
+            targetContainer = availableContainer;
+            targetContainerId = 'availableTags';
+        }
+        
+        this.targetContainer = targetContainer;
+        this.targetContainerId = targetContainerId;
+        
+        // If dragging within the same container, find reorder position
+        if (this.sourceContainerId === this.targetContainerId && this.sourceContainerId === 'selectedTags') {
+            this.findDropPosition(e.clientY);
+        } else {
+            // Cross-list dragging - clear reorder indicators
+            this.targetPosition = null;
+            this.clearDropIndicators();
+            
+            // Highlight the target container
+            if (targetContainer) {
+                targetContainer.style.border = '3px dashed rgba(79, 172, 254, 0.6)';
+                targetContainer.style.borderRadius = '8px';
+                targetContainer.style.transition = 'all 0.2s ease';
+            }
+            
+            // Remove highlight from source container
+            if (this.sourceContainer && this.sourceContainer !== targetContainer) {
+                this.sourceContainer.style.border = '';
+                this.sourceContainer.style.borderRadius = '';
+            }
+        }
     }
 
     handleMouseUp(e) {
@@ -467,21 +527,96 @@ class DragAndDropManager {
         this.draggedElement.style.transition = '';
         this.draggedElement.classList.remove('dragging');
         
-        // Clear drop indicators
+        // Clear drop indicators and container highlights
         this.clearDropIndicators();
+        const selectedContainer = document.querySelector('#selectedTags');
+        const availableContainer = document.querySelector('#availableTags');
+        if (selectedContainer) {
+            selectedContainer.style.border = '';
+            selectedContainer.style.borderRadius = '';
+        }
+        if (availableContainer) {
+            availableContainer.style.border = '';
+            availableContainer.style.borderRadius = '';
+        }
         
-        // Perform reorder if we have a valid target position
-        if (this.targetPosition !== null && this.targetPosition !== this.originalIndex) {
+        // Check if this is cross-list dragging
+        if (this.sourceContainerId && this.targetContainerId && this.sourceContainerId !== this.targetContainerId) {
+            console.log('🔄 Cross-list drag detected:', this.sourceContainerId, '->', this.targetContainerId);
+            
+            // CRITICAL FIX: Store tag name for verification
+            const tagName = this.draggedElement?.querySelector('.tag-checkbox')?.value;
+            
+            // CRITICAL: Don't reset drag state yet - let handleCrossListDrag complete first
+            // The move functions will update the UI, and we don't want to interfere
+            this.handleCrossListDrag();
+            
+            // CRITICAL FIX: Verify element exists after move, with multiple checks
+            const verifyAndReset = () => {
+                if (tagName) {
+                    const targetContainer = document.querySelector(`#${this.targetContainerId}`);
+                    if (targetContainer) {
+                        const tagExists = targetContainer.querySelector(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+                        if (!tagExists) {
+                            console.warn('⚠️ Tag still missing after move, waiting longer:', tagName);
+                            // Wait longer and check again
+                            setTimeout(verifyAndReset, 500);
+                            return;
+                        } else {
+                            console.log('✅ Tag verified in target container:', tagName);
+                        }
+                    }
+                }
+                // Reset drag state after verification
+                this.resetDragState();
+            };
+            
+            // CRITICAL FIX: After cross-list drag, ensure all checkboxes in target container are properly set
+            const ensureCheckboxStates = () => {
+                if (window.TagManager && window.TagManager.state) {
+                    const targetContainer = document.querySelector(`#${this.targetContainerId}`);
+                    if (targetContainer) {
+                        const allCheckboxes = targetContainer.querySelectorAll('.tag-checkbox');
+                        allCheckboxes.forEach(checkbox => {
+                            const tagName = checkbox.value;
+                            if (this.targetContainerId === 'selectedTags') {
+                                const shouldBeChecked = window.TagManager.state.persistentSelectedTags.includes(tagName);
+                                if (shouldBeChecked && !checkbox.checked) {
+                                    console.log(`🔧 Ensuring checkbox is checked for "${tagName}" after drag`);
+                                    checkbox.checked = true;
+                                }
+                            } else if (this.targetContainerId === 'availableTags') {
+                                // Tags in available should not be checked unless they're in persistentSelectedTags
+                                const shouldBeChecked = window.TagManager.state.persistentSelectedTags.includes(tagName);
+                                if (shouldBeChecked !== checkbox.checked) {
+                                    console.log(`🔧 Fixing checkbox state for "${tagName}" in available tags`);
+                                    checkbox.checked = shouldBeChecked;
+                                }
+                            }
+                        });
+                    }
+                }
+            };
+            
+            // Reset drag state after a delay to let the move complete
+            // Increased delay to 500ms to allow move operations to complete
+            setTimeout(() => {
+                ensureCheckboxStates();
+                verifyAndReset();
+            }, 500);
+        } else if (this.targetPosition !== null && this.targetPosition !== this.originalIndex && this.sourceContainerId === 'selectedTags') {
+            // Same-list reordering (only for selected tags)
             console.log('Performing reorder from', this.originalIndex, 'to', this.targetPosition);
             this.performReorder();
             // Add success feedback
             this.showReorderSuccess();
+            // Reset drag state
+            this.resetDragState();
         } else {
-            console.log('No reorder needed - target position:', this.targetPosition, 'original index:', this.originalIndex);
+            console.log('No action needed - target position:', this.targetPosition, 'original index:', this.originalIndex);
+            // Reset drag state
+            this.resetDragState();
         }
-        
-        // Reset drag state
-        this.resetDragState();
     }
 
     findDropPosition(mouseY) {
@@ -612,6 +747,236 @@ class DragAndDropManager {
         this.clearTargetHighlights();
     }
 
+    handleCrossListDrag() {
+        if (!this.draggedElement) {
+            console.error('Cannot move tag - no dragged element');
+            return;
+        }
+        
+        const checkbox = this.draggedElement.querySelector('.tag-checkbox');
+        if (!checkbox || !checkbox.value) {
+            console.error('Cannot move tag - no checkbox value found');
+            return;
+        }
+        
+        const tagName = checkbox.value;
+        console.log('🔄 Cross-list drag detected - Moving tag:', tagName, 'from', this.sourceContainerId, 'to', this.targetContainerId);
+        
+        // CRITICAL FIX: Store tag name and ensure it's in persistentSelectedTags before move
+        // This prevents the tag from disappearing when updateSelectedTags clears the container
+        if (window.TagManager && window.TagManager.state) {
+            // If moving to selected, ensure tag is in persistentSelectedTags
+            if (this.targetContainerId === 'selectedTags') {
+                if (!window.TagManager.state.persistentSelectedTags.includes(tagName)) {
+                    window.TagManager.state.persistentSelectedTags.push(tagName);
+                    console.log('✅ Added tag to persistentSelectedTags before move:', tagName);
+                }
+            }
+            // If moving to available, remove from persistentSelectedTags
+            else if (this.targetContainerId === 'availableTags') {
+                const index = window.TagManager.state.persistentSelectedTags.indexOf(tagName);
+                if (index > -1) {
+                    window.TagManager.state.persistentSelectedTags.splice(index, 1);
+                    console.log('✅ Removed tag from persistentSelectedTags before move:', tagName);
+                }
+            }
+        }
+        
+        // CRITICAL: Find the checkbox in the source container BEFORE any DOM manipulation
+        // The source container still has the original element
+        let sourceCheckbox = null;
+        if (this.sourceContainer) {
+            // Find the tag row in the source container by tag name
+            const sourceTagRows = this.sourceContainer.querySelectorAll('.tag-row');
+            for (const row of sourceTagRows) {
+                const cb = row.querySelector('.tag-checkbox');
+                if (cb && cb.value === tagName) {
+                    sourceCheckbox = cb;
+                    console.log('✅ Found source checkbox in', this.sourceContainerId);
+                    break;
+                }
+            }
+        }
+        
+        if (!sourceCheckbox) {
+            console.error('❌ Could not find source checkbox for tag:', tagName);
+            // Try to use the dragged element's checkbox as fallback
+            sourceCheckbox = checkbox;
+        }
+        
+        // Check the checkbox BEFORE calling move functions
+        sourceCheckbox.checked = true;
+        console.log('✅ Checked checkbox for tag:', tagName);
+        
+        // Verify the checkbox is actually checked
+        if (!sourceCheckbox.checked) {
+            console.error('❌ Failed to check checkbox - trying again');
+            sourceCheckbox.checked = true;
+            // Force it with setAttribute as well
+            sourceCheckbox.setAttribute('checked', 'checked');
+        }
+        
+        // Verify the checkbox is in the correct container
+        const availableContainer = document.querySelector('#availableTags');
+        const selectedContainer = document.querySelector('#selectedTags');
+        const isInAvailable = availableContainer && availableContainer.contains(sourceCheckbox);
+        const isInSelected = selectedContainer && selectedContainer.contains(sourceCheckbox);
+        console.log('📍 Checkbox location - in available:', isInAvailable, 'in selected:', isInSelected);
+        
+        // CRITICAL FIX: Use a safety function to verify tag exists after move and ensure checkbox is checked
+        const verifyTagAfterMove = () => {
+            setTimeout(() => {
+                const targetContainer = document.querySelector(`#${this.targetContainerId}`);
+                if (targetContainer) {
+                    const tagCheckbox = targetContainer.querySelector(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+                    if (!tagCheckbox) {
+                        console.warn('⚠️ Tag missing after move, attempting to restore:', tagName);
+                        // Tag is missing - restore it by ensuring it's in the correct state
+                        if (window.TagManager && window.TagManager.state) {
+                            if (this.targetContainerId === 'selectedTags') {
+                                // Ensure it's in persistentSelectedTags
+                                if (!window.TagManager.state.persistentSelectedTags.includes(tagName)) {
+                                    window.TagManager.state.persistentSelectedTags.push(tagName);
+                                }
+                                // Force refresh of selected tags
+                                const tag = window.TagManager.state.tags.find(t => t['Product Name*'] === tagName) ||
+                                           window.TagManager.state.originalTags.find(t => t['Product Name*'] === tagName);
+                                if (tag && window.TagManager.updateSelectedTags) {
+                                    const selectedTagObjects = window.TagManager.state.persistentSelectedTags
+                                        .map(name => window.TagManager.state.tags.find(t => t['Product Name*'] === name) ||
+                                                     window.TagManager.state.originalTags.find(t => t['Product Name*'] === name))
+                                        .filter(Boolean);
+                                    window.TagManager.updateSelectedTags(selectedTagObjects);
+                                }
+                            }
+                        }
+                    } else {
+                        console.log('✅ Tag verified in target container after move:', tagName);
+                        // CRITICAL FIX: Ensure the checkbox is checked if it should be
+                        if (this.targetContainerId === 'selectedTags') {
+                            if (window.TagManager && window.TagManager.state) {
+                                const shouldBeChecked = window.TagManager.state.persistentSelectedTags.includes(tagName);
+                                if (shouldBeChecked && !tagCheckbox.checked) {
+                                    console.log(`🔧 Fixing unchecked checkbox for "${tagName}" after drag operation`);
+                                    tagCheckbox.checked = true;
+                                }
+                            }
+                        } else if (this.targetContainerId === 'availableTags') {
+                            // If moved to available, ensure it's unchecked
+                            if (tagCheckbox.checked) {
+                                console.log(`🔧 Fixing incorrectly checked checkbox for "${tagName}" after moving to available`);
+                                tagCheckbox.checked = false;
+                            }
+                        }
+                    }
+                }
+            }, 500); // Check after 500ms to allow move operation to complete
+        };
+        
+        // Use a small delay to ensure DOM is ready, then call move functions
+        setTimeout(() => {
+            // Double-check the checkbox is still checked
+            if (!sourceCheckbox.checked) {
+                console.warn('⚠️ Checkbox was unchecked, re-checking...');
+                sourceCheckbox.checked = true;
+            }
+            
+            // Use TagManager's move functions
+            if (this.sourceContainerId === 'availableTags' && this.targetContainerId === 'selectedTags') {
+                // Moving from available to selected
+                console.log('📤 Calling moveToSelected for tag:', tagName);
+                if (window.TagManager && window.TagManager.moveToSelected) {
+                    // Verify checkbox is still in availableTags and checked
+                    const checkedInAvailable = Array.from(document.querySelectorAll('#availableTags input[type="checkbox"].tag-checkbox:checked'))
+                        .map(cb => cb.value);
+                    console.log('🔍 Checked checkboxes in availableTags:', checkedInAvailable);
+                    
+                    if (checkedInAvailable.includes(tagName)) {
+                        // Call moveToSelected which will handle the move
+                        window.TagManager.moveToSelected().then(() => {
+                            verifyTagAfterMove();
+                        }).catch(err => {
+                            console.error('Error in moveToSelected:', err);
+                            verifyTagAfterMove();
+                        });
+                    } else {
+                        console.error('❌ Tag checkbox not found in availableTags - using direct API call');
+                        this.moveTagDirectly(tagName, 'to_selected').then(() => {
+                            verifyTagAfterMove();
+                        });
+                    }
+                } else {
+                    console.error('TagManager.moveToSelected not available - using direct API call');
+                    // Fallback: directly call the API
+                    this.moveTagDirectly(tagName, 'to_selected').then(() => {
+                        verifyTagAfterMove();
+                    });
+                }
+            } else if (this.sourceContainerId === 'selectedTags' && this.targetContainerId === 'availableTags') {
+                // Moving from selected to available
+                console.log('📥 Calling moveToAvailable for tag:', tagName);
+                if (window.TagManager && window.TagManager.moveToAvailable) {
+                    // Verify checkbox is still in selectedTags and checked
+                    const checkedInSelected = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"].tag-checkbox:checked'))
+                        .map(cb => cb.value);
+                    console.log('🔍 Checked checkboxes in selectedTags:', checkedInSelected);
+                    
+                    if (checkedInSelected.includes(tagName)) {
+                        // Call moveToAvailable which will handle the move
+                        window.TagManager.moveToAvailable().then(() => {
+                            verifyTagAfterMove();
+                        }).catch(err => {
+                            console.error('Error in moveToAvailable:', err);
+                            verifyTagAfterMove();
+                        });
+                    } else {
+                        console.error('❌ Tag checkbox not found in selectedTags - using direct API call');
+                        this.moveTagDirectly(tagName, 'to_available').then(() => {
+                            verifyTagAfterMove();
+                        });
+                    }
+                } else {
+                    console.error('TagManager.moveToAvailable not available - using direct API call');
+                    // Fallback: directly call the API
+                    this.moveTagDirectly(tagName, 'to_available').then(() => {
+                        verifyTagAfterMove();
+                    });
+                }
+            } else {
+                console.error('❌ Invalid cross-list drag - source:', this.sourceContainerId, 'target:', this.targetContainerId);
+            }
+        }, 10); // Small delay to ensure DOM is ready
+    }
+    
+    async moveTagDirectly(tagName, direction) {
+        // Fallback method to move tag directly via API
+        try {
+            const response = await fetch('/api/move-tags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tags: [tagName],
+                    direction: direction
+                })
+            });
+            
+            if (response.ok) {
+                console.log('Tag moved successfully via API');
+                // Refresh the UI
+                if (window.TagManager && window.TagManager.loadTags) {
+                    await window.TagManager.loadTags();
+                }
+                return true;
+            } else {
+                console.error('Failed to move tag via API');
+                return false;
+            }
+        } catch (error) {
+            console.error('Error moving tag via API:', error);
+            return false;
+        }
+    }
+
     performReorder() {
         if (this.targetPosition === null || this.originalIndex === null) return;
         
@@ -629,12 +994,18 @@ class DragAndDropManager {
         
         // Get the dragged element
         const draggedElement = allTagRows[this.originalIndex];
-        if (!draggedElement) return;
+        if (!draggedElement) {
+            console.error('❌ Dragged element not found at index:', this.originalIndex);
+            return;
+        }
         
         // Get the checkbox value for debugging
         const draggedCheckbox = draggedElement.querySelector('.tag-checkbox');
         const draggedValue = draggedCheckbox ? draggedCheckbox.value : 'unknown';
         console.log('Dragging element with value:', draggedValue);
+        
+        // CRITICAL FIX: Store a clone of the element's HTML as backup
+        const elementBackup = draggedElement.cloneNode(true);
         
         // Find the parent container of the dragged element
         const draggedParent = this.findParentContainer(draggedElement);
@@ -650,8 +1021,15 @@ class DragAndDropManager {
         const elementData = {
             element: draggedElement,
             value: draggedValue,
-            parent: draggedParent || container
+            parent: draggedParent || container,
+            backup: elementBackup
         };
+        
+        // CRITICAL FIX: Verify element is still in DOM before removing
+        if (!container.contains(draggedElement)) {
+            console.error('❌ Dragged element is not in container, cannot reorder');
+            return;
+        }
         
         // Remove from current position
         draggedElement.remove();
@@ -678,22 +1056,65 @@ class DragAndDropManager {
         console.log('Adjusted target position:', adjustedTargetPosition);
         console.log('Remaining tag rows count:', remainingTagRows.length);
         
+        // CRITICAL FIX: Verify draggedElement still exists before inserting
+        if (!draggedElement || draggedElement.parentNode === null) {
+            console.error('❌ Dragged element was lost during removal! Restoring from backup...');
+            // Restore from backup if element was lost
+            if (elementData.backup) {
+                const restoredElement = elementData.backup.cloneNode(true);
+                if (targetParent) {
+                    if (targetElement) {
+                        targetParent.insertBefore(restoredElement, targetElement);
+                    } else {
+                        targetParent.appendChild(restoredElement);
+                    }
+                } else {
+                    container.appendChild(restoredElement);
+                }
+                console.log('✅ Restored element from backup');
+                return; // Exit early since we restored
+            } else {
+                console.error('❌ No backup available, cannot restore element');
+                return;
+            }
+        }
+        
         // Insert the dragged element at the correct position
         if (targetElement && targetParent) {
             // Insert before the target element
-            targetParent.insertBefore(draggedElement, targetElement);
-            console.log('Inserted before target element');
+            try {
+                targetParent.insertBefore(draggedElement, targetElement);
+                console.log('Inserted before target element');
+            } catch (e) {
+                console.error('❌ Error inserting before target element:', e);
+                // Fallback: append to parent
+                targetParent.appendChild(draggedElement);
+                console.log('Fallback: appended to target parent');
+            }
         } else if (targetParent) {
             // Append to the target parent
-            targetParent.appendChild(draggedElement);
-            console.log('Appended to target parent');
+            try {
+                targetParent.appendChild(draggedElement);
+                console.log('Appended to target parent');
+            } catch (e) {
+                console.error('❌ Error appending to target parent:', e);
+                // Fallback: append to container
+                container.appendChild(draggedElement);
+                console.log('Fallback: appended to main container');
+            }
         } else if (remainingTagRows.length > 0) {
             // Insert before the first remaining element
             const firstElement = remainingTagRows[0];
             const firstParent = this.findParentContainer(firstElement);
             if (firstParent) {
-                firstParent.insertBefore(draggedElement, firstElement);
-                console.log('Inserted before first element');
+                try {
+                    firstParent.insertBefore(draggedElement, firstElement);
+                    console.log('Inserted before first element');
+                } catch (e) {
+                    console.error('❌ Error inserting before first element:', e);
+                    container.appendChild(draggedElement);
+                    console.log('Fallback: appended to main container');
+                }
             } else {
                 container.appendChild(draggedElement);
                 console.log('Appended to main container');
@@ -709,8 +1130,17 @@ class DragAndDropManager {
         console.log('Element still in selected tags:', isStillInSelected);
         
         if (!isStillInSelected) {
-            console.error('Element was moved out of selected tags! Attempting to restore...');
-            container.appendChild(draggedElement);
+            console.error('❌ Element was moved out of selected tags! Attempting to restore...');
+            // Try to restore from backup if available
+            if (elementData.backup) {
+                const restoredElement = elementData.backup.cloneNode(true);
+                container.appendChild(restoredElement);
+                console.log('✅ Restored element from backup to container');
+            } else {
+                // Last resort: try to append the original element
+                container.appendChild(draggedElement);
+                console.log('✅ Appended original element to container');
+            }
         }
         
         // Re-enable the checkbox after a short delay
@@ -896,6 +1326,10 @@ class DragAndDropManager {
         this.targetPosition = null;
         this.originalIndex = null;
         this._isReordering = false;
+        this.sourceContainer = null;
+        this.sourceContainerId = null;
+        this.targetContainer = null;
+        this.targetContainerId = null;
         
         // Remove dragging class from any elements and re-enable checkboxes
         const draggingElements = document.querySelectorAll('.tag-row.dragging');

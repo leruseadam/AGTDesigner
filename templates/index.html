@@ -122,6 +122,9 @@
         if (data.success) {
           console.log('✅ Store set successfully:', storeValue);
 
+          // CRITICAL FIX: Mark store as confirmed to prevent modal reappearing after uploads
+          window.storeConfirmed = true;
+
           // Persist context so the modal stays hidden after reload
           sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
           sessionStorage.setItem('store_just_selected', 'true');
@@ -218,7 +221,7 @@
     
     // Don't add backdrop by default - let checkStoreRequired add it only if needed
     // This prevents the backdrop from appearing when a store is already selected
-    
+
     // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
     // Works universally on all devices - MacBook Pro, PC, tablets, phones
     (function() {
@@ -237,35 +240,15 @@
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
         
         // UNIVERSAL SCALING: Adapt to any screen size
-        // MacBook Pro 16" effective resolution (1728px) = baseline for consistent appearance
-        const baseWidth = 1728;
-        const baseHeight = 1117;
-        
-        // For larger screens, scale down to match MacBook Pro 16" appearance
-        let scaleFactor;
-        if (window.innerWidth > baseWidth || window.innerHeight > baseHeight) {
-          // Scale down proportionally on larger screens
-          const widthScale = baseWidth / window.innerWidth;
-          const heightScale = baseHeight / window.innerHeight;
-          scaleFactor = Math.min(widthScale, heightScale);
-        } else {
-          // For smaller screens, scale up proportionally (but cap at 2x)
-          scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
-        }
-        
+        // Calculate scale factor based on viewport width (1920px = baseline)
+        const baseWidth = 1920;
+        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
-        
-        // Ensure body fills viewport (only if body exists)
-        if (document.body) {
-          document.body.style.minHeight = '100vh';
-          document.body.style.minWidth = '100vw';
-        }
-        document.documentElement.style.minHeight = '100vh';
-        
+
         console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, scale: ${scaleFactor.toFixed(2)}x`);
       }
-      
+
       // Run normalization after DOM is loaded
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', normalizeViewport);
@@ -274,7 +257,7 @@
       }
       window.addEventListener('resize', normalizeViewport);
       window.addEventListener('orientationchange', normalizeViewport);
-      
+
       // Re-normalize after a short delay to catch any late-loading elements
       setTimeout(normalizeViewport, 100);
       setTimeout(normalizeViewport, 500);
@@ -593,6 +576,17 @@
     }
     
     function checkStoreRequired(onStoreConfirmed) {
+      // CRITICAL FIX: Don't check again if store was already confirmed
+      // This prevents the modal from reappearing after uploads
+      if (window.storeConfirmed && !window.checkingStoreRequired) {
+        console.log('✅ Store already confirmed, skipping check');
+        // Store is already confirmed, just call the callback if provided
+        if (typeof onStoreConfirmed === 'function') {
+          onStoreConfirmed();
+        }
+        return;
+      }
+      
       // Prevent multiple simultaneous calls
       if (window.checkingStoreRequired) {
         console.log('⚠️ checkStoreRequired already in progress, skipping...');
@@ -626,10 +620,9 @@
       console.log('Fetching store status from backend...');
       const cacheBust = `ts=${Date.now()}`;
       
-      // PERFORMANCE FIX: Add timeout to prevent hanging
-      const fetchTimeout = 10000; // 10 second timeout
+      // Add timeout to prevent hanging
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), fetchTimeout);
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
       
       fetch(`/api/check-store-required?${cacheBust}`, {
         credentials: 'same-origin',
@@ -637,13 +630,35 @@
         signal: controller.signal
       })
         .then(response => {
-          clearTimeout(timeoutId); // Clear timeout on success
+          clearTimeout(timeoutId);
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
           return response.json();
         })
+        .catch(error => {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            console.error('❌ Store check timed out after 5 seconds');
+            // Fallback: show modal anyway to allow user to proceed
+            console.log('⚠️ Showing store selection modal as fallback');
+            if (typeof showStoreSelectionModal === 'function') {
+              showStoreSelectionModal();
+            } else {
+              // If function doesn't exist, manually show modal
+              if (modalElement) {
+                modalElement.style.display = 'block';
+                modalElement.classList.add('show');
+                document.body.classList.add('modal-open');
+              }
+            }
+            window.checkingStoreRequired = false;
+            return null; // Return null to skip data processing
+          }
+          throw error;
+        })
         .then(data => {
+          if (!data) return; // Skip if error was handled (timeout)
           console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
           console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
           
@@ -657,6 +672,9 @@
           if (hasValidStore) {
             // USER HAS STORE - Show content, hide modal
             console.log('🎉 STORE FOUND:', data.store);
+            
+            // CRITICAL FIX: Mark store as confirmed to prevent re-checking after uploads
+            window.storeConfirmed = true;
             
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
@@ -682,54 +700,34 @@
               setTimeout(() => mainContent.classList.add('loaded'), 100);
             }
             
-            // CRITICAL FIX: Clear blocking flag BEFORE calling callback to ensure TagManager can initialize
+            // Clear blocking flag if it exists
             if (window.STORE_MODAL_BLOCKING) {
               console.log('✅ Clearing STORE_MODAL_BLOCKING - TagManager can initialize');
               window.STORE_MODAL_BLOCKING = false;
             }
             
-            console.log('✅ Content shown, modal hidden');
-            
-            // CRITICAL FIX: Hide splash screen when store is confirmed
-            if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
-              console.log('✅ Hiding splash screen - store confirmed');
-              window.AppLoadingSplash.hide();
+            // CRITICAL FIX: Retry file upload initialization after store is confirmed
+            // This ensures file upload is initialized even if it failed earlier
+            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+              console.log('🔄 Store confirmed - retrying file upload initialization...');
+              window.fileUploadInitAttempts = 0; // Reset counter
+              setTimeout(window.initializeFileUpload, 200);
             }
+            
+            console.log('✅ Content shown, modal hidden');
             
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
             if (typeof onStoreConfirmed === 'function') {
               console.log('🔄 Store confirmed, calling initialization callback...');
-              console.log('🔍 STORE_MODAL_BLOCKING status:', window.STORE_MODAL_BLOCKING);
-              
-              // CRITICAL FIX: Ensure flag is cleared before initialization
-              window.STORE_MODAL_BLOCKING = false;
-              
-              // CRITICAL FIX: Clear the store_just_selected flag after a delay to prevent re-showing splash
-              setTimeout(() => {
-                sessionStorage.removeItem('store_just_selected');
-                console.log('✅ Cleared store_just_selected flag');
-              }, 1000);
-              
               setTimeout(() => {
                 try {
-                  console.log('🚀 Calling onStoreConfirmed callback...');
                   onStoreConfirmed();
-                  console.log('✅ onStoreConfirmed callback completed');
                 } catch (initError) {
                   console.error('❌ Error in onStoreConfirmed callback:', initError);
-                  console.error('Error stack:', initError.stack);
-                  // CRITICAL FIX: Hide splash even if initialization fails
-                  if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
-                    AppLoadingSplash.hide();
-                  }
                 }
               }, 100);
             } else {
               console.warn('⚠️ No onStoreConfirmed callback provided - TagManager may not initialize');
-              // CRITICAL FIX: Hide splash even if no callback
-              if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
-                AppLoadingSplash.hide();
-              }
             }
           } else {
             // NO STORE - Show modal
@@ -789,32 +787,12 @@
         })
         .catch(error => {
           console.error('❌ Error checking store requirement:', error);
-          
-          // CRITICAL FIX: Hide splash screen even if store check fails
-          if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
-            console.log('⚠️ Hiding splash screen due to store check error');
-            window.AppLoadingSplash.hide();
-          }
-          
           // If there's an error, show modal as fallback to require store selection
           console.log('Showing modal as fallback due to error');
           if (typeof bootstrap === 'undefined') {
             setTimeout(() => showStoreSelectionModal(), 500);
           } else {
             showStoreSelectionModal();
-          }
-          
-          // CRITICAL FIX: Still allow initialization even if store check fails
-          // This prevents the app from being stuck forever
-          if (typeof onStoreConfirmed === 'function') {
-            console.log('⚠️ Store check failed, but allowing initialization to proceed');
-            setTimeout(() => {
-              try {
-                onStoreConfirmed();
-              } catch (initError) {
-                console.error('❌ Error in onStoreConfirmed callback after error:', initError);
-              }
-            }, 500);
           }
         })
         .finally(() => {
@@ -921,17 +899,23 @@
           ]);
         };
 
+        // PERFORMANCE OPTIMIZATION: Defer non-critical API calls to improve initial load time
+        // Only load available tags immediately (critical for UI), defer stats/analytics until after page is interactive
         Promise.allSettled([
-          fetchWithTimeout('/api/database-stats').catch(e => ({ error: `Stats: ${e.message}`, total_strains: 0 })),
-          fetchWithTimeout('/api/database-vendor-stats').catch(e => ({ 
-            error: `Vendor Stats: ${e.message}`, 
+          // Defer stats - load after page is interactive
+          Promise.resolve({ error: 'Deferred', total_strains: 0 }),
+          // Defer vendor stats - load after page is interactive  
+          Promise.resolve({ 
+            error: 'Deferred', 
             summary: { total_vendors: 0, total_brands: 0 }, 
             vendors: [], 
             product_types: [], 
             vendor_brands: [] 
-          })),
-          fetchWithTimeout('/api/database-analytics').catch(e => ({ error: `Analytics: ${e.message}` })),
-          fetchWithTimeout('/api/web/available-tags').catch(e => { console.error('Available tags failed:', e); return []; })
+          }),
+          // Defer analytics - load after page is interactive
+          Promise.resolve({ error: 'Deferred' }),
+          // Only load available tags immediately (critical for UI)
+          fetchWithTimeout('/api/web/available-tags', 10000).catch(e => { console.error('Available tags failed:', e); return []; })
         ])
         .then((results) => {
           console.log('All promises settled:', results);
@@ -2780,27 +2764,84 @@
             // Export Database Function
             window.exportDatabase = function() {
               const exportBtn = document.querySelector('button[onclick="exportDatabase()"]');
+              let originalBtnText = '';
               
-              // Show loading state
-              const originalBtnText = exportBtn.innerHTML;
-              exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Exporting...';
-              exportBtn.disabled = true;
+              // Show splash screen using TagManager's splash if available, otherwise use database-sync splash
+              if (typeof showExportSplash === 'function') {
+                showExportSplash();
+              } else if (window.TagManager && typeof window.TagManager.showActionSplash === 'function') {
+                window.TagManager.showActionSplash('Exporting database...');
+              } else {
+                // Fallback: Show loading state on button
+                if (exportBtn) {
+                  originalBtnText = exportBtn.innerHTML;
+                  exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Exporting...';
+                  exportBtn.disabled = true;
+                }
+              }
               
-              // Create a temporary link to trigger download
-              const link = document.createElement('a');
-              link.href = '/api/database-export';
-              link.download = `AGT_Product_Database_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
-              
-              // Trigger download
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-              
-              // Reset button state after a short delay
-              setTimeout(() => {
-                exportBtn.innerHTML = originalBtnText;
-                exportBtn.disabled = false;
-              }, 1000);
+              // Fetch the export file
+              fetch('/api/database-export')
+                .then(response => {
+                  if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                  }
+                  return response.blob();
+                })
+                .then(blob => {
+                  // Create download link
+                  const url = window.URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = `AGT_Product_Database_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+                  
+                  // Trigger download
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  window.URL.revokeObjectURL(url);
+                  
+                  // Hide splash screen
+                  if (typeof hideExportSplash === 'function') {
+                    hideExportSplash();
+                  } else if (window.TagManager && typeof window.TagManager.hideActionSplash === 'function') {
+                    window.TagManager.hideActionSplash();
+                  } else {
+                    // Fallback: Reset button state
+                    if (exportBtn) {
+                      exportBtn.innerHTML = originalBtnText || 'Export Database';
+                      exportBtn.disabled = false;
+                    }
+                  }
+                  
+                  // Show success message
+                  if (window.showToast) {
+                    window.showToast('Database exported successfully', 'success');
+                  }
+                })
+                .catch(error => {
+                  console.error('Error exporting database:', error);
+                  
+                  // Hide splash screen
+                  if (typeof hideExportSplash === 'function') {
+                    hideExportSplash();
+                  } else if (window.TagManager && typeof window.TagManager.hideActionSplash === 'function') {
+                    window.TagManager.hideActionSplash();
+                  } else {
+                    // Fallback: Reset button state
+                    if (exportBtn) {
+                      exportBtn.innerHTML = originalBtnText || 'Export Database';
+                      exportBtn.disabled = false;
+                    }
+                  }
+                  
+                  // Show error message
+                  if (window.showToast) {
+                    window.showToast('Failed to export database: ' + error.message, 'error');
+                  } else {
+                    alert('Failed to export database: ' + error.message);
+                  }
+                });
             };
             
             // Refresh Database Stats Function
@@ -4611,7 +4652,7 @@
       flex-direction: column !important;
       align-items: flex-start !important;
       flex: 1 1 auto !important; /* Allow growth to fit content */
-      min-width: 140px !important;
+      min-width: 160px !important; /* Increased from 140px for more space */
       max-width: none !important; /* Allow expansion to fit content */
     }
     
@@ -4646,19 +4687,28 @@
       background: rgba(255, 255, 255, 0.2) !important;
       border: 3px solid rgba(255, 100, 100, 0.8) !important; /* BRIGHT BORDER TO CONFIRM CSS LOADED */
       color: #fff !important;
-      font-size: 16px !important;
+      font-size: 14px !important; /* Reduced from 16px for more compact look */
       font-weight: 700 !important;
-      padding: 12px 20px !important; /* EXTRA padding */
+      padding: 10px 40px 10px 16px !important; /* Added right padding for arrow */
       width: 100% !important;
-      min-width: 250px !important; /* EVEN WIDER - 250px! */
+      min-width: 280px !important; /* Increased from 250px for more space */
       max-width: none !important; /* Allow expansion to fit content */
       border-radius: 10px !important;
-      min-height: 50px !important; /* TALLER - 50px! */
+      min-height: 52px !important; /* TALL enough for two lines */
       box-shadow: 0 6px 20px rgba(255, 0, 0, 0.5) !important; /* RED GLOW TO CONFIRM */
       transition: all 0.2s ease !important;
       overflow: visible !important; /* Prevent text truncation */
       text-overflow: clip !important; /* Don't use ellipsis */
-      white-space: nowrap !important; /* Keep text on one line */
+      white-space: normal !important; /* Allow wrapping to show full text */
+      line-height: 1.2 !important;
+      /* Add custom dropdown arrow */
+      -webkit-appearance: none !important;
+      -moz-appearance: none !important;
+      appearance: none !important;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='%23ffffff' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
+      background-repeat: no-repeat !important;
+      background-position: right 12px center !important;
+      background-size: 20px 20px !important;
     }
     
     /* Override any Bootstrap or other framework constraints */
@@ -4671,18 +4721,26 @@
     #weightFilter,
     #dohFilter,
     #highCbdFilter {
-      min-width: 140px !important;
+      min-width: 280px !important; /* Increased from 140px for more space */
       width: 100% !important; /* Fill parent container */
       max-width: none !important; /* Allow expansion to fit content */
       min-height: 60px !important;
       border: 3px solid rgba(0, 212, 170, 0.8) !important;
-      font-size: 16px !important;
-      padding: 1rem 1.25rem !important;
-      line-height: 1.5 !important;
+      font-size: 14px !important; /* Reduced from 16px for more compact look */
+      padding: 1rem 40px 1rem 1.25rem !important; /* Added right padding for arrow */
+      line-height: 1.4 !important; /* Reduced from 1.5 */
       box-sizing: border-box !important;
       overflow: visible !important; /* Prevent text truncation */
       text-overflow: clip !important; /* Don't use ellipsis */
       white-space: nowrap !important; /* Keep text on one line */
+      /* Ensure dropdown arrow appears */
+      -webkit-appearance: none !important;
+      -moz-appearance: none !important;
+      appearance: none !important;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='%23ffffff' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
+      background-repeat: no-repeat !important;
+      background-position: right 12px center !important;
+      background-size: 20px 20px !important;
     }
     
     .filter-select:hover {
@@ -5364,7 +5422,7 @@
 
       <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
         <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 0.75rem;">
-          <div style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 1.25rem 2.5rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 600px; position: relative; overflow: hidden;">
+          <div style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 2rem 3rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 750px; position: relative; overflow: hidden;">
             <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 30% 20%, rgba(160, 132, 232, 0.1) 0%, transparent 50%), radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%); pointer-events: none;"></div>
             <div style="position: relative; z-index: 2;">
               <h1 class="vibrant-title">
@@ -5425,7 +5483,7 @@
                     <div class="buttons-row d-flex align-items-center gap-2">
                       <!-- Upload Button -->
                       <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
-                      <button type="button" class="btn filter-action-button" id="uploadTriggerBtn" onclick="var input = document.getElementById('fileInput'); if(input) input.click();" aria-label="Upload Excel file">
+                      <button type="button" class="btn filter-action-button" id="uploadTriggerBtn" onclick="handleFileUploadClick();" aria-label="Upload Excel file">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                           <polyline points="7 10 12 15 17 10"></polyline>
@@ -5466,7 +5524,7 @@
                     </div>
                     <div class="filter-group">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
-                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
+                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 14px !important; line-height: 1.4 !important; width: 100% !important; min-width: 280px !important;">
                         <option value="All">All</option>
                       </select>
                     </div>
@@ -5478,7 +5536,7 @@
                     </div>
                     <div class="filter-group">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
-                      <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <select id="dohFilter" class="form-select filter-select" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 14px !important; line-height: 1.4 !important; min-width: 280px !important;">
                         <option value="All">All</option>
                         <option value="Yes">Yes</option>
                         <option value="No">No</option>
@@ -5546,16 +5604,16 @@
               <!-- Template Section -->
               <div class="control-section mb-2">
                 <label class="filter-label">Template</label>
-                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template" style="margin: 0 auto !important; display: block !important; min-width: 100%; white-space: nowrap;">
+                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
                   <option value="double">Double</option>
-                  <option value="inventory">Inventory</option>
                   <option value="preroll">Preroll</option>
+                  <option value="inventory">Inventory</option>
                 </select>
 
-                <button id="generateBtn" class="btn-generate-themed mt-2 w-100" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="max-width: 100% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important;">
+                <button id="generateBtn" class="btn-generate-themed mt-2" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 85% !important; max-width: 85% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important; margin: 0 auto !important; display: block !important;">
                   Generate Tags
                 </button>
 
@@ -5575,7 +5633,7 @@
                 <label class="filter-label">Controls</label>
                 <div class="d-grid gap-3 w-100">
                   <!-- Match JSON Button - Moved to top for easy access -->
-                  <button class="btn btn-glass btn-control" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL">
+                  <button class="btn btn-glass btn-control btn-color-blue" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL">
                     <span class="icon-btn">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -5585,7 +5643,7 @@
                       Match JSON
                     </span>
                   </button>
-                  <button id="undo-move-btn" class="btn btn-glass btn-control" title="Undo last move">
+                  <button id="undo-move-btn" class="btn btn-glass btn-control btn-color-orange" title="Undo last move">
                   <span class="icon-btn">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="1 4 1 10 7 10"></polyline>
@@ -5594,7 +5652,7 @@
                     Undo
                   </span>
                 </button>
-                    <button id="clear-filters-btn" class="btn btn-glass btn-control" title="Clear selected tags and reset app" onclick="if(window.TagManager && TagManager.clearSelected) { TagManager.clearSelected(); } return false;">
+                    <button id="clear-filters-btn" class="btn btn-glass btn-control btn-color-red" title="Clear selected tags and reset app" onclick="if(window.TagManager && TagManager.clearSelected) { TagManager.clearSelected(); } return false;">
                       <span class="icon-btn">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <polyline points="3 6 5 6 21 6"></polyline>
@@ -5603,16 +5661,6 @@
                         Clear & Reset
                       </span>
                     </button>
-                <button class="btn btn-glass btn-control" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
-                  <span class="icon-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="7 10 12 15 17 10"></polyline>
-                      <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    Export Data
-                  </span>
-                  </button>
                 </div>
               </div>
 
@@ -5620,7 +5668,17 @@
               <div class="control-section mb-2">
                 <label class="filter-label">Database Tools</label>
                 <div class="d-grid gap-3">
-                  <button class="btn btn-glass btn-control" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
+                  <button class="btn btn-glass btn-control btn-color-green" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
+                    <span class="icon-btn">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                      Export Data
+                    </span>
+                  </button>
+                  <button class="btn btn-glass btn-control btn-color-indigo" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
                     <span class="icon-btn">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -5630,7 +5688,7 @@
                       Data & Analytics
                     </span>
                   </button>
-                  <button class="btn btn-glass btn-control" onclick="showDatabaseEditor()" title="Open Edit DB">
+                  <button class="btn btn-glass btn-control btn-color-yellow" onclick="showDatabaseEditor()" title="Open Edit DB">
                     <span class="icon-btn">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -5639,7 +5697,7 @@
                       Edit DB
                     </span>
                   </button>
-                  <button class="btn btn-glass btn-control" onclick="openLineageEditor()" title="Open lineage editor for strain management">
+                  <button class="btn btn-glass btn-control btn-color-purple" onclick="openLineageEditor()" title="Open lineage editor for strain management">
                     <span class="icon-btn">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
@@ -7484,35 +7542,12 @@
     
     function initializeTagManagerSafely() {
       console.log('🚀 initializeTagManagerSafely called');
-      console.log('🔍 STORE_MODAL_BLOCKING status:', window.STORE_MODAL_BLOCKING);
-      console.log('🔍 Store in sessionStorage:', sessionStorage.getItem('selected_store'));
       
       // CHECK: Is store modal blocking initialization?
-      // CRITICAL FIX: Only block if modal is actually showing AND no store is selected
-      const hasStore = sessionStorage.getItem('selected_store') || 
-                      document.getElementById('mainContent')?.classList.contains('store-selected');
-      
-      if (window.STORE_MODAL_BLOCKING === true && !hasStore) {
-        console.log('🚫 TagManager initialization BLOCKED - store modal is active and no store selected');
+      if (window.STORE_MODAL_BLOCKING === true) {
+        console.log('🚫 TagManager initialization BLOCKED - store modal is active');
         console.log('⏳ Waiting for store selection before initializing...');
         // Don't initialize - wait for store selection to call us
-        return;
-      }
-      
-      // CRITICAL FIX: If store is selected but flag is still true, clear it
-      if (window.STORE_MODAL_BLOCKING === true && hasStore) {
-        console.log('⚠️ STORE_MODAL_BLOCKING is true but store is selected - clearing flag');
-        window.STORE_MODAL_BLOCKING = false;
-      }
-      
-      // CRITICAL FIX: If store is already confirmed, initialize immediately without store check
-      if (hasStore && window.STORE_MODAL_BLOCKING !== true) {
-        console.log('✅ Store already confirmed - initializing TagManager immediately');
-        if (window.TagManager && typeof window.TagManager.init === 'function') {
-          TagManager.init();
-        } else {
-          console.error('❌ TagManager.init is not available');
-        }
         return;
       }
       
@@ -7529,6 +7564,16 @@
             
             if (window.TagManager && typeof window.TagManager.init === 'function') {
               TagManager.init();
+              
+              // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
+              // Give it a moment for init to complete
+              setTimeout(() => {
+                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
+                  window.fileUploadInitAttempts = 0; // Reset counter
+                  setTimeout(window.initializeFileUpload, 200);
+                }
+              }, 500);
             } else {
               console.error('❌ TagManager.init is not available');
             }
@@ -7560,7 +7605,16 @@
       document.addEventListener('click', function(e) {
         const target = e.target;
         const tagName = target.tagName.toLowerCase();
-        const targetInfo = `${tagName}${target.id ? '#' + target.id : ''}${target.className ? '.' + target.className.split(' ').join('.') : ''}`;
+        // CRITICAL FIX: Handle className safely - it might be a DOMTokenList or undefined
+        let classNameStr = '';
+        if (target.className) {
+          if (typeof target.className === 'string') {
+            classNameStr = '.' + target.className.split(' ').join('.');
+          } else if (target.className instanceof DOMTokenList) {
+            classNameStr = '.' + Array.from(target.className).join('.');
+          }
+        }
+        const targetInfo = `${tagName}${target.id ? '#' + target.id : ''}${classNameStr}`;
         
         // Log all button and link clicks
         if (tagName === 'button' || tagName === 'a' || target.closest('button') || target.closest('a')) {
@@ -7707,9 +7761,14 @@
           return;
         }
         
-        // Check if TagManager and uploadFile method are available
-        if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
-          console.log('✓ TagManager ready, attaching file upload listener');
+        // CRITICAL FIX: Check if TagManager is loaded and has uploadFile method
+        // uploadFile exists on TagManager even before init() is called
+        // We just need TagManager to be loaded from main.js
+        const tagManagerReady = window.TagManager && 
+                                typeof window.TagManager.uploadFile === 'function';
+        
+        if (tagManagerReady) {
+          console.log('✓ TagManager ready and initialized, attaching file upload listener');
           window.fileUploadInitialized = true; // Mark as initialized to prevent retries
           
           // Remove any existing listeners to prevent duplicates
@@ -7730,21 +7789,88 @@
           });
         } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
           // Only log every 10th attempt to reduce console spam
-          if (window.fileUploadInitAttempts % 10 === 0) {
-            console.warn(`TagManager not ready yet, retrying... (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS})`);
+          if (window.fileUploadInitAttempts % 10 === 0 || window.fileUploadInitAttempts <= 5) {
+            const reason = !window.TagManager ? 'TagManager not loaded from main.js' :
+                          !window.TagManager.uploadFile ? 'uploadFile method not available' : 'unknown';
+            console.warn(`⏳ TagManager not ready yet (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS}): ${reason}`);
           }
           // Retry after a short delay
           setTimeout(initializeFileUpload, 100);
         } else {
-          console.error('❌ Failed to initialize file upload after 5 seconds. TagManager may not be loaded.');
-          console.error('❌ TagManager available:', !!window.TagManager);
-          console.error('❌ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
-          // Don't set fileUploadInitialized to true so it can be retried later if TagManager loads
+          // Don't give up - keep retrying indefinitely but with longer intervals
+          // This handles cases where store selection takes longer than 5 seconds
+          console.warn('⚠️ File upload initialization delayed - TagManager not ready yet');
+          console.warn('⚠️ TagManager available:', !!window.TagManager);
+          console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
+          console.warn('⚠️ main.js loaded:', window.mainJsLoaded || false);
+          console.warn('⚠️ main.js error:', window.mainJsError || 'None');
+          console.warn('⚠️ Will continue retrying every 2 seconds until TagManager is ready...');
+          
+          // Reset counter and retry with longer interval (2 seconds instead of 100ms)
+          // This prevents console spam while still allowing recovery
+          window.fileUploadInitAttempts = 0;
+          setTimeout(initializeFileUpload, 2000);
         }
       }
       
       // Make function globally accessible so it can be called after TagManager loads
       window.initializeFileUpload = initializeFileUpload;
+      
+      // CRITICAL FIX: Handle file upload click with platform-specific directory handling
+      // On Windows, use File System Access API to open Downloads folder
+      // On Mac, regular file input already opens to Downloads
+      async function handleFileUploadClick() {
+        const isWindows = navigator.platform.toLowerCase().includes('win') ||
+                         navigator.userAgent.toLowerCase().includes('windows');
+        
+        // Try to use File System Access API on Windows (if supported)
+        // This API allows specifying a suggested start directory
+        if (isWindows && 'showOpenFilePicker' in window) {
+          try {
+            const fileHandles = await window.showOpenFilePicker({
+              types: [{
+                description: 'Excel Files',
+                accept: {
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
+                }
+              }],
+              excludeAcceptAllOption: false,
+              multiple: false
+            });
+            
+            if (fileHandles && fileHandles.length > 0) {
+              const file = await fileHandles[0].getFile();
+              if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+                window.TagManager.uploadFile(file);
+              } else {
+                // Fallback to regular file input if TagManager not ready
+                const fileInput = document.getElementById('fileInput');
+                if (fileInput) {
+                  const dataTransfer = new DataTransfer();
+                  dataTransfer.items.add(file);
+                  fileInput.files = dataTransfer.files;
+                  fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+              }
+            }
+            return;
+          } catch (error) {
+            // User cancelled or API not fully supported, fall back to regular input
+            if (error.name !== 'AbortError') {
+              console.log('File System Access API not available, using regular file input:', error);
+            }
+          }
+        }
+        
+        // Fallback to regular file input (works on Mac and Windows without API support)
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) {
+          fileInput.click();
+        }
+      }
+      
+      // Make function globally accessible
+      window.handleFileUploadClick = handleFileUploadClick;
       
       // Initialize file upload with retry mechanism
       // Delay initial call slightly to let DOM settle

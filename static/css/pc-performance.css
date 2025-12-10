@@ -148,23 +148,25 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     max-width: 100% !important;
     min-height: 60px !important;
     height: 60px !important;
-    margin: 0.5rem 0 0.75rem 0 !important;
+    margin: 0.5rem auto 0.75rem auto !important; /* Center horizontally */
     
     /* Text alignment - perfectly centered */
     text-align: center !important;
     text-align-last: center !important;
+    direction: ltr !important; /* Ensure left-to-right for proper centering */
     
-    /* Padding - symmetric for centered text */
-    padding: 12px 40px 12px 40px !important;
+    /* Padding - symmetric for visual centering (account for arrow visually) */
+    padding: 12px 50px 12px 50px !important; /* Symmetric padding for proper centering */
     
-    /* Font styling - clean and readable */
-    font-size: 1.1em !important;
+    /* Font styling - larger and more readable for PC */
+    font-size: 1.15em !important;
     font-weight: 700 !important;
-    color: #e0d6f6 !important;
-    line-height: 1.4 !important;
+    color: #ffffff !important; /* Pure white for maximum readability */
+    line-height: 1.5 !important;
+    letter-spacing: 0.5px !important; /* Slight spacing for better readability */
     
-    /* Background and border - clean appearance */
-    background: rgba(34, 34, 51, 0.85) !important;
+    /* Background and border - higher contrast for readability */
+    background: rgba(45, 34, 58, 0.95) !important; /* Darker background for better contrast */
     border: 2.5px solid #a084e8 !important;
     border-radius: 12px !important;
     
@@ -181,20 +183,23 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     overflow: visible !important;
     
     /* Custom dropdown arrow - positioned to not interfere with centering */
-    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23ffffff" height="20" viewBox="0 0 24 24" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
-    background-position: right 14px center !important;
-    background-size: 18px 18px !important;
+    background-position: right 16px center !important;
+    background-size: 20px 20px !important;
 }
 
-/* Template dropdown options - clean styling */
+/* Template dropdown options - clean styling with better readability */
 #templateSelect option,
 #templateSelectModal option {
-    color: #e0d6f6 !important;
-    background: rgba(34, 34, 51, 0.95) !important;
-    font-weight: 500 !important;
+    color: #ffffff !important; /* Pure white for maximum readability */
+    background: rgba(45, 34, 58, 0.98) !important; /* Darker background for better contrast */
+    font-size: 1.05em !important; /* Slightly larger for readability */
+    font-weight: 600 !important; /* Bolder for better visibility */
     text-align: center !important;
-    padding: 8px 12px !important;
+    text-align-last: center !important;
+    padding: 12px 16px !important; /* More padding for better clickability */
+    line-height: 1.6 !important;
 }
 
 /* Template dropdown focus state */
@@ -203,6 +208,32 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     border-color: #cbb6f6 !important;
     box-shadow: 0 0 0 2px rgba(160, 132, 232, 0.3), 0 6px 28px 0 rgba(160, 132, 232, 0.18) !important;
     outline: none !important;
+}
+
+/* PC-specific: Ensure template dropdown is properly centered */
+@media (min-width: 992px) {
+    /* Center the control-section container */
+    .control-section {
+        align-items: center !important;
+        display: flex !important;
+        flex-direction: column !important;
+        width: 100% !important;
+    }
+    
+    /* Ensure template dropdown is centered within control-section */
+    .control-section #templateSelect,
+    .control-section #templateSelectModal {
+        margin-left: auto !important;
+        margin-right: auto !important;
+        display: block !important;
+    }
+    
+    /* Center the control-panel itself */
+    .control-panel {
+        align-items: center !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
 }
 
 /* Disable all transitions globally for smooth performance on PC */

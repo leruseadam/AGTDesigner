@@ -1669,6 +1669,7 @@ class JSONMatcher:
         json_strain = str(json_item.get("strain_name", "")).lower().strip()
         
         # Extract vendor from JSON item using enhanced vendor extraction
+        # CRITICAL FIX: Never extract vendor from product name - always use JSON vendor field or brand field only
         json_vendor = None
         try:
             vendor_info = extract_vendor_info(json_item)
@@ -1676,9 +1677,8 @@ class JSONMatcher:
                 json_vendor = vendor_info.lower()
             elif json_item.get("brand"):
                 json_vendor = str(json_item.get("brand", "")).strip().lower()
-            else:
-                # Extract vendor from product name
-                json_vendor = self._extract_vendor(json_name_raw)
+            # DO NOT extract vendor from product name - this causes product names to be used as vendors
+            # Vendor should be set from JSON metadata or global vendor, never extracted from product names
         except (AttributeError, TypeError) as e:
             logging.warning(f"Error extracting vendor from JSON item: {e}")
             json_vendor = None
@@ -2956,7 +2956,19 @@ class JSONMatcher:
             # ===== STEP 1: Extract all raw data from JSON =====
             raw_product_name = str(item.get("product_name", "")).strip()
             json_vendor_value = str(item.get("vendor", "")).strip()
-            vendor = json_vendor_value or (global_vendor if global_vendor else "")
+            # CRITICAL FIX: Always prioritize global_vendor - vendor should NEVER be missing
+            # Only use JSON vendor if it's valid and global_vendor is not available
+            if global_vendor and global_vendor.strip():
+                vendor = global_vendor.strip()
+            elif json_vendor_value and json_vendor_value.lower() not in ['', 'unknown', 'n/a', 'none']:
+                vendor = json_vendor_value
+            else:
+                # Last resort: use brand as vendor, but still prefer global_vendor from metadata
+                brand_as_vendor = str(item.get("brand", "")).strip()
+                if brand_as_vendor and brand_as_vendor.lower() not in ['', 'unknown', 'n/a', 'none']:
+                    vendor = brand_as_vendor
+                else:
+                    vendor = global_vendor if global_vendor else "Unknown Vendor"
             brand = str(item.get("brand", "")).strip()
             inventory_type = str(item.get("inventory_type", "")).strip()
             inventory_category = str(item.get("inventory_category", "")).strip()
@@ -2988,7 +3000,18 @@ class JSONMatcher:
             strain = str(item.get("strain_name", item.get("strain", ""))).strip()
             if json_vendor_value and global_vendor and not self._is_vendor_match(global_vendor, json_vendor_value):
                 logging.debug(f"🔁 Vendor override for JSON fallback: using item vendor '{json_vendor_value}' instead of metadata vendor '{global_vendor}'")
-            vendor = self._normalize_vendor_display_name(vendor)
+            
+            # Normalize vendor but ensure it's never empty
+            if vendor and vendor.strip():
+                try:
+                    vendor = self._normalize_vendor_display_name(vendor)
+                except (AttributeError, Exception):
+                    pass  # Keep original vendor if normalization fails
+            
+            # Final safety check: Ensure vendor is NEVER empty
+            if not vendor or vendor.strip() == "":
+                vendor = global_vendor if global_vendor else "Unknown Vendor"
+                logging.warning(f"⚠️ Vendor was empty in _create_product_from_json_item, using fallback: '{vendor}'")
             if brand:
                 brand = self._normalize_vendor_display_name(brand)
             
@@ -3121,14 +3144,17 @@ class JSONMatcher:
                     description = desc_clean
             
             # ===== STEP 10: Build COMPLETE product with ALL required fields =====
+            # Vendor and brand - CRITICAL: Vendor should NEVER be empty
+            vendor_final = vendor if vendor and vendor.strip() else (global_vendor if global_vendor else 'Unknown Vendor')
+            
             product = {
                 # Core identification
                 'Product Name*': description,  # Use standardized format
                 'Description': description,    # Same as Product Name*
                 
                 # Vendor and brand
-                'Vendor': vendor if vendor else 'Unknown Vendor',
-                'Vendor/Supplier*': vendor if vendor else 'Unknown Vendor',
+                'Vendor': vendor_final,
+                'Vendor/Supplier*': vendor_final,
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 
@@ -3260,19 +3286,39 @@ class JSONMatcher:
                 logging.warning(f"⚠️ Database product has no name - using JSON fallback")
                 product_name = str(json_item.get("product_name", "Unknown Product"))
             
-            # Get vendor with fallback logic
-            vendor = safe_row_get(excel_row, 'Vendor/Supplier*') or safe_row_get(excel_row, 'Vendor/Supplier') or safe_row_get(excel_row, 'Vendor') or global_vendor
+            # Get vendor with fallback logic - prioritize database vendor, then global vendor, then JSON vendor
+            # CRITICAL FIX: Never extract vendor from product name - use database/global vendor first
+            vendor = safe_row_get(excel_row, 'Vendor/Supplier*') or safe_row_get(excel_row, 'Vendor/Supplier') or safe_row_get(excel_row, 'Vendor') or global_vendor or ""
             json_vendor_value = str(json_item.get("vendor", "")).strip() if json_item else ""
-            if json_vendor_value:
-                if not vendor or not self._is_vendor_match(vendor, json_vendor_value):
-                    logging.debug(f"🔁 Vendor override for Excel match: using JSON vendor '{json_vendor_value}' instead of '{vendor}'")
+            # Only use JSON vendor if it's actually set (not empty) and database/global vendor is missing
+            if json_vendor_value and json_vendor_value.lower() not in ['', 'unknown', 'n/a', 'none']:
+                # If we have a database/global vendor, only override if JSON vendor matches it
+                if vendor:
+                    if self._is_vendor_match(vendor, json_vendor_value):
+                        logging.debug(f"✅ Vendor match: database '{vendor}' matches JSON '{json_vendor_value}'")
+                    else:
+                        logging.debug(f"⚠️ Vendor mismatch: keeping database '{vendor}' over JSON '{json_vendor_value}'")
+                else:
+                    # No database vendor - use JSON vendor
                     vendor = json_vendor_value
+                    logging.debug(f"🔁 Using JSON vendor '{json_vendor_value}' (no database vendor)")
+            
+            # CRITICAL: Ensure vendor is NEVER empty - use global_vendor as absolute fallback
+            if not vendor or vendor.strip() == "":
+                vendor = global_vendor if global_vendor else "Unknown Vendor"
+                logging.warning(f"⚠️ Vendor was empty, using fallback: '{vendor}'")
+            
             if vendor:
                 try:
                     vendor = self._normalize_vendor_display_name(vendor)
                 except AttributeError:
                     # _normalize_vendor_display_name may not exist in some contexts; ignore if unavailable
                     pass
+            
+            # Final safety check: Ensure vendor is NEVER empty after normalization
+            if not vendor or vendor.strip() == "":
+                vendor = global_vendor if global_vendor else "Unknown Vendor"
+                logging.warning(f"⚠️ Vendor became empty after normalization, using fallback: '{vendor}'")
             
             # CRITICAL FIX: Ensure brand, price, and weight are always populated
             # Get brand with multiple fallbacks
@@ -3331,8 +3377,8 @@ class JSONMatcher:
             product = {
                 'Product Name*': standardized_name,
                 'Description': standardized_name,  # Same as Product Name*, standardized format
-                'Vendor': vendor,
-                'Vendor/Supplier*': vendor,
+                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
                 'Product Brand': excel_brand,  # Use the improved brand extraction
                 'ProductBrand': excel_brand,
                 'Product Type*': safe_row_get(excel_row, 'Product Type*'),
@@ -7822,6 +7868,11 @@ class JSONMatcher:
         if not is_classic:
             logging.info(f"🧬 NONCLASSIC TYPE DETECTED: '{product_type}' - will use MIXED or CBD lineage only")
             
+            # Check for paraphernalia product type first
+            if product_type and product_type.strip().lower() == 'paraphernalia':
+                logging.info(f"🧬 PARAPHERNALIA DETECTED: '{product_type}' -> 'PARAPHERNALIA'")
+                return 'PARAPHERNALIA'
+            
             # Check Product Strain for CBD indicators first
             if product_strain:
                 strain_lower = product_strain.lower()
@@ -8132,8 +8183,8 @@ class JSONMatcher:
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type or "Unknown",
                 'Product Type': product_type or "Unknown",
-                'Vendor': vendor,
-                'Vendor/Supplier*': vendor,
+                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 'Product Strain': strain,
@@ -8852,8 +8903,8 @@ class JSONMatcher:
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type,
                 'ProductType': product_type,
-                'Vendor': vendor,
-                'Vendor/Supplier*': vendor,
+                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 'Product Strain': strain,
@@ -9133,8 +9184,8 @@ class JSONMatcher:
                 'Description': product_name,  # Use product_name, not description
                 'Product Type*': product_type,
                 'Product Type': product_type,
-                'Vendor': vendor,
-                'Vendor/Supplier*': vendor,
+                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 'Product Strain': strain,
@@ -9389,8 +9440,8 @@ class JSONMatcher:
                 'Description': description,
                 'Product Type*': product_type,
                 'Product Type': product_type,
-                'Vendor': vendor,
-                'Vendor/Supplier*': vendor,
+                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 'Product Strain': strain,

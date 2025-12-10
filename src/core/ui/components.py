@@ -119,7 +119,7 @@ class FileUploadPanel(ttk.Frame):
             if db_path.exists():
                 db_df = pd.read_csv(db_path)
                 if not ((db_df['filename'] == new_entry['filename']) & (db_df['filepath'] == new_entry['filepath'])).any():
-                    db_df = db_df.append(new_entry, ignore_index=True)
+                    db_df = pd.concat([db_df, pd.DataFrame([new_entry])], ignore_index=True)
                     db_df.to_csv(db_path, index=False)
             else:
                 pd.DataFrame([new_entry]).to_csv(db_path, index=False)

@@ -1107,21 +1107,21 @@ class ProductDatabase:
                     logger.debug(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
-            # Additional validation for essential fields
-            vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
-            product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
+            # Additional validation for essential fields - apply defaults if missing
+            vendor = product_data.get('Vendor/Supplier*', product_data.get('Vendor', '')).strip()
+            product_type = product_data.get('Product Type*', '').strip()
             
+            # CRITICAL FIX: Apply defaults instead of rejecting
             if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
-                self._rejected_missing_vendor += 1
-                if self._rejected_missing_vendor % 10 == 1:
-                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
-                return None
+                vendor = 'Unknown Vendor'
+                product_data['Vendor/Supplier*'] = vendor
+                product_data['Vendor'] = vendor
+                logger.debug(f"Applied default vendor 'Unknown Vendor' for product '{product_name}'")
             
             if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
-                self._rejected_missing_type += 1
-                if self._rejected_missing_type % 10 == 1:
-                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
-                return None
+                product_type = 'Unknown'
+                product_data['Product Type*'] = product_type
+                logger.debug(f"Applied default product type 'Unknown' for product '{product_name}'")
             
             normalized_name = self._normalize_product_name(product_name)
             current_date = datetime.now().isoformat()
@@ -1359,7 +1359,17 @@ class ProductDatabase:
                 return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
             
             # Filter out JSON matched tags to prevent duplicate storage
+            # CRITICAL FIX: Only filter if Source column exists and contains JSON match indicators
+            # Don't filter if Source is just "Excel Import" or similar
+            original_count = len(df)
             filtered_df = self._filter_json_matched_tags(df)
+            filtered_count = len(filtered_df)
+            excluded_count = original_count - filtered_count
+            
+            if excluded_count > 0:
+                logger.info(f"🔍 Filtered out {excluded_count} JSON matched tags, {filtered_count} Excel products remaining")
+            else:
+                logger.info(f"🔍 No JSON matched tags filtered - all {filtered_count} products are Excel products")
 
             # CRITICAL NORMALIZATION: map common column aliases used by different upload paths
             try:
@@ -1399,8 +1409,16 @@ class ProductDatabase:
             except Exception as norm_err:
                 logger.warning(f"Column normalization failed: {norm_err}")
             
-            print(f"🔍 DEBUG: Database storage - Original rows: {len(df)}, Filtered rows: {len(filtered_df)}")
-            print(f"🔍 DEBUG: Database storage - Columns: {list(filtered_df.columns)}")
+            logger.info(f"🔍 DEBUG: Database storage - Original rows: {len(df)}, Filtered rows: {len(filtered_df)}")
+            logger.info(f"🔍 DEBUG: Database storage - Columns: {list(filtered_df.columns)}")
+            if len(filtered_df) == 0:
+                logger.warning(f"⚠️ WARNING: All {len(df)} rows were filtered out! Check JSON match filter or DataFrame structure.")
+                # Log sample of original DataFrame to debug
+                if len(df) > 0:
+                    logger.info(f"Sample original rows (first 3):")
+                    for idx, row in df.head(3).iterrows():
+                        source_val = row.get('Source', 'No Source')
+                        logger.info(f"  Row {idx}: Product='{row.get('Product Name*', 'N/A')}', Source='{source_val}'")
             
             # if filtered_df.empty:
             #     logger.warning("All data was filtered out as JSON matched tags - nothing to store")
@@ -1430,7 +1448,10 @@ class ProductDatabase:
             
             # Process each row in the filtered DataFrame
             # OPTIMIZATION: Use itertuples() instead of iterrows() for 10-100x speedup
-            print(f"🔍 DEBUG: Starting to process {len(filtered_df)} rows for database storage")
+            logger.info(f"🔍 DEBUG: Starting to process {len(filtered_df)} rows for database storage")
+            if len(filtered_df) == 0:
+                logger.error(f"❌ ERROR: No rows to process after filtering! Original: {len(df)}, After JSON filter: {len(filtered_df)}")
+                return {'stored': 0, 'updated': 0, 'errors': 0, 'excluded_json_matches': len(df), 'message': f'All {len(df)} rows were filtered out (likely JSON matched tags)'}
             total_rows = len(filtered_df)
             
             # Create column index mapping for faster access
@@ -1716,31 +1737,39 @@ class ProductDatabase:
                         logger.warning(f"Row {row_idx + 1}: Skipping blank/invalid product name: '{product_name}'")
                         continue
                     
-                    # Skip rows with only whitespace or special characters
-                    if str(product_name).strip() == '' or len(str(product_name).strip()) < 2:
+                    # Skip rows with only whitespace (but allow single character names for vertical template compatibility)
+                    product_name_stripped = str(product_name).strip()
+                    if product_name_stripped == '' or len(product_name_stripped) < 1:
                         logger.warning(f"Row {row_idx + 1}: Skipping product name too short or only whitespace: '{product_name}'")
                         continue
                     
                     # Update the product data with the found name
                     product_data['Product Name*'] = str(product_name).strip()
                     
-                    # Additional validation: Skip rows with missing essential data
-                    vendor = product_data.get('Vendor', '').strip()
-                    product_type = product_data.get('Product Type*', '').strip()
+                    # CRITICAL FIX: Ensure defaults are applied to product_data before validation
+                    # This ensures products with missing vendor/type get defaults instead of being skipped
+                    if not product_data.get('Vendor/Supplier*') or not product_data.get('Vendor/Supplier*').strip():
+                        product_data['Vendor/Supplier*'] = self._ensure_crucial_value(product_data.get('Vendor/Supplier*', product_data.get('Vendor', '')), 'Unknown Vendor', 'Vendor/Supplier*')
+                    if not product_data.get('Vendor') or not product_data.get('Vendor').strip():
+                        product_data['Vendor'] = self._ensure_crucial_value(product_data.get('Vendor', product_data.get('Vendor/Supplier*', '')), 'Unknown Vendor', 'Vendor')
+                    if not product_data.get('Product Type*') or not product_data.get('Product Type*').strip():
+                        product_data['Product Type*'] = self._ensure_crucial_value(product_data.get('Product Type*', ''), 'Unknown', 'Product Type')
                     
-                    if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {row_idx + 1}: Skipping product '{product_name}' - missing vendor information")
-                        continue
+                    # Extract final values for duplicate checking (with defaults guaranteed)
+                    final_vendor = product_data.get('Vendor/Supplier*', product_data.get('Vendor', 'Unknown Vendor')).strip()
+                    final_product_type = product_data.get('Product Type*', 'Unknown').strip()
                     
-                    if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {row_idx + 1}: Skipping product '{product_name}' - missing product type")
+                    # Final validation - should always pass now since defaults are guaranteed
+                    if not final_vendor or not final_product_type:
+                        logger.error(f"Row {row_idx + 1}: CRITICAL - Defaults failed for product '{product_name}' (vendor='{final_vendor}', type='{final_product_type}')")
+                        error_count += 1
                         continue
                     
                     # Skip duplicate entries within the same upload (same name + vendor + type combination)
-                    duplicate_key = f"{product_name}|{vendor}|{product_type}"
+                    duplicate_key = f"{product_name}|{final_vendor}|{final_product_type}"
                     if duplicate_key in self._current_upload_products:
                         skipped_duplicates += 1
-                        logger.warning(f"Row {row_idx + 1}: Skipping duplicate product '{product_name}' from same vendor '{vendor}' and type '{product_type}'")
+                        logger.warning(f"Row {row_idx + 1}: Skipping duplicate product '{product_name}' from same vendor '{final_vendor}' and type '{final_product_type}'")
                         continue
                     
                     # Track this product to prevent duplicates within the same upload
@@ -1759,7 +1788,7 @@ class ProductDatabase:
                     
                     # Try multiple lookup strategies to find existing product
                     normalized_name = self._normalize_product_name(product_name)
-                    vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
+                    vendor = final_vendor  # Use the final vendor value (with defaults applied)
                     
                     # Strategy 1: Exact normalized name + vendor match
                     cursor_check.execute('''
@@ -1849,24 +1878,39 @@ class ProductDatabase:
                     cursor_temp.execute("SELECT COUNT(*) FROM products")
                     count_before = cursor_temp.fetchone()[0]
                     
-                    product_id = self.add_or_update_product(product_data)
+                    # Log product data before storage attempt
+                    logger.info(f"Row {row_idx + 1}: Attempting to store product '{product_name}' (vendor='{final_vendor}', type='{final_product_type}')")
                     
-                    if product_id:
-                        cursor_temp.execute("SELECT COUNT(*) FROM products")
-                        count_after = cursor_temp.fetchone()[0]
+                    try:
+                        product_id = self.add_or_update_product(product_data)
                         
-                        if count_after > count_before:
-                            stored_count += 1
+                        if product_id:
+                            cursor_temp.execute("SELECT COUNT(*) FROM products")
+                            count_after = cursor_temp.fetchone()[0]
+                            
+                            if count_after > count_before:
+                                stored_count += 1
+                                logger.info(f"Row {row_idx + 1}: ✅ Successfully STORED new product '{product_name}' (ID: {product_id})")
+                            else:
+                                updated_count += 1
+                                logger.info(f"Row {row_idx + 1}: ✅ Successfully UPDATED existing product '{product_name}' (ID: {product_id})")
+                        elif product_id is None:
+                            # Product was skipped as duplicate or rejected
+                            skipped_duplicates += 1
+                            logger.warning(f"Row {row_idx + 1}: ⚠️ Product '{product_name}' returned None from add_or_update_product (likely duplicate or validation failure)")
+                            continue
                         else:
-                            updated_count += 1
-                    elif product_id is None:
-                        # Product was skipped as duplicate
-                        skipped_duplicates += 1
-                        logger.info(f"Row {row_idx + 1}: Skipped duplicate product '{product_name}'")
-                        continue
-                    else:
+                            error_count += 1
+                            error_msg = f"Row {row_idx + 1}: Failed to store product '{product_name}' - add_or_update_product returned {product_id}"
+                            errors.append(error_msg)
+                            logger.error(f"❌ {error_msg}")
+                    except Exception as storage_error:
                         error_count += 1
-                        errors.append(f"Row {row_idx + 1}: Failed to store product")
+                        error_msg = f"Row {row_idx + 1}: Exception storing product '{product_name}': {str(storage_error)}"
+                        errors.append(error_msg)
+                        logger.error(f"❌ {error_msg}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
                         
                 except Exception as row_error:
                     error_count += 1
@@ -2018,6 +2062,245 @@ class ProductDatabase:
                 'error': str(e),
                 'message': f'Cleanup failed: {str(e)}'
             }
+
+    # ============================================================
+    # FAST TAG LIST FOR AVAILABLE-TAGS ENDPOINT
+    # ============================================================
+    def get_available_tags_fast(self) -> List[Dict[str, Any]]:
+        """
+        Return a lightweight list of tags built directly from the products table.
+
+        This is designed to mirror the shape of ExcelProcessor.get_available_tags()
+        closely enough for the frontend available-tags UI, but using a single,
+        efficient SQL query instead of walking the Excel DataFrame.
+
+        It intentionally omits heavy JSON-matching or lineage-alignment work;
+        those can be layered on by slower, non-fast-load calls if needed.
+        """
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            query_start = time.time()
+            cursor.execute(
+                '''
+                SELECT
+                    "Product Name*"            AS product_name,
+                    "Product Type*"            AS product_type,
+                    "Vendor/Supplier*"         AS vendor,
+                    "Product Brand"            AS brand,
+                    COALESCE("Lineage", '')    AS lineage,
+                    "Quantity*"                AS quantity,
+                    "DOH"                      AS doh,
+                    "Weight*"                  AS weight,
+                    "Units"                    AS units,
+                    "Price"                    AS price,
+                    "Product Strain"           AS product_strain,
+                    "Ratio_or_THC_CBD"         AS ratio_or_thc_cbd,
+                    "THC test result"          AS thc_test_result,
+                    "CBD test result"          AS cbd_test_result,
+                    "Test result unit (% or mg)" AS test_unit
+                FROM products
+                WHERE ("Is Archived? (yes/no)" IS NULL OR "Is Archived? (yes/no)" != 'yes')
+                '''
+            )
+            rows = cursor.fetchall()
+            elapsed_ms = (time.time() - query_start) * 1000
+            logger.info(f"[PERF] ProductDatabase.get_available_tags_fast query returned {len(rows)} rows in {elapsed_ms:.1f}ms")
+
+            tags: List[Dict[str, Any]] = []
+            for (
+                product_name,
+                product_type,
+                vendor,
+                brand,
+                lineage,
+                quantity,
+                doh,
+                weight,
+                units,
+                price,
+                product_strain,
+                ratio_or_thc_cbd,
+                thc_test_result,
+                cbd_test_result,
+                test_unit,
+            ) in rows:
+                if not product_name:
+                    continue
+
+                # CRITICAL FIX: Apply nonclassic weight conversion logic
+                combined_weight = self._calculate_combined_weight(
+                    product_name, product_type, weight, units
+                )
+
+                tag: Dict[str, Any] = {
+                    'Product Name*': product_name,
+                    'ProductName': product_name,
+                    'Product Type*': product_type or '',
+                    'Type': product_type or '',
+                    'Vendor/Supplier*': vendor or '',
+                    'Vendor': vendor or '',
+                    'Product Brand': brand or '',
+                    'Brand': brand or '',
+                    'Lineage': (lineage or '').strip().upper() or 'MIXED',
+                    'canonical_lineage': (lineage or '').strip().upper() or 'MIXED',
+                    'currentLineage': (lineage or '').strip().upper() or 'MIXED',
+                    'Quantity*': quantity,
+                    'Quantity': quantity,
+                    'DOH': doh or '',
+                    'Weight*': weight or '',
+                    'Weight': weight or '',
+                    'Units': units or '',
+                    'Price': price,
+                    'Product Strain': product_strain or '',
+                    'Ratio_or_THC_CBD': ratio_or_thc_cbd or '',
+                    'THC test result': thc_test_result or '',
+                    'CBD test result': cbd_test_result or '',
+                    'Test result unit (% or mg)': test_unit or '',
+                    'Source': 'DB Fast',
+                    # CRITICAL FIX: Add combined weight fields for frontend compatibility
+                    'CombinedWeight': combined_weight,
+                    'WeightWithUnits': combined_weight,
+                    'WeightUnits': combined_weight,
+                    'weightWithUnits': combined_weight,
+                }
+                tags.append(tag)
+
+            return tags
+        except Exception as e:
+            logger.error(f"Error in get_available_tags_fast: {e}")
+            return []
+    
+    def _calculate_combined_weight(self, product_name: str, product_type: str, weight: Any, units: Any) -> str:
+        """
+        Calculate combined weight with proper unit conversion for nonclassic products.
+        This mirrors the logic in app.py's process_database_product_for_api function.
+        """
+        try:
+            product_name_str = str(product_name or '').lower()
+            product_type_str = str(product_type or '').lower()
+            weight_value = str(weight or '').strip() if weight else ''
+            units_str = str(units or '').strip() if units else ''
+            
+            # If no weight or units, return N/A
+            if not weight_value or not units_str or units_str.lower() in ['none', 'null', '']:
+                if weight_value:
+                    return str(weight_value)
+                return 'N/A'
+            
+            # Special handling for pre-roll products (they use JointRatio, not weight)
+            if product_type_str in ['pre-roll', 'infused pre-roll']:
+                # For pre-rolls, we'd need JointRatio from DB, but for now use weight if available
+                if weight_value and units_str:
+                    try:
+                        weight_float = float(weight_value)
+                        if weight_float == int(weight_float):
+                            return f'{int(weight_float)}{units_str}'
+                        else:
+                            return f'{weight_value}{units_str}'
+                    except (ValueError, TypeError):
+                        return f'{weight_value}{units_str}'
+                return 'N/A'
+            
+            # Check if this is a nonclassic product that needs weight conversion
+            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 
+                           'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+            is_nonclassic = product_type_str not in [ct.lower() for ct in CLASSIC_TYPES]
+            
+            if is_nonclassic and units_str.lower() in ['g', 'grams', 'gram']:
+                # Special handling for Moonshot products - convert to 2oz
+                if 'moonshot' in product_name_str:
+                    return '2oz'
+                # Find the most common ounce weight for this product type
+                most_likely_oz_weight = self._find_most_likely_ounce_weight(product_name_str, product_type_str)
+                if most_likely_oz_weight:
+                    return most_likely_oz_weight
+                else:
+                    # Use original weight with units from data
+                    try:
+                        weight_float = float(weight_value)
+                        if weight_float == int(weight_float):
+                            return f'{int(weight_float)}{units_str}'
+                        else:
+                            return f'{weight_value}{units_str}'
+                    except (ValueError, TypeError):
+                        return f'{weight_value}{units_str}'
+            else:
+                # Use original logic for classic products or nonclassic with oz units
+                try:
+                    weight_float = float(weight_value)
+                    if weight_float == int(weight_float):
+                        return f'{int(weight_float)}{units_str}'
+                    else:
+                        return f'{weight_value}{units_str}'
+                except (ValueError, TypeError):
+                    return f'{weight_value}{units_str}'
+        except Exception as e:
+            logger.warning(f"Error calculating combined weight for {product_name}: {e}")
+            # Fallback to simple concatenation
+            if weight and units:
+                return f'{weight}{units}'
+            elif weight:
+                return str(weight)
+            return 'N/A'
+    
+    def _find_most_likely_ounce_weight(self, product_name: str, product_type: str) -> str:
+        """
+        Find the most common ounce weight for similar nonclassic products.
+        This mirrors the logic in app.py's _find_most_likely_ounce_weight_for_database function.
+        """
+        # Common ounce weights for nonclassic products based on typical packaging
+        common_oz_weights = {
+            # Edibles - common sizes
+            'edible (liquid)': ['2.5oz', '3.53oz', '1.7oz'],
+            'edible (solid)': ['1oz', '2.5oz', '3.5oz'],
+            'gummy': ['1oz', '2oz', '3.5oz'],
+            'chocolate': ['1oz', '2oz', '3.5oz'],
+            'cookie': ['1oz', '2oz'],
+            'brownie': ['1oz', '2oz'],
+            'candy': ['1oz', '2oz', '3.5oz'],
+            
+            # Tinctures and oils
+            'tincture': ['1oz', '2oz', '4oz'],
+            'drops': ['1oz', '2oz'],
+            'liquid': ['1oz', '2oz', '4oz'],
+            
+            # Topicals
+            'topical': ['1oz', '2oz', '4oz'],
+            'cream': ['1oz', '2oz', '4oz'],
+            'lotion': ['1oz', '2oz', '4oz'],
+            'salve': ['1oz', '2oz'],
+            'balm': ['1oz', '2oz'],
+            
+            # Capsules
+            'capsule': ['1oz', '2oz'],
+            
+            # Beverages
+            'beverage': ['12oz', '16oz', '20oz'],
+            'drink': ['12oz', '16oz', '20oz'],
+            'soda': ['12oz', '16oz'],
+            'juice': ['12oz', '16oz'],
+            
+            # Default fallback
+            'default': ['1oz', '2oz', '3.5oz']
+        }
+        
+        # Get the most common weight for this product type
+        product_type_lower = product_type.lower().strip()
+        
+        # Try exact match first
+        if product_type_lower in common_oz_weights:
+            return common_oz_weights[product_type_lower][0]  # Return the first (most common) weight
+        
+        # Try partial matches for product types that might have variations
+        for key, weights in common_oz_weights.items():
+            if key != 'default' and key in product_type_lower:
+                return weights[0]
+        
+        # Default fallback
+        return common_oz_weights['default'][0]  # Return '1oz' as default
     
     def cleanup_blank_entries(self) -> Dict[str, Any]:
         """
@@ -2110,10 +2393,13 @@ class ProductDatabase:
                 if col in filtered_df.columns:
                     if col == 'Source':
                         # Look for JSON match indicators in Source column
+                        # CRITICAL FIX: Be more specific - only match actual JSON/AI match patterns, not generic "Match" or "Excel Import"
+                        # Match patterns like "JSON Match", "AI Match", "Generated", but NOT "Excel Import" or "Match" alone
                         json_match_mask |= filtered_df[col].astype(str).str.contains(
-                            'JSON Match|AI Match|JSON|AI|Match|Generated', 
+                            r'\b(JSON Match|AI Match|Generated|JSON Matched|AI Matched)\b', 
                             case=False, 
-                            na=False
+                            na=False,
+                            regex=True
                         )
                     else:
                         # Look for non-null values in other JSON match columns
@@ -4307,10 +4593,11 @@ class ProductDatabase:
                 logger.debug("No product name provided for lineage lookup")
                 return None
             
-            # Try exact match first (fastest) – respect sovereign/canonical/product lineage as-is
+            # CRITICAL FIX: Prioritize product Lineage first (user's explicit changes), then strain lineage
+            # This ensures frontend lineage changes persist and are not overwritten by strain lineage
             cursor.execute(
                 '''
-                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                SELECT COALESCE(p."Lineage", s.sovereign_lineage, s.canonical_lineage) AS lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" = ? OR p."ProductName" = ?
@@ -4328,7 +4615,7 @@ class ProductDatabase:
             # Fallback: case-insensitive and whitespace-insensitive match
             cursor.execute(
                 '''
-                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                SELECT COALESCE(p."Lineage", s.sovereign_lineage, s.canonical_lineage) AS lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
@@ -4347,7 +4634,7 @@ class ProductDatabase:
             # Last resort: partial match (in case product name has extra characters)
             cursor.execute(
                 '''
-                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                SELECT COALESCE(p."Lineage", s.sovereign_lineage, s.canonical_lineage) AS lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" LIKE ? OR p."ProductName" LIKE ?
@@ -4935,13 +5222,13 @@ class ProductDatabase:
             # Use placeholders for the IN clause
             placeholders = ','.join(['?' for _ in normalized_names])
             
-            # CRITICAL FIX: JOIN with strains table to get sovereign_lineage (manual overrides)
-            # Use COALESCE to prioritize sovereign_lineage, then canonical_lineage, then products.Lineage
+            # CRITICAL FIX: Prioritize product Lineage first (user's explicit changes), then strain lineage
+            # This ensures frontend lineage changes are reflected in DOCX generation
             cursor.execute(f'''
                 SELECT p.id, p."Product Name*", p.normalized_name, p."Product Type*", p."Vendor/Supplier*", p."Product Brand",
-                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS "Lineage",
+                       COALESCE(p."Lineage", s.sovereign_lineage, s.canonical_lineage) AS "Lineage",
                        p."Product Strain" as strain_name,
-                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as canonical_lineage,
+                       COALESCE(p."Lineage", s.sovereign_lineage, s.canonical_lineage) as canonical_lineage,
                        p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        p."Description", p."Weight*", p."Units", p."Price", 
                        p."THC test result", p."CBD test result", p."Test result unit (% or mg)",
@@ -4982,11 +5269,11 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        'Lineage': result[6] or 'MIXED',  # lineage (now includes sovereign_lineage priority)
+                        'Lineage': result[6] or 'MIXED',  # lineage (prioritizes product Lineage, then strain lineage)
                         'Product Strain': result[7],  # strain_name from Product Strain column
                         'strain_name': result[7],  # strain_name from Product Strain column
-                        'canonical_lineage': result[8] or result[6] or 'MIXED',  # canonical_lineage (now includes sovereign_lineage priority)
-                        'currentLineage': result[8] or result[6] or 'MIXED',  # currentLineage - same as canonical_lineage (includes sovereign_lineage priority)
+                        'canonical_lineage': result[8] or result[6] or 'MIXED',  # canonical_lineage (prioritizes product Lineage, then strain lineage)
+                        'currentLineage': result[8] or result[6] or 'MIXED',  # currentLineage - same as canonical_lineage (prioritizes product Lineage, then strain lineage)
                         'total_occurrences': result[9],
                         'first_seen_date': result[10],
                         'last_seen_date': result[11],

@@ -38,6 +38,44 @@ if (isWindows) {
     verboseLog('Windows performance optimizations enabled');
 }
 
+// CRITICAL: Prevent multiple simultaneous page reloads
+let _reloadInProgress = false;
+let _reloadTimeout = null;
+
+const safeReload = (delay = 0) => {
+    // Prevent multiple reloads
+    if (_reloadInProgress) {
+        console.log('⏭️ Reload already in progress, skipping duplicate reload request');
+        return;
+    }
+    
+    _reloadInProgress = true;
+    
+    // Clear any existing reload timeout
+    if (_reloadTimeout) {
+        clearTimeout(_reloadTimeout);
+        _reloadTimeout = null;
+    }
+    
+    const doReload = () => {
+        console.log('🔄 Executing safe page reload...');
+        _reloadInProgress = false;
+        // Use original reload method to bypass any interceptors
+        const originalReload = window.location.reload.bind(window.location);
+        originalReload();
+    };
+    
+    if (delay > 0) {
+        _reloadTimeout = setTimeout(doReload, delay);
+    } else {
+        doReload();
+    }
+};
+
+// Make safeReload available globally
+window.safeReload = safeReload;
+window._reloadInProgress = false; // Make flag accessible
+
 // Memory-optimized performance utilities
 const performanceUtils = {
     // Memory-efficient debounce with cleanup - optimized for Windows
@@ -763,7 +801,7 @@ const AppLoadingSplash = {
         }
         this._emergencyTimer = setTimeout(() => {
             this.emergencyHide();
-        }, 7000);
+        }, 5000); // Reduced from 7000 to 5000 for faster recovery
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -889,23 +927,38 @@ const AppLoadingSplash = {
         
         if (splash) {
             splash.style.display = 'none';
+            splash.classList.add('fade-out');
         }
         
         if (mainContent) {
             mainContent.style.opacity = '1';
+            mainContent.style.display = 'block';
             mainContent.classList.add('loaded');
+        }
+        
+        // Try to initialize TagManager if it hasn't been initialized yet
+        if (window.TagManager && typeof window.TagManager.init === 'function') {
+            if (!window.TagManager.state || !window.TagManager.state.initialized) {
+                verboseLog('Emergency: Attempting to initialize TagManager from emergencyHide');
+                try {
+                    window.TagManager.init();
+                } catch (e) {
+                    console.error('Emergency TagManager.init() from emergencyHide failed:', e);
+                }
+            }
         }
     }
 };
 
+// CRITICAL FIX: Expose TagManager to window immediately when defined
+// This allows other scripts to check for TagManager even before it's fully initialized
 const TagManager = {
     CACHE_TTL_MS: 10 * 60 * 1000, // 10 minutes
     state: {
         selectedTags: new Set(),
-        isProcessingDeselection: false, // Flag to prevent filter updates during deselection
-        isUpdatingSelectedTags: false, // Flag to prevent concurrent updateSelectedTags calls
         isClearing: false, // Flag to prevent multiple simultaneous clear operations
         persistentSelectedTags: [], // Array to maintain order
+        _selectedTagsSet: new Set(), // PERFORMANCE: Set for O(1) lookups instead of array.includes()
         initialized: false,
         filters: {},
         loading: false,
@@ -934,7 +987,9 @@ const TagManager = {
         simplifiedAvailableTagsActive: false,
         // Memory optimization flags
         _memoryOptimized: true,
-        _lastCleanup: Date.now()
+        _lastCleanup: Date.now(),
+        // Local undo stack for immediate undo
+        localUndoStack: []
     },
     SIMPLIFIED_RENDER_THRESHOLD: 900,
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
@@ -962,6 +1017,14 @@ const TagManager = {
                 console.log('❌ No sessionStorage available');
                 return null;
             }
+            
+            // CRITICAL: Don't load from cache if no file is uploaded
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            if (!file || file === 'nofile' || file === '') {
+                console.log('❌ No file uploaded, skipping cache load');
+                return null;
+            }
+            
             const cacheKey = this.getAvailableTagsCacheKey();
             const raw = sessionStorage.getItem(cacheKey);
             if (!raw) {
@@ -1044,6 +1107,13 @@ const TagManager = {
 
     hydrateAvailableTagsFromCache() {
         if (this.state.hydratedFromCache) {
+            return false;
+        }
+        
+        // CRITICAL: Don't load from cache if no file is uploaded
+        const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+        if (!file || file === 'nofile' || file === '') {
+            console.log('❌ No file uploaded, skipping cache hydration');
             return false;
         }
         
@@ -1204,26 +1274,37 @@ const TagManager = {
     // Helper function to find tags in selected tags list, preserving tags from multiple filters
     // CRITICAL FIX: Use originalTags first to find ALL selected tags, not just filtered ones
     getSelectedTagObjects() {
-        return this.state.persistentSelectedTags.map(name => {
-            // First try to find in originalTags (all tags regardless of filters)
-            let tag = this.state.originalTags.find(t => t['Product Name*'] === name);
-            // If not found in originalTags, try current tags (filtered view)
-            if (!tag) {
-                tag = this.state.tags.find(t => t['Product Name*'] === name);
-            }
-            // If still not found, create minimal tag object to preserve selection
-            if (!tag) {
-                verboseLog(`Warning: Selected tag '${name}' not found in state, creating minimal object`);
-                tag = {
-                    'Product Name*': name,
-                    'Product Brand': 'Unknown',
-                    'Vendor': 'Unknown',
-                    'Product Type*': 'Unknown',
-                    'Lineage': 'MIXED'
-                };
-            }
-            return tag;
-        }).filter(Boolean);
+        // PERFORMANCE: Use Map lookup for O(1) instead of array.find() which is O(n)
+        // This function is called frequently, so O(1) lookups provide massive performance boost
+        return this.state.persistentSelectedTags
+            .map(name => {
+                // Try Map lookup first (fastest - O(1))
+                let tag = this._tagLookupMap?.get(name);
+                
+                // If not in Map, fallback to originalTags (only if Map wasn't built yet)
+                if (!tag && this.state.originalTags) {
+                    tag = this.state.originalTags.find(t => t['Product Name*'] === name);
+                }
+                
+                // Last resort: current tags (filtered view)
+                if (!tag && this.state.tags) {
+                    tag = this.state.tags.find(t => t['Product Name*'] === name);
+                }
+                
+                // If still not found, create minimal tag object to preserve selection
+                if (!tag) {
+                    verboseLog(`Warning: Selected tag '${name}' not found in state, creating minimal object`);
+                    tag = {
+                        'Product Name*': name,
+                        'Product Brand': 'Unknown',
+                        'Vendor': 'Unknown',
+                        'Product Type*': 'Unknown',
+                        'Lineage': 'MIXED'
+                    };
+                }
+                return tag;
+            })
+            .filter(Boolean);
     },
 
     clearInitialDataRetry() {
@@ -1270,9 +1351,9 @@ const TagManager = {
         try {
             this.state.selectedTags = new Set();
             this.state.persistentSelectedTags = [];
+            this.state._selectedTagsSet = new Set(); // PERFORMANCE: Reset Set when clearing tags
             this.state.tags = [];
             this.state.originalTags = [];
-            this.state.isProcessingDeselection = false;
             this.state.loading = true;
             this.state.initialized = false;
             this.state.filterCache = null;
@@ -1339,27 +1420,92 @@ const TagManager = {
 
     saveSelectionState(actionType = 'checkbox_selection', extraPayload = {}) {
         try {
+            // IMMEDIATE: Save to local undo stack for instant undo
+            if (!this.state.localUndoStack) {
+                this.state.localUndoStack = [];
+            }
+            
+            // PERFORMANCE: Use Set for O(1) lookup instead of O(n) .includes()
+            const selectedSet = new Set(this.state.persistentSelectedTags);
+            
+            // Save current state locally
+            const currentState = {
+                selected_tag_names: [...this.state.persistentSelectedTags],
+                available_tag_names: this.state.tags
+                    .filter(tag => !selectedSet.has(tag['Product Name*']))
+                    .map(tag => tag['Product Name*']),
+                action_type: actionType,
+                timestamp: new Date().toISOString()
+            };
+            
+            this.state.localUndoStack.push(currentState);
+            // Limit local undo stack size
+            if (this.state.localUndoStack.length > 5) {
+                this.state.localUndoStack = this.state.localUndoStack.slice(-5);
+            }
+            
+            verboseLog(`💾 Saved selection state for undo - Action: ${actionType}, Stack size: ${this.state.localUndoStack.length}, Selected tags: ${currentState.selected_tag_names.length}`);
+            
+            // Background: Also save to backend (non-blocking)
+            // Use fetch instead of sendBeacon for better reliability and error handling
             const payload = JSON.stringify({
                 action_type: actionType,
                 ...extraPayload
             });
             
-            if (navigator.sendBeacon) {
-                const blob = new Blob([payload], { type: 'application/json' });
-                navigator.sendBeacon('/api/save-selection-state', blob);
-            } else {
-                fetch('/api/save-selection-state', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: payload,
-                    keepalive: true
-                }).catch(error => {
-                    console.warn('Failed to save selection state for undo (fetch):', error);
-                });
-            }
+            // Always use fetch with keepalive for better reliability
+            // sendBeacon doesn't support proper error handling
+            fetch('/api/save-selection-state', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                keepalive: true  // Ensures request completes even if page is unloading
+            }).then(response => {
+                if (!response.ok) {
+                    verboseLog(`⚠️ Failed to save selection state for undo: ${response.status} ${response.statusText}`);
+                } else {
+                    verboseLog('✅ Selection state saved successfully to backend for undo');
+                }
+            }).catch(error => {
+                verboseLog('⚠️ Failed to save selection state for undo:', error);
+            });
         } catch (error) {
-            console.warn('Failed to save selection state for undo:', error);
+            console.error('❌ Error saving selection state for undo:', error);
         }
+    },
+
+    _extractFiltersFromTags(tags) {
+        // Extract unique filter values from tags array
+        const vendors = new Set();
+        const brands = new Set();
+        const productTypes = new Set();
+        const lineages = new Set();
+        const weights = new Set();
+        const strains = new Set();
+        const doh = new Set();
+        const highCbd = new Set();
+
+        tags.forEach(tag => {
+            if (tag.Vendor) vendors.add(tag.Vendor);
+            if (tag.ProductBrand || tag['Product Brand']) brands.add(tag.ProductBrand || tag['Product Brand']);
+            if (tag.ProductType || tag['Product Type*']) productTypes.add(tag.ProductType || tag['Product Type*']);
+            if (tag.Lineage) lineages.add(tag.Lineage);
+            if (tag.WeightUnits || tag.CombinedWeight) weights.add(tag.WeightUnits || tag.CombinedWeight);
+            if (tag.ProductStrain || tag['Product Strain']) strains.add(tag.ProductStrain || tag['Product Strain']);
+            if (tag.DOH || tag['DOH Compliant (Yes/No)']) doh.add(tag.DOH || tag['DOH Compliant (Yes/No)']);
+            if (tag.Ratio) highCbd.add(tag.Ratio);
+        });
+
+        return {
+            vendor: Array.from(vendors).filter(Boolean).sort(),
+            brand: Array.from(brands).filter(Boolean).sort(),
+            productType: Array.from(productTypes).filter(Boolean).sort(),
+            lineage: Array.from(lineages).filter(Boolean).sort(),
+            weight: Array.from(weights).filter(Boolean).sort(),
+            strain: Array.from(strains).filter(Boolean).sort(),
+            doh: Array.from(doh).filter(Boolean).sort(),
+            highCbd: Array.from(highCbd).filter(Boolean).sort()
+        };
     },
 
     updateFilters(filters, preserveExistingValues = true) {
@@ -2029,10 +2175,11 @@ const TagManager = {
         // Ensure we always use originalTags for filtering to preserve the full dataset
         const tagsToFilter = this.state.originalTags.length > 0 ? this.state.originalTags : this.state.tags;
         
-        // If we don't have original tags, we can't filter properly
-        if (this.state.originalTags.length === 0) {
-            console.warn('No original tags available for filtering');
-            return;
+        // If we don't have any tags to filter, log warning but don't fail silently
+        if (tagsToFilter.length === 0) {
+            console.warn('No tags available for filtering - originalTags:', this.state.originalTags.length, 'tags:', this.state.tags.length);
+            // Don't return early - allow filter to run with empty array so UI updates correctly
+            // This prevents filters from appearing broken when tags are still loading
         }
         
         verboseLog('applyFilters - tagsToFilter length:', tagsToFilter.length);
@@ -2120,7 +2267,18 @@ const TagManager = {
             if (dohFilter && dohFilter.trim() !== '' && dohFilter.toLowerCase() !== 'all') {
                 const tagDoh = (tag.DOH || tag.doh || '').toString().trim().toUpperCase();
                 const filterDoh = dohFilter.toString().trim().toUpperCase();
-                if (tagDoh !== filterDoh) {
+                
+                // Normalize DOH values for comparison
+                // Map common variations: "Yes" -> "DOH", "No" -> "NONE"
+                let normalizedTagDoh = tagDoh;
+                if (tagDoh === 'YES') {
+                    normalizedTagDoh = 'DOH';
+                } else if (tagDoh === 'NO') {
+                    normalizedTagDoh = 'NONE';
+                }
+                
+                // Check if filter matches (exact match or normalized match)
+                if (normalizedTagDoh !== filterDoh && tagDoh !== filterDoh) {
                     return false;
                 }
             }
@@ -2128,7 +2286,8 @@ const TagManager = {
             // Check High CBD filter - only apply if not empty and not "All"
             if (highCbdFilter && highCbdFilter.trim() !== '' && highCbdFilter.toLowerCase() !== 'all') {
                 const tagProductType = (tag.productType || tag['Product Type*'] || '').toString().trim().toLowerCase();
-                const isHighCbd = tagProductType.startsWith('high cbd');
+                // Check for all high CBD variations: "high cbd", "doh high cbd", etc.
+                const isHighCbd = tagProductType.startsWith('high cbd') || tagProductType.includes('doh high cbd');
                 
                 if (highCbdFilter === 'High CBD Products' && !isHighCbd) {
                     return false;
@@ -2145,12 +2304,25 @@ const TagManager = {
             originalTagsCount: tagsToFilter.length,
             filteredTagsCount: filteredTags.length,
             productTypeFilter: productTypeFilter,
+            vendorFilter: vendorFilter,
+            brandFilter: brandFilter,
+            lineageFilter: lineageFilter,
+            weightFilter: weightFilter,
+            dohFilter: dohFilter,
+            highCbdFilter: highCbdFilter,
             prerollTags: filteredTags.filter(tag => {
                 const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
                 const normalizedType = normalizeProductType(tagProductType);
                 return normalizedType.toLowerCase() === 'pre-roll';
             }).length
         });
+        
+        // If filtering resulted in empty array but we had tags to filter, log warning
+        if (filteredTags.length === 0 && tagsToFilter.length > 0) {
+            console.warn('🔍 Filter resulted in 0 tags but had', tagsToFilter.length, 'tags to filter. Active filters:', {
+                vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter
+            });
+        }
         
         // Cache the results
         this.state.filterCache = {
@@ -2169,27 +2341,9 @@ const TagManager = {
         }
         
         // Update selected tags to also respect the current filters
-        const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
-            // First try to find in current tags (filtered view)
-            let foundTag = this.state.tags.find(t => t['Product Name*'] === name);
-            // If not found in current tags, try original tags
-            if (!foundTag) {
-                foundTag = this.state.originalTags.find(t => t['Product Name*'] === name);
-            }
-            // If still not found, create a minimal tag object (for JSON matched items)
-            if (!foundTag) {
-                console.warn(`Tag not found in state: ${name}, creating minimal tag object`);
-                foundTag = {
-                    'Product Name*': name,
-                    'Product Brand': 'Unknown',
-                    'Vendor': 'Unknown',
-                    'Product Type*': 'Unknown',
-                    'Lineage': 'MIXED'
-                };
-            }
-            return foundTag;
-        }).filter(Boolean);
-        
+        // CRITICAL FIX: Use getSelectedTagObjects() which properly checks all sources (Map, originalTags, tags)
+        // This prevents tags from disappearing when filters are active
+        const selectedTagObjects = this.getSelectedTagObjects();
         this.updateSelectedTags(selectedTagObjects);
         this.renderActiveFilters();
         // USER PREFERENCE: Scroll to top after filter update
@@ -2199,66 +2353,71 @@ const TagManager = {
     },
 
     handleSearch(listId, searchInputId) {
-        const searchInput = document.getElementById(searchInputId);
-        const searchTerm = searchInput.value.toLowerCase().trim();
+        // PERFORMANCE FIX: Use requestAnimationFrame for smoother updates
+        return requestAnimationFrame(() => {
+            const searchInput = document.getElementById(searchInputId);
+            if (!searchInput) return false;
+            
+            const searchTerm = searchInput.value.toLowerCase().trim();
 
-        // Choose which tags to filter
-        let tags = [];
-        if (listId === 'availableTags') {
-            tags = this.state.originalTags || [];
-        } else if (listId === 'selectedTags') {
-            tags = Array.from(this.state.selectedTags).map(name =>
-                this.state.originalTags.find(t => t['Product Name*'] === name)
-            ).filter(Boolean);
-        }
-
-        if (!searchTerm) {
-            // Restore full list
+            // Choose which tags to filter
+            let tags = [];
             if (listId === 'availableTags') {
-                this.debouncedUpdateAvailableTags(this.state.originalTags, null);
+                tags = this.state.originalTags || [];
             } else if (listId === 'selectedTags') {
-                this.updateSelectedTags(tags);
+                tags = Array.from(this.state.selectedTags).map(name =>
+                    this.state.originalTags.find(t => t['Product Name*'] === name)
+                ).filter(Boolean);
             }
-            searchInput.classList.remove('search-active');
-            this.state.isSearching = false;
-            return true;
-        }
 
-        // Filter tags: only match product name
-        const filteredTags = tags.filter(tag => {
-            const tagName = tag['Product Name*'] || '';
-            return tagName.toLowerCase().includes(searchTerm);
+            if (!searchTerm) {
+                // Restore full list
+                if (listId === 'availableTags') {
+                    this.debouncedUpdateAvailableTags(this.state.originalTags, null);
+                } else if (listId === 'selectedTags') {
+                    this.updateSelectedTags(tags);
+                }
+                searchInput.classList.remove('search-active');
+                this.state.isSearching = false;
+                return true;
+            }
+
+            // Filter tags: only match product name
+            const filteredTags = tags.filter(tag => {
+                const tagName = tag['Product Name*'] || '';
+                return tagName.toLowerCase().includes(searchTerm);
+            });
+
+            // Update the list with only matching tags
+            if (listId === 'availableTags') {
+                this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
+                // Scroll to top of available tags list after search
+                requestAnimationFrame(() => {
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    if (availableTagsContainer) {
+                        availableTagsContainer.scrollTop = 0;
+                    }
+                });
+                // Ensure groups are expanded while searching
+                setTimeout(() => {
+                    this.expandAllTagGroups();
+                }, 120);
+            } else if (listId === 'selectedTags') {
+                this.updateSelectedTags(filteredTags);
+                // Scroll to top of selected tags list after search
+                requestAnimationFrame(() => {
+                    const selectedTagsContainer = document.getElementById('selectedTags');
+                    if (selectedTagsContainer) {
+                        selectedTagsContainer.scrollTop = 0;
+                    }
+                });
+            }
+            searchInput.classList.add('search-active');
+            this.state.isSearching = true;
+
+            // Return boolean indicating whether any tags match the search
+            return filteredTags.length > 0;
         });
-
-        // Update the list with only matching tags
-        if (listId === 'availableTags') {
-            this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
-            // Scroll to top of available tags list after search
-            setTimeout(() => {
-                const availableTagsContainer = document.getElementById('availableTags');
-                if (availableTagsContainer) {
-                    availableTagsContainer.scrollTop = 0;
-                }
-            }, 50);
-            // Ensure groups are expanded while searching
-            setTimeout(() => {
-                this.expandAllTagGroups();
-            }, 120);
-        } else if (listId === 'selectedTags') {
-            this.updateSelectedTags(filteredTags);
-            // Scroll to top of selected tags list after search
-            setTimeout(() => {
-                const selectedTagsContainer = document.getElementById('selectedTags');
-                if (selectedTagsContainer) {
-                    selectedTagsContainer.scrollTop = 0;
-                }
-            }, 50);
-        }
-        searchInput.classList.add('search-active');
-        this.state.isSearching = true;
-
-        // Return boolean indicating whether any tags match the search
-        return filteredTags.length > 0;
     },
 
     handleAvailableTagsSearch(event) {
@@ -2357,40 +2516,71 @@ const TagManager = {
         // we now trust the backend and work with the full tag list.
         const uniqueTags = tags;
         
-        // PERFORMANCE: For very large datasets, optimize processing
-        const LARGE_DATASET_THRESHOLD = 1000;
-        const isLargeDataset = uniqueTags.length > LARGE_DATASET_THRESHOLD;
-        
         // Debug: Log the first few tags to see their structure
         if (uniqueTags.length > 0) {
             verboseLog('First tag structure:', uniqueTags[0]);
         }
         
-        // PERFORMANCE: Use for loop for large datasets (faster than forEach)
-        for (let i = 0; i < uniqueTags.length; i++) {
-            const tag = uniqueTags[i];
-            
+        uniqueTags.forEach(tag => {
             // Use the correct field names from the tag object - check multiple possible field names
             let vendor = tag.vendor || tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || '';
             let brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || this.extractBrand(tag) || '';
             const rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
             const normalizedProductType = normalizeProductType(rawProductType.trim());
-            const productType = VALID_PRODUCT_TYPES.includes(normalizedProductType.toLowerCase())
+            const normalizedLower = normalizedProductType.toLowerCase();
+            
+            // CRITICAL FIX: Accept High CBD and High THC product types (any product type starting with "high cbd" or "high thc")
+            // Also accept any product type that's in VALID_PRODUCT_TYPES
+            const isHighCbdType = normalizedLower.startsWith('high cbd');
+            const isHighThcType = normalizedLower.startsWith('high thc');
+            const isValidType = VALID_PRODUCT_TYPES.includes(normalizedLower) || isHighCbdType || isHighThcType;
+            
+            const productType = isValidType
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
               : 'Unknown Type';
             // CRITICAL FIX: Always prioritize database lineage fields (currentLineage/canonical_lineage) over Excel Lineage
-            // Check if this is a classic type BEFORE determining default lineage
-            const rawProductTypeForLineage = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
-            const normalizedProductTypeForLineage = normalizeProductType(rawProductTypeForLineage.trim());
-            const isClassicTypeForLineage = normalizedProductTypeForLineage && (typeof window.getUniqueLineages === 'function' ? window.getUniqueLineages(normalizedProductTypeForLineage).length === 6 : false);
-            
-            // CRITICAL FIX: Classic types should default to HYBRID, not MIXED
-            const defaultLineageForType = isClassicTypeForLineage ? 'HYBRID' : 'MIXED';
-            const lineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || defaultLineageForType).toString().trim().toUpperCase();
+            const lineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
             // CRITICAL FIX: Ensure weightWithUnits is properly populated from multiple possible sources
-            const weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
+            let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
                                    tag.CombinedWeight || tag.weightWithUnits || weight || '').toString().trim();
+            
+            // CRITICAL FIX: If weightWithUnits doesn't have units, append default unit "g"
+            if (weightWithUnits && !weightWithUnits.match(/[a-zA-Z]+/)) {
+                // Weight is just a number, add "g" unit
+                weightWithUnits = `${weightWithUnits}g`;
+            } else if (!weightWithUnits && weight) {
+                // Fallback: if weightWithUnits is empty but weight exists, add "g" unit
+                weightWithUnits = `${weight}g`;
+            }
+            
+            // CRITICAL FIX: Normalize weight to remove .0 decimals (e.g., "1.0g" -> "1g", "1.0G" -> "1g")
+            // This ensures "1.0g" and "1g" are treated as the same weight group
+            if (weightWithUnits) {
+                const weightMatch = weightWithUnits.match(/^([\d.]+)([a-zA-Z]+.*)$/i);
+                if (weightMatch) {
+                    const weightValue = weightMatch[1];
+                    let unit = weightMatch[2].toLowerCase(); // Normalize unit to lowercase
+                    // Standardize "grams" to "g"
+                    if (unit === 'grams' || unit === 'gram') {
+                        unit = 'g';
+                    }
+                    const weightFloat = parseFloat(weightValue);
+                    if (!isNaN(weightFloat)) {
+                        if (weightFloat % 1 === 0) {
+                            // It's a whole number, remove decimal point (e.g., "1.0" -> "1")
+                            weightWithUnits = `${Math.round(weightFloat)}${unit}`;
+                        } else {
+                            // It's a decimal number, remove trailing zeros (e.g., "1.50" -> "1.5")
+                            let formatted = weightFloat.toString();
+                            formatted = formatted.replace(/\.0+$/, ''); // Remove .0, .00, etc.
+                            formatted = formatted.replace(/(\.\d*?)0+$/, '$1'); // Remove trailing zeros after decimal
+                            formatted = formatted.replace(/\.$/, ''); // Remove trailing decimal point
+                            weightWithUnits = `${formatted}${unit}`;
+                        }
+                    }
+                }
+            }
             
             // Extract price for grouping - try multiple possible price fields
             const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag['Product Price'] || tag.price || '';
@@ -2458,18 +2648,12 @@ const TagManager = {
             const dbLineage = tag.canonical_lineage || tag.currentLineage || '';
             const excelLineage = tag.Lineage || tag.lineage || '';
             const calculatedLineage = lineage ? lineage.toString().trim().toUpperCase() : '';
-            
-            // CRITICAL FIX: Check if this is a classic type BEFORE determining default
-            const isClassicType = productType && (typeof window.getUniqueLineages === 'function' ? window.getUniqueLineages(productType).length === 6 : false);
-            
-            // CRITICAL FIX: Classic types should default to HYBRID, not MIXED
-            // Non-classic types default to MIXED
-            const defaultLineage = isClassicType ? 'HYBRID' : 'MIXED';
-            let finalLineage = dbLineage || excelLineage || calculatedLineage || defaultLineage;
+            let finalLineage = dbLineage || excelLineage || calculatedLineage || 'MIXED';
             let finalLineageUpper = String(finalLineage).trim().toUpperCase();
             
             // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
             // This ensures UI displays correct lineage even if database/Excel has wrong value
+            const isClassicType = productType && (typeof window.getUniqueLineages === 'function' ? window.getUniqueLineages(productType).length === 6 : false);
             if (isClassicType && (finalLineageUpper === 'MIXED' || finalLineageUpper === 'THC')) {
                 finalLineageUpper = 'HYBRID';
                 finalLineage = 'HYBRID';
@@ -2491,9 +2675,6 @@ const TagManager = {
                 weight: weight,
                 weightWithUnits: weightWithUnits,
                 priceGroup: priceGroup,
-                // CRITICAL FIX: Preserve price fields for display
-                price: rawPrice || tag.price || tag.Price || tag['Price*'] || '',
-                'Price*': rawPrice || tag['Price*'] || tag.Price || tag.price || '',
                 displayName: tag['Product Name*'] || tag.ProductName || tag.Description || 'Unknown Product'
             };
 
@@ -2543,7 +2724,7 @@ const TagManager = {
             }
             const productsAtPrice = priceGroups.get(normalizedTag.priceGroup);
             productsAtPrice.push(normalizedTag);
-        }
+        });
 
         if (skippedTags > 0) {
             console.info(`Skipped ${skippedTags} tags due to missing vendor information`);
@@ -2617,13 +2798,8 @@ const TagManager = {
     },
 
     // Debounced version of updateAvailableTags to prevent multiple rapid calls
+    // PERFORMANCE: Reduced debounce delay from 300ms to 150ms for faster response
     debouncedUpdateAvailableTags: debounce(function(originalTags, filteredTags = null) {
-        // CRITICAL FIX: Don't update available tags during deselection
-        if (this.state.isProcessingDeselection) {
-            verboseLog('🚫 SKIPPING debouncedUpdateAvailableTags - currently processing deselection');
-            return;
-        }
-        
         // CRITICAL FIX: Don't clear the list if we're actively refreshing after lineage updates
         // Only skip if there's a pending refresh timeout (active lineage update operation)
         if (this._pendingLineageRefresh) {
@@ -2658,11 +2834,12 @@ const TagManager = {
             }
         }
         
-        // Use requestAnimationFrame to ensure smooth DOM updates
-        requestAnimationFrame(() => {
+        // PERFORMANCE: Use setTimeout(0) instead of requestAnimationFrame for faster initial render
+        // requestAnimationFrame can add unnecessary delay
+        setTimeout(() => {
             this._updateAvailableTags(originalTags, filteredTags);
-        });
-    }, 300),
+        }, 0);
+    }, 150), // Reduced debounce from 300ms to 150ms for faster response
 
     // Helpers to preserve scroll position of the available list across re-renders
     // USER PREFERENCE: Scroll CURRENT INVENTORY to top when filter is applied
@@ -2675,6 +2852,81 @@ const TagManager = {
             }
         } catch (error) {
             console.warn('Could not scroll to top:', error);
+        }
+    },
+
+    // CRITICAL FIX: Restore checkbox states after re-render to preserve selections made during initial load
+    _restoreCheckboxStates() {
+        if (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0) {
+            return;
+        }
+        
+        const availableTagsContainer = document.getElementById('availableTags');
+        if (!availableTagsContainer) {
+            return;
+        }
+        
+        // CRITICAL FIX: Use case-insensitive matching to handle any case differences
+        const persistentSet = new Set(this.state.persistentSelectedTags.map(name => name.toLowerCase()));
+        
+        // Restore checkbox states based on persistentSelectedTags
+        const checkboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
+        let restoredCount = 0;
+        let uncheckedCount = 0;
+        
+        checkboxes.forEach(checkbox => {
+            const tagName = checkbox.value;
+            if (tagName) {
+                // Check both exact match and case-insensitive match
+                const isSelected = this.state.persistentSelectedTags.includes(tagName) || 
+                                  persistentSet.has(tagName.toLowerCase());
+                if (isSelected && !checkbox.checked) {
+                    checkbox.checked = true;
+                    restoredCount++;
+                } else if (!isSelected && checkbox.checked) {
+                    // CRITICAL FIX: Only uncheck if it's not in persistentSelectedTags
+                    // Don't uncheck if it might be a timing issue
+                    const shouldUncheck = !this.state.persistentSelectedTags.includes(tagName) && 
+                                         !persistentSet.has(tagName.toLowerCase());
+                    if (shouldUncheck) {
+                        checkbox.checked = false;
+                        uncheckedCount++;
+                    }
+                }
+            }
+        });
+        
+        if (restoredCount > 0) {
+            verboseLog(`✅ Restored ${restoredCount} checkbox states after re-render`);
+        }
+        if (uncheckedCount > 0) {
+            verboseLog(`⚠️ Unchecked ${uncheckedCount} checkboxes that shouldn't be selected`);
+        }
+        
+        // CRITICAL FIX: Also ensure selected tags display is updated
+        if (this.state.persistentSelectedTags.length > 0) {
+            // Update selectedTags set to match persistentSelectedTags
+            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+            
+            // CRITICAL FIX: Immediately update selected tags display to prevent selections from disappearing
+            // Use requestAnimationFrame to ensure DOM is ready, but don't delay too long
+            requestAnimationFrame(() => {
+                const selectedTagObjects = this.getSelectedTagObjects();
+                if (selectedTagObjects.length > 0) {
+                    this.updateSelectedTags(selectedTagObjects);
+                } else if (this.state.persistentSelectedTags.length > 0) {
+                    // CRITICAL FIX: If no tag objects found but we have persistent selections,
+                    // try again after a short delay - tags might still be loading
+                    setTimeout(() => {
+                        const retrySelectedTagObjects = this.getSelectedTagObjects();
+                        if (retrySelectedTagObjects.length > 0) {
+                            this.updateSelectedTags(retrySelectedTagObjects);
+                        } else {
+                            console.warn(`⚠️ Could not find tag objects for ${this.state.persistentSelectedTags.length} selected tags - they may be filtered out`);
+                        }
+                    }, 200);
+                }
+            });
         }
     },
 
@@ -2810,9 +3062,9 @@ const TagManager = {
                     }
                 });
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
+                // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources (Map, originalTags, tags)
+                // This prevents tags from disappearing when filters are active
+                const selectedTagObjects = this.getSelectedTagObjects();
                 this.updateSelectedTags(selectedTagObjects);
                 this.efficientlyUpdateAvailableTagsDisplay();
                 requestAnimationFrame(() => {
@@ -2958,9 +3210,10 @@ const TagManager = {
                             }
                         });
                         this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                        const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                            this.state.tags.find(t => t['Product Name*'] === name)
-                        ).filter(Boolean);
+                        // PERFORMANCE: Use Map lookup instead of array.find() inside map - O(1) vs O(n²)
+                        const selectedTagObjects = this.state.persistentSelectedTags
+                            .map(name => this._tagLookupMap?.get(name))
+                            .filter(Boolean);
                         this.updateSelectedTags(selectedTagObjects);
                         this.efficientlyUpdateAvailableTagsDisplay();
                         requestAnimationFrame(() => {
@@ -2991,15 +3244,26 @@ const TagManager = {
                         const weightSection = document.createElement('div');
                         weightSection.className = 'weight-section ms-3 mb-2';
                         
+                        // Check if there's only one price group for inline display
+                        const isSinglePriceGroup = priceGroups instanceof Map && priceGroups.size === 1;
+                        
                         // Create weight header with checkbox
                         const weightHeader = document.createElement('div');
                         weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                        if (isSinglePriceGroup) {
+                            weightHeader.style.display = 'inline-flex';
+                            weightHeader.style.marginRight = '12px';
+                        }
                         weightHeader.addEventListener('click', (e) => {
                             if (e.target.type === 'checkbox') return;
                             const weightContent = weightSection.querySelector('.weight-content');
+                            if (!weightContent) return; // Safety check
                             const isCollapsed = weightContent.classList.contains('collapsed');
                             weightContent.classList.toggle('collapsed', !isCollapsed);
-                            weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                            const collapseIcon = weightHeader.querySelector('.collapse-icon');
+                            if (collapseIcon) {
+                                collapseIcon.textContent = isCollapsed ? '▼' : '▶';
+                            }
                         });
                         
                         const weightCheckbox = document.createElement('input');
@@ -3032,9 +3296,8 @@ const TagManager = {
                                 }
                             });
                             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                this.state.tags.find(t => t['Product Name*'] === name)
-                            ).filter(Boolean);
+                            // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
+                            const selectedTagObjects = this.getSelectedTagObjects();
                             this.updateSelectedTags(selectedTagObjects);
                             this.efficientlyUpdateAvailableTagsDisplay();
                             requestAnimationFrame(() => {
@@ -3054,6 +3317,9 @@ const TagManager = {
                         weightContent.className = 'weight-content';
                         // CRITICAL FIX: JSON matched tags should always start expanded (not collapsed)
                         // Do NOT add 'collapsed' class - keep expanded by default
+                        if (isSinglePriceGroup) {
+                            weightContent.style.display = 'inline-block';
+                        }
                         weightSection.appendChild(weightContent);
 
                         // Render price subgroups (price groups are now always organized as Map)
@@ -3069,9 +3335,18 @@ const TagManager = {
                                     return priceA - priceB;
                                 });
                             
-                            sortedPriceGroups.forEach(([priceGroup, tagArray]) => {
+                            const isSinglePriceGroup = sortedPriceGroups.length === 1;
+                            
+                            sortedPriceGroups.forEach(([priceGroup, tagArray], priceIndex) => {
                                 const priceSection = document.createElement('div');
                                 priceSection.className = 'price-section ms-3 mb-1';
+                                
+                                // If single price group, display inline with weight header
+                                if (isSinglePriceGroup && priceIndex === 0) {
+                                    priceSection.style.display = 'inline-block';
+                                    priceSection.style.marginLeft = '12px';
+                                    priceSection.style.verticalAlign = 'middle';
+                                }
                                 
                                 // Create price header with checkbox and collapse functionality
                                 const priceHeader = document.createElement('div');
@@ -3079,9 +3354,13 @@ const TagManager = {
                                 priceHeader.addEventListener('click', (e) => {
                                     if (e.target.type === 'checkbox') return;
                                     const priceContent = priceSection.querySelector('.price-content');
+                                    if (!priceContent) return; // Safety check
                                     const isCollapsed = priceContent.classList.contains('collapsed');
                                     priceContent.classList.toggle('collapsed', !isCollapsed);
-                                    priceHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                    const collapseIcon = priceHeader.querySelector('.collapse-icon');
+                                    if (collapseIcon) {
+                                        collapseIcon.textContent = isCollapsed ? '▼' : '▶';
+                                    }
                                 });
                                 
                                 const priceCheckbox = document.createElement('input');
@@ -3114,9 +3393,8 @@ const TagManager = {
                                         }
                                     });
                                     this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                        this.state.tags.find(t => t['Product Name*'] === name)
-                                    ).filter(Boolean);
+                                    // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
+                                    const selectedTagObjects = this.getSelectedTagObjects();
                                     this.updateSelectedTags(selectedTagObjects);
                                     this.efficientlyUpdateAvailableTagsDisplay();
                                     requestAnimationFrame(() => {
@@ -3130,12 +3408,16 @@ const TagManager = {
                                 priceCollapseIcon.className = 'collapse-icon ms-auto';
                                 priceCollapseIcon.textContent = '▼';
                                 priceHeader.appendChild(priceCollapseIcon);
-                                weightContent.appendChild(priceSection);
+                                
+                                // CRITICAL FIX: Append priceHeader to priceSection BEFORE appending priceSection to weightContent
                                 priceSection.appendChild(priceHeader);
                                 
                                 const priceContent = document.createElement('div');
                                 priceContent.className = 'price-content';
                                 priceSection.appendChild(priceContent);
+                                
+                                // Now append priceSection to weightContent
+                                weightContent.appendChild(priceSection);
                                 
                                 const sortedTags = [...tagArray].sort((a, b) => {
                                     const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
@@ -3175,44 +3457,48 @@ const TagManager = {
             const fragment = document.createDocumentFragment();
             fragment.appendChild(tagList);
             
+            // PERFORMANCE FIX: Batch DOM operations
             availableTagsContainer.innerHTML = '';
             availableTagsContainer.appendChild(fragment);
             
-            // After tags are in DOM, restore scroll and initialize
-            this._restoreAvailableScrollPosition(savedScroll);
-            this.updateSelectAllCheckboxes();
-            this.initializeSelectAllCheckbox();
+            // PERFORMANCE FIX: Defer non-critical operations to next frame
+            requestAnimationFrame(() => {
+                // After tags are in DOM, restore scroll and initialize
+                this._restoreAvailableScrollPosition(savedScroll);
+                this.updateSelectAllCheckboxes();
+                this.initializeSelectAllCheckbox();
             
-            // Update all group-level select all checkboxes
-            const container = availableTagsContainer;
-            function updateSelectAllCheckboxState(section) {
-                const selectAll = section.querySelector('.select-all-checkbox');
-                if (!selectAll) return;
-                const tagCheckboxes = section.querySelectorAll('.tag-checkbox');
-                if (tagCheckboxes.length === 0) {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = false;
-                    return;
+                // Update all group-level select all checkboxes
+                const container = availableTagsContainer;
+                function updateSelectAllCheckboxState(section) {
+                    const selectAll = section.querySelector('.select-all-checkbox');
+                    if (!selectAll) return;
+                    const tagCheckboxes = section.querySelectorAll('.tag-checkbox');
+                    if (tagCheckboxes.length === 0) {
+                        selectAll.checked = false;
+                        selectAll.indeterminate = false;
+                        return;
+                    }
+                    const checkedCount = Array.from(tagCheckboxes).filter(cb => cb.checked).length;
+                    if (checkedCount === tagCheckboxes.length) {
+                        selectAll.checked = true;
+                        selectAll.indeterminate = false;
+                    } else if (checkedCount === 0) {
+                        selectAll.checked = false;
+                        selectAll.indeterminate = false;
+                    } else {
+                        selectAll.checked = false;
+                        selectAll.indeterminate = true;
+                    }
                 }
-                const checkedCount = Array.from(tagCheckboxes).filter(cb => cb.checked).length;
-                if (checkedCount === tagCheckboxes.length) {
-                    selectAll.checked = true;
-                    selectAll.indeterminate = false;
-                } else if (checkedCount === 0) {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = false;
-                } else {
-                    selectAll.checked = false;
-                    selectAll.indeterminate = true;
-                }
-            }
-            // Update all group-level select all checkboxes
-            container.querySelectorAll('.vendor-section, .brand-section, .product-type-section, .subcategory-section, .weight-section, .price-section').forEach(section => {
-                updateSelectAllCheckboxState(section);
+                // Update all group-level select all checkboxes
+                container.querySelectorAll('.vendor-section, .brand-section, .product-type-section, .subcategory-section, .weight-section, .price-section').forEach(section => {
+                    updateSelectAllCheckboxState(section);
+                });
+                
+                // Hide loading splash only after tags actually appear in DOM
+                this._waitForTagsToAppear();
             });
-            
-            // Hide loading splash only after tags actually appear in DOM
-            this._waitForTagsToAppear();
         });
         
         verboseLog('✅ Rendered', tags.length, 'JSON matched tags with HIERARCHY (same as Selected Tags)');
@@ -3220,15 +3506,11 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
-        // Windows optimization: Use requestAnimationFrame for smoother rendering
-        if (isWindows) {
-            requestAnimationFrame(() => {
-                this._performUpdateAvailableTags(originalTags, filteredTags);
-            });
-            return;
-        }
-        
-        this._performUpdateAvailableTags(originalTags, filteredTags);
+        // Use requestAnimationFrame for smoother rendering without debounce delay
+        // Immediate response is more important than batching for tag selection
+        requestAnimationFrame(() => {
+            this._performUpdateAvailableTags(originalTags, filteredTags);
+        });
     },
     
     _performUpdateAvailableTags(originalTags, filteredTags = null) {
@@ -3244,6 +3526,36 @@ const TagManager = {
             console.error('Available tags container not found');
             return;
         }
+        
+        // CRITICAL FIX: Preserve checkbox selections from DOM before re-rendering
+        // This prevents selections made during initial load from being lost
+        const currentlyCheckedCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox:checked');
+        const currentlySelectedTagNames = Array.from(currentlyCheckedCheckboxes).map(cb => cb.value).filter(Boolean);
+        
+        // CRITICAL FIX: Always preserve persistentSelectedTags, even if DOM doesn't show them
+        // This prevents selections from being lost when tags are re-rendered
+        if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+            verboseLog(`🔒 Preserving ${this.state.persistentSelectedTags.length} persistent selected tags before re-render`);
+        }
+        
+        // Merge DOM selections with persistentSelectedTags to ensure nothing is lost
+        if (currentlySelectedTagNames.length > 0) {
+            const currentSet = new Set(this.state.persistentSelectedTags || []);
+            currentlySelectedTagNames.forEach(tagName => {
+                if (!currentSet.has(tagName)) {
+                    console.log(`🔍 Preserving selection from DOM: ${tagName}`);
+                    this.state.persistentSelectedTags.push(tagName);
+                }
+            });
+            // Update selectedTags set to match
+            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+            verboseLog(`✅ Preserved ${currentlySelectedTagNames.length} selections from DOM before re-render`);
+        }
+        
+        // CRITICAL FIX: Ensure persistentSelectedTags is never cleared during re-render
+        // Save a copy to restore if something goes wrong
+        const savedPersistentTags = [...(this.state.persistentSelectedTags || [])];
+        
         // Preserve scroll position during re-render
         const savedScroll = this._saveAvailableScrollPosition();
 
@@ -3259,38 +3571,23 @@ const TagManager = {
             return;
         }
         
-        // PERFORMANCE: Skip loading spinner for instant cache loads
-        // Only show spinner if not hydrated from cache (i.e., fetching from server)
+        // PERFORMANCE: Skip loading spinner entirely to prevent flickering
+        // Instead, show tags immediately without intermediate loading state
         const currentContent = availableTagsContainer.innerHTML.trim();
-        const hasLoadingIndicator = currentContent.includes('spinner-border') || currentContent.includes('Loading');
-        const isEmpty = !currentContent || currentContent === '' || currentContent === '<div class="tag-entry">No tags available</div>';
+        const hasActualTags = currentContent && !currentContent.includes('spinner-border') && !currentContent.includes('No tags available');
         
-        // Only show loading indicator if NOT loaded from cache and container is empty
-        if (!this.state.hydratedFromCache && (isEmpty || hasLoadingIndicator)) {
-            // Show loading indicator for server fetch
-            availableTagsContainer.innerHTML = `
-                <div class="text-center py-4">
-                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2 text-white">Loading tags...</p>
-                </div>
-            `;
+        // Don't clear existing tags - just update them smoothly
+        if (!hasActualTags) {
+            // Only show minimal placeholder if truly empty
+            availableTagsContainer.innerHTML = '<div class="text-center py-2 text-muted">Loading...</div>';
         }
+        // Otherwise keep existing content to prevent flicker
         
-        verboseLog('Tags received, showing simple test first');
-        verboseLog('=== TAGS BEING RENDERED ===');
-        verboseLog('Tags array:', tags);
-        verboseLog('Tags length:', tags.length);
-        if (tags.length > 0) {
-            verboseLog('First tag structure:', tags[0]);
-            verboseLog('First tag keys:', Object.keys(tags[0]));
+        // PERFORMANCE: Reduced verbose logging for faster rendering
+        // Only log essential information
+        if (tags.length > 0 && verboseLog.enabled) {
+            verboseLog(`Rendering ${tags.length} tags`);
         }
-        
-        // Update the state with the tags
-        verboseLog('=== UPDATING STATE ===');
-        verboseLog('Before update - this.state.tags length:', this.state.tags.length);
-        verboseLog('Before update - this.state.originalTags length:', this.state.originalTags.length);
         
         // CRITICAL FIX: Ensure all tags in state have database lineage fields prioritized
         // This ensures TagManager always uses database lineage, not Excel lineage
@@ -3331,6 +3628,25 @@ const TagManager = {
         // Always update the current tags for display
         this.state.tags = [...tagsWithDbLineage];
         
+        // PERFORMANCE: Build tag lookup Map once when tags load for instant checkbox operations
+        // Also build Set for selected tags for O(1) lookups instead of array.includes()
+        this._tagLookupMap = new Map();
+        this.state.tags.forEach(t => {
+            if (t && t['Product Name*']) {
+                this._tagLookupMap.set(t['Product Name*'], t);
+            }
+        });
+        this.state.originalTags.forEach(t => {
+            if (t && t['Product Name*'] && !this._tagLookupMap.has(t['Product Name*'])) {
+                this._tagLookupMap.set(t['Product Name*'], t);
+            }
+        });
+        
+        // PERFORMANCE: Convert persistentSelectedTags to Set for O(1) lookups
+        if (!this.state._selectedTagsSet || this.state._selectedTagsSet.size !== this.state.persistentSelectedTags.length) {
+            this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags);
+        }
+        
         const shouldUseSimplified = !this.state.forceFullAvailableTagRender &&
             !this.state.isSearching &&
             !this.hasActiveFilters() &&
@@ -3344,11 +3660,11 @@ const TagManager = {
             verboseLog('Detailed view forced despite large dataset.');
         }
         
-        verboseLog('After update - this.state.tags length:', this.state.tags.length);
-        verboseLog('After update - this.state.originalTags length:', this.state.originalTags.length);
+        // PERFORMANCE: Removed redundant logging
         
         // PERFORMANCE: Skip redundant loading indicator for cache loads
         // Only show if not from cache and not already showing
+        const hasLoadingIndicator = availableTagsContainer.innerHTML.includes('spinner-border');
         if (!this.state.hydratedFromCache && !hasLoadingIndicator) {
             // Show loading indicator for slow server fetch
             availableTagsContainer.innerHTML = `
@@ -3478,6 +3794,25 @@ const TagManager = {
                         availableTagsContainer.innerHTML = '';
                         availableTagsContainer.appendChild(tagList);
                         
+                        // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
+                        // Also restore persistentSelectedTags if it was accidentally cleared
+                        if (savedPersistentTags.length > 0 && (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0)) {
+                            console.log(`🔄 Restoring ${savedPersistentTags.length} persistent selected tags that were cleared`);
+                            this.state.persistentSelectedTags = [...savedPersistentTags];
+                            this.state.selectedTags = new Set(savedPersistentTags);
+                        }
+                        this._restoreCheckboxStates();
+                        
+                        // CRITICAL FIX: Also update selected tags display to ensure they're shown
+                        if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+                            setTimeout(() => {
+                                const selectedTagObjects = this.getSelectedTagObjects();
+                                if (selectedTagObjects.length > 0) {
+                                    this.updateSelectedTags(selectedTagObjects);
+                                }
+                            }, 100);
+                        }
+                        
                         // After tags are in DOM, restore scroll and initialize
                         this._restoreAvailableScrollPosition(savedScroll);
                         this.updateSelectAllCheckboxes();
@@ -3526,7 +3861,8 @@ const TagManager = {
                     }
                     
                     const tagName = checkbox.value;
-                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                    // PERFORMANCE: Use Map lookup instead of array.find() - O(1) vs O(n)
+                    const tag = this._tagLookupMap?.get(tagName);
                     if (!tag) {
                         checkbox.checked = isChecked;
                         return;
@@ -3534,24 +3870,27 @@ const TagManager = {
 
                     checkbox.checked = isChecked;
 
-                            if (isChecked) {
-                        if (!this.state.persistentSelectedTags.includes(tagName)) {
+                    // PERFORMANCE: Use Set for O(1) lookups instead of array.includes()
+                    if (isChecked) {
+                        if (!this.state._selectedTagsSet.has(tagName)) {
                             this.state.persistentSelectedTags.push(tagName);
-                                }
-                            } else {
+                            this.state._selectedTagsSet.add(tagName);
+                        }
+                    } else {
                         // Only remove if the originating event is actually unchecking
                         if (!e.target.checked) {
                             const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                if (index > -1) {
-                                    this.state.persistentSelectedTags.splice(index, 1);
+                            if (index > -1) {
+                                this.state.persistentSelectedTags.splice(index, 1);
+                                this.state._selectedTagsSet.delete(tagName);
                             }
                         }
                     }
                 });
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                    this.state.tags.find(t => t['Product Name*'] === name)
-                ).filter(Boolean);
+                // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources (Map, originalTags, tags)
+                // This prevents tags from disappearing when filters are active
+                const selectedTagObjects = this.getSelectedTagObjects();
                 this.updateSelectedTags(selectedTagObjects);
                 this.efficientlyUpdateAvailableTagsDisplay();
                 // Use double requestAnimationFrame to ensure it happens after all updates, including updateSelectAllCheckboxes
@@ -3620,7 +3959,8 @@ const TagManager = {
                     }
 
                     const tagName = checkbox.value;
-                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                    // PERFORMANCE: Use Map lookup instead of array.find() - O(1) vs O(n)
+                    const tag = this._tagLookupMap?.get(tagName);
                     if (!tag) {
                         checkbox.checked = isChecked;
                         return;
@@ -3628,15 +3968,18 @@ const TagManager = {
 
                     checkbox.checked = isChecked;
 
-                            if (isChecked) {
-                        if (!this.state.persistentSelectedTags.includes(tagName)) {
+                    // PERFORMANCE: Use Set for O(1) lookups instead of array.includes()
+                    if (isChecked) {
+                        if (!this.state._selectedTagsSet.has(tagName)) {
                             this.state.persistentSelectedTags.push(tagName);
-                                }
-                            } else {
+                            this.state._selectedTagsSet.add(tagName);
+                        }
+                    } else {
                         if (!e.target.checked) {
                             const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                if (index > -1) {
-                                    this.state.persistentSelectedTags.splice(index, 1);
+                            if (index > -1) {
+                                this.state.persistentSelectedTags.splice(index, 1);
+                                this.state._selectedTagsSet.delete(tagName);
                             }
                         }
                     }
@@ -3716,7 +4059,8 @@ const TagManager = {
                             }
 
                             const tagName = checkbox.value;
-                            const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                            // PERFORMANCE: Use Map lookup instead of array.find() - O(1) vs O(n)
+                            const tag = this._tagLookupMap?.get(tagName);
                             if (!tag) {
                                 checkbox.checked = isChecked;
                                 return;
@@ -3724,23 +4068,27 @@ const TagManager = {
 
                             checkbox.checked = isChecked;
 
-                                    if (isChecked) {
-                                if (!this.state.persistentSelectedTags.includes(tagName)) {
+                            // PERFORMANCE: Use Set for O(1) lookups instead of array.includes()
+                            if (isChecked) {
+                                if (!this.state._selectedTagsSet.has(tagName)) {
                                     this.state.persistentSelectedTags.push(tagName);
-                                        }
-                                    } else {
+                                    this.state._selectedTagsSet.add(tagName);
+                                }
+                            } else {
                                 if (!e.target.checked) {
                                     const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                        if (index > -1) {
-                                            this.state.persistentSelectedTags.splice(index, 1);
+                                    if (index > -1) {
+                                        this.state.persistentSelectedTags.splice(index, 1);
+                                        this.state._selectedTagsSet.delete(tagName);
                                     }
                                 }
                             }
                         });
                         this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                        const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                            this.state.tags.find(t => t['Product Name*'] === name)
-                        ).filter(Boolean);
+                        // PERFORMANCE: Use Map lookup instead of array.find() inside map - O(1) vs O(n²)
+                        const selectedTagObjects = this.state.persistentSelectedTags
+                            .map(name => this._tagLookupMap?.get(name))
+                            .filter(Boolean);
                         this.updateSelectedTags(selectedTagObjects);
                         this.efficientlyUpdateAvailableTagsDisplay();
                         // Restore scroll after all DOM updates complete
@@ -3777,16 +4125,27 @@ const TagManager = {
                         const weightSection = document.createElement('div');
                         weightSection.className = 'weight-section ms-3 mb-1';
                         
+                        // Check if there's only one price group for inline display
+                        const isSinglePriceGroup = priceGroups instanceof Map && priceGroups.size === 1;
+                        
                         // Create weight header with checkbox and collapse functionality
                         const weightHeader = document.createElement('div');
                         weightHeader.className = 'weight-header mb-1 d-flex align-items-center cursor-pointer';
+                        if (isSinglePriceGroup) {
+                            weightHeader.style.display = 'inline-flex';
+                            weightHeader.style.marginRight = '12px';
+                        }
                         weightHeader.addEventListener('click', (e) => {
                             if (e.target.type === 'checkbox') return; // Don't collapse if clicking checkbox
                             if (this.state.isSearching) return; // Don't collapse while searching
                             const weightContent = weightSection.querySelector('.weight-content');
+                            if (!weightContent) return; // Safety check
                             const isCollapsed = weightContent.classList.contains('collapsed');
                             weightContent.classList.toggle('collapsed', !isCollapsed);
-                            weightHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                            const collapseIcon = weightHeader.querySelector('.collapse-icon');
+                            if (collapseIcon) {
+                                collapseIcon.textContent = isCollapsed ? '▼' : '▶';
+                            }
                             
                             // Remove the instructional blurb when any chevron is clicked
                             this.removeDropdownInstructionBlurb();
@@ -3829,9 +4188,8 @@ const TagManager = {
                                 }
                             });
                             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                            const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                this.state.tags.find(t => t['Product Name*'] === name)
-                            ).filter(Boolean);
+                            // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
+                            const selectedTagObjects = this.getSelectedTagObjects();
                             this.updateSelectedTags(selectedTagObjects);
                             this.efficientlyUpdateAvailableTagsDisplay();
                             // Restore scroll after all DOM updates complete
@@ -3857,6 +4215,9 @@ const TagManager = {
                         if (shouldStartCollapsed) {
                             weightContent.classList.add('collapsed');
                         }
+                        if (isSinglePriceGroup) {
+                            weightContent.style.display = 'inline-block';
+                        }
                         weightSection.appendChild(weightContent);
 
                         // Handle price groups - check if priceGroups is a Map (new structure) or Array (old structure)
@@ -3873,9 +4234,18 @@ const TagManager = {
                                     return priceA - priceB;
                                 });
                             
-                            sortedPriceGroups.forEach(([priceGroup, tagArray]) => {
+                            const isSinglePriceGroup = sortedPriceGroups.length === 1;
+                            
+                            sortedPriceGroups.forEach(([priceGroup, tagArray], priceIndex) => {
                                 const priceSection = document.createElement('div');
                                 priceSection.className = 'price-section ms-3 mb-1';
+                                
+                                // If single price group, display inline with weight header
+                                if (isSinglePriceGroup && priceIndex === 0) {
+                                    priceSection.style.display = 'inline-block';
+                                    priceSection.style.marginLeft = '12px';
+                                    priceSection.style.verticalAlign = 'middle';
+                                }
                                 
                                 // Create price header with checkbox and collapse functionality
                                 const priceHeader = document.createElement('div');
@@ -3884,9 +4254,13 @@ const TagManager = {
                                     if (e.target.type === 'checkbox') return;
                                     if (this.state.isSearching) return;
                                     const priceContent = priceSection.querySelector('.price-content');
+                                    if (!priceContent) return; // Safety check
                                     const isCollapsed = priceContent.classList.contains('collapsed');
                                     priceContent.classList.toggle('collapsed', !isCollapsed);
-                                    priceHeader.querySelector('.collapse-icon').textContent = isCollapsed ? '▼' : '▶';
+                                    const collapseIcon = priceHeader.querySelector('.collapse-icon');
+                                    if (collapseIcon) {
+                                        collapseIcon.textContent = isCollapsed ? '▼' : '▶';
+                                    }
                                     this.removeDropdownInstructionBlurb();
                                 });
                                 
@@ -3926,9 +4300,8 @@ const TagManager = {
                                         }
                                     });
                                     this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                    const selectedTagObjects = this.state.persistentSelectedTags.map(name =>
-                                        this.state.tags.find(t => t['Product Name*'] === name)
-                                    ).filter(Boolean);
+                                    // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
+                                    const selectedTagObjects = this.getSelectedTagObjects();
                                     this.updateSelectedTags(selectedTagObjects);
                                     this.efficientlyUpdateAvailableTagsDisplay();
                                     requestAnimationFrame(() => {
@@ -3938,10 +4311,15 @@ const TagManager = {
                                 
                                 priceHeader.appendChild(priceCheckbox);
                                 priceHeader.appendChild(document.createTextNode(priceGroup));
-                                priceHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
-                                priceHeader.querySelector('.collapse-icon').textContent = '▼';
+                                // Only show price collapse icon if there are multiple price groups
+                                if (!isSinglePriceGroup) {
+                                    const priceCollapseIcon = document.createElement('span');
+                                    priceCollapseIcon.className = 'collapse-icon ms-auto';
+                                    priceCollapseIcon.textContent = '▼';
+                                    priceHeader.appendChild(priceCollapseIcon);
+                                }
                                 
-                                weightContent.appendChild(priceSection);
+                                // CRITICAL FIX: Append priceHeader to priceSection BEFORE appending priceSection to weightContent
                                 priceSection.appendChild(priceHeader);
                                 
                                 // Create price content container
@@ -3949,16 +4327,22 @@ const TagManager = {
                                 priceContent.className = 'price-content';
                                 priceSection.appendChild(priceContent);
                                 
+                                // Now append priceSection to weightContent
+                                weightContent.appendChild(priceSection);
+                                
                                 // Add individual tags (sorted alphabetically by product name)
                                 const tagsToRender = [...tagArray].sort((a, b) => {
                                     const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
                                     const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                     return aName.localeCompare(bName);
                                 });
+                                // PERFORMANCE: Use DocumentFragment for batch DOM insertion
+                                const fragment = document.createDocumentFragment();
                                 tagsToRender.forEach(tag => {
                                     const tagElement = this.createTagElement(tag, false);
-                                    priceContent.appendChild(tagElement);
+                                    fragment.appendChild(tagElement);
                                 });
+                                priceContent.appendChild(fragment);
                             });
                         } else {
                             // Old structure: priceGroups is actually a tag array (backward compatibility)
@@ -3967,10 +4351,13 @@ const TagManager = {
                                 const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
                                 return aName.localeCompare(bName);
                             });
+                            // PERFORMANCE: Use DocumentFragment for batch DOM insertion
+                            const fragment = document.createDocumentFragment();
                             tagsToRender.forEach(tag => {
                                 const tagElement = this.createTagElement(tag, false);
-                                weightContent.appendChild(tagElement);
+                                fragment.appendChild(tagElement);
                             });
+                            weightContent.appendChild(fragment);
                         }
                     });
                 });
@@ -3980,6 +4367,38 @@ const TagManager = {
         // Replace container content with built tags (this replaces any loading indicator)
         availableTagsContainer.innerHTML = '';
         availableTagsContainer.appendChild(tagList);
+
+        // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
+        // Use requestAnimationFrame to ensure DOM is fully updated before restoring
+        requestAnimationFrame(() => {
+            // Double-check that persistentSelectedTags haven't been cleared
+            if (savedPersistentTags.length > 0 && this.state.persistentSelectedTags.length === 0) {
+                console.warn('⚠️ persistentSelectedTags was cleared during re-render, restoring from saved copy');
+                this.state.persistentSelectedTags = [...savedPersistentTags];
+                this.state.selectedTags = new Set(savedPersistentTags);
+            }
+            this._restoreCheckboxStates();
+            
+            // CRITICAL FIX: Also restore after a small delay to catch any async updates
+            setTimeout(() => {
+                if (savedPersistentTags.length > 0) {
+                    const currentCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
+                    let restoredCount = 0;
+                    currentCheckboxes.forEach(checkbox => {
+                        const tagName = checkbox.value;
+                        // PERFORMANCE: Use Set for O(1) lookup instead of array.includes() - O(n)
+                        const savedSet = new Set(savedPersistentTags);
+                        if (tagName && savedSet.has(tagName) && !checkbox.checked) {
+                            checkbox.checked = true;
+                            restoredCount++;
+                        }
+                    });
+                    if (restoredCount > 0) {
+                        verboseLog(`✅ Late restoration: ${restoredCount} checkboxes restored`);
+                    }
+                }
+            }, 50);
+        });
 
         // Restore previous scroll position after full rebuild
         this._restoreAvailableScrollPosition(savedScroll);
@@ -4158,6 +4577,18 @@ const TagManager = {
                 // Tags are fully rendered, hide splash
                 clearTimeout(forceHideTimeout);
                 console.log(`✅ Tags ready: ${currentTagCount} items (${visibleTags.length} visible) - hiding splash`);
+                
+                // CRITICAL FIX: Mark tags as ready and enable dropdowns after a short delay
+                // This prevents dropdowns from freezing if used immediately after page load
+                this._fetchingAvailableTags = false;
+                setTimeout(() => {
+                    // Ensure TagManager is fully initialized before enabling dropdowns
+                    if (!this.state.initialized) {
+                        this.state.initialized = true;
+                    }
+                    console.log('✅ Dropdowns enabled - tags fully loaded and TagManager initialized');
+                }, 100); // Small delay to ensure all event listeners are attached
+                
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
@@ -4220,45 +4651,122 @@ const TagManager = {
         
         // Use the cleaned display name for the checkbox value
         checkbox.value = displayName;
-        checkbox.checked = this.state.persistentSelectedTags.includes(displayName);
+        // PERFORMANCE: Use Set for O(1) lookup instead of array.includes() - O(n)
+        checkbox.checked = this.state._selectedTagsSet?.has(displayName) || false;
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = (e) => {
-            // Prevent event handling during deselection to avoid triggering filter updates
-            if (this.state.isProcessingDeselection) {
-                return;
-            }
-            
             // Prevent event handling during drag operations
             if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
                 return;
             }
             
-            // Save current state for undo before making changes
-            this.saveSelectionState('checkbox_selection');
-            
             // Ensure the checkbox state is properly updated
             const isChecked = e.target.checked;
             
-            // Update persistent selected tags with proper array handling
+            // PERFORMANCE: Use Set for O(1) lookups and updates instead of array operations
             if (isChecked) {
-                if (!this.state.persistentSelectedTags.includes(displayName)) {
+                if (!this.state._selectedTagsSet?.has(displayName)) {
                     this.state.persistentSelectedTags.push(displayName);
+                    if (!this.state._selectedTagsSet) {
+                        this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags);
+                    } else {
+                        this.state._selectedTagsSet.add(displayName);
+                    }
                 }
             } else {
                 const index = this.state.persistentSelectedTags.indexOf(displayName);
                 if (index > -1) {
                     this.state.persistentSelectedTags.splice(index, 1);
+                    this.state._selectedTagsSet?.delete(displayName);
                 }
             }
             
             // Update the regular selectedTags set to match persistent ones
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
             
-            // Call the main handler - find the current tag object from state
-            const currentTag = this.state.tags.find(t => t && t['Product Name*'] === displayName) ||
-                              this.state.originalTags.find(t => t && t['Product Name*'] === displayName) ||
-                              tag; // fallback to original tag
-            this.handleTagSelection(e, currentTag);
+            // PERFORMANCE: For deselection, use immediate DOM manipulation instead of full rebuild
+            if (!isChecked && isForSelectedTags) {
+                // Find and remove the tag element from selected tags immediately for instant feedback
+                const tagItem = e.target.closest('.tag-item');
+                if (tagItem) {
+                    // Immediate removal - no animation delay
+                    tagItem.remove();
+                    this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+                }
+                
+                // Update the corresponding checkbox in available tags - use cached reference if possible
+                requestAnimationFrame(() => {
+                    // Try to get checkbox using the optimized approach - search only within available tags
+                    const availableContainer = document.getElementById('availableTags');
+                    if (availableContainer) {
+                        const availableCheckbox = availableContainer.querySelector(`input[data-tag-name="${displayName}"]`);
+                        if (availableCheckbox && availableCheckbox.checked) {
+                            availableCheckbox.checked = false;
+                        }
+                    }
+                });
+                
+                // Defer expensive operations to background with longer delay
+                setTimeout(() => this.saveSelectionState('checkbox_selection'), 500);
+                
+                // CRITICAL: Do NOT trigger any filter updates or available tags re-render
+                return; // Exit immediately to prevent any further processing
+            } else {
+                // For selection, defer full rebuild
+                setTimeout(() => {
+                    // CRITICAL FIX: Use fallback lookup if tag not in _tagLookupMap
+                    // This prevents tags from disappearing on first selection
+                    const selectedTagObjects = this.state.persistentSelectedTags
+                        .map(name => {
+                            // Try lookup map first
+                            let tag = this._tagLookupMap?.get(name);
+                            if (tag) return tag;
+                            
+                            // Fallback to state.tags
+                            tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                            if (tag) return tag;
+                            
+                            // Fallback to originalTags
+                            tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                            if (tag) return tag;
+                            
+                            // If still not found, log warning but don't filter out - preserve selection
+                            console.warn(`Tag '${name}' not found in lookup maps, but preserving selection`);
+                            return null;
+                        })
+                        .filter(Boolean);
+                    
+                    // Only update if we have valid tag objects
+                    if (selectedTagObjects.length > 0) {
+                        this.updateSelectedTags(selectedTagObjects);
+                    } else {
+                        // If no valid objects but we have persistent selections, rebuild lookup map
+                        console.warn('No valid tag objects found, rebuilding lookup map');
+                        // Rebuild the lookup map
+                        this._tagLookupMap = new Map();
+                        this.state.tags.forEach(t => {
+                            if (t && t['Product Name*']) {
+                                this._tagLookupMap.set(t['Product Name*'], t);
+                            }
+                        });
+                        this.state.originalTags.forEach(t => {
+                            if (t && t['Product Name*'] && !this._tagLookupMap.has(t['Product Name*'])) {
+                                this._tagLookupMap.set(t['Product Name*'], t);
+                            }
+                        });
+                        // Retry with rebuilt map
+                        const retryTagObjects = this.state.persistentSelectedTags
+                            .map(name => this._tagLookupMap?.get(name))
+                            .filter(Boolean);
+                        if (retryTagObjects.length > 0) {
+                            this.updateSelectedTags(retryTagObjects);
+                        }
+                    }
+                }, 0);
+                
+                // Defer state saving to avoid blocking UI
+                setTimeout(() => this.saveSelectionState('checkbox_selection'), 50);
+            }
         };
         
         // Store the handler on the element itself so we can reference it later
@@ -4276,21 +4784,7 @@ const TagManager = {
         checkbox.setAttribute('data-tag-name', displayName);
         checkbox.setAttribute('data-is-selected-tag', isForSelectedTags.toString());
         
-        // Also add a click event listener for debugging
-        const handleCheckboxMouseDown = (e) => {
-            // CRITICAL FIX: Set flag BEFORE checkbox state changes if this is a deselection
-            const isInSelectedTags = e.target.closest('#selectedTags') !== null;
-            const isUncheckingInSelected = isInSelectedTags && e.target.checked; // Clicking on checked box in selected tags
-            
-            if (isUncheckingInSelected) {
-                this.state.isProcessingDeselection = true;
-            }
-        };
-        
-        checkbox.removeEventListener('mousedown', handleCheckboxMouseDown);
-        
-        // Add event listeners
-        checkbox.addEventListener('mousedown', handleCheckboxMouseDown);
+        // No longer need mousedown handler - deselection is now optimized with immediate DOM manipulation
 
         // Tag entry (colored)
         const tagElement = document.createElement('div');
@@ -4399,10 +4893,41 @@ const TagManager = {
             return false;
         };
         
-        // CRITICAL: Only apply fallback logic if database lineage is missing, invalid, or MIXED
+        // CRITICAL: Define validDatabaseLineages and hasValidDatabaseLineage BEFORE the if/else block
+        // so it's always available regardless of which path is taken
         // Valid database lineages: SATIVA, INDICA, HYBRID, HYBRID/SATIVA, HYBRID/INDICA, CBD, CBD_BLEND, MIXED, PARA, PARAPHERNALIA
         const validDatabaseLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA', 'PARAPHERNALIA'];
         const hasValidDatabaseLineage = validDatabaseLineages.includes(lineage);
+        
+        // CRITICAL FIX: Paraphernalia products should ALWAYS get PARAPHERNALIA lineage (pink color)
+        // Check if product type is "paraphernalia" - this overrides everything else
+        if (lowerProductType === 'paraphernalia') {
+            displayLineage = 'PARAPHERNALIA';
+            verboseLog(`🎯 Paraphernalia product detected: "${displayName}" (${lowerProductType}) → PARAPHERNALIA (pink)`);
+            // Set the lineage data attributes
+            tagElement.dataset.lineage = 'PARAPHERNALIA';
+            row.dataset.lineage = 'PARAPHERNALIA';
+            // Update tag object
+            if (!tag.canonical_lineage && !tag.currentLineage) {
+                tag.currentLineage = 'PARAPHERNALIA';
+            }
+            // Skip the rest of the lineage logic for Paraphernalia products
+        } else if (lowerProductType.startsWith('high cbd')) {
+            // CRITICAL FIX: High CBD products should ALWAYS get CBD_BLEND lineage (takes priority over database lineage)
+            // Check if product type starts with "high cbd" - this overrides everything else
+            displayLineage = 'CBD_BLEND';
+            verboseLog(`🎯 High CBD product detected: "${displayName}" (${lowerProductType}) → CBD_BLEND (yellow)`);
+            // Set the lineage data attributes
+            tagElement.dataset.lineage = 'CBD_BLEND';
+            row.dataset.lineage = 'CBD_BLEND';
+            // Update tag object
+            if (!tag.canonical_lineage && !tag.currentLineage) {
+                tag.currentLineage = 'CBD_BLEND';
+            }
+            // Skip the rest of the lineage logic for High CBD products
+        } else {
+        
+        // CRITICAL: Only apply fallback logic if database lineage is missing, invalid, or MIXED
         
         // Apply nonclassic product type logic ONLY if database lineage is missing or invalid
         // Reuse classicTypes already declared above (line 4325)
@@ -4443,9 +4968,10 @@ const TagManager = {
             } else if (hasCbdIndicator()) {
                 displayLineage = 'CBD_BLEND';
                 verboseLog(`🎨 NON-CLASSIC CBD SIGNAL: "${displayName}" → CBD_BLEND (yellow)`);
-            } else if (strainStr.includes('paraphernalia')) {
+            } else if (lowerProductType === 'paraphernalia' || strainStr.includes('paraphernalia')) {
+                // CRITICAL FIX: Paraphernalia products should be pink - check both product type and strain
                 displayLineage = 'PARAPHERNALIA'; // Pink color
-                verboseLog(`🎨 NON-CLASSIC PARA: "${displayName}" → PARAPHERNALIA (pink)`);
+                verboseLog(`🎨 NON-CLASSIC PARA: "${displayName}" (${lowerProductType}) → PARAPHERNALIA (pink)`);
             } else {
                 // Default to MIXED for all other nonclassic types (including capsules without CBD indicators)
                 displayLineage = 'MIXED'; // Blue color
@@ -4457,6 +4983,7 @@ const TagManager = {
             displayLineage = lineage || 'HYBRID';
             verboseLog(`🎨 Classic type using database lineage: "${displayName}" → ${displayLineage}`);
         }
+        } // End of else block for High CBD check
         
         // Backend now handles lineage assignment correctly:
         // CBD Blend products = yellow (CBD lineage)
@@ -4571,7 +5098,7 @@ const TagManager = {
                 highThcImg.alt = 'High THC';
                 highThcImg.title = 'High THC Product';
                 highThcImg.loading = 'lazy';
-                highThcImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                highThcImg.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle';
                 imageContainer.appendChild(highThcImg);
             } else if (status === 'DOH') {
                 // Add regular DOH image with optimized loading
@@ -4580,7 +5107,7 @@ const TagManager = {
                 dohImg.alt = 'DOH Compliant';
                 dohImg.title = 'DOH Compliant Product';
                 dohImg.loading = 'lazy';
-                dohImg.style.cssText = 'height:21px;width:auto;margin-left:6px;vertical-align:middle';
+                dohImg.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle';
                 imageContainer.appendChild(dohImg);
             }
             // NONE shows no image
@@ -4588,28 +5115,55 @@ const TagManager = {
             performanceUtils.endTiming(startTime, 'DOH image update');
         };
         
+        // Check if product type indicates High CBD (more robust check)
+        // Check both the original product type and normalized version
+        const productTypeOriginal = (tag['Product Type*'] || tag.productType || tag.Type || '').toString().toLowerCase().trim();
+        const isHighCbdProduct = productTypeForImages.startsWith('high cbd') || 
+                                 productTypeForImages.includes('doh high cbd') ||
+                                 productTypeOriginal.startsWith('high cbd') ||
+                                 productTypeOriginal.includes('doh high cbd') ||
+                                 productTypeForImages.includes('high cbd edible') ||
+                                 productTypeOriginal.includes('high cbd edible');
+        
         // Set initial image based on current DOH status
         let initialDohStatus = 'NONE'; // Default to NONE
         
-        // Check explicit DOH field first
-        if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
-            initialDohStatus = 'DOH';
-        } else if (dohValue === 'THC') {
-            initialDohStatus = 'THC';
-        } else if (dohValue === 'CBD') {
-            initialDohStatus = 'CBD';
-        } else if (dohValue === 'NO' || dohValue === 'NONE') {
-            // Explicitly no DOH image
-            initialDohStatus = 'NONE';
-        } 
-        // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
-        else if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
-            initialDohStatus = 'CBD';
-        } else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
-            initialDohStatus = 'THC';
+        // For High CBD products, only show High CBD badge (not DOH badge)
+        // CRITICAL: This check must happen BEFORE any DOH status checks
+        if (isHighCbdProduct) {
+            // High CBD products should only show High CBD badge, not DOH badge
+            // Clear any existing images first
+            while (imageContainer.firstChild) {
+                imageContainer.removeChild(imageContainer.firstChild);
+            }
+            const highCbdImg = document.createElement('img');
+            highCbdImg.src = '/static/img/HighCBD.png';
+            highCbdImg.alt = 'High CBD';
+            highCbdImg.title = 'High CBD Product';
+            highCbdImg.loading = 'lazy';
+            highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+            imageContainer.appendChild(highCbdImg);
+            // Don't call updateDohImage for High CBD products - skip DOH logic entirely
+        } else {
+            // For non-High CBD products, use normal DOH logic
+            // Check explicit DOH field first
+            if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
+                initialDohStatus = 'DOH';
+            } else if (dohValue === 'THC') {
+                initialDohStatus = 'THC';
+            } else if (dohValue === 'CBD') {
+                initialDohStatus = 'CBD';
+            } else if (dohValue === 'NO' || dohValue === 'NONE') {
+                initialDohStatus = 'NONE';
+            } 
+            // Then check product type for High THC indicators
+            else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
+                initialDohStatus = 'THC';
+            }
+            
+            updateDohImage(initialDohStatus);
         }
         
-        updateDohImage(initialDohStatus);
         tagInfo.appendChild(imageContainer);
         
         // Add JSON match indicator if this tag came from JSON matching or educated guessing
@@ -4626,15 +5180,40 @@ const TagManager = {
         // Create lineage dropdown
         const lineageSelect = document.createElement('select');
         lineageSelect.className = 'form-select form-select-sm lineage-select lineage-dropdown lineage-dropdown-mini';
-        lineageSelect.style.height = '28px';
+        lineageSelect.style.height = '14px'; /* Compact */
         lineageSelect.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-        lineageSelect.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-        lineageSelect.style.borderRadius = '6px';
+        lineageSelect.style.border = '0.5px solid rgba(255, 255, 255, 0.2)';
+        lineageSelect.style.borderRadius = '2px'; /* Very small radius */
         lineageSelect.style.cursor = 'pointer';
         lineageSelect.style.color = '#fff';
         lineageSelect.style.backdropFilter = 'blur(10px)';
         lineageSelect.style.transition = 'all 0.2s ease';
-        lineageSelect.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
+        lineageSelect.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.1)';
+        lineageSelect.style.fontSize = '8px'; /* Compact font */
+        lineageSelect.style.transform = 'none'; /* No transform - CSS handles size */
+        lineageSelect.style.transformOrigin = 'left center';
+        lineageSelect.style.lineHeight = '1.0';
+        lineageSelect.style.fontWeight = 'bold';
+        lineageSelect.style.letterSpacing = '-0.1px';
+        lineageSelect.style.marginLeft = '-4px';
+        lineageSelect.style.marginRight = '2px';
+        lineageSelect.style.width = '35px'; /* Compact */
+        lineageSelect.style.minWidth = '30px';
+        lineageSelect.style.maxWidth = '40px';
+        lineageSelect.style.flexShrink = '0';
+        lineageSelect.style.overflow = 'visible';
+        lineageSelect.style.textOverflow = 'clip';
+        lineageSelect.style.whiteSpace = 'nowrap';
+        lineageSelect.style.padding = '2px 6px 2px 3px'; /* Minimal padding for compact dropdown */
+        lineageSelect.style.boxSizing = 'border-box';
+        /* Style dropdown arrow - larger and more visible */
+        lineageSelect.style.backgroundImage = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 9L1 4h10z'/%3E%3C/svg%3E\")";
+        lineageSelect.style.backgroundRepeat = 'no-repeat';
+        lineageSelect.style.backgroundPosition = 'right 3px center';
+        lineageSelect.style.backgroundSize = '8px 8px'; /* Larger arrow */
+        lineageSelect.style.webkitAppearance = 'none';
+        lineageSelect.style.mozAppearance = 'none';
+        lineageSelect.style.appearance = 'none';
         // Style the dropdown options
         const style = document.createElement('style');
         style.textContent = `
@@ -4654,8 +5233,8 @@ const TagManager = {
             }
         `;
         document.head.appendChild(style);
-        // Add lineage options
-        const uniqueLineages = [
+        // Add lineage options - filter based on product type
+        const allLineageOptions = [
             { value: 'SATIVA', label: 'S' },
             { value: 'INDICA', label: 'I' },
             { value: 'HYBRID', label: 'H' },
@@ -4665,11 +5244,6 @@ const TagManager = {
             { value: 'PARA', label: 'P' },
             { value: 'MIXED', label: 'THC' }
         ];
-        // Helper function to determine if a lineage should map to MIXED
-        const shouldMapToMixed = (lineageValue) => {
-            const validLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'];
-            return !validLineages.includes((lineageValue || '').toUpperCase());
-        };
         
         // CRITICAL: Calculate normalized lineage BEFORE creating options, so option selection uses database lineage
         // Set the dropdown value - handle mappings for display
@@ -4698,15 +5272,51 @@ const TagManager = {
             }
         }
         
-        // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage in dropdown - convert to HYBRID
-        // This must happen AFTER getting database lineage but BEFORE setting dropdown value
+        // CRITICAL FIX: Determine product type and filter lineage options accordingly
         const productTypeForDropdown = tag['Product Type*'] || tag.productType || tag.ProductType || '';
         const classicTypesForDropdown = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isClassicTypeForDropdown = classicTypesForDropdown.map(ct => ct.toLowerCase()).includes((productTypeForDropdown || '').toString().toLowerCase());
+        const isParaphernaliaType = (productTypeForDropdown || '').toString().toLowerCase() === 'paraphernalia';
+        
+        // CRITICAL FIX: Show all lineage options for nonclassic types (user may need all options)
+        // For paraphernalia, only show PARA
+        // For classic types, show all classic lineages (no MIXED, no PARA)
+        // For nonclassic types, show ALL options including classic lineages
+        let uniqueLineages;
+        if (isParaphernaliaType) {
+            // Paraphernalia: only show PARA
+            uniqueLineages = [
+                { value: 'PARA', label: 'P' }
+            ];
+        } else if (!isClassicTypeForDropdown) {
+            // Nonclassic types (edibles, tinctures, topicals, capsules, etc.): show ALL lineage options
+            // User may need SATIVA, INDICA, HYBRID, etc. for nonclassic types
+            uniqueLineages = allLineageOptions.filter(opt => opt.value !== 'PARA');
+            // For High CBD products, ensure CBD is selected by default (but still show all options)
+            const isHighCbdType = (productTypeForDropdown || '').toString().toLowerCase().startsWith('high cbd');
+            if (isHighCbdType && normalizedLineage !== 'CBD_BLEND' && normalizedLineage !== 'CBD') {
+                normalizedLineage = 'CBD_BLEND';
+                console.log(`🎯 High CBD product: Forcing CBD_BLEND lineage for dropdown: "${displayName}"`);
+            }
+        } else {
+            // Classic types: show all classic lineages (no MIXED, no PARA)
+            uniqueLineages = allLineageOptions.filter(opt => 
+                opt.value !== 'MIXED' && opt.value !== 'PARA'
+            );
+        }
+        
+        // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage in dropdown - convert to HYBRID
+        // This must happen AFTER getting database lineage but BEFORE setting dropdown value
         if (isClassicTypeForDropdown && (normalizedLineage === 'MIXED' || normalizedLineage === 'THC')) {
             console.log(`🔄 DROPDOWN FIX: Converting ${normalizedLineage} to HYBRID for classic type "${displayName}" (${productTypeForDropdown})`);
             normalizedLineage = 'HYBRID';
         }
+        
+        // Helper function to determine if a lineage should map to MIXED
+        const shouldMapToMixed = (lineageValue) => {
+            const validLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/INDICA', 'HYBRID/SATIVA', 'CBD', 'CBD_BLEND', 'PARA', 'PARAPHERNALIA', 'MIXED'];
+            return !validLineages.includes((lineageValue || '').toUpperCase());
+        };
         
         // NOW create options using normalizedLineage (database lineage) for selection
         uniqueLineages.forEach(option => {
@@ -4742,11 +5352,20 @@ const TagManager = {
         } else if (normalizedLineage && uniqueLineages.some(opt => opt.value === normalizedLineage)) {
             lineageSelect.value = normalizedLineage;
         } else {
-            // CRITICAL FIX: Fallback to HYBRID for classic types, MIXED for non-classic
+            // CRITICAL FIX: Smart fallback based on product type and lineage
             if (isClassicTypeForDropdown) {
+                // Classic types default to HYBRID
                 lineageSelect.value = 'HYBRID';
                 console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for classic type "${displayName}", defaulting to HYBRID`);
+            } else if (isParaphernaliaType || normalizedLineage === 'PARA' || normalizedLineage === 'PARAPHERNALIA') {
+                // Paraphernalia items should always use PARA
+                lineageSelect.value = 'PARA';
+            } else if (normalizedLineage === 'HYBRID' && !isClassicTypeForDropdown) {
+                // Non-classic items with HYBRID lineage (likely accessories/paraphernalia misclassified)
+                // Silently default to MIXED (THC) without warning since HYBRID isn't valid for non-classic
+                lineageSelect.value = 'MIXED';
             } else {
+                // All other non-classic types default to MIXED
                 lineageSelect.value = 'MIXED';
                 console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for "${displayName}", defaulting to MIXED`);
             }
@@ -4806,48 +5425,85 @@ const TagManager = {
         });
         tagInfo.appendChild(lineageSelect);
 
-        // Create DOH dropdown (same style as lineage dropdown)
+        // Create DOH dropdown (same style as lineage dropdown) - all products use regular DOH dropdown
         const dohSelect = document.createElement('select');
         dohSelect.className = 'form-select form-select-sm doh-select doh-dropdown doh-dropdown-mini';
-        dohSelect.style.height = '28px';
+        dohSelect.style.height = '14px'; /* Compact */
         dohSelect.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-        dohSelect.style.border = '1px solid rgba(255, 255, 255, 0.2)';
-        dohSelect.style.borderRadius = '6px';
+        dohSelect.style.border = '0.5px solid rgba(255, 255, 255, 0.2)';
+        dohSelect.style.borderRadius = '2px'; /* Very small radius */
         dohSelect.style.cursor = 'pointer';
         dohSelect.style.color = '#fff';
         dohSelect.style.backdropFilter = 'blur(10px)';
         dohSelect.style.transition = 'all 0.2s ease';
-        dohSelect.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
-        dohSelect.style.marginLeft = '4px';
-        dohSelect.style.minWidth = '60px';
+        dohSelect.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.1)';
+        dohSelect.style.marginLeft = '1px';
+        dohSelect.style.marginRight = '-2px';
+        dohSelect.style.minWidth = '70px'; /* Even wider for full text visibility */
+        dohSelect.style.maxWidth = '70px';
+        dohSelect.style.width = '70px';
+        dohSelect.style.fontSize = '9px'; /* Slightly larger font */
+        dohSelect.style.transform = 'none'; /* No transform - CSS handles size */
+        dohSelect.style.transformOrigin = 'left center';
+        dohSelect.style.lineHeight = '1.0';
+        dohSelect.style.fontWeight = '300';
+        dohSelect.style.letterSpacing = '-0.1px';
+        dohSelect.style.padding = '2px 12px 2px 6px'; /* More padding for full text visibility */
+        dohSelect.style.textAlign = 'left'; /* Left align text */
+        dohSelect.style.overflow = 'visible'; /* Don't clip text */
+        dohSelect.style.textOverflow = 'clip'; /* Don't use ellipsis */
+        dohSelect.style.whiteSpace = 'nowrap'; /* Keep text on one line */
+        dohSelect.style.webkitAppearance = 'none'; /* Remove default arrow */
+        dohSelect.style.mozAppearance = 'none';
+        dohSelect.style.appearance = 'none';
+        dohSelect.style.boxSizing = 'border-box';
+        /* Add custom dropdown arrow - larger and more visible */
+        dohSelect.style.backgroundImage = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 12 12'%3E%3Cpath fill='%23000000' d='M6 9L1 4h10z'/%3E%3C/svg%3E\")";
+        dohSelect.style.backgroundRepeat = 'no-repeat';
+        dohSelect.style.backgroundPosition = 'right 6px center';
+        dohSelect.style.backgroundSize = '8px 8px'; /* Larger arrow */
 
-        // Add DOH options
+        let currentDropdownStatus = 'NONE'; // Default to NONE
+        
+        // All products get normal DOH dropdown
         const dohOptions = [
-            { value: 'NONE', label: 'no DOH' },
+            { value: 'NONE', label: '' }, // Empty label for "No DOH"
             { value: 'DOH', label: 'DOH' },
             { value: 'THC', label: 'THC' },
             { value: 'CBD', label: 'CBD' }
         ];
         
         // Use the same logic as initialDohStatus to determine current dropdown state
-        let currentDropdownStatus = 'NONE'; // Default to NONE
-        
-        // Check explicit DOH field first
-        if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
-            currentDropdownStatus = 'DOH';
-        } else if (dohValue === 'THC') {
-            currentDropdownStatus = 'THC';
-        } else if (dohValue === 'CBD') {
-            currentDropdownStatus = 'CBD';
-        } else if (dohValue === 'NO' || dohValue === 'NONE') {
-            // Explicitly no DOH image
-            currentDropdownStatus = 'NONE';
-        } 
-        // Then check product type for High CBD/THC indicators (DOH High CBD, DOH High THC)
-        else if (productTypeForImages.startsWith('high cbd') || productTypeForImages.includes('doh high cbd')) {
-            currentDropdownStatus = 'CBD';
-        } else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
-            currentDropdownStatus = 'THC';
+        // For high CBD products, CBD trumps DOH (High CBD implies DOH compliance)
+        if (isHighCbdProduct) {
+            // If DOH/Yes status exists, CBD trumps it for High CBD products
+            if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
+                currentDropdownStatus = 'CBD';
+            } else if (dohValue === 'THC') {
+                // Keep THC if explicitly set
+                currentDropdownStatus = 'THC';
+            } else if (dohValue === 'CBD') {
+                currentDropdownStatus = 'CBD';
+            } else {
+                // Default to CBD for High CBD products (no status, No, or NONE)
+                currentDropdownStatus = 'CBD';
+            }
+        } else {
+            // Non-High CBD products: Check explicit DOH field first
+            if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
+                currentDropdownStatus = 'DOH';
+            } else if (dohValue === 'THC') {
+                currentDropdownStatus = 'THC';
+            } else if (dohValue === 'CBD') {
+                currentDropdownStatus = 'CBD';
+            } else if (dohValue === 'NO' || dohValue === 'NONE') {
+                // Explicitly no DOH image
+                currentDropdownStatus = 'NONE';
+            } 
+            // Then check product type for High THC indicators (DOH High THC)
+            else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
+                currentDropdownStatus = 'THC';
+            }
         }
         
         dohOptions.forEach(option => {
@@ -4875,11 +5531,24 @@ const TagManager = {
         }
         
         dohSelect.addEventListener('change', async (e) => {
-            const newDohStatus = e.target.value;
+            // CRITICAL FIX: Prevent interactions during initial tag load to avoid freezes
+            if (this._fetchingAvailableTags || !this.state.initialized) {
+                console.warn('⚠️ DOH dropdown change blocked - tags still loading or TagManager not initialized');
+                // Revert to previous value
+                e.target.value = currentDropdownStatus;
+                return;
+            }
+            
+            let newDohStatus = e.target.value;
             const prevValue = currentDropdownStatus;
             
+            // For regular DOH dropdown, map NONE to No for backend
+            let backendDohStatus = (newDohStatus === 'NONE') ? 'No' : newDohStatus;
+            
             // Immediate UI feedback - update image first for responsiveness
-            updateDohImage(newDohStatus);
+            if (typeof updateDohImage === 'function') {
+                updateDohImage(newDohStatus);
+            }
             
             dohSelect.disabled = true;
             
@@ -4897,7 +5566,7 @@ const TagManager = {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         product_name: displayName,
-                        doh_status: newDohStatus
+                        doh_status: backendDohStatus
                     })
                 });
                 
@@ -4909,18 +5578,18 @@ const TagManager = {
                 const data = await response.json();
                 if (data.success) {
                     // On success, update tag DOH status in state
-                    // CRITICAL: Map NONE to No for storage
-                    const normalizedDoh = newDohStatus === 'NONE' ? 'No' : newDohStatus;
-                    tag.DOH = normalizedDoh;
-                    tag.doh = normalizedDoh;
-                    tag['DOH Compliant (Yes/No)'] = normalizedDoh;
-                    dohSelect.value = newDohStatus;  // Keep dropdown showing NONE even though we store No
-                    verboseLog(`✅ DOH status updated for "${displayName}" to: ${normalizedDoh} (frontend dropdown: ${newDohStatus})`);
+                    tag.DOH = backendDohStatus;
+                    tag.doh = backendDohStatus;
+                    tag['DOH Compliant (Yes/No)'] = backendDohStatus;
+                    dohSelect.value = newDohStatus;  // Keep dropdown showing UI value
+                    verboseLog(`✅ DOH status updated for "${displayName}" to: ${backendDohStatus} (frontend dropdown: ${newDohStatus})`);
                     
                     // Image already updated above for immediate feedback
                     
-                    // Update DOH in both available and selected tags displays - use NONE for UI dropdown display
-                    this.updateDohInAllDisplays(displayName, newDohStatus);
+                    // Update DOH in both available and selected tags displays
+                    if (typeof this.updateDohInAllDisplays === 'function') {
+                        this.updateDohInAllDisplays(displayName, newDohStatus);
+                    }
                     
                 } else {
                     // Revert image on failure
@@ -4931,10 +5600,12 @@ const TagManager = {
                 // Remove saving option
                 dohSelect.removeChild(savingOption);
             } catch (error) {
-                console.error('Failed to update DOH status:', error);
+                console.error(`Failed to update DOH status:`, error);
                 // On failure, revert to previous value
                 dohSelect.value = prevValue;
-                alert('Failed to update DOH status: ' + error.message);
+                // Revert image
+                updateDohImage(prevValue);
+                alert(`Failed to update DOH status: ` + error.message);
                 // Remove saving option
                 if (savingOption.parentNode) {
                     dohSelect.removeChild(savingOption);
@@ -4962,27 +5633,23 @@ const TagManager = {
     _renderTagsInBatches(tags, container) {
         if (!tags || tags.length === 0) return;
         
-        // PERFORMANCE: Adaptive batch size based on dataset size
-        // Small datasets: render all at once for instant display
-        // Large datasets: use progressive rendering to prevent UI freeze
-        const LARGE_DATASET_THRESHOLD = 500;
-        const isLargeDataset = tags.length > LARGE_DATASET_THRESHOLD;
-        
-        // Adaptive batch size: larger batches for very large datasets to reduce overhead
-        const BATCH_SIZE = isLargeDataset ? 100 : tags.length;
-        
-        // For very large datasets, render initial batch immediately, then continue progressively
-        const INITIAL_BATCH_SIZE = isLargeDataset ? 200 : tags.length;
-        
+        // PERFORMANCE: Increase batch size for faster rendering (100 tags per batch)
+        // Use larger batches for better performance on modern browsers
+        const BATCH_SIZE = 100;
         let index = 0;
         
         const renderBatch = () => {
             const endIndex = Math.min(index + BATCH_SIZE, tags.length);
             const fragment = document.createDocumentFragment();
             
+            // PERFORMANCE: Build HTML string first, then set innerHTML once per batch
+            // This is faster than multiple appendChild calls for large batches
+            const batchHtml = [];
             for (let i = index; i < endIndex; i++) {
                 const tagElement = this.createTagElement(tags[i], false);
-                fragment.appendChild(tagElement);
+                if (tagElement) {
+                    fragment.appendChild(tagElement);
+                }
             }
             
             container.appendChild(fragment);
@@ -4990,17 +5657,12 @@ const TagManager = {
             
             // Continue rendering if there are more tags
             if (index < tags.length) {
-                // For large datasets, use setTimeout with small delay to allow UI updates
-                // For small datasets, use requestAnimationFrame for smooth rendering
-                if (isLargeDataset && index > INITIAL_BATCH_SIZE) {
-                    setTimeout(renderBatch, 10); // 10ms delay for large datasets
-                } else {
-                    requestAnimationFrame(renderBatch);
-                }
+                // Use setTimeout with 0ms for faster rendering (less overhead than requestAnimationFrame)
+                setTimeout(renderBatch, 0);
             }
         };
         
-        // Start rendering
+        // Start rendering immediately
         renderBatch();
     },
 
@@ -5020,204 +5682,29 @@ const TagManager = {
     },
 
     handleTagSelection(e, tag) {
-        verboseLog('=== HANDLE TAG SELECTION CALLED ===');
-        verboseLog('Event:', e);
-        verboseLog('Tag:', tag);
+        // PERFORMANCE: Instant checkbox response - defer ALL processing
+        // Guards only
+        if (this.state.isProcessingDeselection || this.state.isClearing || this.isMovingTags) return;
+        if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) return;
+        if (!tag || !tag['Product Name*']) return;
         
-        // CRITICAL FIX: Don't process selection changes during deselection to prevent filter clearing
-        if (this.state.isProcessingDeselection) {
-            verboseLog('🚫 SKIPPING handleTagSelection - currently processing deselection');
-            return;
-        }
-        
-        // PERFORMANCE: Skip handling during bulk clear operations to prevent UI freeze
-        if (this.state.isClearing) {
-            verboseLog('🚫 SKIPPING handleTagSelection - currently clearing/resetting');
-            return;
-        }
-        
-        // Ignore changes during drag-and-drop reordering
-        if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
-            verboseLog('Ignoring tag selection change during drag operation');
-            return;
-        }
-        
+        // PERFORMANCE: Defer everything to avoid blocking checkbox UI
         const isChecked = e.target.checked;
-        verboseLog('Tag selection changed:', tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED', 'checked:', isChecked);
+        const originalName = tag['Product Name*'];
         
-        // Safety check: ensure tag exists and has required properties
-        if (!tag || !tag['Product Name*']) {
-            console.error('Invalid tag object received:', tag);
-            return;
-        }
-        
-        // Prevent rapid deselection issues
-        if (this.isMovingTags) {
-            verboseLog('Ignoring tag selection during tag move operation');
-            return;
-        }
-        
-        // CRITICAL FIX: Debounce and make async to prevent UI freezing
-        // Use requestAnimationFrame for non-blocking updates
-        if (this.tagSelectionTimeout) {
-            clearTimeout(this.tagSelectionTimeout);
-        }
-        
-        // Update checkbox state immediately for instant feedback (non-blocking)
-        requestAnimationFrame(() => {
-            this.updateSelectAllCheckboxes();
-        });
-        
-        // Debounce the heavy operations (updateSelectedTags) to prevent freezing
-        this.tagSelectionTimeout = setTimeout(() => {
-            // CRITICAL: Check flag again inside timeout to prevent filter clearing
-            if (this.state.isProcessingDeselection) {
-                verboseLog('🚫 SKIPPING setTimeout in handleTagSelection - currently processing deselection');
-                return;
-            }
-            
-            // CRITICAL FIX: Use requestAnimationFrame to make updates non-blocking
-            requestAnimationFrame(() => {
-                // Update select all checkbox states after tag selection changes
-                this.updateSelectAllCheckboxes();
+        // Only handle deselection from selected tags
+        if (!isChecked && e.target.closest('#selectedTags')) {
+            setTimeout(() => {
+                const availableCheckbox = document.querySelector(`#availableTags .tag-checkbox[value="${originalName}"]`);
+                if (availableCheckbox) availableCheckbox.checked = false;
                 
-                // Note: The persistent selected tags are already updated in the checkbox event handler
-                // This function now focuses on UI updates and backend synchronization
-                
-                verboseLog('Persistent selected tags after change:', this.state.persistentSelectedTags);
-                
-                // CRITICAL FIX: Batch the expensive operations to prevent freezing
-                // Build selectedTagObjects efficiently
-                const selectedTagNames = this.state.persistentSelectedTags;
-                const tagsMap = new Map([...this.state.tags, ...this.state.originalTags].map(t => [t['Product Name*'], t]));
-                
-                const selectedTagObjects = selectedTagNames.map(name => {
-                    // Safety check: ensure name is valid
-                    if (!name || typeof name !== 'string') {
-                        return null;
-                    }
-                    
-                    // Use Map lookup for O(1) performance instead of find() O(n)
-                    let foundTag = tagsMap.get(name);
-                    
-                    // If not found, try case-insensitive search (only if needed)
-                    if (!foundTag) {
-                        for (const [key, tag] of tagsMap.entries()) {
-                            if (key && key.toLowerCase() === name.toLowerCase()) {
-                                foundTag = tag;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // If still not found, create a minimal tag object for the selected tag
-                    if (!foundTag) {
-                        foundTag = {
-                            'Product Name*': name,
-                            'Product Brand': 'Unknown',
-                            'Vendor': 'Unknown',
-                            'Product Type*': 'Unknown',
-                            'Lineage': 'MIXED',
-                            'Source': 'Frontend Selection'
-                        };
-                    }
-                    
-                    return foundTag;
-                }).filter(Boolean); // Filter out null values from invalid names
-                
-                verboseLog('selectedTagObjects length:', selectedTagObjects.length);
-                
-                // CRITICAL FIX: Use setTimeout to defer expensive updateSelectedTags call
-                // This prevents blocking the UI thread
-                setTimeout(() => {
-                    this.updateSelectedTags(selectedTagObjects);
-                }, 0);
-            
-            // FIXED: Don't hide selected tags from available display - keep all items visible
-            // This allows users to see all available options even after making selections
-            if (isChecked && e.target.closest('#availableTags')) {
-                verboseLog('FIXED: Not hiding selected tag from available display - keeping all items visible');
-                // Tag remains visible in available list even after selection
-            }
-            
-            // If tag was unchecked in selected list, show it in available display and uncheck it
-            if (!isChecked && e.target.closest('#selectedTags') && tag && tag['Product Name*']) {
-                // Flag should already be set by mousedown handler, but set it here as backup
-                if (!this.state.isProcessingDeselection) {
-                    verboseLog('🚫 Backup: Setting isProcessingDeselection flag in handleTagSelection');
-                    this.state.isProcessingDeselection = true;
-                }
-                
-                // Robust lookup for the corresponding available tag checkbox
-                const originalName = tag['Product Name*'];
-                const nonBreakingHyphenName = originalName.replace(/-/g, '\u2011');
-                const withoutBySuffix = originalName.replace(/ by [^-]*$/i, '').replace(/ by [^-]+(?= -)/i, '');
-                const candidates = [
-                    originalName,
-                    nonBreakingHyphenName,
-                    withoutBySuffix,
-                    withoutBySuffix.replace(/-/g, '\u2011')
-                ].filter(Boolean);
-
-                let availableTagElement = null;
-                for (const candidate of candidates) {
-                    availableTagElement = document.querySelector(`#availableTags .tag-checkbox[value="${candidate}"]`);
-                    if (availableTagElement) break;
-                }
-                if (!availableTagElement) {
-                    // Fallback: try data-tag-name selector which mirrors the display name
-                    for (const candidate of candidates) {
-                        const el = document.querySelector(`#availableTags [data-tag-name="${candidate}"] input.tag-checkbox`);
-                        if (el) { availableTagElement = el; break; }
-                    }
-                }
-                if (availableTagElement) {
-                    const tagElement = availableTagElement.closest('.tag-item');
-                    if (tagElement) tagElement.style.display = 'block';
-                    // Also uncheck the available tags checkbox
-                    // Ensure the tag is removed from persistentSelectedTags (should already be done, but double-check)
-                    const idx = this.state.persistentSelectedTags.indexOf(originalName);
-                    if (idx > -1) {
-                        this.state.persistentSelectedTags.splice(idx, 1);
-                    }
-                    // Update selectedTags set to match
-                    this.state.selectedTags.delete(originalName);
-                    // Uncheck the checkbox
-                    availableTagElement.checked = false;
-                    verboseLog(`✅ Unchecked available tags checkbox for ${originalName}`);
-                    
-                    // Immediately update hierarchical checkboxes after unchecking
-                    // Use requestAnimationFrame to ensure DOM is updated first
-                    requestAnimationFrame(() => {
-                        this.updateSelectAllCheckboxes();
-                    });
-                } else {
-                    console.warn('⚠️ Could not locate matching available tag checkbox for deselection:', originalName);
-                }
-                
-                // Clear corresponding filters when tag is deselected
                 this.clearFiltersForDeselectedTag(tag);
                 
-                // For JSON matched items and educated guess items, also ensure they appear in available tags
-                // This is important for items that might not exist in the original Excel data
                 if (tag.Source && (tag.Source === 'JSON Match' || tag.Source.includes('Educated Guess'))) {
-                    verboseLog(`${tag.Source.includes('Educated Guess') ? 'Educated guess' : 'JSON matched'} item deselected: ${tag['Product Name*']}`);
-                    // Sync with backend to ensure deselection is persisted
-                    this.syncDeselectionWithBackend(tag['Product Name*']);
+                    this.syncDeselectionWithBackend(originalName);
                 }
-            }
-            
-            // Update hierarchical checkboxes (vendor, brand, product type, weight) to reflect deselection
-            this.updateSelectAllCheckboxes();
-            
-            // Clear flag after a longer delay to allow any debounced updates to complete
-            if (!isChecked && tag && tag['Product Name*']) {
-                setTimeout(() => {
-                    this.state.isProcessingDeselection = false;
-                    verboseLog('✅ Clearing isProcessingDeselection flag after delay');
-                }, 3000);
-            }
-        }, 100); // 100ms debounce delay for individual tag selection
+            }, 0);
+        }
     },
 
     updateTagLineage(tag, lineage) {
@@ -5705,14 +6192,14 @@ const TagManager = {
                         img.src = '/static/img/HighTHC.png';
                         img.alt = 'High THC';
                         img.title = 'High THC Product';
-                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle';
                         imageContainer.appendChild(img);
                     } else if (newDohStatus === 'DOH') {
                         const img = document.createElement('img');
                         img.src = '/static/img/DOH.png';
                         img.alt = 'DOH Compliant';
                         img.title = 'DOH Compliant Product';
-                        img.style.cssText = 'height:21px;width:auto;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle';
                         imageContainer.appendChild(img);
                     }
                     // NONE shows no image
@@ -5753,14 +6240,14 @@ const TagManager = {
                         img.src = '/static/img/HighTHC.png';
                         img.alt = 'High THC';
                         img.title = 'High THC Product';
-                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle';
                         imageContainer.appendChild(img);
                     } else if (newDohStatus === 'DOH') {
                         const img = document.createElement('img');
                         img.src = '/static/img/DOH.png';
                         img.alt = 'DOH Compliant';
                         img.title = 'DOH Compliant Product';
-                        img.style.cssText = 'height:21px;width:auto;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle';
                         imageContainer.appendChild(img);
                     }
                     // NONE shows no image
@@ -5892,6 +6379,7 @@ const TagManager = {
     },
 
     // NEW: Update lineage for all items with the same vendor + strain immediately in UI/state
+    // CRITICAL FIX: For nonclassic types, only update the specific product, don't propagate
     updateSimilarLineages(tagName, newLineage) {
         // Helper to normalize values
         const norm = v => (v || '').toString().trim().toLowerCase();
@@ -5922,6 +6410,18 @@ const TagManager = {
             console.warn('updateSimilarLineages: Source tag not found for', tagName);
             return;
         }
+        
+        // CRITICAL FIX: Check if this is a nonclassic product type
+        // For nonclassic types, don't propagate lineage changes to other products
+        const productType = (source['Product Type*'] || source.ProductType || source.Type || '').toString().trim().toLowerCase();
+        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        const isNonclassic = !classicTypes.includes(productType);
+        
+        if (isNonclassic) {
+            verboseLog(`🔄 Nonclassic product '${tagName}' (type: ${productType}) - skipping lineage propagation to other products`);
+            return; // Don't propagate for nonclassic types
+        }
+        
         const srcVendor = norm(getVendor(source));
         // Prefer explicit strain columns
         // Support multiple possible keys for strain across datasets
@@ -6022,7 +6522,8 @@ const TagManager = {
             // Use same fallback logic as selected tags
             const name = el.getAttribute('data-tag-name') || (el.querySelector('.tag-checkbox')?.value);
             verboseLog(`🔍 Available item ${idx}: data-tag-name="${name}"`);
-            const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name);
+            // PERFORMANCE: Use Map lookup for O(1) instead of array.find() - O(n)
+            const tag = this._tagLookupMap?.get(name);
             if (tag && isSimilar(tag)) {
                 const select = el.querySelector('.lineage-dropdown');
                 if (select) {
@@ -6100,16 +6601,11 @@ const TagManager = {
     },
 
     updateSelectedTags(tags) {
-        // CRITICAL FIX: Prevent concurrent calls to avoid freezing
-        if (this.state.isUpdatingSelectedTags) {
-            verboseLog('🚫 SKIPPING updateSelectedTags - already updating, queueing update');
-            // Queue the update for after current one completes
-            this._pendingSelectedTagsUpdate = tags;
-            return;
-        }
-        
-        this.state.isUpdatingSelectedTags = true;
-        
+        // PERFORMANCE: Skip batching - update immediately for responsive UI
+        this._performUpdateSelectedTags(tags);
+    },
+    
+    _performUpdateSelectedTags(tags) {
         // CRITICAL FIX: NEVER clear selected tags during lineage updates
         // Check if we're in the middle of a lineage update
         const isLineageUpdateActive = this._lineageUpdateInProgress || 
@@ -6120,7 +6616,6 @@ const TagManager = {
             // If called with empty array during lineage update, ignore it completely
             if (!tags || tags.length === 0) {
                 console.log('🚫 BLOCKED updateSelectedTags([]) during lineage update - preserving selected tags');
-                this.state.isUpdatingSelectedTags = false;
                 return;
             }
             // If called with tags but we have existing selections, merge instead of replace
@@ -6130,11 +6625,15 @@ const TagManager = {
                 const merged = [...new Set([...this.state.persistentSelectedTags, ...newTagNames])];
                 if (merged.length > this.state.persistentSelectedTags.length) {
                     console.log('🔄 Merging tags during lineage update instead of replacing');
+                    // PERFORMANCE: Use Map lookup for O(1) instead of array.find() - O(n²) becomes O(n)
                     tags = merged.map(name => {
-                        return tags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
-                               this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
-                               this.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === name) ||
-                               null;
+                        // Try Map lookup first (fastest)
+                        let tag = this._tagLookupMap?.get(name);
+                        // Fallback to tags array if not in Map
+                        if (!tag) {
+                            tag = tags.find(t => (t['Product Name*'] || t.ProductName) === name);
+                        }
+                        return tag || null;
                     }).filter(Boolean);
                 }
             }
@@ -6152,13 +6651,11 @@ const TagManager = {
         // This prevents selections from being cleared when updateSelectedTags([]) is called
         if (tags.length === 0 && this.state.persistentSelectedTags.length > 0) {
             verboseLog('updateSelectedTags called with empty array, but preserving persistentSelectedTags:', this.state.persistentSelectedTags);
-            // Rebuild tags from persistentSelectedTags instead of clearing
-            const tagsMap = new Map(this.state.tags.map(t => [t['Product Name*'], t]));
-            const originalTagsMap = new Map(this.state.originalTags.map(t => [t['Product Name*'], t]));
-            
-            tags = this.state.persistentSelectedTags.map(tagName => {
-                return tagsMap.get(tagName) || originalTagsMap.get(tagName) || null;
-            }).filter(Boolean);
+            // PERFORMANCE: Use existing _tagLookupMap instead of creating new Maps
+            // This avoids O(n) Map creation and uses already-built lookup Map
+            tags = this.state.persistentSelectedTags
+                .map(tagName => this._tagLookupMap?.get(tagName))
+                .filter(Boolean);
             
             if (tags.length === 0) {
                 verboseLog('No tag objects found for persistentSelectedTags, but keeping selections in state');
@@ -6170,7 +6667,6 @@ const TagManager = {
         // Prevent updates during tag move operations to avoid race conditions
         if (this.isMovingTags) {
             verboseLog('Ignoring updateSelectedTags during tag move operation');
-            this.state.isUpdatingSelectedTags = false;
             return;
         }
         
@@ -6178,7 +6674,6 @@ const TagManager = {
         const container = document.getElementById('selectedTags');
         if (!container) {
             console.error('Selected tags container not found');
-            this.state.isUpdatingSelectedTags = false;
             return;
         }
         
@@ -6188,38 +6683,31 @@ const TagManager = {
         const forceUpdate = this._forceSelectedTagsUpdate || false;
         this._forceSelectedTagsUpdate = false; // Reset flag
         
-        // Check if the current content matches what we're about to render
-        const currentTagCount = container.querySelectorAll('.tag-item').length;
-        if (!forceUpdate && currentTagCount === tags.length && tags.length > 0) {
-            // Quick check: if we have the same number of tags and they're not empty, 
-            // we might not need to update (this is a heuristic to avoid unnecessary updates)
-            // BUT: Skip this check if we're forcing update for database lineage
-            const currentTagNames = new Set(Array.from(container.querySelectorAll('.tag-item')).map(el => 
-                el.querySelector('.tag-checkbox')?.value || el.getAttribute('data-tag-name')
-            ).filter(Boolean));
+        // PERFORMANCE: Quick comparison using cached state instead of slow DOM queries
+        if (!forceUpdate && this._lastRenderedSelectedTags) {
+            const lastNames = this._lastRenderedSelectedTags;
+            const newNames = tags.map(tag => tag['Product Name*']).filter(Boolean);
             
-            const newTagNames = new Set(tags.map(tag => tag['Product Name*']).filter(Boolean));
-            
-            // Use Set comparison to handle order differences
-            if (currentTagNames.size === newTagNames.size && 
-                [...currentTagNames].every(name => newTagNames.has(name))) {
+            if (lastNames.length === newNames.length && 
+                lastNames.every((name, idx) => name === newNames[idx])) {
                 verboseLog('updateSelectedTags: No changes detected, skipping update');
                 return;
             }
         }
         
-        // CRITICAL FIX: Wrap DOM updates in requestAnimationFrame to prevent blocking
-        requestAnimationFrame(() => {
-            // Dispatch event to notify drag and drop manager that tag updates are starting
-            document.dispatchEvent(new CustomEvent('updateSelectedTags'));
-            verboseLog('updateSelectedTags called with tags:', tags);
+        // Cache for next comparison
+        this._lastRenderedSelectedTags = tags.map(tag => tag['Product Name*']).filter(Boolean);
+        
+        // Dispatch event to notify drag and drop manager that tag updates are starting
+        document.dispatchEvent(new CustomEvent('updateSelectedTags'));
+        verboseLog('updateSelectedTags called with tags:', tags);
 
-            // Clear existing content
-            container.innerHTML = '';
+        // Clear existing content
+        container.innerHTML = '';
 
-            // For JSON matched items, we want to keep them even if they don't exist in Excel data
-            // So we'll be more permissive with validation
-            const validTags = [];
+        // For JSON matched items, we want to keep them even if they don't exist in Excel data
+        // So we'll be more permissive with validation
+        const validTags = [];
         
         // Create a Set for O(1) lookup performance instead of O(n) .some() calls
         const originalTagNames = new Set(this.state.originalTags.map(tag => tag['Product Name*']));
@@ -6894,9 +7382,8 @@ const TagManager = {
                                     }
                                 });
                                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                const selectedTagObjects = Array.from(this.state.persistentSelectedTags).map(name =>
-                                    this.state.tags.find(t => t['Product Name*'] === name)
-                                ).filter(Boolean);
+                                // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
+                                const selectedTagObjects = this.getSelectedTagObjects();
                                 this.updateSelectedTags(selectedTagObjects);
                                 this.efficientlyUpdateAvailableTagsDisplay();
                             });
@@ -6954,9 +7441,8 @@ const TagManager = {
                             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                             
                             // Update the selected tags display
-                            const selectedTagObjects = Array.from(this.state.persistentSelectedTags).map(name =>
-                                this.state.tags.find(t => t['Product Name*'] === name)
-                            ).filter(Boolean);
+                            // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
+                            const selectedTagObjects = this.getSelectedTagObjects();
                             this.updateSelectedTags(selectedTagObjects);
                             
                             // Use efficient update instead of rebuilding entire DOM
@@ -7122,9 +7608,9 @@ const TagManager = {
                                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                                 
                                 // Update the selected tags display
-                                const selectedTagObjects = Array.from(this.state.persistentSelectedTags).map(name =>
-                                    this.state.tags.find(t => t['Product Name*'] === name)
-                                ).filter(Boolean);
+                                // CRITICAL FIX: Use getSelectedTagObjects() which checks both state.tags AND originalTags
+                                // This prevents tags from disappearing when filters are active
+                                const selectedTagObjects = this.getSelectedTagObjects();
                                 this.updateSelectedTags(selectedTagObjects);
                                 
                                 // Use efficient update instead of rebuilding entire DOM
@@ -7230,6 +7716,23 @@ const TagManager = {
 
         this.updateTagCount('selected', fullTags.length);
 
+        // CRITICAL FIX: After rebuilding selected tags, ensure all checkboxes are properly checked
+        // This fixes the issue where drag-and-drop causes tags to deselect themselves
+        setTimeout(() => {
+            const allCheckboxes = container.querySelectorAll('.tag-checkbox');
+            allCheckboxes.forEach(checkbox => {
+                const tagName = checkbox.value;
+                const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
+                if (shouldBeChecked && !checkbox.checked) {
+                    console.log(`🔧 Fixing unchecked checkbox for "${tagName}" after drag operation`);
+                    checkbox.checked = true;
+                } else if (!shouldBeChecked && checkbox.checked) {
+                    console.log(`🔧 Fixing incorrectly checked checkbox for "${tagName}" after drag operation`);
+                    checkbox.checked = false;
+                }
+            });
+        }, 50); // Small delay to ensure DOM is fully rendered
+
         // Attach delegated change handler once (idempotent)
         if (!container._hasDeselectionHandler) {
             // Only respond to actual checkbox changes; do not toggle on row clicks
@@ -7294,18 +7797,6 @@ const TagManager = {
                 window.dragAndDropManager.reinitializeTagDragAndDrop();
             }, 100);
         }
-        
-        // CRITICAL FIX: Clear the flag and process any queued updates
-        this.state.isUpdatingSelectedTags = false;
-        if (this._pendingSelectedTagsUpdate) {
-            const pending = this._pendingSelectedTagsUpdate;
-            this._pendingSelectedTagsUpdate = null;
-            // Use setTimeout to prevent recursion stack overflow
-            setTimeout(() => {
-                this.updateSelectedTags(pending);
-            }, 0);
-        }
-        });
     },
 
     updateTagCount(type, count) {
@@ -7508,6 +7999,27 @@ const TagManager = {
     },
 
     async fetchAndUpdateAvailableTags() {
+        // CRITICAL FIX: Prevent multiple simultaneous calls to avoid restarts
+        // But allow clearSelected to force a refresh by waiting briefly
+        if (this._fetchingAvailableTags) {
+            console.log('⏸️ Tag fetch already in progress, waiting for completion...');
+            // Wait up to 2 seconds for in-progress fetch to complete
+            let waitCount = 0;
+            while (this._fetchingAvailableTags && waitCount < 20) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                waitCount++;
+            }
+            // If still in progress after waiting, skip to prevent hang
+            if (this._fetchingAvailableTags) {
+                console.log('⏸️ Tag fetch still in progress after wait, skipping duplicate call');
+                return false;
+            }
+        }
+        
+        // Set flag to prevent concurrent calls
+        this._fetchingAvailableTags = true;
+        
+        // CRITICAL FIX: Use try-finally to ensure flag is always reset
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
             // Ensure flag is initialized
@@ -7563,9 +8075,9 @@ const TagManager = {
             });
             
             // Rate limiting: prevent rapid successive calls
-            // Reduced from 2000ms to 500ms to allow faster retries while still preventing abuse
+            // Increased to 1000ms to prevent restarts from multiple rapid calls
             const now = Date.now();
-            if (this._lastFetchTime && (now - this._lastFetchTime) < 500) {
+            if (this._lastFetchTime && (now - this._lastFetchTime) < 1000) {
                 verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
                 // Hide splash if we're skipping
                 if (this.hideActionSplash) {
@@ -7617,17 +8129,18 @@ const TagManager = {
             const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
+            // CRITICAL FIX: Reduced retries to prevent multiple restarts
             let response;
             let responseData;
-            const maxRetries = 3;
+            const maxRetries = 1; // Reduced from 3 to 1 to prevent multiple restarts
             let retryCount = 0;
             let lastError;
             
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // PERFORMANCE FIX: Reduced timeout to 8s - fast_load should make this fast enough
-                    const timeoutId = setTimeout(() => controller.abort(), 8000);
+                    // PERFORMANCE FIX: Increased timeout to 15s to reduce timeouts and restarts
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
@@ -7644,6 +8157,18 @@ const TagManager = {
                     verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}):`, response.status);
 
                     if (!response.ok) {
+                        // CRITICAL FIX: Handle 503 errors gracefully - try to use cache
+                        if (response.status === 503) {
+                            verboseLog('⚠️ Server returned 503 (Service Unavailable), attempting to use cached data...');
+                            // Try to use cached tags if available
+                            const cachedTags = this.hydrateAvailableTagsFromCache();
+                            if (cachedTags) {
+                                verboseLog('✅ Using cached tags as fallback for 503 error');
+                                return true;
+                            }
+                            // If no cache, throw error but don't retry 503 (server is overloaded)
+                            throw new Error(`HTTP 503: Service Unavailable - Server is temporarily overloaded. Please try again in a moment.`);
+                        }
                         if (response.status >= 500 && retryCount < maxRetries - 1) {
                             // Server error - retry
                             retryCount++;
@@ -7715,7 +8240,7 @@ const TagManager = {
             }
             
             if (tags.length === 0) {
-                console.warn('Backend returned empty tags array');
+                console.warn('Backend returned empty tags array - no Excel file loaded');
                 this.state.tags = [];
                 this.state.originalTags = [];
                 this._updateAvailableTags([]);
@@ -7724,7 +8249,14 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                return false;
+                // CRITICAL FIX: Still complete initialization even with no tags
+                // This allows the app to load and show the upload UI
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                // Return true to indicate initialization completed (even with no tags)
+                return true;
             }
             
             // PERFORMANCE OPTIMIZATION: Single-pass normalization to reduce processing overhead
@@ -7793,7 +8325,13 @@ const TagManager = {
             
             // CRITICAL: ALWAYS update selected tags after loading tags to ensure they have database lineage
             // This is essential because selected tags dropdowns need to show database lineage, not Excel lineage
+            // CRITICAL FIX: Preserve persistentSelectedTags even if tag objects aren't immediately found
+            // Save a copy before any operations to prevent accidental loss
+            const savedSelectedTagsBeforeUpdate = [...(this.state.persistentSelectedTags || [])];
+            
             if (this.state.persistentSelectedTags.length > 0) {
+                console.log(`🔄 Preserving ${this.state.persistentSelectedTags.length} selected tags during tag update`);
+                
                 // Map selected tag names to updated tag objects with database lineage
                 const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
                     const updatedTag = tags.find(t => t['Product Name*'] === name);
@@ -7813,18 +8351,44 @@ const TagManager = {
                         }
                         return updatedTag;
                     }
-                    console.warn(`⚠️ Selected tag "${name}" not found in updated available tags`);
+                    // CRITICAL FIX: Don't log warning if tag isn't found - it might be temporarily unavailable
+                    // The tag might be in a different filter or still loading
                     return null;
                 }).filter(Boolean);
                 
+                // CRITICAL FIX: Even if some tag objects aren't found, preserve the selections
+                // They might be in a different filter or temporarily unavailable
                 if (selectedTagObjects.length > 0) {
                     console.log(`✅ Updating ${selectedTagObjects.length} selected tags with database lineage from available tags`);
                     // Force update to ensure dropdowns are re-rendered with database lineage
                     this._forceSelectedTagsUpdate = true;
                     this.updateSelectedTags(selectedTagObjects);
-                } else {
-                    console.warn(`⚠️ No matching selected tags found in updated available tags`);
+                } else if (this.state.persistentSelectedTags.length > 0) {
+                    // CRITICAL FIX: If no tag objects found but we have persistent selections,
+                    // don't clear them - they might be in a different filter or still loading
+                    console.log(`⚠️ Selected tag objects not found in current tags, but preserving ${this.state.persistentSelectedTags.length} selections`);
+                    // Try to restore from originalTags as fallback
+                    const fallbackTagObjects = this.state.persistentSelectedTags.map(name => {
+                        return this.state.originalTags.find(t => t['Product Name*'] === name);
+                    }).filter(Boolean);
+                    
+                    if (fallbackTagObjects.length > 0) {
+                        console.log(`✅ Found ${fallbackTagObjects.length} selected tags in originalTags, restoring...`);
+                        this._forceSelectedTagsUpdate = true;
+                        this.updateSelectedTags(fallbackTagObjects);
+                    }
                 }
+            }
+            
+            // CRITICAL FIX: Safety check - if persistentSelectedTags were accidentally cleared, restore them
+            if (savedSelectedTagsBeforeUpdate.length > 0 && this.state.persistentSelectedTags.length === 0) {
+                console.warn('⚠️ persistentSelectedTags were cleared during tag update, restoring from saved copy');
+                this.state.persistentSelectedTags = [...savedSelectedTagsBeforeUpdate];
+                this.state.selectedTags = new Set(savedSelectedTagsBeforeUpdate);
+                // Restore checkboxes after a short delay to ensure DOM is ready
+                setTimeout(() => {
+                    this._restoreCheckboxStates();
+                }, 100);
             }
             
             // PERFORMANCE: Clear filter cache when tags change
@@ -7849,7 +8413,8 @@ const TagManager = {
             this.validateSelectedTags();
             
             // OPTIMIZATION: If this was a fast load, optionally refresh with lineage alignment in background
-            // This allows tags to appear immediately while lineage is updated asynchronously
+            // CRITICAL FIX: Disabled background refresh to prevent restarts - lineage is already aligned in main fetch
+            // This allows tags to appear immediately without triggering another load
             if (responseData && responseData.source === 'cache-fast' && tags.length > 0) {
                 verboseLog('Fast load completed - tags displayed immediately');
                 // Update UI immediately with fast-loaded tags
@@ -7860,48 +8425,8 @@ const TagManager = {
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
                 
-                // Optionally refresh with lineage alignment in background (non-blocking)
-                // This ensures lineage is eventually aligned without blocking initial display
-                setTimeout(async () => {
-                    try {
-                        verboseLog('Background: Refreshing tags with lineage alignment...');
-                        const lineageResponse = await fetch(`/api/available-tags?t=${Date.now()}&fast_load=0`);
-                        if (lineageResponse.ok) {
-                            const lineageData = await lineageResponse.json();
-                            if (lineageData.tags && lineageData.tags.length > 0) {
-                                // Update tags with lineage-aligned data (source will be 'cache+db-lineage' or 'excel+db-lineage')
-                                if (lineageData.source && (lineageData.source.includes('lineage') || lineageData.source.includes('db-lineage'))) {
-                                    verboseLog(`Background: Updated ${lineageData.tags.length} tags with lineage alignment`);
-                                    this.state.tags = [...lineageData.tags];
-                                    this.state.originalTags = [...lineageData.tags];
-                                    // Only re-render if lineage data actually changed (to avoid flicker)
-                                    // Compare lineage values, not just tag names
-                                    let lineageChanged = false;
-                                    if (tags.length === lineageData.tags.length) {
-                                        for (let i = 0; i < tags.length; i++) {
-                                            const oldLin = (tags[i].Lineage || tags[i].canonical_lineage || '').toString().trim();
-                                            const newLin = (lineageData.tags[i].Lineage || lineageData.tags[i].canonical_lineage || '').toString().trim();
-                                            if (oldLin !== newLin) {
-                                                lineageChanged = true;
-                                                break;
-                                            }
-                                        }
-                                    } else {
-                                        lineageChanged = true;
-                                    }
-                                    
-                                    if (lineageChanged) {
-                                        // Update only the lineage fields in existing DOM without full re-render
-                                        // This is faster and avoids flicker
-                                        this._updateAvailableTags(lineageData.tags);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (bgError) {
-                        verboseLog('Background lineage alignment failed (non-critical):', bgError);
-                    }
-                }, 500); // Small delay to let UI settle
+                // REMOVED: Background refresh was causing multiple restarts
+                // Lineage is already aligned in the main fetch, no need for background refresh
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');
@@ -7923,6 +8448,7 @@ const TagManager = {
         } catch (error) {
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
+            // Note: Flag will be reset in finally block
             // CRITICAL FIX: savedScroll may not be defined if error occurs early - save it now if needed
             const savedScrollForFallback = typeof savedScroll !== 'undefined' ? savedScroll : this._saveAvailableScrollPosition();
             // If this is just a timeout/AbortError and we already have tags on screen,
@@ -7967,6 +8493,10 @@ const TagManager = {
             }
 
             return false;
+        } finally {
+            // CRITICAL FIX: Always reset flag in finally block to ensure it's cleared even if error occurs
+            // This prevents the hangup issue where the flag gets stuck in true state
+            this._fetchingAvailableTags = false;
         }
     },
 
@@ -8061,6 +8591,7 @@ const TagManager = {
             
             const currentSelectedTags = [...this.state.persistentSelectedTags];
             this.state.persistentSelectedTags = [];
+            this.state._selectedTagsSet = new Set(); // PERFORMANCE: Reset Set when clearing tags
             this.state.selectedTags = new Set();
             
             if (currentSelectedTags.length > 0) {
@@ -8402,6 +8933,16 @@ const TagManager = {
     },
 
     async downloadExcel() {
+        // Show splash screen before starting export
+        if (this.showActionSplash) {
+            this.showActionSplash('Exporting data to Excel...');
+        } else if (typeof showExportSplash === 'function') {
+            showExportSplash();
+        } else {
+            // Fallback: show a simple loading message
+            console.log('Exporting data to Excel...');
+        }
+        
         // Collect filter values from dropdowns (adjust IDs as needed)
         const filters = {
             vendor: document.getElementById('vendorFilter')?.value || null,
@@ -8443,14 +8984,34 @@ const TagManager = {
             a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
+            
+            // Hide splash screen after successful download
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            } else if (typeof hideExportSplash === 'function') {
+                hideExportSplash();
+            }
         } catch (error) {
             console.error('Error downloading Excel:', error);
+            // Hide splash screen on error
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            } else if (typeof hideExportSplash === 'function') {
+                hideExportSplash();
+            }
             alert(error.message || 'Failed to download Excel');
         }
     },
 
     // Initialize the tag manager
     init() {
+        // CRITICAL FIX: Prevent multiple initialization calls
+        if (this.state.initialized || this._initializing) {
+            console.log('⚠️ TagManager already initialized or initializing, skipping duplicate init call');
+            return;
+        }
+        this._initializing = true;
+        
         console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
         console.log('⚡ TagManager initializing...');
         const availableTagsContainer = document.getElementById('availableTags');
@@ -8470,50 +9031,67 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
         
-        // CRITICAL FIX: Only show splash screen if store is not already confirmed
-        // Check multiple indicators to determine if store is already confirmed
-        const mainContent = document.getElementById('mainContent');
-        const storeAlreadyConfirmed = 
-            sessionStorage.getItem('store_just_selected') === 'true' || 
-            (window.STORE_MODAL_BLOCKING === false && mainContent?.classList.contains('store-selected')) ||
-            (mainContent && mainContent.style.display !== 'none' && !mainContent.classList.contains('store-selection-disabled'));
-        
-        if (!storeAlreadyConfirmed) {
-            // Show application splash screen only if store not confirmed yet
-            console.log('⏳ Store not confirmed - showing splash screen');
-            AppLoadingSplash.show();
-            AppLoadingSplash.startAutoAdvance();
-            AppLoadingSplash.nextStep(); // Templates loaded
-        } else {
-            // Store already confirmed - ensure splash is hidden immediately
-            console.log('✅ Store already confirmed - hiding splash screen');
-            if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
-                AppLoadingSplash.hide();
-            }
-            // Also ensure main content is visible
-            if (mainContent) {
-                mainContent.style.display = 'block';
-                mainContent.style.visibility = 'visible';
-                mainContent.style.opacity = '1';
-            }
+        // CRITICAL FIX: Check cache FIRST before showing splash screen
+        const cachedTags = this.loadAvailableTagsFromCache();
+        if (cachedTags && cachedTags.length > 0) {
+            console.log(`⚡ INSTANT CACHE: Found ${cachedTags.length} tags in cache, loading immediately...`);
+            // Load from cache immediately without splash
+            this.state.hydratedFromCache = true;
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            this.state.initialized = true;
+            this._initializing = false;
+            
+            // Render immediately
+            requestAnimationFrame(() => {
+                if (this._updateAvailableTags) {
+                    this._updateAvailableTags(cachedTags, null);
+                }
+                console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags displayed from cache`);
+                
+                // Hide any splash screens
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                
+                // Load selected tags and filters in background
+                this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
+                if (this.fetchAndPopulateFilters) {
+                    this.fetchAndPopulateFilters();
+                }
+            });
+            
+            // Continue with rest of initialization (filters, etc.) but skip splash
+            this._continueInitWithoutSplash();
+            return;
         }
         
-        // Initialize empty state first
+        // No cache - show splash screen and load from server
+        // Show application splash screen
+        AppLoadingSplash.show();
+        AppLoadingSplash.startAutoAdvance();
+        
+        // Initialize empty state first (but don't clear if we have tags)
         this.clearInitialDataRetry();
-        this.initializeEmptyState();
+        // CRITICAL FIX: Only initialize empty state if we don't have tags already
+        if (!this.state.tags || this.state.tags.length === 0) {
+            this.initializeEmptyState();
+        }
+        AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
-        this.checkForExistingData();
-        
-        // CRITICAL FIX: Ensure splash is hidden after initialization completes
-        // Add fallback timeout to hide splash even if checkForExistingData doesn't complete
-        setTimeout(() => {
-            if (window.AppLoadingSplash && AppLoadingSplash.isVisible) {
-                console.log('⚠️ Force hiding splash screen after initialization timeout');
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-        }, 2000); // 2 second fallback timeout
+        this.checkForExistingData().then(() => {
+            this.state.initialized = true;
+            this._initializing = false;
+        }).catch(err => {
+            console.error('Error during initialization:', err);
+            this.state.initialized = true;
+            this._initializing = false;
+        });
         
         // GUARANTEED FIX: Restore filters from localStorage on page load
         const savedFilters = this.loadFiltersFromStorage();
@@ -8593,14 +9171,24 @@ const TagManager = {
 
         // JSON matching is now handled by the modal - removed old above-tags-list logic
         
-        // Emergency initialization fix - force complete after 15 seconds
+        // Emergency initialization fix - force complete after 8 seconds
         setTimeout(() => {
             if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                 verboseLog('Emergency initialization fix: forcing splash completion');
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
+                
+                // Also try to initialize TagManager if it hasn't been initialized yet
+                if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state.initialized) {
+                    verboseLog('Emergency: Attempting to initialize TagManager');
+                    try {
+                        window.TagManager.init();
+                    } catch (e) {
+                        console.error('Emergency TagManager.init() failed:', e);
+                    }
+                }
             }
-        }, 15000);
+        }, 8000); // Reduced from 15000 to 8000
         
         // Additional emergency fix for stuck initialization
         window.addEventListener('load', () => {
@@ -8612,24 +9200,105 @@ const TagManager = {
                     const mainContent = document.getElementById('mainContent');
                     if (mainContent) {
                         mainContent.style.display = 'block';
+                        mainContent.style.opacity = '1';
+                    }
+                    
+                    // Force initialize TagManager if still not initialized
+                    if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state.initialized) {
+                        verboseLog('Emergency: Force initializing TagManager after load');
+                        try {
+                            window.TagManager.init();
+                        } catch (e) {
+                            console.error('Emergency TagManager.init() after load failed:', e);
+                        }
                     }
                 }
-            }, 20000); // 20 second emergency timeout
+            }, 10000); // Reduced from 20000 to 10000
         });
+    },
+
+    // Continue initialization without showing splash (for cache hits)
+    _continueInitWithoutSplash() {
+        // GUARANTEED FIX: Restore filters from localStorage on page load
+        const savedFilters = this.loadFiltersFromStorage();
+        this.state.filters = savedFilters || {
+            vendor: 'All',
+            brand: 'All',
+            productType: 'All',
+            lineage: 'All',
+            weight: 'All'
+        };
+        
+        // Set each filter dropdown to saved value or 'All' (or '')
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const filterMap = {
+            'vendorFilter': 'vendor',
+            'brandFilter': 'brand',
+            'productTypeFilter': 'productType',
+            'lineageFilter': 'lineage',
+            'weightFilter': 'weight',
+            'dohFilter': 'doh',
+            'highCbdFilter': 'highCbd'
+        };
+        filterIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                const filterKey = filterMap[id];
+                const savedValue = this.state.filters[filterKey];
+                if (savedValue && savedValue !== 'All') {
+                    el.value = savedValue;
+                } else {
+                    el.value = '';
+                }
+            }
+        });
+        
+        // Add filter change event listeners immediately
+        verboseLog('=== SETTING UP FILTER EVENT LISTENERS ===');
+        this.setupFilterEventListeners();
+        verboseLog('=== FILTER EVENT LISTENERS SETUP COMPLETE ===');
+        
+        // Add search event listeners
+        this.setupSearchEventListeners();
+        
+        // Start memory optimization
+        this.startMemoryOptimization();
+        
+        // Start periodic filter refresh
+        this.startPeriodicFilterRefresh();
+        
+        // Update table header if TagsTable is available
+        setTimeout(() => {
+            if (typeof TagsTable !== 'undefined' && TagsTable.updateTableHeader) {
+                TagsTable.updateTableHeader();
+            }
+        }, 100);
     },
 
     // CRITICAL FIX: Setup reload protection to wait for pending lineage updates
     _setupLineageUpdateReloadProtection() {
-        // Intercept page reload attempts
+        // Intercept page reload attempts - but use safeReload to prevent multiple reloads
         const originalReload = window.location.reload.bind(window.location);
         window.location.reload = (force) => {
-            this._waitForPendingLineageUpdates().then(() => {
-                console.log('✅ All lineage updates completed, proceeding with reload...');
-                originalReload(force);
-            }).catch((error) => {
-                console.warn('⚠️ Error waiting for lineage updates, reloading anyway:', error);
-                originalReload(force);
-            });
+            // Use safeReload if available to prevent multiple reloads
+            if (window.safeReload && !_reloadInProgress) {
+                this._waitForPendingLineageUpdates().then(() => {
+                    console.log('✅ All lineage updates completed, proceeding with reload...');
+                    safeReload(0);
+                }).catch((error) => {
+                    console.warn('⚠️ Error waiting for lineage updates, reloading anyway:', error);
+                    safeReload(0);
+                });
+            } else {
+                // Fallback to original behavior if safeReload not available
+                this._waitForPendingLineageUpdates().then(() => {
+                    console.log('✅ All lineage updates completed, proceeding with reload...');
+                    originalReload(force);
+                }).catch((error) => {
+                    console.warn('⚠️ Error waiting for lineage updates, reloading anyway:', error);
+                    originalReload(force);
+                });
+            }
         };
         
         // Add beforeunload handler to warn if updates are pending
@@ -8772,6 +9441,15 @@ const TagManager = {
             verboseLog('checkForExistingData already in progress, skipping...');
             return;
         }
+        
+        // CRITICAL FIX: If we already have tags from cache, skip this to prevent clearing them
+        // BUT: Allow reload if explicitly triggered by upload (check timestamp)
+        const recentUpload = this._lastUploadTime && (Date.now() - this._lastUploadTime) < 5000;
+        if (!recentUpload && this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0) {
+            verboseLog('✅ Tags already loaded from cache, skipping checkForExistingData to prevent clearing');
+            return;
+        }
+        
         this._checkingExistingData = true;
 
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
@@ -8833,6 +9511,11 @@ const TagManager = {
                         </div>
                     </div>
                 `;
+                // CRITICAL FIX: Complete splash screen even when no file
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
                 // No file, so exit early
                 this._checkingExistingData = false;
                 return;
@@ -8968,10 +9651,42 @@ const TagManager = {
         try {
             // PERFORMANCE FIX: Use fast_load=1 for initial loads to skip expensive lineage alignment
             // This dramatically speeds up initial tag loading
+            // CRITICAL FIX: Add timeout to prevent hanging - if API takes too long, complete initialization anyway
             const response = await Promise.race([
                 fetch('/api/initial-data?fast_load=1'),
                 timeoutPromise
-            ]);
+            ]).catch(err => {
+                // If fetch fails or times out, complete initialization anyway
+                console.warn('Initial data fetch failed or timed out:', err);
+                // Complete splash screen
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                // Show upload prompt
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                    availableTagsContainer.innerHTML = `
+                        <div class="text-center py-5">
+                            <div class="upload-prompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No product data loaded</h5>
+                                <p class="text-muted">Upload an Excel file to get started</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-upload me-2"></i>Upload Excel File
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+                this.initializeEmptyState();
+                this._checkingExistingData = false;
+                clearTimeout(splashSafetyTimeout);
+                throw err; // Re-throw to be caught by outer catch
+            });
 
             if (response.ok) {
                 const data = await response.json();
@@ -9595,6 +10310,20 @@ const TagManager = {
         const productStrain = (productData['Product Strain'] || '').toString().trim();
         const currentLineage = productData.Lineage || productData.lineage || '';
         
+        // CRITICAL FIX: Paraphernalia products should ALWAYS get PARAPHERNALIA lineage (pink color)
+        // Check if product type is "paraphernalia" - this takes priority over everything else
+        if (productType === 'paraphernalia') {
+            console.log(`🎯 Paraphernalia product detected: "${productType}" → PARAPHERNALIA (pink)`);
+            return 'PARAPHERNALIA';
+        }
+        
+        // CRITICAL FIX: High CBD products should ALWAYS get CBD_BLEND lineage
+        // Check if product type starts with "high cbd" - this takes priority over everything else
+        if (productType.startsWith('high cbd')) {
+            console.log(`🎯 High CBD product detected: "${productType}" → CBD_BLEND`);
+            return 'CBD_BLEND';
+        }
+        
         // Define classic types (matching backend CLASSIC_TYPES)
         const classicTypes = [
             'flower', 'pre-roll', 'joint', 'blunt', 'cone', 'preroll',
@@ -9625,7 +10354,8 @@ const TagManager = {
                 return 'CBD_BLEND';
             }
             // Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
-            else if (strainLower.includes('paraphernalia')) {
+            // Also check product type as fallback
+            else if (strainLower.includes('paraphernalia') || productType === 'paraphernalia') {
                 return 'PARAPHERNALIA';
             }
             // Mixed products -> MIXED lineage (blue) - override existing lineage
@@ -9669,6 +10399,9 @@ const TagManager = {
             console.error('No tags selected to move');
             return;
         }
+        
+        // Save state for undo BEFORE making changes
+        this.saveSelectionState('move_to_selected');
         
         try {
             // Show action splash for better UX
@@ -9768,6 +10501,9 @@ const TagManager = {
             verboseLog('[DEBUG] Already moving tags, ignoring request');
             return;
         }
+        
+        // Save state for undo BEFORE making changes
+        this.saveSelectionState('move_to_available');
         
         this.isMovingTags = true;
         
@@ -9898,80 +10634,199 @@ const TagManager = {
 
     async undoMove() {
         try {
+            console.log('🔙 Starting undo operation...');
+            console.log('📊 Local undo stack size:', this.state.localUndoStack?.length || 0);
             verboseLog('Starting undo operation...');
-            // Show loading splash
-            this.showActionSplash('Undoing last action...');
+            verboseLog('Local undo stack size:', this.state.localUndoStack?.length || 0);
             
-            // Call the backend API to undo the last move
-            const response = await fetch('/api/undo-move', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            
-            verboseLog('Undo API response status:', response.status);
-            
-            if (response.ok) {
-                const data = await response.json();
-                verboseLog('Undo API response data:', data);
-                
-                if (data.success) {
-                    // Update the persistent selected tags with the restored state
-                    this.state.persistentSelectedTags = data.selected_tags;
-                    this.state.selectedTags = new Set(data.selected_tags);
-                    
+            // Show user feedback immediately
+            if (window.Toast) {
+                Toast.show('info', 'Processing undo...');
+            }
+
+            // IMMEDIATE: Update UI from local state first (optimistic update)
+            const localUndoStack = this.state.localUndoStack || [];
+            let uiUpdated = false;
+
+            if (localUndoStack.length > 0) {
+                const lastState = localUndoStack[localUndoStack.length - 1];
+                verboseLog('Restoring from local undo stack:', lastState);
+
+                const actionType = lastState.action_type || 'checkbox_selection';
+
+                // Only use local cache for selection actions, not lineage edits
+                if (actionType !== 'lineage_edit') {
+                    // Update UI immediately from cached state
+                    this.state.persistentSelectedTags = lastState.selected_tag_names || [];
+                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+
                     // Update the selected tags display immediately
-                    this.updateSelectedTags(data.selected_tags.map(tagName => 
+                    const selectedTagObjects = this.state.persistentSelectedTags.map(tagName =>
                         this.state.tags.find(t => t['Product Name*'] === tagName)
-                    ).filter(Boolean));
-                    
-                    // Update available tags with optimized approach
-                    this.updateAvailableTagsOptimized(data.available_tags);
-                    
-                    verboseLog('Undo completed - restored previous state');
-                    
+                    ).filter(Boolean);
+                    this.updateSelectedTags(selectedTagObjects);
+
+                    // Update available tags display immediately
+                    const availableTagObjects = this.state.tags.filter(tag =>
+                        !this.state.persistentSelectedTags.includes(tag['Product Name*'])
+                    );
+                    this.updateAvailableTagsOptimized(availableTagObjects.map(t => t['Product Name*']));
+
+                    // Remove from local stack
+                    localUndoStack.pop();
+                    this.state.localUndoStack = localUndoStack;
+                    uiUpdated = true;
+
                     // Show success message
                     if (window.Toast) {
-                        Toast.show('success', 'Undo completed successfully');
+                        Toast.show('success', 'Undo successful!');
                     }
-                } else {
-                    console.error('Failed to undo move:', data.error);
-                    if (window.Toast) {
-                        Toast.show('error', `Undo failed: ${data.error}`);
-                    }
-                }
-            } else {
-                const errorData = await response.json();
-                verboseLog('Undo API error response:', errorData);
-                
-                if (response.status === 400 && errorData.error === 'No undo history available') {
-                    verboseLog('Nothing to undo');
-                    if (window.Toast) {
-                        Toast.show('info', 'No actions to undo. Try moving some tags first, then use the undo button.');
-                    } else {
-                        // Fallback if Toast is not available
-                        alert('No actions to undo. Try moving some tags first, then use the undo button.');
-                    }
-                } else {
-                    console.error('Failed to undo move on server:', errorData.error);
-                    if (window.Toast) {
-                        Toast.show('error', `Undo failed: ${errorData.error}`);
-                    } else {
-                        // Fallback if Toast is not available
-                        alert(`Undo failed: ${errorData.error}`);
-                    }
+
+                    verboseLog('Undo completed immediately - restored previous state from cache');
                 }
             }
+            
+            // Call backend API (either for sync or as fallback if local stack is empty)
+            try {
+                const response = await fetch('/api/undo-move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                verboseLog('Undo API response status:', response.status);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    verboseLog('Undo API response data:', data);
+
+                    if (data.success) {
+                        const actionType = data.action_type || 'checkbox_selection';
+
+                        if (actionType === 'lineage_edit') {
+                            // Lineage edit was undone - refresh the tags to show updated lineages
+                            verboseLog('Lineage edit undone, refreshing tags...');
+
+                            // Reload available tags to get updated lineages
+                            await this.fetchAndUpdateAvailableTags();
+
+                            if (window.Toast) {
+                                const message = data.message || `Reverted lineage changes for ${data.changes_reverted || 1} product(s)`;
+                                Toast.show('success', message);
+                            }
+
+                            verboseLog('Lineage undo completed');
+                        } else {
+                            // Selection/move action - update UI with tag lists
+                            if (!uiUpdated) {
+                                this.state.persistentSelectedTags = data.selected_tags || [];
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+
+                                this.updateSelectedTags(data.selected_tags.map(tagName =>
+                                    this.state.tags.find(t => t['Product Name*'] === tagName)
+                                ).filter(Boolean));
+
+                                // CRITICAL: Update checkboxes to reflect the undone state
+                                this.updateSelectAllCheckboxes();
+
+                                if (data.available_tags) {
+                                    this.updateAvailableTagsOptimized(data.available_tags);
+                                }
+                                verboseLog('Undo completed from backend');
+                            } else {
+                                // Sync with backend response (may have more up-to-date data)
+                                this.state.persistentSelectedTags = data.selected_tags || this.state.persistentSelectedTags;
+                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                
+                                // CRITICAL: Update checkboxes to reflect the undone state
+                                this.updateSelectAllCheckboxes();
+                            }
+                        }
+                    } else if (data.success === false) {
+                        // Handle case where backend returns success: false with 200 status (no undo history)
+                        if (!uiUpdated) {
+                            const message = data.message || data.error || 'No actions to undo. Try moving some tags first, then use the undo button.';
+                            if (window.Toast) {
+                                Toast.show('info', message);
+                            } else {
+                                alert(message);
+                            }
+                        }
+                        verboseLog('Nothing to undo on backend (expected when no actions taken)');
+                        return; // Exit early - no need to process further
+                    }
+                } else {
+                    // Handle error - try to parse JSON, but handle cases where response might not be JSON
+                    let errorData = {};
+                    try {
+                        const text = await response.text();
+                        if (text) {
+                            try {
+                                errorData = JSON.parse(text);
+                            } catch (parseError) {
+                                verboseLog('Could not parse error response as JSON:', parseError);
+                                // If response is not JSON, create a default error message based on status
+                                if (response.status === 400) {
+                                    errorData = { error: 'No undo history available' };
+                                }
+                            }
+                        } else if (response.status === 400) {
+                            // Empty response but 400 status - likely no undo history
+                            errorData = { error: 'No undo history available' };
+                        }
+                    } catch (textError) {
+                        verboseLog('Could not read error response text:', textError);
+                        if (response.status === 400) {
+                            errorData = { error: 'No undo history available' };
+                        }
+                    }
+                    
+                    if (response.status === 400 && (errorData.error === 'No undo history available' || !errorData.error)) {
+                        // This is expected when there's nothing to undo - not a real error
+                        // Only show message if UI wasn't updated from local stack
+                        if (!uiUpdated) {
+                            // No local stack and no backend stack
+                            if (window.Toast) {
+                                Toast.show('info', 'No actions to undo. Try moving some tags first, then use the undo button.');
+                            } else {
+                                alert('No actions to undo. Try moving some tags first, then use the undo button.');
+                            }
+                        }
+                        // Don't log as error - this is expected behavior
+                        verboseLog('Nothing to undo on backend (expected when no actions taken)');
+                        // Suppress the console error for this expected case
+                        return; // Exit early - no need to process further
+                    } else {
+                        const errorMessage = errorData.error || `Server error: ${response.status}`;
+                        if (!uiUpdated) {
+                            if (window.Toast) {
+                                Toast.show('error', `Undo failed: ${errorMessage}`);
+                            } else {
+                                alert(`Undo failed: ${errorMessage}`);
+                            }
+                        }
+                    }
+                }
+            } catch (apiError) {
+                // If UI wasn't updated and API fails, show error
+                if (!uiUpdated) {
+                    console.error('Failed to undo move:', apiError.message);
+                    if (window.Toast) {
+                        Toast.show('error', `Undo failed: ${apiError.message}`);
+                    } else {
+                        alert(`Undo failed: ${apiError.message}`);
+                    }
+                } else {
+                    verboseLog('Background undo sync error (non-critical):', apiError);
+                }
+            }
+            
         } catch (error) {
             console.error('Failed to undo move:', error.message);
             if (window.Toast) {
                 Toast.show('error', `Undo failed: ${error.message}`);
             } else {
-                // Fallback if Toast is not available
                 alert(`Undo failed: ${error.message}`);
             }
-        } finally {
-            // Hide loading splash
-            this.hideActionSplash();
         }
     },
 
@@ -10149,6 +11004,27 @@ const TagManager = {
             };
             
             // NON-BLOCKING: Clear JSON matches and switch to full Excel view with timeout
+            // CRITICAL FIX: Wait for any in-progress fetch to complete before starting new one
+            const refreshTagsAfterClear = async () => {
+                // Wait for any in-progress fetch to complete (max 3 seconds)
+                let waitCount = 0;
+                while (this._fetchingAvailableTags && waitCount < 30) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    waitCount++;
+                }
+                
+                // Now refresh tags
+                verboseLog('Refreshing available tags with full Excel data...');
+                if (this.fetchAndUpdateAvailableTags) {
+                    try {
+                        await this.fetchAndUpdateAvailableTags();
+                    } catch (fetchError) {
+                        console.error('Error refreshing available tags:', fetchError);
+                        this.state.isClearing = false; // Ensure flag is reset
+                    }
+                }
+            };
+            
             fetchWithTimeout('/api/json-clear', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
@@ -10166,28 +11042,12 @@ const TagManager = {
                 return null;
             }).then(data => {
                 // Always refresh available tags after clearing JSON matches and switching to full Excel
-                verboseLog('Refreshing available tags with full Excel data...');
-                if (this.fetchAndUpdateAvailableTags) {
-                    // CRITICAL FIX: Wrap in try-catch and timeout to prevent hanging
-                    try {
-                        this.fetchAndUpdateAvailableTags();
-                    } catch (fetchError) {
-                        console.error('Error refreshing available tags:', fetchError);
-                        this.state.isClearing = false; // Ensure flag is reset
-                    }
-                }
+                refreshTagsAfterClear();
             }).catch(fetchError => {
                 // Silently handle errors - UI is already updated, but still try to refresh tags
                 verboseLog('Backend JSON clear/toggle call failed (non-critical):', fetchError);
                 // Still refresh tags to ensure we show full Excel data
-                if (this.fetchAndUpdateAvailableTags) {
-                    try {
-                        this.fetchAndUpdateAvailableTags();
-                    } catch (refreshError) {
-                        console.error('Error refreshing available tags after failure:', refreshError);
-                        this.state.isClearing = false; // Ensure flag is reset
-                    }
-                }
+                refreshTagsAfterClear();
             });
             
             // NON-BLOCKING: Fire-and-forget backend API call for clearing filters (don't wait for it)
@@ -10564,6 +11424,7 @@ const TagManager = {
             
             <style>
                 @keyframes spin {
+                    from { transform: rotate(0deg); }
                     to { transform: rotate(360deg); }
                 }
                 
@@ -10717,66 +11578,44 @@ const TagManager = {
 
     // Efficient helper to update available tags display without DOM rebuilding
     efficientlyUpdateAvailableTagsDisplay() {
-        // CRITICAL FIX: Make this non-blocking to prevent UI freeze
-        // Use requestAnimationFrame to batch DOM updates
-        requestAnimationFrame(() => {
-            // FIXED: Don't hide selected tags from available display - keep all items visible
-            // This allows users to see all available options even after making selections
-            verboseLog('FIXED: Not hiding selected tags from available display - keeping all items visible');
-            
-            const availableTagElements = document.querySelectorAll('#availableTags .tag-item');
-            
-            // Show all tags regardless of selection status (batch DOM updates)
-            // Use DocumentFragment for better performance
-            const fragment = document.createDocumentFragment();
-            availableTagElements.forEach(tagElement => {
-                tagElement.style.display = 'block';
-            });
-            
-            // Update select all checkboxes state (defer to avoid blocking)
-            setTimeout(() => {
-                this.updateSelectAllCheckboxes();
-            }, 0);
+        // FIXED: Don't hide selected tags from available display - keep all items visible
+        // This allows users to see all available options even after making selections
+        verboseLog('FIXED: Not hiding selected tags from available display - keeping all items visible');
+        
+        const availableTagElements = document.querySelectorAll('#availableTags .tag-item');
+        
+        // Show all tags regardless of selection status
+        availableTagElements.forEach(tagElement => {
+            tagElement.style.display = 'block';
         });
+        
+        // Update select all checkboxes state
+        this.updateSelectAllCheckboxes();
     },
 
     // Update select all checkboxes state
     updateSelectAllCheckboxes() {
-        // CRITICAL FIX: Use Set for O(1) lookups instead of array includes() O(n)
-        // This dramatically improves performance when there are many selected tags
-        const selectedTagsSet = new Set(this.state.persistentSelectedTags);
-        
+        // PERFORMANCE: Batch operation only - not called on single checkbox changes
         // CRITICAL: First sync all available tag checkboxes with persistentSelectedTags state
-        // Batch DOM updates for better performance
         const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
-        const updates = [];
         availableCheckboxes.forEach(checkbox => {
             const tagName = checkbox.value;
-            const shouldBeChecked = selectedTagsSet.has(tagName);
+            const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
             if (checkbox.checked !== shouldBeChecked) {
-                updates.push({ checkbox, shouldBeChecked });
+                checkbox.checked = shouldBeChecked;
             }
-        });
-        // Batch apply all checkbox updates
-        updates.forEach(({ checkbox, shouldBeChecked }) => {
-            checkbox.checked = shouldBeChecked;
         });
         
         // CRITICAL FIX: Also sync selected tag checkboxes with persistentSelectedTags state
         // This prevents selected tags from being unchecked when available tags are re-rendered
         const selectedCheckboxes = document.querySelectorAll('#selectedTags .tag-checkbox');
-        const selectedUpdates = [];
         selectedCheckboxes.forEach(checkbox => {
             const tagName = checkbox.value;
-            const shouldBeChecked = selectedTagsSet.has(tagName);
+            const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
             if (checkbox.checked !== shouldBeChecked) {
-                selectedUpdates.push({ checkbox, shouldBeChecked, tagName });
+                checkbox.checked = shouldBeChecked;
+                verboseLog(`Synced selected tag checkbox for "${tagName}": ${shouldBeChecked}`);
             }
-        });
-        // Batch apply all selected checkbox updates
-        selectedUpdates.forEach(({ checkbox, shouldBeChecked, tagName }) => {
-            checkbox.checked = shouldBeChecked;
-            verboseLog(`Synced selected tag checkbox for "${tagName}": ${shouldBeChecked}`);
         });
         
         // FIXED: Don't filter out hidden elements since we're not hiding any elements anymore
@@ -10926,6 +11765,41 @@ const TagManager = {
         try {
             verboseLog(`🚀 Starting LIGHTNING upload:`, file.name, 'Size:', file.size, 'bytes');
             
+            // CRITICAL: Clear cache but PRESERVE selected tags during upload
+            this._lastUploadTime = Date.now();
+            this.state.hydratedFromCache = false; // Force fresh data load
+            
+            // CRITICAL: Save selected tags before clearing cache
+            const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
+            verboseLog('💾 Preserving selected tags before upload:', savedSelectedTags);
+            
+            this.state.tags = []; // Clear in-memory tags
+            this.state.originalTags = []; // Clear original tags
+            
+            // Clear localStorage cache but preserve selected tags
+            try {
+                // Save selected tags to temp variable
+                const selectedTagsBackup = localStorage.getItem('selectedTags');
+                
+                localStorage.removeItem('tagManagerState');
+                localStorage.removeItem('availableTagsCache');
+                
+                // Restore selected tags
+                if (selectedTagsBackup) {
+                    localStorage.setItem('selectedTags', selectedTagsBackup);
+                }
+                
+                verboseLog('🔄 Cleared localStorage cache (preserved selected tags)');
+            } catch (e) {
+                verboseLog('⚠️ Could not clear localStorage:', e);
+            }
+            
+            // Restore selected tags to state
+            this.state.persistentSelectedTags = savedSelectedTags;
+            this.state.selectedTags = new Set(savedSelectedTags);
+            
+            verboseLog('🔄 Cache cleared for upload - selected tags preserved');
+            
             // Show Excel loading splash screen
             this.showExcelLoadingSplash(file.name);
             
@@ -11013,13 +11887,13 @@ const TagManager = {
             // Load tags instantly using fast_load=1 and bypass cache to get fresh data
             // Try multiple times with increasing delays to handle backend processing
             let tagsLoaded = false;
-            const maxRetries = 3;
-            
+            const maxRetries = 5;  // Increased retries for more reliability
+
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 try {
-                    // PERFORMANCE: Try immediately on first attempt, then back off on retries
-                    // 0ms initial delay (instant), then 1500ms, 3000ms
-                    const delay = attempt === 0 ? 0 : attempt === 1 ? 1500 : 3000;
+                    // PERFORMANCE: Progressive backoff for reliability
+                    // 500ms, 1000ms, 2000ms, 3000ms, 5000ms delays
+                    const delay = attempt === 0 ? 500 : attempt === 1 ? 1000 : attempt === 2 ? 2000 : attempt === 3 ? 3000 : 5000;
                     if (delay > 0) {
                         await new Promise(resolve => setTimeout(resolve, delay));
                         verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload (waiting ${delay}ms for backend processing)...`);
@@ -11028,15 +11902,14 @@ const TagManager = {
                     }
                     
                     const tagsController = new AbortController();
-                    // PERFORMANCE: Increased timeout after upload to allow for file processing (30s for large files)
-                    // Large Excel files can take time to process, especially on first load
+                    // PERFORMANCE: Reduced timeout to keep UI responsive (15s max)
                     const tagsTimeout = setTimeout(() => {
-                        verboseLog('⏱️ Tag loading timeout - file may be large, continuing to wait...');
+                        verboseLog('⏱️ Tag loading timeout - aborting request');
                         tagsController.abort();
-                    }, 30000); // 30s timeout after upload for large files
+                    }, 15000); // 15s timeout to avoid long waits
                     
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
-                    verboseLog(`🔄 Requesting tags from /api/available-tags (timeout: 30s)...`);
+                    verboseLog(`🔄 Requesting tags from /api/available-tags (timeout: 15s)...`);
                     const tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
                         signal: tagsController.signal
                     });
@@ -11046,20 +11919,28 @@ const TagManager = {
                         const tagsData = await tagsResponse.json();
                         if (tagsData.tags && tagsData.tags.length > 0) {
                             verboseLog(`✅ Loaded ${tagsData.tags.length} tags instantly after upload (attempt ${attempt + 1})`);
-                            
+
                             // Update tags immediately
                             this.state.tags = [...tagsData.tags];
                             this.state.originalTags = [...tagsData.tags];
                             this._updateAvailableTags(tagsData.tags);
-                            
-                            // Load filters and selected tags in parallel (non-blocking)
+
+                            // CRITICAL: Extract and populate filters from tags data immediately
+                            // This ensures filters appear instantly without waiting for separate API call
+                            if (tagsData.tags && tagsData.tags.length > 0) {
+                                const extractedFilters = this._extractFiltersFromTags(tagsData.tags);
+                                this.updateFilters(extractedFilters);
+                                verboseLog('✅ Filters extracted from tags immediately:', extractedFilters);
+                            }
+
+                            // Load filters and selected tags in parallel (non-blocking) to refresh with full options
                             Promise.allSettled([
                                 this.fetchAndPopulateFilters(),
                                 this.fetchAndUpdateSelectedTags()
                             ]).then(() => {
-                                verboseLog('✅ Filters and selected tags loaded');
+                                verboseLog('✅ Filters and selected tags refreshed');
                             }).catch(err => {
-                                console.warn('Filter/selected tag loading failed:', err);
+                                console.warn('Filter/selected tag loading failed (non-critical):', err);
                             });
                             
                             // Wait for tags to appear, then hide splash
@@ -11097,10 +11978,7 @@ const TagManager = {
                             console.error('⚠️ Standard tag loading also failed:', fallbackError);
                             // Only reload as absolute last resort, and show user-friendly message first
                             this.updateUploadUI('Tags are loading slowly. The page will refresh in a moment...', 'warning');
-                            setTimeout(() => {
-                                verboseLog('🔄 Reloading page as last resort...');
-                                window.location.reload();
-                            }, 3000); // Give user time to see the message
+                            safeReload(3000); // Give user time to see the message
                         }
                         return;
                     }
@@ -11120,10 +11998,7 @@ const TagManager = {
                     console.error('⚠️ Standard tag loading failed:', fallbackError);
                     // Only reload as absolute last resort
                     this.updateUploadUI('Tags are loading slowly. The page will refresh in a moment...', 'warning');
-                    setTimeout(() => {
-                        verboseLog('🔄 Reloading page as last resort...');
-                        window.location.reload();
-                    }, 3000); // Give user time to see the message
+                    safeReload(3000); // Give user time to see the message
                 }
             }
             
@@ -11152,6 +12027,41 @@ const TagManager = {
         try {
             verboseLog('Using fallback upload method for:', file.name);
             
+            // CRITICAL: Clear cache but PRESERVE selected tags during upload
+            this._lastUploadTime = Date.now();
+            this.state.hydratedFromCache = false; // Force fresh data load
+            
+            // CRITICAL: Save selected tags before clearing cache
+            const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
+            verboseLog('💾 Preserving selected tags before fallback upload:', savedSelectedTags);
+            
+            this.state.tags = []; // Clear in-memory tags
+            this.state.originalTags = []; // Clear original tags
+            
+            // Clear localStorage cache but preserve selected tags
+            try {
+                // Save selected tags to temp variable
+                const selectedTagsBackup = localStorage.getItem('selectedTags');
+                
+                localStorage.removeItem('tagManagerState');
+                localStorage.removeItem('availableTagsCache');
+                
+                // Restore selected tags
+                if (selectedTagsBackup) {
+                    localStorage.setItem('selectedTags', selectedTagsBackup);
+                }
+                
+                verboseLog('🔄 Cleared localStorage cache (preserved selected tags)');
+            } catch (e) {
+                verboseLog('⚠️ Could not clear localStorage:', e);
+            }
+            
+            // Restore selected tags to state
+            this.state.persistentSelectedTags = savedSelectedTags;
+            this.state.selectedTags = new Set(savedSelectedTags);
+            
+            verboseLog('🔄 Cache cleared for fallback upload - selected tags preserved');
+            
             const formData = new FormData();
             formData.append('file', file);
             
@@ -11166,7 +12076,7 @@ const TagManager = {
                 verboseLog('Fallback upload successful');
                 this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
                 // Refresh the page to load the new file
-                window.location.reload();
+                safeReload(500); // Small delay to ensure UI updates
                 return true;
             } else {
                 console.error('Fallback upload failed:', data.error);
@@ -11487,7 +12397,18 @@ const TagManager = {
             
             // Call applyFilters with immediate flag to skip debounce
             if (self.applyFilters) {
-                self.applyFilters(true); // Pass true to indicate immediate update
+                try {
+                    self.applyFilters(true); // Pass true to indicate immediate update
+                } catch (filterError) {
+                    console.error('Error applying filters:', filterError);
+                    // Retry after a short delay if filters fail (might be timing issue)
+                    setTimeout(() => {
+                        if (self.applyFilters && (self.state.originalTags.length > 0 || self.state.tags.length > 0)) {
+                            console.log('Retrying filter application after error...');
+                            self.applyFilters(true);
+                        }
+                    }, 100);
+                }
             } else {
                 console.error('applyFilters method not found on TagManager');
             }
@@ -11555,23 +12476,38 @@ const TagManager = {
                     filterElement.removeEventListener('click', filterElement._filterClickHandler);
                 }
                 
-                // Single, fast event handler (Mac-like simplicity)
+                // PERFORMANCE FIX: Add throttling to filter handlers to prevent excessive updates
+                if (!self._filterThrottleTimers) {
+                    self._filterThrottleTimers = {};
+                }
+                
+                // Single, fast event handler with throttling for better performance
                 filterElement._filterChangeHandler = (event) => {
                     try {
                         verboseLog(`🔥 FILTER CHANGED: ${filterId} = "${event.target.value}"`);
                         const filterType = self.getFilterTypeFromId(filterId);
                         const value = event.target.value;
                         
-                        // Special handling for vendor filter
-                        if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
-                            if (self.resetAllOtherFilters) {
-                                self.resetAllOtherFilters();
-                            }
+                        // Clear existing throttle timer for this filter
+                        if (self._filterThrottleTimers[filterId]) {
+                            clearTimeout(self._filterThrottleTimers[filterId]);
                         }
                         
-                        // Immediate filter update (no debounce for instant response)
-                        verboseLog(`🔥 Calling immediateFilterUpdate for ${filterType}: ${value}`);
-                        immediateFilterUpdate(filterType, value);
+                        // Throttle filter updates (150ms delay for smoother performance)
+                        self._filterThrottleTimers[filterId] = setTimeout(() => {
+                            // Special handling for vendor filter
+                            if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
+                                if (self.resetAllOtherFilters) {
+                                    self.resetAllOtherFilters();
+                                }
+                            }
+                            
+                            // Filter update with requestAnimationFrame for smoother rendering
+                            requestAnimationFrame(() => {
+                                verboseLog(`🔥 Calling immediateFilterUpdate for ${filterType}: ${value}`);
+                                immediateFilterUpdate(filterType, value);
+                            });
+                        }, 150); // 150ms throttle delay
                     } catch (error) {
                         console.error(`Error in filter change handler for ${filterId}:`, error);
                     }
@@ -11603,12 +12539,43 @@ const TagManager = {
     setupSearchEventListeners() {
         verboseLog('Setting up search event listeners...');
         
+        // CRITICAL FIX: Add debouncing to search handlers for better performance
+        // Debounce timers for search inputs
+        if (!this._searchDebounceTimers) {
+            this._searchDebounceTimers = {
+                available: null,
+                selected: null
+            };
+        }
+        
+        // Debounced search handler for available tags
+        const debouncedAvailableSearch = (event) => {
+            if (this._searchDebounceTimers.available) {
+                clearTimeout(this._searchDebounceTimers.available);
+            }
+            this._searchDebounceTimers.available = setTimeout(() => {
+                this.handleAvailableTagsSearch(event);
+            }, 300); // 300ms debounce delay
+        };
+        
+        // Debounced search handler for selected tags
+        const debouncedSelectedSearch = (event) => {
+            if (this._searchDebounceTimers.selected) {
+                clearTimeout(this._searchDebounceTimers.selected);
+            }
+            this._searchDebounceTimers.selected = setTimeout(() => {
+                this.handleSelectedTagsSearch(event);
+            }, 300); // 300ms debounce delay
+        };
+        
         // Add search event listeners for available tags
         const availableTagsSearch = document.getElementById('availableTagsSearch');
         if (availableTagsSearch) {
-            availableTagsSearch.removeEventListener('input', this.handleAvailableTagsSearch.bind(this));
-            availableTagsSearch.addEventListener('input', this.handleAvailableTagsSearch.bind(this));
-            verboseLog('Added event listener to availableTagsSearch');
+            availableTagsSearch.removeEventListener('input', this._boundAvailableSearch);
+            availableTagsSearch.removeEventListener('input', debouncedAvailableSearch);
+            this._boundAvailableSearch = debouncedAvailableSearch;
+            availableTagsSearch.addEventListener('input', debouncedAvailableSearch);
+            verboseLog('Added debounced event listener to availableTagsSearch');
         } else {
             console.warn('Available tags search element not found');
         }
@@ -11616,9 +12583,11 @@ const TagManager = {
         // Add search event listeners for selected tags
         const selectedTagsSearch = document.getElementById('selectedTagsSearch');
         if (selectedTagsSearch) {
-            selectedTagsSearch.removeEventListener('input', this.handleSelectedTagsSearch.bind(this));
-            selectedTagsSearch.addEventListener('input', this.handleSelectedTagsSearch.bind(this));
-            verboseLog('Added event listener to selectedTagsSearch');
+            selectedTagsSearch.removeEventListener('input', this._boundSelectedSearch);
+            selectedTagsSearch.removeEventListener('input', debouncedSelectedSearch);
+            this._boundSelectedSearch = debouncedSelectedSearch;
+            selectedTagsSearch.addEventListener('input', debouncedSelectedSearch);
+            verboseLog('Added debounced event listener to selectedTagsSearch');
         } else {
             console.warn('Selected tags search element not found');
         }
@@ -12258,11 +13227,40 @@ const TagManager = {
     }
 };
 
-// Expose TagManager to global scope
-window.TagManager = TagManager;
-window.updateAvailableTags = TagManager.debouncedUpdateAvailableTags.bind(TagManager);
-window.updateFilters = TagManager.updateFilters.bind(TagManager);
-window.fetchAndUpdateSelectedTags = TagManager.fetchAndUpdateSelectedTags.bind(TagManager);
+// CRITICAL FIX: Expose TagManager to global scope IMMEDIATELY
+// This must happen as soon as the TagManager object is created, not at the end
+// This allows initializeFileUpload and other scripts to detect TagManager early
+try {
+    if (typeof window !== 'undefined') {
+        window.TagManager = TagManager;
+        // Also set a flag to indicate TagManager is loaded
+        window.tagManagerLoaded = true;
+        console.log('✅ TagManager assigned to window.TagManager');
+        
+        // Also expose helper functions immediately
+        if (TagManager.debouncedUpdateAvailableTags) {
+            window.updateAvailableTags = TagManager.debouncedUpdateAvailableTags.bind(TagManager);
+        }
+        if (TagManager.updateFilters) {
+            window.updateFilters = TagManager.updateFilters.bind(TagManager);
+        }
+        if (TagManager.fetchAndUpdateSelectedTags) {
+            window.fetchAndUpdateSelectedTags = TagManager.fetchAndUpdateSelectedTags.bind(TagManager);
+        }
+    }
+} catch (error) {
+    console.error('❌ Error assigning TagManager to window:', error);
+    // Try to assign anyway - this is critical
+    try {
+        if (typeof window !== 'undefined' && typeof TagManager !== 'undefined') {
+            window.TagManager = TagManager;
+            window.tagManagerLoaded = true;
+            console.log('✅ TagManager assigned to window.TagManager (fallback)');
+        }
+    } catch (fallbackError) {
+        console.error('❌ CRITICAL: Failed to assign TagManager even in fallback:', fallbackError);
+    }
+}
 
 function attachSelectedTagsCheckboxListeners() {
     const container = document.getElementById('selectedTags');
@@ -12741,37 +13739,58 @@ document.addEventListener('DOMContentLoaded', function() {
             const newButton = undoButton.cloneNode(true);
             undoButton.parentNode.replaceChild(newButton, undoButton);
             
-            newButton.addEventListener('click', function() {
+            newButton.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('🔙 Undo button clicked');
                 verboseLog('Undo button clicked');
-                if (window.TagManager && TagManager.undoMove) {
+                
+                if (window.TagManager && typeof TagManager.undoMove === 'function') {
+                    console.log('✅ Calling TagManager.undoMove()');
                     verboseLog('Calling TagManager.undoMove()');
-                    TagManager.undoMove();
+                    TagManager.undoMove().catch(error => {
+                        console.error('❌ Error in undoMove:', error);
+                        alert(`Undo failed: ${error.message || error}`);
+                    });
                 } else {
-                    console.error('TagManager or undoMove method not available');
+                    console.error('❌ TagManager or undoMove method not available', {
+                        hasTagManager: !!window.TagManager,
+                        hasUndoMove: !!(window.TagManager && TagManager.undoMove),
+                        typeofUndoMove: typeof (window.TagManager && TagManager.undoMove)
+                    });
                     // Fallback: try to call the undo function directly
-                    if (typeof undoMove === 'function') {
+                    if (typeof window.undoMove === 'function') {
+                        console.log('🔄 Calling window.undoMove() directly');
                         verboseLog('Calling undoMove() directly');
-                        undoMove();
+                        window.undoMove().catch(error => {
+                            console.error('❌ Error in window.undoMove:', error);
+                            alert(`Undo failed: ${error.message || error}`);
+                        });
                     } else {
-                        console.error('No undo function available');
+                        console.error('❌ No undo function available');
                         alert('Undo functionality is not available. Please try refreshing the page.');
                     }
                 }
             });
+            console.log('✅ Undo button event listener attached successfully');
             verboseLog('Undo button event listener attached successfully');
             return true;
         } else {
-            console.error('Undo button not found in DOM');
+            console.error('❌ Undo button not found in DOM');
             return false;
         }
     }
     
-    // Try to attach the listener immediately
+    // Try to attach the listener immediately (we're already inside DOMContentLoaded)
     if (!attachUndoButtonListener()) {
         // If not found, retry after a short delay
         setTimeout(() => {
             if (!attachUndoButtonListener()) {
-                console.warn('Undo button still not found after retry');
+                console.warn('⚠️ Undo button still not found after retry');
+                // Final retry after longer delay
+                setTimeout(() => {
+                    attachUndoButtonListener();
+                }, 2000);
             }
         }, 1000);
     }
@@ -12915,9 +13934,7 @@ async function clearStuckUploads() {
             }
             
             // Refresh the page to reset the UI state
-            setTimeout(() => {
-                window.location.reload();
-            }, 1000);
+            safeReload(1000);
         } else {
             console.error('Failed to clear upload status:', response.statusText);
             alert('Failed to clear stuck uploads. Please try again.');
@@ -13796,9 +14813,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 150);
             
             // Reload the page after a brief delay for visual feedback
-            setTimeout(() => {
-                window.location.reload();
-            }, 200);
+            safeReload(200);
         });
     }
 });

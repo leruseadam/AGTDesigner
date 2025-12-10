@@ -28,46 +28,62 @@ async function openDatabaseAnalytics() {
     const vendorStats = await vendorStatsResponse.json();
     const analytics = await analyticsResponse.json();
     
-    // Create health status indicator
+    // Create health status indicator with modern design
     const healthColor = health.status === 'healthy' ? 'success' : 
                        health.status === 'warning' ? 'warning' : 'danger';
     const healthIcon = health.status === 'healthy' ? 'check-circle' : 
                       health.status === 'warning' ? 'exclamation-circle' : 'x-circle';
+    const healthGradient = health.status === 'healthy' ? 'var(--success-gradient)' : 
+                          health.status === 'warning' ? 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)' : 
+                          'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
                       
     const healthHtml = `
       <div class="row mb-4">
-        <div class="col-md-6">
-          <div class="card glass-card">
-            <div class="card-body text-center">
-              <div class="d-flex align-items-center justify-content-center mb-3">
-                <i class="bi bi-${healthIcon} text-${healthColor} fs-1"></i>
+        <div class="col-md-4">
+          <div class="analytics-card health-card">
+            <div class="analytics-card-icon" style="background: ${healthGradient};">
+              <i class="bi bi-${healthIcon}"></i>
+            </div>
+            <div class="analytics-card-content">
+              <h2 class="analytics-card-value" style="background: ${healthGradient}; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">${health.health_score}%</h2>
+              <p class="analytics-card-label">Database Health</p>
+              <div class="analytics-card-details">
+                <div class="detail-item">
+                  <span class="detail-label">Size</span>
+                  <span class="detail-value">${health.metrics ? `${health.metrics.database_size_mb.toFixed(1)} MB` : 'N/A'}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Memory</span>
+                  <span class="detail-value">${health.metrics ? `${health.metrics.memory_usage_mb.toFixed(1)} MB` : 'N/A'}</span>
               </div>
-              <h3 class="text-${healthColor}">${health.health_score}%</h3>
-              <p class="mb-0">Database Health</p>
-              <div class="mt-3">
-                <small class="text-muted">
-                  Size: ${health.metrics ? `${health.metrics.database_size_mb.toFixed(1)} MB` : 'N/A'}<br>
-                  Memory: ${health.metrics ? `${health.metrics.memory_usage_mb.toFixed(1)} MB` : 'N/A'}
-                </small>
               </div>
             </div>
           </div>
         </div>
-        <div class="col-md-6">
-          <div class="card glass-card">
-            <div class="card-body">
-              <h6 class="mb-3">Recent Activity</h6>
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <span>New Products (24h)</span>
-                <span class="badge bg-primary">${health.metrics ? health.metrics.products_last_24h : 'N/A'}</span>
+        <div class="col-md-4">
+          <div class="analytics-card stats-card">
+            <div class="analytics-card-icon" style="background: var(--primary-gradient);">
+              <i class="bi bi-box-seam"></i>
+            </div>
+            <div class="analytics-card-content">
+              <h2 class="analytics-card-value" style="background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">${health.metrics ? health.metrics.total_products.toLocaleString() : 'N/A'}</h2>
+              <p class="analytics-card-label">Total Products</p>
+              <div class="analytics-card-badge">
+                <span class="badge-modern">${health.metrics ? health.metrics.products_last_24h : '0'} new (24h)</span>
               </div>
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <span>Total Products</span>
-                <span class="badge bg-success">${health.metrics ? health.metrics.total_products : 'N/A'}</span>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="analytics-card stats-card">
+            <div class="analytics-card-icon" style="background: var(--secondary-gradient);">
+              <i class="bi bi-flower1"></i>
               </div>
-              <div class="d-flex justify-content-between align-items-center">
-                <span>Total Strains</span>
-                <span class="badge bg-info">${health.metrics ? health.metrics.total_strains : 'N/A'}</span>
+            <div class="analytics-card-content">
+              <h2 class="analytics-card-value" style="background: var(--secondary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">${health.metrics ? health.metrics.total_strains.toLocaleString() : 'N/A'}</h2>
+              <p class="analytics-card-label">Total Strains</p>
+              <div class="analytics-card-badge">
+                <span class="badge-modern">Active</span>
               </div>
             </div>
           </div>
@@ -75,47 +91,69 @@ async function openDatabaseAnalytics() {
       </div>
     `;
 
-    // Create vendor statistics section
+    // Create vendor statistics section with modern design
     const vendorStatsHtml = `
       <div class="row mb-4">
         <div class="col-md-6">
-          <div class="card glass-card">
-            <div class="card-header">
-              <h6 class="mb-0">All Vendors (${vendorStats.vendors ? vendorStats.vendors.length : 0})</h6>
+          <div class="analytics-section-card">
+            <div class="analytics-section-header">
+              <div class="section-header-icon" style="background: var(--primary-gradient);">
+                <i class="bi bi-building"></i>
+              </div>
+              <div>
+                <h5 class="section-title">Vendors</h5>
+                <p class="section-subtitle">${vendorStats.vendors ? vendorStats.vendors.length : 0} total vendors</p>
+              </div>
             </div>
-            <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+            <div class="analytics-section-body">
               ${vendorStats.vendors && vendorStats.vendors.length > 0 ? 
                 vendorStats.vendors.map((vendor, index) => 
-                  `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.vendors.length - 1 ? 'border-bottom' : ''}">
-                    <div>
-                      <strong>${vendor.vendor || 'Unknown'}</strong>
-                      <small class="text-muted d-block">${vendor.unique_brands || 0} brands, ${vendor.unique_product_types || 0} types</small>
+                  `<div class="analytics-list-item ${index < vendorStats.vendors.length - 1 ? 'has-border' : ''}">
+                    <div class="list-item-content">
+                      <h6 class="list-item-title">${vendor.vendor || 'Unknown'}</h6>
+                      <p class="list-item-meta">
+                        <span><i class="bi bi-tag"></i> ${vendor.unique_brands || 0} brands</span>
+                        <span><i class="bi bi-grid"></i> ${vendor.unique_product_types || 0} types</span>
+                      </p>
                     </div>
-                    <span class="badge bg-primary">${vendor.product_count || 0}</span>
+                    <div class="list-item-badge">
+                      <span class="badge-gradient">${vendor.product_count || 0}</span>
+                    </div>
                   </div>`
                 ).join('') : 
-                '<p class="text-muted">No vendor data available. Upload Excel files to see vendor statistics.</p>'
+                '<div class="empty-state"><i class="bi bi-inbox"></i><p>No vendor data available</p></div>'
               }
             </div>
           </div>
         </div>
         <div class="col-md-6">
-          <div class="card glass-card">
-            <div class="card-header">
-              <h6 class="mb-0">All Product Types (${vendorStats.product_types ? vendorStats.product_types.length : 0})</h6>
+          <div class="analytics-section-card">
+            <div class="analytics-section-header">
+              <div class="section-header-icon" style="background: var(--secondary-gradient);">
+                <i class="bi bi-grid-3x3-gap"></i>
+              </div>
+              <div>
+                <h5 class="section-title">Product Types</h5>
+                <p class="section-subtitle">${vendorStats.product_types ? vendorStats.product_types.length : 0} categories</p>
+              </div>
             </div>
-            <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+            <div class="analytics-section-body">
               ${vendorStats.product_types && vendorStats.product_types.length > 0 ? 
                 vendorStats.product_types.map((type, index) => 
-                  `<div class="d-flex justify-content-between align-items-center py-2 ${index < vendorStats.product_types.length - 1 ? 'border-bottom' : ''}">
-                    <div>
-                      <strong>${type.product_type || 'Unknown'}</strong>
-                      <small class="text-muted d-block">${type.unique_vendors || 0} vendors, ${type.unique_brands || 0} brands</small>
+                  `<div class="analytics-list-item ${index < vendorStats.product_types.length - 1 ? 'has-border' : ''}">
+                    <div class="list-item-content">
+                      <h6 class="list-item-title">${type.product_type || 'Unknown'}</h6>
+                      <p class="list-item-meta">
+                        <span><i class="bi bi-building"></i> ${type.unique_vendors || 0} vendors</span>
+                        <span><i class="bi bi-tag"></i> ${type.unique_brands || 0} brands</span>
+                      </p>
                     </div>
-                    <span class="badge bg-success">${type.product_count || 0}</span>
+                    <div class="list-item-badge">
+                      <span class="badge-gradient badge-success">${type.product_count || 0}</span>
+                    </div>
                   </div>`
                 ).join('') : 
-                '<p class="text-muted">No product type data available. Upload Excel files to see product analytics.</p>'
+                '<div class="empty-state"><i class="bi bi-inbox"></i><p>No product type data available</p></div>'
               }
             </div>
           </div>
@@ -123,16 +161,22 @@ async function openDatabaseAnalytics() {
       </div>
     `;
 
-    // Create daily usage graph section
+    // Create daily usage graph section with modern design
     const vendorBrandsHtml = `
-      <div class="row">
+      <div class="row mb-4">
         <div class="col-12">
-          <div class="card glass-card">
-            <div class="card-header">
-              <h6 class="mb-0">Daily App Usage</h6>
+          <div class="analytics-section-card">
+            <div class="analytics-section-header">
+              <div class="section-header-icon" style="background: var(--third-gradient);">
+                <i class="bi bi-graph-up-arrow"></i>
+              </div>
+              <div>
+                <h5 class="section-title">Usage Analytics</h5>
+                <p class="section-subtitle">Daily activity trends</p>
+              </div>
             </div>
-            <div class="card-body">
-              <div style="height: 250px;">
+            <div class="analytics-section-body">
+              <div class="chart-container">
                 <canvas id="usageChart"></canvas>
               </div>
             </div>
@@ -141,34 +185,45 @@ async function openDatabaseAnalytics() {
       </div>
     `;
 
-    // Create summary section
+    // Create summary section with modern design
     const summaryHtml = `
-      <div class="row mt-4">
+      <div class="row mb-4">
         <div class="col-12">
-          <div class="alert alert-info">
-            <h6>Analytics Summary</h6>
-            <p class="mb-0">
+          <div class="analytics-info-card">
+            <div class="info-card-icon">
+              <i class="bi bi-info-circle"></i>
+            </div>
+            <div class="info-card-content">
+              <h6 class="info-card-title">Analytics Summary</h6>
+              <p class="info-card-text">
               ${health.metrics && health.metrics.total_products > 0 ? 
-                `This comprehensive dashboard shows real-time statistics from your product database with ${health.metrics.total_products} products currently loaded. Data is automatically updated each time you upload new Excel files.` :
+                  `This comprehensive dashboard shows real-time statistics from your product database with <strong>${health.metrics.total_products.toLocaleString()}</strong> products currently loaded. Data is automatically updated each time you upload new Excel files.` :
                 'Upload Excel files to populate the database and unlock detailed vendor analytics, strain statistics, and performance metrics.'
               }
             </p>
             ${stats.error || vendorStats.error || analytics.error ? 
-              `<small class="text-warning d-block mt-2">Some data may be limited due to: ${[stats.error, vendorStats.error, analytics.error].filter(e => e).join(', ')}</small>` : 
+                `<div class="info-card-warning">
+                  <i class="bi bi-exclamation-triangle"></i>
+                  <span>Some data may be limited due to: ${[stats.error, vendorStats.error, analytics.error].filter(e => e).join(', ')}</span>
+                </div>` : 
               ''
             }
+            </div>
           </div>
         </div>
       </div>
     `;
 
-    // Add export button
+    // Add export button with modern design
     const exportButtonHtml = `
-      <div class="row mt-4">
-        <div class="col-12 text-end">
-          <button class="btn btn-primary" onclick="exportDatabase()">
-            <i class="bi bi-download"></i> Export Database
+      <div class="row">
+        <div class="col-12">
+          <div class="analytics-actions">
+            <button class="btn-analytics-export" onclick="exportDatabase()">
+              <i class="bi bi-download"></i>
+              <span>Export Database</span>
           </button>
+          </div>
         </div>
       </div>
     `;
@@ -204,23 +259,29 @@ async function openDatabaseAnalytics() {
             {
               label: 'File Uploads',
               data: usageData.map(d => d.ready_files),
-              borderColor: 'rgba(75, 192, 192, 1)',
+              borderColor: '#a084e8',
+              backgroundColor: 'rgba(160, 132, 232, 0.1)',
               tension: 0.4,
-              fill: false
+              fill: true,
+              borderWidth: 2
             },
             {
               label: 'Products Added',
               data: usageData.map(d => d.total_files),
-              borderColor: 'rgba(54, 162, 235, 1)',
+              borderColor: '#ff8fab',
+              backgroundColor: 'rgba(255, 143, 171, 0.1)',
               tension: 0.4,
-              fill: false
+              fill: true,
+              borderWidth: 2
             },
             {
               label: 'Memory Usage (MB)',
               data: usageData.map(d => d.memory_usage_mb),
-              borderColor: 'rgba(255, 99, 132, 1)',
+              borderColor: '#43e97b',
+              backgroundColor: 'rgba(67, 233, 123, 0.1)',
               tension: 0.4,
-              fill: false
+              fill: true,
+              borderWidth: 2
             }
           ]
         },
@@ -239,18 +300,24 @@ async function openDatabaseAnalytics() {
             y: {
               beginAtZero: true,
               grid: {
-                color: 'rgba(255, 255, 255, 0.1)'
+                color: 'rgba(160, 132, 232, 0.15)'
               },
               ticks: {
-                color: 'rgba(255, 255, 255, 0.8)'
+                color: 'rgba(255, 255, 255, 0.7)',
+                font: {
+                  size: 11
+                }
               }
             },
             x: {
               grid: {
-                color: 'rgba(255, 255, 255, 0.1)'
+                color: 'rgba(160, 132, 232, 0.15)'
               },
               ticks: {
-                color: 'rgba(255, 255, 255, 0.8)'
+                color: 'rgba(255, 255, 255, 0.7)',
+                font: {
+                  size: 11
+                }
               }
             }
           }
@@ -260,7 +327,7 @@ async function openDatabaseAnalytics() {
           // No historical data available
           const chartContainer = document.getElementById('usageChart');
           if (chartContainer) {
-            chartContainer.innerHTML = '<div class="text-center text-muted p-4">No historical usage data available</div>';
+            chartContainer.parentElement.innerHTML = '<div class="empty-state"><i class="bi bi-graph-down"></i><p>No historical usage data available</p></div>';
           }
         }
       });

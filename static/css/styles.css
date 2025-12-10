@@ -11,10 +11,10 @@
   --bg-secondary: rgba(60, 45, 75, 0.9);
   --accent-color: rgba(160, 132, 232, 1);
   
-  /* Simple responsive sizing - Significantly increased for better readability */
-  --base-font-size: 1.25rem;
-  --small-font-size: 1.15rem;
-  --large-font-size: 1.5rem;
+  /* Normal responsive sizing */
+  --base-font-size: 1rem;
+  --small-font-size: 0.875rem;
+  --large-font-size: 1.25rem;
   
   /* Button sizing */
   --btn-height: 44px;
@@ -33,37 +33,48 @@
   --tag-list-scroll-padding: 1rem;
 }
 
-/* Larger scaling for better readability */
+/* Normal base font size */
 html {
-  font-size: 18px; /* Increased from 16px for bigger text */
+  font-size: 16px; /* Standard base font size */
   width: 100%;
   height: 100%;
   min-height: 100vh;
   margin: 0;
   padding: 0;
+  overflow-x: hidden; /* Prevent horizontal scrolling */
+  overflow-y: auto; /* Allow vertical scrolling when needed */
   /* Ensure no browser defaults interfere with fullscreen canvas */
   box-sizing: border-box;
   /* Enable smooth zoom scaling */
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* Ensure background covers full viewport */
+  background: linear-gradient(135deg, #1a1623 0%, #2d223a 50%, #1a1623 100%);
+  background-attachment: fixed;
+  background-size: cover;
 }
 
+
 body {
-  font-size: 1.1rem;
+  font-size: 1rem;
   line-height: 1.5;
   width: 100%;
-  height: 100%;
   min-height: 100vh;
   margin: 0;
-  padding: 0 0 0.5rem 0; /* Reduced bottom gutter from 1.5rem */
+  padding: 0; /* Remove all padding to prevent white bars */
   overflow-x: hidden;
+  overflow-y: auto; /* Allow vertical scrolling when content exceeds viewport */
   /* Ensure body doesn't interfere with fullscreen canvas */
   position: relative;
   /* Ensure smooth zoom scaling */
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* Ensure background covers full viewport */
+  background: linear-gradient(135deg, #1a1623 0%, #2d223a 50%, #1a1623 100%);
+  background-attachment: fixed;
+  background-size: cover;
 }
 
 /* Global zoom responsiveness - all elements scale with browser zoom */
@@ -96,6 +107,180 @@ body > .container,
 body > .container-fluid {
   max-width: 100% !important;
   margin: 0 auto !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
+}
+
+/* CRITICAL FIX: Prevent any direct child of body from causing white space at bottom */
+/* But allow internal scrollable containers (like tag lists) to work */
+body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
+  /* Removed max-height restriction to allow full content visibility */
+}
+
+/* Ensure main content containers allow scrolling when needed */
+.main-content,
+.main-container,
+#main-container {
+  overflow-x: hidden !important;
+  overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
+}
+
+/* Constrain large monitors - reduce font sizes and spacing directly */
+@media (min-width: 1921px) {
+  html {
+    font-size: 14px !important; /* Reduce base font from 18px */
+  }
+  
+  body {
+    overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
+    overflow-x: hidden !important;
+    min-height: 100vh !important;
+  }
+  
+  body > .container,
+  body > .container-fluid,
+  .main-content {
+    max-width: 1920px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    height: auto !important;
+    min-height: auto !important;
+  }
+  
+  /* Reduce all font sizes - EXCEPT tag lists */
+  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
+    font-size: 0.78em !important; /* Scale down all fonts by 22% */
+  }
+  
+  html {
+    font-size: 14px !important; /* Base size */
+  }
+  
+  /* Override: Keep inventory list at readable size on large screens - use absolute px to avoid scaling issues */
+  #availableTags,
+  #availableTags *,
+  #availableTags .tag-item,
+  #availableTags .tag-entry,
+  #availableTags .tag-name,
+  #availableTags .tag-text,
+  #availableTags .tag-info,
+  #selectedTags,
+  #selectedTags *,
+  #selectedTags .tag-item,
+  #selectedTags .tag-entry,
+  #selectedTags .tag-name,
+  #selectedTags .tag-text,
+  #selectedTags .tag-info,
+  .tag-list-container,
+  .tag-list-container *,
+  .tag-list-container .tag-item,
+  .tag-list-container .tag-entry,
+  .tag-list-container .tag-name,
+  .tag-list-container .tag-text,
+  .tag-list-container .tag-info {
+    font-size: 28px !important; /* Reduced for better fit */
+  }
+  
+  /* Reduce padding and margins */
+  .btn-modern, .btn-modern2, .btn-modern3, .btn-glass {
+    padding: 6px 12px !important;
+    font-size: 0.9rem !important;
+    min-height: 36px !important;
+    min-width: 80px !important;
+  }
+  
+  /* Remove height restrictions - allow scrolling */
+  #availableTags,
+  #selectedTags,
+  [data-container-type="available"],
+  [data-container-type="selected"],
+  .tag-list-container,
+  .main-content {
+    overflow-y: auto !important;
+    max-height: none !important;
+    height: auto !important;
+    min-height: auto !important;
+  }
+}
+
+@media (min-width: 2560px) {
+  html {
+    font-size: 12px !important;
+  }
+  
+  /* Reduce font sizes - EXCEPT tag lists */
+  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
+    font-size: 0.67em !important; /* Scale down all fonts by 33% */
+  }
+  
+  html {
+    font-size: 12px !important;
+  }
+  
+  /* Override: Keep inventory list at readable size on very large screens - use absolute px */
+  #availableTags,
+  #availableTags *,
+  #availableTags .tag-item,
+  #availableTags .tag-entry,
+  #availableTags .tag-name,
+  #availableTags .tag-text,
+  #availableTags .tag-info,
+  #selectedTags,
+  #selectedTags *,
+  #selectedTags .tag-item,
+  #selectedTags .tag-entry,
+  #selectedTags .tag-name,
+  #selectedTags .tag-text,
+  #selectedTags .tag-info,
+  .tag-list-container,
+  .tag-list-container *,
+  .tag-list-container .tag-item,
+  .tag-list-container .tag-entry,
+  .tag-list-container .tag-name,
+  .tag-list-container .tag-text,
+  .tag-list-container .tag-info {
+    font-size: 32px !important; /* Reduced for better fit */
+  }
+}
+
+@media (min-width: 3840px) {
+  html {
+    font-size: 10px !important;
+  }
+  
+  /* Reduce font sizes - EXCEPT tag lists */
+  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
+    font-size: 0.56em !important; /* Scale down all fonts by 44% */
+  }
+  
+  html {
+    font-size: 10px !important;
+  }
+  
+  /* Override: Keep inventory list at readable size on ultra-large screens - use absolute px */
+  #availableTags,
+  #availableTags *,
+  #availableTags .tag-item,
+  #availableTags .tag-entry,
+  #availableTags .tag-name,
+  #availableTags .tag-text,
+  #availableTags .tag-info,
+  #selectedTags,
+  #selectedTags *,
+  #selectedTags .tag-item,
+  #selectedTags .tag-entry,
+  #selectedTags .tag-name,
+  #selectedTags .tag-text,
+  #selectedTags .tag-info,
+  .tag-list-container,
+  .tag-list-container *,
+  .tag-list-container .tag-item,
+  .tag-list-container .tag-entry,
+  .tag-list-container .tag-name,
+  .tag-list-container .tag-text,
+  .tag-list-container .tag-info {
+    font-size: 36px !important; /* Reduced for better fit */
+  }
 }
   
 /* Tag lists and containers - ensure they scale with zoom */
@@ -112,10 +297,32 @@ body > .container-fluid {
   zoom: reset;
 }
 
-/* Larger scaling for key UI elements - zoom responsive */
+/* Normal scaling for key UI elements */
 .tag-item, .tag-entry {
-  font-size: 0.8rem !important; /* Reduced for more compact tag lists */
-  min-height: 2.4rem !important;
+  font-size: 16px !important; /* Reduced for better fit */
+  min-height: 2.5rem !important;
+}
+
+/* Force larger font size for all tag content globally */
+#availableTags .tag-item,
+#availableTags .tag-entry,
+#availableTags .tag-name,
+#availableTags .tag-row,
+#availableTags .tag-item *,
+#selectedTags .tag-item,
+#selectedTags .tag-entry,
+#selectedTags .tag-name,
+#selectedTags .tag-row,
+#selectedTags .tag-item * {
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+}
+
+/* Highlight items with 5 or more units */
+.tag-item.high-units {
+  background-color: rgba(255, 215, 0, 0.3) !important; /* Gold/yellow highlight */
+  border-left: 3px solid rgba(255, 215, 0, 0.8) !important;
+  font-weight: 600 !important;
 }
 
 .quick-start-guide, .help-text {
@@ -134,30 +341,30 @@ body > .container-fluid {
 }
 
 button, .btn {
-  font-size: 1.05rem !important;
-  padding: 0.65rem 1.2rem !important;
-  min-height: 44px !important;
+  font-size: 1rem !important;
+  padding: 0.5rem 1rem !important;
+  min-height: 38px !important;
 }
 
 .form-control, .form-select, input, select {
-  font-size: 0.95rem !important; /* Reduced from 1.05rem */
-  padding: 0.5rem 0.75rem !important; /* Reduced from 0.7rem 1rem */
-  min-height: 40px !important; /* Reduced from 46px */
+  font-size: 0.875rem !important;
+  padding: 0.375rem 0.75rem !important;
+  min-height: 38px !important;
 }
 
-/* Scale up all labels and headers throughout app */
+/* Normal label sizing */
 label, .form-label {
-  font-size: 1.1rem !important;
+  font-size: 1rem !important;
   font-weight: 600 !important;
 }
 
-/* Larger header scaling */
-h1 { font-size: 2.4rem !important; font-weight: 800 !important; }
-h2 { font-size: 2.1rem !important; font-weight: 700 !important; }
-h3 { font-size: 1.8rem !important; font-weight: 700 !important; }
-h4 { font-size: 1.5rem !important; font-weight: 600 !important; }
-h5 { font-size: 1.3rem !important; font-weight: 600 !important; }
-h6 { font-size: 1.15rem !important; font-weight: 600 !important; }
+/* Normal header scaling */
+h1 { font-size: 2rem !important; font-weight: 800 !important; }
+h2 { font-size: 1.75rem !important; font-weight: 700 !important; }
+h3 { font-size: 1.5rem !important; font-weight: 700 !important; }
+h4 { font-size: 1.25rem !important; font-weight: 600 !important; }
+h5 { font-size: 1.1rem !important; font-weight: 600 !important; }
+h6 { font-size: 1rem !important; font-weight: 600 !important; }
 
 /* Larger filter bar and dropdowns */
 .filter-bar, .filters-row {
@@ -166,9 +373,11 @@ h6 { font-size: 1.15rem !important; font-weight: 600 !important; }
 
 .filter-bar select, .filter-bar .form-select, .filter-bar option {
   font-size: 1.05rem !important;
-  padding: 0.75rem 0.9rem !important;
-  min-height: 52px !important;
-  line-height: 1.5 !important;
+  padding: 0.5rem 0.9rem 0.6rem 0.9rem !important;
+  min-height: 2.5rem !important;
+  height: auto !important;
+  line-height: 1.6 !important;
+  overflow: visible !important;
 }
 
 /* Larger list items */
@@ -544,28 +753,60 @@ canvas#lava-lamp-canvas {
   justify-content: flex-start !important;
   align-items: stretch !important;
   gap: 0 !important;
-  overflow-y: visible !important;
+  overflow-y: auto !important; /* Allow scrolling if content exceeds height */
+  overflow-x: hidden !important;
   height: var(--center-panel-height) !important;
   min-height: var(--center-panel-height) !important;
+  /* Removed max-height to allow content to extend and scroll properly */
+  padding-bottom: 4rem !important; /* Extra bottom padding to ensure help button is never cut off */
+}
+
+/* FORCE control-section to center its children, especially template select */
+.control-panel .control-section,
+.control-section {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+}
+
+/* Ensure control-panel also centers its content */
+.control-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: 100% !important;
 }
 
 .control-panel > * {
   width: 100% !important;
 }
 
+/* Allow template dropdown to be centered on PC */
+@media (min-width: 992px) {
+  .control-panel > .control-section {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+  }
+}
+
 .control-panel > .control-section + .control-section {
-  margin-top: 0.9rem !important;
+  margin-top: 0.25rem !important; /* Further reduced from 0.5rem */
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: 0 !important;
+  margin-top: 0.5rem !important; /* Equal spacing from buttons above */
 }
  
 .control-section {
   width: 100% !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 0.50rem !important;
+  align-items: center !important;
+  gap: 0.25rem !important; /* Further reduced from 0.35rem */
 }
  
 .control-section .d-grid,
@@ -574,16 +815,18 @@ canvas#lava-lamp-canvas {
 }
 
 .help-button-container {
-  margin: 0 !important;
+  margin: 0.5rem 0 1rem 0 !important; /* Top margin and extra bottom margin to prevent cutoff */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 0 !important;
+  padding: 0.9rem 0 !important; /* Equal top and bottom padding */
+  position: relative !important;
+  z-index: 1 !important;
 }
 
 .help-button-container .big-glow-help-btn {
-  margin: 0.5rem !important;
+  margin: 0 !important; /* Remove margins - spacing handled by container */
 }
 :root {
     --primary-gradient: linear-gradient(135deg, #ff8fab 0%, #a084e8 100%);
@@ -605,7 +848,7 @@ canvas#lava-lamp-canvas {
     --lineage-hybrid-sativa: rgba(237, 65, 35, 0.5);
     --lineage-cbd: rgba(241, 194, 50, 0.8);
     --lineage-mixed: rgba(0, 33, 245, 0.8);
-    --lineage-para: rgba(255, 192, 203, 0.5);
+    --lineage-para: rgba(200, 50, 120, 0.8);
     
     /* Column Width Variables - Flexible for natural layout */
     --canvas-max-width: 100%;        /* Allow full width with padding */
@@ -646,13 +889,17 @@ canvas#lava-lamp-canvas {
     z-index: 1;
   }
   
+  /* CRITICAL FIX: Ensure body::before doesn't cause white space */
   body::before {
     content: '';
-    position: fixed;
+    position: fixed; /* Fixed to viewport, not document */
     top: 0;
     left: 0;
     width: 100%;
-    height: 100%;
+    height: 100vh; /* Fixed to viewport height */
+    max-height: 100vh; /* Prevent exceeding viewport */
+    pointer-events: none;
+    z-index: -1; /* Behind content */
     background: linear-gradient(135deg, 
       #ff0066 0%, 
       #ff3366 15%,
@@ -662,7 +909,6 @@ canvas#lava-lamp-canvas {
       #3300ff 75%,
       #0033cc 90%,
       #001a66 100%);
-    z-index: -1;
   }
   
   @keyframes trippyTieDye {
@@ -753,9 +999,9 @@ canvas#lava-lamp-canvas {
     color: #ffffff !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 800 !important;
-    font-size: 2.8rem !important; /* Reduced from 3.6rem for compactness */
+    font-size: 3.5rem !important; /* Increased for bigger title section */
     letter-spacing: -0.02em;
-    margin: 0 0 0.4rem 0 !important; /* Reduced from 0.8rem */
+    margin: 0 0 0.6rem 0 !important; /* Increased spacing */
     text-align: center !important;
     line-height: 1.0;
     text-shadow: 
@@ -768,26 +1014,26 @@ canvas#lava-lamp-canvas {
   /* Responsive Title Scaling */
   @media (max-width: 768px) {
     .vibrant-title {
-      font-size: 2.4rem !important; /* Reduced from 2.6rem */
-      margin: 0 0 0.3rem 0 !important; /* Reduced from 0.6rem */
+      font-size: 3rem !important; /* Increased for bigger title section */
+      margin: 0 0 0.5rem 0 !important;
     }
     
     .vibrant-subtitle {
-      font-size: 0.85rem !important; /* Reduced from 0.95rem */
-      margin: 0 0 0.5rem 0 !important; /* Reduced from 1rem */
+      font-size: 1rem !important; /* Increased for bigger title section */
+      margin: 0 0 0.7rem 0 !important;
     }
   }
   
   @media (max-width: 480px) {
     .vibrant-title {
-      font-size: 2.0rem !important; /* Reduced from 2.2rem */
-      margin: 0 0 0.3rem 0 !important; /* Reduced from 0.5rem */
+      font-size: 2.5rem !important; /* Increased for bigger title section */
+      margin: 0 0 0.4rem 0 !important;
       padding: 0 1rem;
     }
     
     .vibrant-subtitle {
-      font-size: 0.8rem !important; /* Reduced from 0.85rem */
-      margin: 0 0 0.5rem 0 !important; /* Reduced from 0.8rem */
+      font-size: 0.95rem !important; /* Increased for bigger title section */
+      margin: 0 0 0.6rem 0 !important;
       padding: 0 1rem;
     }
   }
@@ -883,11 +1129,11 @@ canvas#lava-lamp-canvas {
   .vibrant-subtitle {
     color: rgba(255, 255, 255, 0.9) !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    font-size: 0.9rem !important; /* Reduced from 1.0rem for compactness */
+    font-size: 1.15rem !important; /* Increased for bigger title section */
     font-weight: 600 !important;
-    letter-spacing: 0.06em; /* Reduced from 0.08em */
+    letter-spacing: 0.06em;
     text-align: center !important;
-    margin: 0 0 0.6rem 0 !important; /* Reduced from 1.2rem */
+    margin: 0 0 0.8rem 0 !important; /* Increased spacing */
     line-height: 1.2;
     text-transform: uppercase;
     text-shadow: 0 2px 6px rgba(0,0,0,0.4);
@@ -896,9 +1142,9 @@ canvas#lava-lamp-canvas {
   }
   
  .copyright-text {
-    font-size: 0.8rem !important; /* Reduced from 0.9rem */
+    font-size: 0.95rem !important; /* Increased for bigger title section */
     color: #ffffff !important;
-    margin: 0.15rem 0 0 0 !important; /* Reduced from 0.25rem */
+    margin: 0.3rem 0 0 0 !important; /* Increased spacing */
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 400;
     letter-spacing: 0.02em;
@@ -1097,25 +1343,34 @@ canvas#lava-lamp-canvas {
   }
   
   .big-glow-help-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.6), rgba(0, 150, 255, 0.7)) !important;
+    border: 2px solid rgba(0, 212, 255, 0.9) !important;
+    border-radius: 50% !important;
     width: 54px;
     height: 54px;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.3s ease;
-    color: rgba(255, 255, 255, 0.9);
+    color: #ffffff !important;
     font-size: 1.4rem;
     font-weight: 700;
+    box-shadow: 
+      0 4px 16px rgba(0, 212, 255, 0.5),
+      0 0 24px rgba(0, 212, 255, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
   }
   
   .big-glow-help-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.3);
-    transform: scale(1.05);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.8), rgba(0, 150, 255, 0.9)) !important;
+    border-color: rgba(0, 212, 255, 1) !important;
+    transform: scale(1.1);
+    box-shadow: 
+      0 6px 24px rgba(0, 212, 255, 0.7),
+      0 0 32px rgba(0, 212, 255, 0.6),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
   }
   
   .big-glow-help-btn svg {
@@ -1317,8 +1572,8 @@ canvas#lava-lamp-canvas {
       height: 18px !important;
     }
     
-    /* Control panel buttons on mobile */
-    .control-panel .btn-glass {
+    /* Control panel buttons on mobile - exclude btn-control which has its own styles */
+    .control-panel .btn-glass:not(.btn-control) {
       padding: 12px 16px !important;
       font-size: 1.15rem !important;
       min-height: 52px !important;
@@ -1339,10 +1594,18 @@ canvas#lava-lamp-canvas {
     #generateBtn {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
-      height: 52px !important;
+      min-height: 52px !important;
+      height: auto !important;
       width: 100% !important;
       max-width: 100% !important;
       margin: 0 auto !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      line-height: 1.2 !important;
+      text-align: center !important;
+      white-space: nowrap !important;
+      overflow: visible !important;
     }
   }
   /* Small screens (tablets, 481px and up) */
@@ -1363,8 +1626,8 @@ canvas#lava-lamp-canvas {
       height: 16px !important;
     }
     
-    /* Control panel buttons on small tablets */
-    .control-panel .btn-glass {
+    /* Control panel buttons on small tablets - exclude btn-control */
+    .control-panel .btn-glass:not(.btn-control) {
       padding: 10px 14px !important;
       font-size: 1.1rem !important;
       min-height: 48px !important;
@@ -1385,10 +1648,18 @@ canvas#lava-lamp-canvas {
     #generateBtn {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
-      height: 52px !important;
+      min-height: 52px !important;
+      height: auto !important;
       width: 100% !important;
       max-width: 100% !important;
       margin: 0 auto !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      line-height: 1.2 !important;
+      text-align: center !important;
+      white-space: nowrap !important;
+      overflow: visible !important;
     }
   }
   /* Medium screens (tablets, 769px and up) */
@@ -1409,8 +1680,8 @@ canvas#lava-lamp-canvas {
       height: 15px !important;
     }
     
-    /* Control panel buttons on medium tablets */
-    .control-panel .btn-glass {
+    /* Control panel buttons on medium tablets - exclude btn-control */
+    .control-panel .btn-glass:not(.btn-control) {
       padding: 9px 13px !important;
       font-size: 1.05rem !important;
       min-height: 46px !important;
@@ -1431,10 +1702,18 @@ canvas#lava-lamp-canvas {
     #generateBtn {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
-      height: 52px !important;
+      min-height: 52px !important;
+      height: auto !important;
       width: 100% !important;
       max-width: 100% !important;
       margin: 0 auto !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      line-height: 1.2 !important;
+      text-align: center !important;
+      white-space: nowrap !important;
+      overflow: visible !important;
     }
   }
   
@@ -1456,8 +1735,8 @@ canvas#lava-lamp-canvas {
       height: 14px !important;
     }
     
-    /* Control panel buttons on large screens */
-    .control-panel .btn-glass {
+    /* Control panel buttons on large screens - exclude btn-control */
+    .control-panel .btn-glass:not(.btn-control) {
       padding: 10px 14px !important;
       font-size: 1.1rem !important;
       min-height: 46px !important;
@@ -1478,10 +1757,18 @@ canvas#lava-lamp-canvas {
     #generateBtn {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
-      height: 52px !important;
+      min-height: 52px !important;
+      height: auto !important;
       width: 100% !important;
       max-width: 100% !important;
       margin: 0 auto !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      line-height: 1.2 !important;
+      text-align: center !important;
+      white-space: nowrap !important;
+      overflow: visible !important;
     }
   }
   
@@ -1503,8 +1790,8 @@ canvas#lava-lamp-canvas {
       height: 16px !important;
     }
     
-    /* Control panel buttons on extra large screens */
-    .control-panel .btn-glass {
+    /* Control panel buttons on extra large screens - exclude btn-control */
+    .control-panel .btn-glass:not(.btn-control) {
       padding: 10px 14px !important;
       font-size: 1.1rem !important;
       min-height: 48px !important;
@@ -1525,10 +1812,18 @@ canvas#lava-lamp-canvas {
     #generateBtn {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
-      height: 52px !important;
+      min-height: 52px !important;
+      height: auto !important;
       width: 100% !important;
       max-width: 100% !important;
       margin: 0 auto !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      line-height: 1.2 !important;
+      text-align: center !important;
+      white-space: nowrap !important;
+      overflow: visible !important;
     }
   }
   
@@ -1550,8 +1845,8 @@ canvas#lava-lamp-canvas {
       height: 18px !important;
     }
     
-    /* Control panel buttons on ultra-wide screens */
-    .control-panel .btn-glass {
+    /* Control panel buttons on ultra-wide screens - exclude btn-control */
+    .control-panel .btn-glass:not(.btn-control) {
       padding: 11px 16px !important;
       font-size: 1rem !important;
       min-height: 50px !important;
@@ -1572,10 +1867,18 @@ canvas#lava-lamp-canvas {
     #generateBtn {
       padding: 0.85rem 1.2rem !important;
       font-size: 1.15rem !important;
-      height: 52px !important;
+      min-height: 52px !important;
+      height: auto !important;
       width: 100% !important;
       max-width: 100% !important;
       margin: 0 auto !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      line-height: 1.2 !important;
+      text-align: center !important;
+      white-space: nowrap !important;
+      overflow: visible !important;
     }
   }
   
@@ -1842,11 +2145,20 @@ canvas#lava-lamp-canvas {
     display: block !important;
     position: relative !important;
     pointer-events: auto !important;
+    font-size: 14px !important; /* Normal font size */
   }
   
   /* Force all content to fill the container */
   #availableTags * {
     box-sizing: border-box !important;
+  }
+  
+  /* Ensure all text in inventory list uses readable size */
+  #availableTags .tag-item,
+  #availableTags .tag-entry,
+  #availableTags .tag-name,
+  #availableTags .tag-text {
+    font-size: 14px !important;
   }
   
   /* Fix selected tags container height */
@@ -2171,7 +2483,7 @@ canvas#lava-lamp-canvas {
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(160, 132, 232, 0.18);
     border-radius: 1rem;
-    padding: 0.5rem !important; /* Reduced from 0.75rem */
+    padding: 0.5rem 0.75rem 0.5rem 0.5rem !important; /* Increased right padding to prevent dropdown cutoff */
     flex: 1;
     width: 100% !important;
     /* Remove height restrictions to allow full expansion */
@@ -2179,7 +2491,7 @@ canvas#lava-lamp-canvas {
     max-height: none !important;
     min-height: 31.25rem !important;
     overflow-y: visible !important;
-    overflow-x: hidden !important;
+    overflow-x: hidden !important; /* Keep hidden to prevent horizontal scroll, but ensure right padding is sufficient */
     scrollbar-width: thin;
     scrollbar-color: #a084e8 #2d223a;
     box-shadow: 0 2px 16px rgba(160, 132, 232, 0.08);
@@ -2440,9 +2752,10 @@ canvas#lava-lamp-canvas {
     position: relative;
     width: 100%;
     max-width: 100%;
-    /* Allow content to be visible */
-    overflow: visible;
+    /* Allow content to be visible - CRITICAL for dropdowns */
+    overflow: visible !important;
     margin-bottom: 0.5rem !important; /* Reduced from 0.75rem for compactness */
+    padding-right: 8px !important; /* Extra padding to prevent dropdown cutoff */
   }
   
   .tag-list-container::-webkit-scrollbar {
@@ -2502,10 +2815,10 @@ canvas#lava-lamp-canvas {
     padding: 0.3rem 0.6rem !important;
   }
   
-  /* Professional section spacing for center panel */
+  /* Professional section spacing for center panel - FURTHER REDUCED MARGINS */
   .control-panel > div {
-    margin-bottom: 1rem !important;
-    padding-bottom: 0.6rem !important;
+    margin-bottom: 0.25rem !important; /* Further reduced from 0.5rem */
+    padding-bottom: 0.25rem !important; /* Further reduced from 0.4rem */
   }
   
   /* Add subtle divider between sections */
@@ -2513,7 +2826,7 @@ canvas#lava-lamp-canvas {
     border-bottom: 1px solid rgba(160, 132, 232, 0.2);
   }
   
-  /* Professional section headers */
+  /* Professional section headers - FURTHER REDUCED MARGINS */
   .control-panel h5,
   .control-panel .section-header {
     font-size: 0.85rem !important;
@@ -2522,9 +2835,9 @@ canvas#lava-lamp-canvas {
     text-transform: uppercase !important;
     color: rgba(160, 132, 232, 0.8) !important;
     text-align: center !important;
-    margin-bottom: 0.6rem !important;
-    margin-top: 0.4rem !important;
-    padding-bottom: 0.3rem !important;
+    margin-bottom: 0.25rem !important; /* Further reduced from 0.4rem */
+    margin-top: 0.15rem !important; /* Further reduced from 0.25rem */
+    padding-bottom: 0.15rem !important; /* Further reduced from 0.2rem */
   }
   
   /* Ensure center panel uses full available height */
@@ -2571,16 +2884,18 @@ canvas#lava-lamp-canvas {
 
   /* Center column specific spacing reductions */
   .help-button-container {
-    margin: 0.9rem 0 !important;
+    margin: 0.5rem 0 1rem 0 !important; /* Top margin and extra bottom margin to prevent cutoff */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.75rem !important;
+    position: relative !important;
+    z-index: 1 !important;
+    padding: 0.9rem 0.75rem !important; /* Equal top and bottom padding */
   }
   
   .help-button-container .big-glow-help-btn {
-    margin-bottom: 0 !important;
+    margin: 0 !important; /* Remove any margins from the button itself */
   }
   
   .help-label {
@@ -2601,6 +2916,16 @@ canvas#lava-lamp-canvas {
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
   }
   
+  /* CRITICAL: Override for template select specifically to ensure centering */
+  .control-panel #templateSelect.form-select-modern,
+  .control-panel #templateSelectModal.form-select-modern {
+    margin: 0.5rem auto 0.75rem auto !important;
+    text-align: center !important;
+    text-align-last: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  
   /* Generate button - Professional and Prominent */
   .control-panel #generateBtn {
     margin: 0.2rem auto !important;
@@ -2608,19 +2933,26 @@ canvas#lava-lamp-canvas {
     font-size: 1.05rem !important;
     width: 100% !important;
     max-width: 100% !important;
-    display: block !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     border-radius: 8px !important;
     font-weight: 700 !important;
     box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
     transition: all 0.2s ease-in-out !important;
-    height: 52px !important;
-    line-height: 1.4 !important;
+    min-height: 52px !important;
+    height: auto !important;
+    line-height: 1.2 !important;
     border-radius: 10px !important;
     /* Vibrant purple gradient */
     background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
     border: 1px solid rgba(139, 92, 246, 0.8) !important;
     color: #fff !important;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
   }
 
   .control-panel #generateBtn:hover {
@@ -2630,45 +2962,75 @@ canvas#lava-lamp-canvas {
   }
 
   /* Generate button themed like header buttons (color/border/hover) without size constraints */
-  .btn-generate-themed {
-    background: var(--primary-gradient) !important;
-    border: none !important;
-    color: white !important;
-    padding: 8px 16px !important;
+  .btn-generate-themed,
+  #generateBtn {
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.4), rgba(219, 39, 119, 0.5)) !important;
+    backdrop-filter: blur(20px) saturate(1.2) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(1.2) !important;
+    border: 2px solid rgba(236, 72, 153, 0.8) !important;
+    color: #fce7f3 !important;
+    padding: 1.15rem 1.5rem !important;
     border-radius: 12px !important;
-    font-weight: 700 !important;
-    font-size: 1rem !important;
-    transition: all 0.4s cubic-bezier(0.4,0,0.2,1) !important;
+    font-weight: 600 !important;
+    font-size: 1.1rem !important;
+    min-height: 60px !important;
+    transition: all 0.2s ease !important;
     box-shadow: 
-      0 4px 16px rgba(160,132,232,0.15), 
-      0 2px 8px rgba(0,0,0,0.1),
-      inset 0 1px 0 rgba(255,255,255,0.2) !important;
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(236, 72, 153, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
     text-decoration: none !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    gap: 4px !important;
+    gap: 8px !important;
     cursor: pointer !important;
     outline: none !important;
     position: relative !important;
+    overflow: hidden !important;
+    text-shadow: none !important;
   }
 
-  .btn-generate-themed:hover {
-    filter: brightness(1.1) saturate(1.15) !important;
-    box-shadow: 
-      0 12px 40px rgba(160,132,232,0.2), 
-      0 4px 16px rgba(0,0,0,0.12),
-      inset 0 1px 0 rgba(255,255,255,0.25) !important;
-    transform: translateY(-3px) scale(1.02) !important;
+  .btn-generate-themed:hover,
+  #generateBtn:hover {
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.5), rgba(219, 39, 119, 0.6)) !important;
+    border-color: rgba(236, 72, 153, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(236, 72, 153, 0.6), 0 0 20px rgba(236, 72, 153, 0.5) !important;
+    transform: translateY(-2px) scale(1.02) !important;
   }
   
-  .btn-generate-themed:active {
-    transform: translateY(0) !important;
+  .btn-generate-themed:active,
+  #generateBtn:active {
+    transform: translateY(0) scale(1) !important;
     transition: transform 0.1s ease !important;
   }
   
-  .btn-generate-themed:focus {
-    box-shadow: 0 0 0 4px rgba(160,132,232,0.13), 0 2px 12px 0 rgba(160,132,232,0.10) !important;
+  .btn-generate-themed:focus,
+  #generateBtn:focus {
+    box-shadow: 
+      0 0 0 4px rgba(236, 72, 153, 0.3),
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(236, 72, 153, 0.4) !important;
+    outline: none !important;
+  }
+  
+  /* Subtle shine effect for Generate Tags button */
+  .btn-generate-themed::before,
+  #generateBtn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    transition: left 0.5s ease;
+  }
+  
+  .btn-generate-themed:hover::before,
+  #generateBtn:hover::before {
+    left: 100%;
   }
   
   /* JSON Tools section spacing */
@@ -2694,63 +3056,302 @@ canvas#lava-lamp-canvas {
   
   /* Enhanced Control Button Styling - Matching Generate Button */
   /* High specificity to override media query rules */
+  /* Professional Center Column Buttons - Glass Morphism Design with Color Coding */
+  /* High specificity to override all media queries and other rules */
   .control-panel .btn-control,
   .control-panel .btn-glass.btn-control,
+  .control-panel .d-grid .btn-control,
   .btn-control {
-    padding: 12px 14px !important;
-    font-size: 1.05rem !important;
+    padding: 2.2rem 1.2rem !important; /* Further increased vertical padding */
+    font-size: 1.1rem !important;
     font-weight: 600 !important;
-    min-height: 50px !important;
-    width: 70% !important;
-    max-width: 185px !important;
-    margin: 0 auto !important;
-    border-radius: 10px !important;
+    min-height: 110px !important; /* Increased from 88px */
+    width: 85% !important; /* Decreased from 100% */
+    max-width: 85% !important; /* Decreased from 100% */
+    margin: 0 auto !important; /* Center the narrower buttons */
+    border-radius: 12px !important;
     display: flex !important;
     align-items: center !important;
-    justify-content: center !important;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    /* Match Generate button gradient */
-    background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
-    backdrop-filter: blur(15px) !important;
-    -webkit-backdrop-filter: blur(15px) !important;
-    border: 1px solid rgba(139, 92, 246, 0.8) !important;
-    color: #fff !important;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
-    box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
+    justify-content: center !important; /* Center button text */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    /* Professional glass morphism - matches glass-card theme */
+    background: rgba(45, 34, 58, 0.75) !important;
+    backdrop-filter: blur(20px) saturate(1.2) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(1.2) !important;
+    border: 2px solid rgba(160, 132, 232, 0.25) !important;
+    color: rgba(255, 255, 255, 0.95) !important;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 1px 3px rgba(160, 132, 232, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    position: relative !important;
+    overflow: hidden !important;
+    text-shadow: none !important;
+  }
+  
+  /* Color Coding for Different Button Functions - VIBRANT COLORS */
+  /* High specificity to ensure colors override base styles */
+  
+  /* Match JSON - Blue/Cyan (Data Import) - VIBRANT */
+  .control-panel .btn-control.btn-color-blue,
+  .control-panel .btn-glass.btn-control.btn-color-blue,
+  .control-panel .d-grid .btn-control.btn-color-blue,
+  .btn-control.btn-color-blue,
+  .btn-control[data-bs-target="#jsonMatchModal"] {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5)) !important;
+    border-color: rgba(59, 130, 246, 0.8) !important;
+    color: #dbeafe !important;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(59, 130, 246, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+  .control-panel .btn-control.btn-color-blue:hover,
+  .control-panel .btn-glass.btn-control.btn-color-blue:hover,
+  .control-panel .d-grid .btn-control.btn-color-blue:hover,
+  .btn-control.btn-color-blue:hover,
+  .btn-control[data-bs-target="#jsonMatchModal"]:hover {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.6)) !important;
+    border-color: rgba(59, 130, 246, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.6), 0 0 20px rgba(59, 130, 246, 0.5) !important;
+  }
+  
+  /* Undo - Orange/Amber (Action Reversal) - VIBRANT */
+  .control-panel .btn-control.btn-color-orange,
+  .control-panel .btn-glass.btn-control.btn-color-orange,
+  .control-panel .d-grid .btn-control.btn-color-orange,
+  .btn-control.btn-color-orange,
+  #undo-move-btn.btn-control {
+    background: linear-gradient(135deg, rgba(251, 146, 60, 0.4), rgba(249, 115, 22, 0.5)) !important;
+    border-color: rgba(251, 146, 60, 0.8) !important;
+    color: #fed7aa !important;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(251, 146, 60, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+  .control-panel .btn-control.btn-color-orange:hover,
+  .control-panel .btn-glass.btn-control.btn-color-orange:hover,
+  .control-panel .d-grid .btn-control.btn-color-orange:hover,
+  .btn-control.btn-color-orange:hover,
+  #undo-move-btn.btn-control:hover {
+    background: linear-gradient(135deg, rgba(251, 146, 60, 0.5), rgba(249, 115, 22, 0.6)) !important;
+    border-color: rgba(251, 146, 60, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(251, 146, 60, 0.6), 0 0 20px rgba(251, 146, 60, 0.5) !important;
+  }
+  
+  /* Clear & Reset - Red (Destructive Action) - VIBRANT */
+  .control-panel .btn-control.btn-color-red,
+  .control-panel .btn-glass.btn-control.btn-color-red,
+  .control-panel .d-grid .btn-control.btn-color-red,
+  .btn-control.btn-color-red,
+  #clear-filters-btn.btn-control {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.4), rgba(220, 38, 38, 0.5)) !important;
+    border-color: rgba(239, 68, 68, 0.8) !important;
+    color: #fee2e2 !important;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(239, 68, 68, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+  .control-panel .btn-control.btn-color-red:hover,
+  .control-panel .btn-glass.btn-control.btn-color-red:hover,
+  .control-panel .d-grid .btn-control.btn-color-red:hover,
+  .btn-control.btn-color-red:hover,
+  #clear-filters-btn.btn-control:hover {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.5), rgba(220, 38, 38, 0.6)) !important;
+    border-color: rgba(239, 68, 68, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(239, 68, 68, 0.6), 0 0 20px rgba(239, 68, 68, 0.5) !important;
+  }
+  
+  /* Export Data - Green/Teal (Export/Download) - VIBRANT */
+  .control-panel .btn-control.btn-color-green,
+  .control-panel .btn-glass.btn-control.btn-color-green,
+  .control-panel .d-grid .btn-control.btn-color-green,
+  .btn-control.btn-color-green,
+  .btn-control[onclick*="downloadExcel"] {
+    background: linear-gradient(135deg, rgba(20, 184, 166, 0.4), rgba(15, 118, 110, 0.5)) !important;
+    border-color: rgba(20, 184, 166, 0.8) !important;
+    color: #ccfbf1 !important;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(20, 184, 166, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+  .control-panel .btn-control.btn-color-green:hover,
+  .control-panel .btn-glass.btn-control.btn-color-green:hover,
+  .control-panel .d-grid .btn-control.btn-color-green:hover,
+  .btn-control.btn-color-green:hover,
+  .btn-control[onclick*="downloadExcel"]:hover {
+    background: linear-gradient(135deg, rgba(20, 184, 166, 0.5), rgba(15, 118, 110, 0.6)) !important;
+    border-color: rgba(20, 184, 166, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(20, 184, 166, 0.6), 0 0 20px rgba(20, 184, 166, 0.5) !important;
+  }
+  
+  /* Data & Analytics - Indigo/Blue (Analytics/View) - VIBRANT */
+  .control-panel .btn-control.btn-color-indigo,
+  .control-panel .btn-glass.btn-control.btn-color-indigo,
+  .control-panel .d-grid .btn-control.btn-color-indigo,
+  .btn-control.btn-color-indigo,
+  .btn-control[onclick*="showProductDatabaseManager"] {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(79, 70, 229, 0.5)) !important;
+    border-color: rgba(99, 102, 241, 0.8) !important;
+    color: #e0e7ff !important;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(99, 102, 241, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+  .control-panel .btn-control.btn-color-indigo:hover,
+  .control-panel .btn-glass.btn-control.btn-color-indigo:hover,
+  .control-panel .d-grid .btn-control.btn-color-indigo:hover,
+  .btn-control.btn-color-indigo:hover,
+  .btn-control[onclick*="showProductDatabaseManager"]:hover {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(79, 70, 229, 0.6)) !important;
+    border-color: rgba(99, 102, 241, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.6), 0 0 20px rgba(99, 102, 241, 0.5) !important;
+  }
+  
+  /* Edit DB - Yellow/Amber (Edit Action) - VIBRANT */
+  .control-panel .btn-control.btn-color-yellow,
+  .control-panel .btn-glass.btn-control.btn-color-yellow,
+  .control-panel .d-grid .btn-control.btn-color-yellow,
+  .btn-control.btn-color-yellow,
+  .btn-control[onclick*="showDatabaseEditor"] {
+    background: linear-gradient(135deg, rgba(234, 179, 8, 0.4), rgba(217, 119, 6, 0.5)) !important;
+    border-color: rgba(234, 179, 8, 0.8) !important;
+    color: #fef3c7 !important;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(234, 179, 8, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+  .control-panel .btn-control.btn-color-yellow:hover,
+  .control-panel .btn-glass.btn-control.btn-color-yellow:hover,
+  .control-panel .d-grid .btn-control.btn-color-yellow:hover,
+  .btn-control.btn-color-yellow:hover,
+  .btn-control[onclick*="showDatabaseEditor"]:hover {
+    background: linear-gradient(135deg, rgba(234, 179, 8, 0.5), rgba(217, 119, 6, 0.6)) !important;
+    border-color: rgba(234, 179, 8, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(234, 179, 8, 0.6), 0 0 20px rgba(234, 179, 8, 0.5) !important;
+  }
+  
+  /* Lineage Editor - Purple (Management Tool - matches theme) - VIBRANT */
+  .control-panel .btn-control.btn-color-purple,
+  .control-panel .btn-glass.btn-control.btn-color-purple,
+  .control-panel .d-grid .btn-control.btn-color-purple,
+  .btn-control.btn-color-purple,
+  .btn-control[onclick*="openLineageEditor"] {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.4), rgba(124, 58, 237, 0.5)) !important;
+    border-color: rgba(139, 92, 246, 0.8) !important;
+    color: #e9d5ff !important;
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(139, 92, 246, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  }
+  .control-panel .btn-control.btn-color-purple:hover,
+  .control-panel .btn-glass.btn-control.btn-color-purple:hover,
+  .control-panel .d-grid .btn-control.btn-color-purple:hover,
+  .btn-control.btn-color-purple:hover,
+  .btn-control[onclick*="openLineageEditor"]:hover {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(124, 58, 237, 0.6)) !important;
+    border-color: rgba(139, 92, 246, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(139, 92, 246, 0.6), 0 0 20px rgba(139, 92, 246, 0.5) !important;
+  }
+  
+  /* Subtle shine effect on hover */
+  .control-panel .btn-control::before,
+  .control-panel .btn-glass.btn-control::before,
+  .btn-control::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    transition: left 0.5s ease;
+    pointer-events: none;
+  }
+  
+  .control-panel .btn-control:hover::before,
+  .control-panel .btn-glass.btn-control:hover::before,
+  .btn-control:hover::before {
+    left: 100%;
   }
   
   .control-panel .btn-control:hover,
   .control-panel .btn-glass.btn-control:hover,
+  .control-panel .d-grid .btn-control:hover,
   .btn-control:hover {
-    background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
-    border-color: rgba(159, 122, 234, 1) !important;
-    color: #fff !important;
-    transform: translateY(-2px) scale(1.02) !important;
-    box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5), 0 8px 28px rgba(139, 92, 246, 0.35) !important;
+    background: rgba(55, 44, 68, 0.85) !important;
+    border-color: rgba(160, 132, 232, 0.45) !important;
+    color: #ffffff !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 
+      0 4px 16px rgba(0, 0, 0, 0.2),
+      0 2px 8px rgba(160, 132, 232, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    text-shadow: none !important;
   }
   
   .control-panel .btn-control:active,
   .control-panel .btn-glass.btn-control:active,
+  .control-panel .d-grid .btn-control:active,
   .btn-control:active {
-    transform: translateY(0) scale(0.98) !important;
+    transform: translateY(0) !important;
     transition: transform 0.1s ease !important;
+    box-shadow: 
+      0 1px 4px rgba(0, 0, 0, 0.15),
+      inset 0 1px 2px rgba(0, 0, 0, 0.1) !important;
+  }
+  
+  .control-panel .btn-control:focus,
+  .control-panel .btn-glass.btn-control:focus,
+  .btn-control:focus {
+    outline: none !important;
+    border-color: rgba(160, 132, 232, 0.6) !important;
+    box-shadow: 
+      0 0 0 3px rgba(160, 132, 232, 0.15),
+      0 4px 16px rgba(0, 0, 0, 0.2) !important;
   }
   
   .control-panel .btn-control .icon-btn,
   .control-panel .btn-glass.btn-control .icon-btn,
+  .control-panel .d-grid .btn-control .icon-btn,
   .btn-control .icon-btn {
     display: flex !important;
     align-items: center !important;
-    gap: 8px !important;
+    gap: 0.65rem !important;
     width: 100% !important;
-    justify-content: center !important;
+    justify-content: center !important; /* Center icon and text */
   }
   
   .control-panel .btn-control svg,
   .control-panel .btn-glass.btn-control svg,
+  .control-panel .d-grid .btn-control svg,
   .btn-control svg {
     flex-shrink: 0 !important;
     opacity: 0.95 !important;
+    width: 20px !important;
+    height: 20px !important;
+    stroke-width: 2.5 !important;
+    transition: opacity 0.2s ease !important;
+  }
+  
+  .control-panel .btn-control:hover svg,
+  .control-panel .btn-glass.btn-control:hover svg,
+  .control-panel .d-grid .btn-control:hover svg,
+  .btn-control:hover svg {
+    opacity: 1 !important;
   }
   
   /* Section spacing improvements */
@@ -2801,7 +3402,7 @@ canvas#lava-lamp-canvas {
   
   .tag-item {
     border-radius: 8px !important;
-    padding: 8px 18px 8px 36px !important; /* Increased padding */
+    padding: 8px 8px 8px 36px !important; /* Right padding to allow dropdowns to show */
     margin-bottom: 8px !important; /* Increased from 6px */
     min-height: 36px !important; /* Increased from 32px */
     box-shadow: none !important;
@@ -2809,15 +3410,15 @@ canvas#lava-lamp-canvas {
     display: flex !important;
     align-items: center !important;
     flex-wrap: nowrap !important;
-    gap: 10px !important; /* Increased from 8px */
+    gap: 4px !important; /* Small gap between elements */
     transition: all 0.3s ease;
     position: relative;
     /* Ensure tag items stay within container and fit properly */
     width: 100% !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
-    /* Allow content to be visible */
-    overflow: visible;
+    /* Allow content to be visible - CRITICAL for dropdowns */
+    overflow: visible !important;
     /* Make all tag text bold */
     font-weight: bold !important;
   }
@@ -2942,10 +3543,14 @@ canvas#lava-lamp-canvas {
     min-width: 0;
     display: flex !important;
     flex-direction: row !important;
+    flex-wrap: nowrap !important; /* Keep price and weight dropdown on same line */
+    /* CRITICAL: Ensure dropdowns aren't cut off */
+    overflow: visible !important;
+    padding-right: 4px !important; /* Extra padding for dropdowns */
   }
   
   .tag-name {
-    font-size: 0.8rem !important;
+    font-size: inherit !important; /* Use inherited font size from parent tag-item */
     line-height: 1.3 !important;
     margin-right: 8px !important;
     white-space: normal !important;
@@ -2967,7 +3572,14 @@ canvas#lava-lamp-canvas {
   .lineage-select {
     margin-left: 6px !important;
   }
-  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
+  .vendor-header {
+      font-size: 1.2rem !important;
+      font-weight: 700 !important;
+      letter-spacing: 0.08em !important;
+    color: #e0d7ff !important;
+      padding: 4px 6px !important;
+  }
+  .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
       font-size: 0.9rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
@@ -2998,37 +3610,45 @@ canvas#lava-lamp-canvas {
   /* Compact lineage dropdowns override the above rules */
   .lineage-dropdown-mini,
   .lineage-select.lineage-dropdown-mini {
-    min-width: 28px !important;
-    max-width: 36px !important;
-    width: 32px !important;
+    min-width: 30px !important;
+    max-width: 40px !important;
+    width: 35px !important;
+    height: 14px !important;
   }
   .lineage-dropdown {
     /* Cross-platform consistency - remove platform-specific styling */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
-    
-    /* Standardized styling for consistent appearance */
-    min-width: 160px;
+
+    /* Standardized styling for consistent appearance - compact */
+    min-width: 30px !important;
+    max-width: 40px !important;
+    width: 35px !important;
+    height: 14px !important;
     background: rgba(45, 34, 58, 0.95) !important;
-    border: 1.5px solid rgba(160, 132, 232, 0.25) !important;
+    border: 0.5px solid rgba(160, 132, 232, 0.5) !important;
     color: white !important;
-    border-radius: 8px !important;
-    box-shadow: none !important;
+    border-radius: 2px !important;
+    box-shadow: 0 1px 2px rgba(160, 132, 232, 0.2) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     font-weight: 600 !important;
-    font-size: 1.05em !important;
-    padding: 10px 16px 10px 32px !important;
+    font-size: 8px !important;
+    padding: 2px 6px 2px 3px !important;
     transition: border-color 0.15s ease !important;
     text-align: center !important;
     text-shadow: none !important;
-    
-    /* Ensure consistent arrow across platforms */
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e") !important;
+    line-height: 1.0 !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+
+    /* Ensure consistent arrow across platforms - small */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4' viewBox='0 0 12 12'%3e%3cpath fill='white' d='M6 9L1 4h10z'/%3e%3c/svg%3e") !important;
     background-repeat: no-repeat !important;
-    background-position: left 12px center !important;
-    background-size: 12px !important;
+    background-position: right 2px center !important;
+    background-size: 4px 4px !important;
   }
   
   .lineage-dropdown:focus, .form-select.lineage-dropdown:focus {
@@ -3037,13 +3657,15 @@ canvas#lava-lamp-canvas {
     box-shadow: 0 0 0 2px rgba(160, 132, 232, 0.2) !important;
     background: rgba(255, 255, 255, 0.25) !important;
   }
-  
+
   .lineage-dropdown option, .form-select.lineage-dropdown option {
     background: rgba(255, 255, 255, 0.95) !important;
     color: #2d223a !important;
     font-weight: 500 !important;
     text-align: center !important;
-    padding: 6px !important;
+    padding: 2px 4px !important; /* Reduced padding for compact list */
+    font-size: 0.85rem !important; /* Smaller font */
+    line-height: 1.2 !important; /* Tighter line height */
     text-shadow: none !important;
   }
   
@@ -3070,21 +3692,53 @@ canvas#lava-lamp-canvas {
   
   /* Legacy lineage dropdown option styling removed - now using lineage-specific colors with white text */
   
-  /* DOH Dropdown Styling */
+  /* DOH Dropdown Styling - wider for readability */
   .doh-dropdown,
-  .doh-dropdown-mini {
-    width: 80px !important;
-    max-width: 80px !important;
-    min-width: 80px !important;
-    font-size: 0.85rem !important;
-    padding: 4px 8px !important;
-    padding-right: 20px !important;
-    border: 2px solid #ff6600 !important;
+  .doh-dropdown-mini,
+  .high-cbd-dropdown,
+  .high-cbd-dropdown-mini {
+    width: 70px !important;
+    max-width: 70px !important;
+    min-width: 70px !important;
+    height: 14px !important;
+    font-size: 9px !important;
+    padding: 2px 12px 2px 6px !important;
+    border: 0.5px solid #ff6600 !important;
     background: #ffcc00 !important;
-    color: #000000 !important;
-    border-radius: 6px;
-    transition: all 0.3s ease;
+    border-radius: 2px !important;
+    transition: all 0.2s ease !important;
+    line-height: 1.0 !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    text-align: left !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
   }
+  
+  
+  /* Quantity badge styling - make it bigger and more prominent */
+  .quantity-badge {
+    background: linear-gradient(135deg, rgba(160, 132, 232, 0.9), rgba(139, 92, 246, 0.7)) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 2px solid rgba(160, 132, 232, 0.5) !important;
+    padding: 10px 18px !important; /* Increased from default - bigger badge */
+    border-radius: 20px !important;
+    font-weight: 700 !important;
+    font-size: 1rem !important; /* Larger font size */
+    color: white !important;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+    box-shadow: 0 4px 12px rgba(160, 132, 232, 0.3) !important;
+    min-width: 40px !important; /* Ensure minimum width */
+    text-align: center !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important; /* Prevent shrinking */
+  }
+  
 
   .doh-dropdown:focus, .form-select.doh-dropdown:focus {
     border-color: rgba(34, 197, 94, 0.5) !important;
@@ -3093,12 +3747,15 @@ canvas#lava-lamp-canvas {
     outline: none !important;
   }
 
-  .doh-dropdown option, .form-select.doh-dropdown option {
+  .doh-dropdown option, .form-select.doh-dropdown option,
+  .high-cbd-dropdown option, .form-select.high-cbd-dropdown option {
     background: rgba(45, 34, 58, 0.95) !important;
     color: white !important;
     border: none !important;
-    font-size: 0.75rem !important;
-    padding: 4px 8px !important;
+    font-size: 0.8rem !important; /* Smaller font */
+    padding: 2px 4px !important; /* Reduced padding for compact list */
+    line-height: 1.2 !important; /* Tighter line height */
+    font-weight: 500 !important;
   }
 
   .doh-dropdown option[value="Yes"], .form-select.doh-dropdown option[value="Yes"] {
@@ -3113,9 +3770,88 @@ canvas#lava-lamp-canvas {
     font-weight: 600 !important;
   }
 
-  .doh-dropdown:hover, .form-select.doh-dropdown:hover {
-    border-color: rgba(34, 197, 94, 0.5) !important;
-    background: rgba(255, 255, 255, 0.22) !important;
+  .doh-dropdown:hover, 
+  .form-select.doh-dropdown:hover,
+  .doh-dropdown-mini:hover,
+  .high-cbd-dropdown:hover,
+  .high-cbd-dropdown-mini:hover {
+    border-color: #ff8800 !important; /* Brighter border on hover */
+    background: #ffdd44 !important; /* Lighter background on hover */
+    box-shadow: 0 4px 12px rgba(255, 102, 0, 0.6), 0 0 0 2px rgba(255, 102, 0, 0.4) !important; /* Enhanced hover shadow */
+    transform: translateY(-1px) scale(1.05) !important; /* Slight lift and scale on hover */
+    cursor: pointer !important;
+  }
+  
+  .doh-dropdown:focus,
+  .doh-dropdown-mini:focus,
+  .high-cbd-dropdown:focus,
+  .high-cbd-dropdown-mini:focus {
+    border-color: #ff8800 !important;
+    background: #ffdd44 !important;
+    box-shadow: 0 4px 12px rgba(255, 102, 0, 0.6), 0 0 0 3px rgba(255, 102, 0, 0.4) !important;
+    outline: none !important;
+    transform: scale(1.05) !important;
+  }
+
+  /* CRITICAL OVERRIDE: Compact dropdown sizes */
+  .lineage-dropdown,
+  .lineage-dropdown-mini,
+  .form-select.lineage-dropdown,
+  .form-select.lineage-dropdown-mini,
+  .tag-item .lineage-dropdown,
+  .tag-item .lineage-dropdown-mini,
+  .tag-entry .lineage-dropdown,
+  .tag-entry .lineage-dropdown-mini,
+  .tag-row .lineage-dropdown,
+  .tag-row .lineage-dropdown-mini {
+    min-width: 30px !important;
+    max-width: 40px !important;
+    width: 35px !important;
+    font-size: 8px !important;
+    padding: 2px 6px 2px 3px !important;
+    height: 14px !important;
+    line-height: 1.0 !important;
+    letter-spacing: -0.1px !important;
+    margin-left: -4px !important;
+    margin-right: 2px !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+  }
+
+  .doh-dropdown,
+  .doh-dropdown-mini,
+  .high-cbd-dropdown,
+  .high-cbd-dropdown-mini,
+  .tag-item .doh-dropdown,
+  .tag-item .doh-dropdown-mini,
+  .tag-item .high-cbd-dropdown,
+  .tag-item .high-cbd-dropdown-mini,
+  .tag-entry .doh-dropdown,
+  .tag-entry .doh-dropdown-mini,
+  .tag-entry .high-cbd-dropdown,
+  .tag-entry .high-cbd-dropdown-mini,
+  .tag-row .doh-dropdown,
+  .tag-row .doh-dropdown-mini,
+  .tag-row .high-cbd-dropdown,
+  .tag-row .high-cbd-dropdown-mini {
+    width: 70px !important;
+    max-width: 70px !important;
+    min-width: 70px !important;
+    font-size: 9px !important;
+    padding: 2px 12px 2px 6px !important;
+    height: 14px !important;
+    line-height: 1.0 !important;
+    letter-spacing: -0.1px !important;
+    margin-left: 1px !important;
+    margin-right: -2px !important;
+    text-align: left !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
   }
 
   .tag-actions {
@@ -3123,6 +3859,10 @@ canvas#lava-lamp-canvas {
     display: flex;
     align-items: center;
     gap: 8px;
+    /* CRITICAL: Ensure dropdowns aren't cut off */
+    overflow: visible !important;
+    padding-right: 4px !important; /* Extra padding for dropdowns */
+    flex-shrink: 0 !important; /* Prevent shrinking */
   }
   
   .move-tag-btn {
@@ -3190,14 +3930,14 @@ canvas#lava-lamp-canvas {
   }
   
   .tag-item[data-lineage="PARA"] {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3);
+    background: rgba(200, 50, 120, 0.8) !important;
+    border-color: rgba(200, 50, 120, 0.5) !important;
     font-weight: bold !important;
   }
   
   .tag-item[data-lineage="PARAPHERNALIA"] {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3);
+    background: rgba(200, 50, 120, 0.8) !important;
+    border-color: rgba(200, 50, 120, 0.5) !important;
     font-weight: bold !important;
   }
 
@@ -3248,8 +3988,8 @@ canvas#lava-lamp-canvas {
 
   div.tag-item[data-lineage="PARA"].tag-item,
   div.tag-item[data-lineage="PARAPHERNALIA"].tag-item {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3) !important;
+    background: rgba(200, 50, 120, 0.8) !important;
+    border-color: rgba(200, 50, 120, 0.5) !important;
   }
 
   /* JSON matched tag styling - subtle indicator without overriding lineage colors */
@@ -3331,12 +4071,12 @@ canvas#lava-lamp-canvas {
   .tag-item[data-lineage="PARA"] .tag-checkbox:checked,
   .tag-item[data-lineage="PARAPHERNALIA"] .custom-checkbox:checked,
   .tag-item[data-lineage="PARAPHERNALIA"] .tag-checkbox:checked {
-    background: linear-gradient(135deg, #ffc0cb 0%, #ffb3ba 100%) !important;
-    border-color: rgba(255, 192, 203, 0.9) !important;
+    background: linear-gradient(135deg, #c83278 0%, #a0285a 100%) !important;
+    border-color: rgba(200, 50, 120, 0.9) !important;
     box-shadow: 
       inset 0 2px 4px rgba(0, 0, 0, 0.2),
-      0 4px 15px rgba(255, 192, 203, 0.6),
-      0 2px 4px rgba(255, 192, 203, 0.4) !important;
+      0 4px 15px rgba(200, 50, 120, 0.6),
+      0 2px 4px rgba(200, 50, 120, 0.4) !important;
   }
   
   /* Tag row styles (for table view) - matching tag-item styles */
@@ -3381,13 +4121,13 @@ canvas#lava-lamp-canvas {
   }
   
   .tag-row[data-lineage="PARA"] {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3);
+    background: rgba(200, 50, 120, 0.8) !important;
+    border-color: rgba(200, 50, 120, 0.5) !important;
   }
   
   .tag-row[data-lineage="PARAPHERNALIA"] {
-    background: rgba(255, 192, 203, 0.6) !important;
-    border-color: rgba(255, 192, 203, 0.3);
+    background: rgba(200, 50, 120, 0.8) !important;
+    border-color: rgba(200, 50, 120, 0.5) !important;
   }
 
   /* CRITICAL FIX: Ensure CBD lineage colors override all other styles for tag-row */
@@ -3885,8 +4625,12 @@ canvas#lava-lamp-canvas {
     
     .filter-bar select {
       font-size: 0.8rem;
-      padding: 5px 8px;
+      padding: 0.5rem 8px 0.6rem 8px !important;
       margin-bottom: 0.5rem;
+      height: auto !important;
+      min-height: 2.5rem !important;
+      line-height: 1.6 !important;
+      overflow: visible !important;
     }
   }
   
@@ -3900,7 +4644,7 @@ canvas#lava-lamp-canvas {
     max-width: 60px;
     min-width: 40px;
     padding: 0.1rem 0.3rem;
-    font-size: 0.85em;
+    font-size: 0.5em !important; /* Much smaller font size */
     height: 1.6em;
     line-height: 1.2;
   }
@@ -3925,7 +4669,7 @@ canvas#lava-lamp-canvas {
     color: var(--primary-color);
     font-weight: 600;
     margin-bottom: 0.75rem;
-    font-size: 1.4rem;
+    font-size: 1.2rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
     position: relative;
@@ -4542,8 +5286,11 @@ canvas#lava-lamp-canvas {
     min-width: 160px !important;
     max-width: 250px !important;
     font-size: 1.05rem !important;
-    height: 36px !important;
-    padding: 6px 12px !important;
+    height: auto !important;
+    min-height: 2.5rem !important;
+    padding: 0.5rem 12px 0.6rem 12px !important;
+    line-height: 1.6 !important;
+    overflow: visible !important;
     background: rgba(45, 34, 58, 0.8) !important;
     color: var(--text-primary) !important;
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
@@ -4945,6 +5692,21 @@ canvas#lava-lamp-canvas {
     background: rgba(160, 132, 232, 0.1);
   }
   
+  /* Make name column wider in tags table */
+  .table .tag-name-header,
+  .table .tag-name-cell {
+    min-width: 250px !important;
+    width: 30% !important;
+    max-width: 400px !important;
+  }
+  
+  /* Make other columns appropriately sized */
+  .table thead th:not(.tag-name-header),
+  .table tbody td:not(.tag-name-cell) {
+    width: auto !important;
+    min-width: 80px !important;
+  }
+  
   /* Database buttons in control panel */
   .d-grid .btn-glass.btn-sm {
     font-size: 0.75rem;
@@ -5222,19 +5984,26 @@ canvas#lava-lamp-canvas {
     padding: 3px 5px !important;
     margin-bottom: 1px !important;
   }
-  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header,
+  .vendor-header {
+    padding: 0 0.25rem 0 0 !important;
+    margin-bottom: 0 !important;
+    min-width: 60px;
+    font-size: 1.2rem !important;
+  }
+  .brand-header, .product-type-header, .subcategory-header, .weight-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
     font-size: 0.78rem !important;
   }
+  /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
-    width: 16px;
-    height: 16px;
+    /* Use the larger checkbox sizes defined in main checkbox styles */
+    /* Don't override with smaller size */
   }
   .lineage-dropdown-mini {
-    font-size: 0.85em;
+    font-size: 0.5em !important; /* Much smaller font size */
     padding: 2px 6px;
     min-width: 40px;
     max-width: 60px;
@@ -5266,9 +6035,10 @@ canvas#lava-lamp-canvas {
     margin-left: 0 !important;
     margin-right: 0 !important;
     padding-left: 8px !important;
-    padding-right: 8px !important;
+    padding-right: 24px !important; /* Increased right padding to prevent dropdown cutoff */
     padding-top: 6px !important;
     padding-bottom: 6px !important;
+    overflow: visible !important; /* Ensure dropdowns aren't clipped */
   }
   .tag-info, .tag-name {
     flex-grow: 1;
@@ -5281,6 +6051,7 @@ canvas#lava-lamp-canvas {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: nowrap !important; /* Keep price and weight dropdown on same line */
   }
   .tag-name {
     flex-grow: 1;
@@ -5295,22 +6066,44 @@ canvas#lava-lamp-canvas {
   .lineage-dropdown,
   .lineage-dropdown-mini,
   .form-select.lineage-dropdown {
-    min-width: 45px !important;
-    max-width: 55px !important;
-    width: 50px !important;
-    font-size: 0.85em !important;
-    padding: 0 2px 0 12px !important;
-    background: rgba(255, 255, 255, 0.12) !important;
+    min-width: 60px !important;
+    max-width: 70px !important;
+    width: 65px !important;
+    font-size: 0.5em !important; /* Much smaller font size */
+    padding: 4px 14px 4px 4px !important; /* Right padding for arrow, left padding for text */
+    background: rgba(255, 255, 255, 0.15) !important; /* Slightly more visible */
     color: white !important;
-    border: 1px solid rgba(160, 132, 232, 0.25) !important;
+    border: 2px solid rgba(160, 132, 232, 0.5) !important; /* Thicker, more visible border */
     border-radius: 4px !important;
     backdrop-filter: blur(6px) !important;
     -webkit-backdrop-filter: blur(6px) !important;
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e") !important;
+    box-shadow: 0 2px 6px rgba(160, 132, 232, 0.3) !important; /* Add shadow for visibility */
+    cursor: pointer !important; /* Make it obvious it's clickable */
+    transition: all 0.2s ease !important; /* Smooth transitions */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important; /* White arrow */
     background-repeat: no-repeat !important;
-    background-position: left 4px center !important;
-    background-size: 8px !important;
+    background-position: right 2px center !important; /* Arrow on the right */
+    background-size: 10px !important; /* Larger arrow */
+    text-align: left !important; /* Left-align the text */
+  }
+  
+  .lineage-dropdown-mini:hover,
+  .form-select.lineage-dropdown-mini:hover {
+    border-color: rgba(160, 132, 232, 0.8) !important; /* Brighter border on hover */
+    background: rgba(255, 255, 255, 0.25) !important; /* Lighter background on hover */
+    box-shadow: 0 3px 8px rgba(160, 132, 232, 0.5) !important; /* Enhanced hover shadow */
+    transform: translateY(-1px) scale(1.05) !important; /* Slight lift and scale on hover */
+    cursor: pointer !important;
+  }
+  
+  .lineage-dropdown-mini:focus,
+  .form-select.lineage-dropdown-mini:focus {
+    border-color: rgba(160, 132, 232, 0.9) !important;
+    background: rgba(255, 255, 255, 0.3) !important;
+    box-shadow: 0 3px 8px rgba(160, 132, 232, 0.5), 0 0 0 2px rgba(160, 132, 232, 0.3) !important;
+    outline: none !important;
+    transform: scale(1.05) !important;
   }
 
   /* --- Super Compact Tag Item Styles --- */
@@ -5326,7 +6119,7 @@ canvas#lava-lamp-canvas {
     gap: 4px !important;
   }
   .tag-name {
-      font-size: 0.95rem !important;
+      font-size: 14px !important; /* Normal font size */
       line-height: 1.4 !important;
     white-space: normal !important;
     word-break: break-word !important;
@@ -5339,11 +6132,11 @@ canvas#lava-lamp-canvas {
   .lineage-dropdown,
   .lineage-dropdown-mini,
   .form-select.lineage-dropdown {
-    font-size: 0.75em !important;
-    min-width: 35px !important;
-    max-width: 45px !important;
-    width: 40px !important;
-    padding: 0 1px 0 8px !important;
+    font-size: 0.5em !important; /* Much smaller font size */
+    min-width: 60px !important;
+    max-width: 70px !important;
+    width: 65px !important;
+    padding: 0 14px 0 4px !important; /* Right padding for arrow, left padding for text */
     background: rgba(255, 255, 255, 0.12) !important;
     color: white !important;
     border: 1px solid rgba(160, 132, 232, 0.25) !important;
@@ -5351,10 +6144,11 @@ canvas#lava-lamp-canvas {
     backdrop-filter: blur(6px) !important;
     -webkit-backdrop-filter: blur(6px) !important;
     text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e") !important;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important; /* White arrow */
     background-repeat: no-repeat !important;
-    background-position: left 2px center !important;
-    background-size: 6px !important;
+    background-position: right 2px center !important; /* Arrow on the right */
+    background-size: 10px !important; /* Larger arrow */
+    text-align: left !important; /* Left-align the text */
   }
   .tag-info .d-flex.align-items-center {
     gap: 0.25rem !important;
@@ -5540,8 +6334,29 @@ canvas#lava-lamp-canvas {
     padding-left: 0 !important;
   }
 
-  .modal #editLineageSelect,
-  
+  /* Lineage Editor Modal Dropdown - Appropriately sized */
+  #lineageEditorModal #editLineageSelect,
+  #lineageEditorModal .lineage-dropdown-mini {
+    min-width: 120px !important;
+    max-width: 180px !important;
+    width: 150px !important;
+    font-size: 0.9rem !important;
+    padding: 0.5rem 2rem 0.5rem 0.75rem !important;
+    display: inline-block !important;
+    background: rgba(15, 23, 42, 0.9) !important;
+    color: rgba(255, 255, 255, 0.9) !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    border-radius: 8px !important;
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+    height: auto !important;
+    min-height: 2.5rem !important;
+    line-height: 1.5 !important;
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 14px center !important;
+    background-size: 18px 18px !important;
+  }
 
   .modal select#lineageSelect {
     min-width: 14px !important;
@@ -5573,7 +6388,7 @@ canvas#lava-lamp-canvas {
 
   /* Vendor (top-level) */
   .vendor-section > .vendor-header {
-    font-size: 2em !important;
+    font-size: 1.3em !important;
     font-weight: 700;
     margin-bottom: 0.4em;
     letter-spacing: 0.04em;
@@ -5586,7 +6401,7 @@ canvas#lava-lamp-canvas {
   .vendor-section > .vendor-header.d-flex,
   .vendor-section > .vendor-header.mb-2,
   .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 2.5em !important;
+    font-size: 1.4em !important;
     font-weight: 700 !important;
   }
 
@@ -5691,15 +6506,16 @@ canvas#lava-lamp-canvas {
     /* Standardized styling for consistent appearance */
     display: block !important;
     box-sizing: border-box !important;
-    width: 100% !important;
-    min-width: 180px !important; /* Ensure enough width for "Horizontal" */
-    max-width: 100% !important;
+    width: 140px !important; /* Fixed width to match min/max */
+    min-width: 140px !important; /* Reduced width for more compact appearance */
+    max-width: 140px !important; /* Limit max width to match min-width */
     min-height: 60px !important;
     height: 60px !important;
-    margin: 0.5rem 0 0.75rem 0 !important;
+    margin: 0.5rem auto 0.75rem auto !important; /* Center with auto margins */
     text-align: center !important;
     text-align-last: center !important;
-    padding: 12px 40px 12px 40px !important; /* Symmetric padding for centered text */
+    direction: ltr !important; /* Ensure left-to-right for proper centering */
+    padding: 12px 45px 12px 30px !important; /* Asymmetric padding: more right padding for arrow, more left to balance text */
     font-size: 0.95em !important; /* Reduced from 1.1em for better PC UI */
     font-weight: 700 !important;
     color: #e0d6f6 !important;
@@ -5714,11 +6530,199 @@ canvas#lava-lamp-canvas {
     white-space: nowrap !important; /* Prevent text wrapping */
     text-overflow: ellipsis !important;
     
+    /* CRITICAL: Force centering - override any conflicting rules */
+    margin-left: auto !important;
+    margin-right: auto !important;
+    float: none !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    transform: none !important;
+    
     /* Ensure consistent arrow across platforms - positioned to not interfere with centering */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
     background-position: right 14px center !important;
     background-size: 18px 18px !important;
+  }
+  
+  /* OVERRIDE form-select-modern class for template select */
+  #templateSelect.form-select-modern,
+  #templateSelectModal.form-select-modern {
+    margin: 0.5rem auto 0.75rem auto !important;
+    text-align: center !important;
+    text-align-last: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 50px !important; /* Match right padding to center text accounting for arrow */
+    padding-right: 50px !important;
+  }
+  
+  /* CRITICAL: Force text centering by adjusting padding to account for arrow */
+  #templateSelect option,
+  #templateSelectModal option {
+    text-align: center !important;
+    text-align-last: center !important;
+  }
+  
+  /* CRITICAL: Ensure selected text in dropdown is centered - override all other rules */
+  /* This rule ensures the displayed text is visually centered accounting for the dropdown arrow */
+  #templateSelect,
+  #templateSelectModal {
+    text-align: center !important;
+    text-align-last: center !important;
+    /* Adjust padding to visually center text - arrow takes ~32px on right (14px position + 18px size) */
+    /* So we add more left padding to balance it out visually */
+    padding-left: 30px !important;
+    padding-right: 45px !important;
+    direction: ltr !important;
+    /* Ensure text appears centered visually */
+    text-indent: 0 !important;
+  }
+  
+  /* FORCE CENTERING - Override any conflicting rules - UNIVERSAL RULE */
+  .control-section #templateSelect,
+  .control-section #templateSelectModal,
+  .control-panel #templateSelect,
+  .control-panel #templateSelectModal,
+  .control-panel .control-section #templateSelect,
+  .control-panel .control-section #templateSelectModal,
+  [data-container-type="center"] #templateSelect,
+  [data-container-type="center"] #templateSelectModal,
+  [data-container-type="center"] .control-section #templateSelect,
+  [data-container-type="center"] .control-section #templateSelectModal,
+  #templateSelect,
+  #templateSelectModal {
+    margin-left: auto !important;
+    margin-right: auto !important;
+    display: block !important;
+    text-align: center !important;
+    text-align-last: center !important;
+    float: none !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    transform: none !important;
+  }
+  
+  /* CRITICAL: Ensure control-section centers ALL its content including template select */
+  .control-section {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    width: 100% !important;
+  }
+  
+  /* Ensure the Template label is also centered */
+  .control-section .filter-label,
+  .control-section label[for="templateSelect"],
+  .control-section > label:first-child {
+    text-align: center !important;
+    width: 100% !important;
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  
+  /* FORCE template select to be centered within control-section */
+  .control-section #templateSelect,
+  .control-section #templateSelectModal {
+    margin-left: auto !important;
+    margin-right: auto !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  /* Fix template dropdown on large monitors (Windows PC) */
+  @media (min-width: 1921px) {
+    #templateSelect,
+    #templateSelectModal {
+      font-size: 0.8em !important; /* Smaller font on large monitors */
+      margin: 0.5rem auto 0.75rem auto !important; /* Ensure centered */
+      margin-left: auto !important;
+      margin-right: auto !important;
+      display: block !important;
+      width: 100% !important;
+    }
+    
+    /* Force control-section to center on large monitors */
+    .control-section {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+  }
+  
+  /* PC-specific: Reduce template select font size on Windows/PC screens */
+  /* Target larger screens (typically PC monitors) - Mac screens are usually smaller */
+  @media screen and (min-width: 1400px) {
+    #templateSelect,
+    #templateSelectModal {
+      font-size: 0.75em !important; /* Smaller font size for PC */
+    }
+  }
+  
+  /* PC-specific: Ensure template dropdown is centered in control-section */
+  @media (min-width: 992px) {
+    /* CRITICAL: Override control-panel's stretch alignment to center content on PC */
+    .control-panel {
+      align-items: center !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: flex-start !important;
+    }
+    
+    /* Center the control-section itself - ensure it centers its children */
+    .control-section {
+      align-items: center !important;
+      display: flex !important;
+      flex-direction: column !important;
+      width: 100% !important;
+      text-align: center !important;
+      justify-content: center !important;
+    }
+    
+    /* FORCE template dropdown to be centered - override everything */
+    .control-section #templateSelect,
+    .control-section #templateSelectModal,
+    .control-panel .control-section #templateSelect,
+    .control-panel .control-section #templateSelectModal {
+      display: block !important;
+      width: 100% !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+      text-align: center !important;
+      text-align-last: center !important;
+      transform: none !important;
+    }
+    
+    /* Ensure the center column container properly centers its children */
+    [data-container-type="center"] {
+      align-items: center !important;
+      text-align: center !important;
+    }
+    
+    /* Force center alignment for template select in center container */
+    [data-container-type="center"] #templateSelect,
+    [data-container-type="center"] #templateSelectModal {
+      margin-left: auto !important;
+      margin-right: auto !important;
+      text-align: center !important;
+      text-align-last: center !important;
+    }
+    
+    /* Ensure Template label is centered */
+    .control-section .filter-label,
+    .control-section label:first-child {
+      text-align: center !important;
+      width: 100% !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+    }
   }
   
   /* Override inline styles on template select */
@@ -5748,7 +6752,9 @@ canvas#lava-lamp-canvas {
     background: rgba(34, 34, 51, 0.95) !important;
     font-size: 0.95em !important; /* Match select font size */
     font-weight: 500;
-    text-align: center;
+    text-align: center !important;
+    text-align-last: center !important;
+    padding: 8px 12px !important;
   }
 
   #templateSelect:focus,
@@ -5772,11 +6778,11 @@ canvas#lava-lamp-canvas {
   }
 
   #generateBtn {
-    width: 100% !important;
-    max-width: 100% !important;
-    height: 52px !important;
+    width: 85% !important; /* Decreased from 100% to match other buttons */
+    max-width: 85% !important; /* Decreased from 100% */
+    height: 220px !important; /* Doubled from 110px - twice as tall */
     margin: 0.2rem auto !important;
-    padding: 0.85rem 1.2rem !important;
+    padding: 4.4rem 1.2rem !important; /* Doubled vertical padding from 2.2rem */
     font-size: 1rem !important;
     font-weight: 700 !important;
     border-radius: 10px !important;
@@ -6229,7 +7235,7 @@ canvas#lava-lamp-canvas {
   }
 
   .excel-loading-subtitle {
-    font-size: 24px; /* Increased for better visibility */
+    font-size: 18px; /* Normal size */
     color: rgba(255, 255, 255, 0.8);
     margin-bottom: 28px; /* Increased spacing */
     font-weight: 500;
@@ -6237,7 +7243,7 @@ canvas#lava-lamp-canvas {
 
 
   .excel-loading-status {
-    font-size: 22px; /* Increased for better visibility */
+    font-size: 16px; /* Normal size */
     color: rgba(255, 255, 255, 0.7);
     margin-bottom: 28px; /* Increased spacing */
     font-weight: 500;
@@ -6285,7 +7291,7 @@ canvas#lava-lamp-canvas {
     }
     
     .excel-loading-subtitle {
-      font-size: 22px; /* Increased for mobile */
+      font-size: 16px; /* Normal size for mobile */
     }
     
     .excel-loading-status {
@@ -6349,10 +7355,15 @@ canvas#lava-lamp-canvas {
     width: 54px;
     height: 54px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #00d4aa 0%, #0099cc 100%);
-    box-shadow: 0 0 4px 1px rgba(0, 212, 170, 0.6), 0 0 8px 2px rgba(0, 212, 170, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.8);
-    color: #ffffff;
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.6), rgba(0, 150, 255, 0.7)) !important;
+    box-shadow: 
+      0 4px 16px rgba(0, 212, 255, 0.5),
+      0 0 24px rgba(0, 212, 255, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+    border: 2px solid rgba(0, 212, 255, 0.9) !important;
+    color: #ffffff !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     font-size: 1.4rem;
     margin: 0;
     cursor: pointer;
@@ -6371,10 +7382,14 @@ canvas#lava-lamp-canvas {
   }
 
   .big-glow-help-btn:hover, .big-glow-help-btn:focus {
-    box-shadow: 0 0 24px 8px rgba(0, 212, 170, 0.7), 0 0 36px 12px rgba(0, 212, 170, 0.5);
-    transform: scale(1.06);
+    box-shadow: 
+      0 6px 24px rgba(0, 212, 255, 0.7),
+      0 0 32px rgba(0, 212, 255, 0.6),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+    transform: scale(1.1);
     outline: none;
-    background: linear-gradient(135deg, #00b894 0%, #00a8cc 100%);
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.8), rgba(0, 150, 255, 0.9)) !important;
+    border-color: rgba(0, 212, 255, 1) !important;
   }
 
   @keyframes help-glow-pulse {
@@ -6474,7 +7489,7 @@ canvas#lava-lamp-canvas {
       0 4px 16px rgba(160,132,232,0.1),
       0 2px 8px rgba(160,132,232,0.08) !important; /* Match glass-card shadows */
     margin: 0 0 0.75rem 0; /* Reduced bottom margin */
-    padding: 0.75rem; /* Reduced from 1.5rem */
+    padding: 0.75rem 0.75rem 1rem 0.75rem !important; /* Increased bottom padding to prevent cutoff */
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important; /* Match glass-card transition */
     position: relative;
     display: flex !important;
@@ -6482,6 +7497,7 @@ canvas#lava-lamp-canvas {
     gap: 0.75rem !important;
     align-items: stretch !important;
     justify-content: stretch !important;
+    overflow: visible !important; /* Prevent content cutoff */
   }
 
   /* Hover effect to match glass-card */
@@ -6500,7 +7516,7 @@ canvas#lava-lamp-canvas {
 
   /* Filter column styling - updated to match glass-card aesthetic and equal sizing */
   .sticky-filter-bar .filter-column {
-    padding: 0.5rem !important; /* Reduced from 1rem */
+    padding: 0.5rem 0.5rem 0.75rem 0.5rem !important; /* Increased bottom padding to prevent cutoff */
     margin: 0 !important;
     background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
     border-radius: 10px !important; /* Reduced from 12px */
@@ -6512,6 +7528,7 @@ canvas#lava-lamp-canvas {
     display: flex !important;
     flex-direction: column !important;
     gap: 0.35rem !important;
+    overflow: visible !important; /* Prevent content cutoff */
   }
 
   .sticky-filter-bar .filter-column:hover {
@@ -6528,12 +7545,20 @@ canvas#lava-lamp-canvas {
     font-weight: 700 !important; /* Match tag column header weight */
     color: #ffffff !important; /* Match tag column header color */
     margin-bottom: 0.4rem !important; /* Reduced from 0.75rem */
+    margin-top: 0 !important; /* Remove top margin */
+    padding-top: 0 !important; /* Remove top padding */
+    padding-bottom: 0.2rem !important; /* Increased bottom padding to prevent cutoff */
+    padding-left: 0 !important;
+    padding-right: 0 !important;
     text-transform: uppercase !important;
     letter-spacing: 0.5px !important;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7) !important; /* Match tag column styling */
     white-space: nowrap !important; /* Prevent label wrapping */
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
+    overflow: visible !important; /* Changed from hidden to visible to prevent cutoff */
+    text-overflow: clip !important; /* Changed from ellipsis to clip to show full text */
+    line-height: 1.6 !important; /* Increased line-height to prevent bottom cutoff */
+    min-height: 1.3rem !important; /* Increased minimum height for text visibility */
+    box-sizing: border-box !important;
   }
 
   /* Filter dropdowns styling - updated to match overall theme and equal sizing */
@@ -6544,11 +7569,13 @@ canvas#lava-lamp-canvas {
     border-radius: 8px !important;
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
-    padding: 0.35rem 0.55rem !important; /* Reduced padding */
+    padding: 0.5rem 0.55rem 0.6rem 0.55rem !important; /* Significantly increased vertical padding to prevent text cutoff */
     padding-right: 1.75rem !important; /* Extra space for dropdown arrow */
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
     min-width: 140px !important; /* Minimum width to fit "All" text and arrow */
+    min-height: 2.5rem !important; /* Increased minimum height for text visibility */
+    height: auto !important; /* Allow height to adjust to content */
     white-space: nowrap !important; /* Prevent text wrapping */
     overflow: visible !important; /* Allow dropdown to expand */
     text-overflow: clip !important; /* Don't truncate text */
@@ -6557,7 +7584,7 @@ canvas#lava-lamp-canvas {
     flex: 1 1 auto !important; /* Flex grow and shrink */
     box-sizing: border-box !important;
     font-size: 0.85rem !important; /* Reduced font size */
-    line-height: 1.3 !important;
+    line-height: 1.6 !important; /* Increased line-height to prevent cutoff */
   }
 
   .sticky-filter-bar .form-select:focus,
@@ -6687,12 +7714,14 @@ canvas#lava-lamp-canvas {
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    margin: 0.9rem 0 !important;
+    margin: 0.5rem 0 1rem 0 !important; /* Top margin and extra bottom margin to prevent cutoff */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.75rem !important;
+    padding: 0.9rem 0.75rem !important; /* Equal top and bottom padding */
+    position: relative !important;
+    z-index: 1 !important;
   }
   
   .help-label {
@@ -6754,7 +7783,7 @@ canvas#lava-lamp-canvas {
 
   /* Explicit filter column styling */
   .sticky-filter-bar .filter-column {
-    padding: 1rem !important;
+    padding: 0.5rem 0.5rem 0.75rem 0.5rem !important; /* Increased bottom padding to prevent cutoff */
     margin: 0 0.5rem !important;
     background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
     border-radius: 12px !important; /* Slightly smaller than parent */
@@ -6763,6 +7792,7 @@ canvas#lava-lamp-canvas {
     flex: 1 1 auto !important; /* Allow growth to fit content */
     min-width: 140px !important; /* Prevent shrinking below content size */
     max-width: none !important; /* Remove max-width constraints */
+    overflow: visible !important; /* Prevent content cutoff */
   }
 
   .sticky-filter-bar .filter-column:hover {
@@ -6886,10 +7916,12 @@ canvas#lava-lamp-canvas {
     color: #fff;
     border-radius: 8px;
     border: 1.5px solid #a084e8;
-    height: 36px;
-    min-height: 36px;
-    padding: 6px 10px;
+    height: auto !important;
+    min-height: 2.5rem !important;
+    padding: 0.5rem 10px 0.6rem 10px !important;
     font-size: 0.95rem;
+    line-height: 1.6 !important;
+    overflow: visible !important;
     /* Bright blue arrow */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%2300BFFF" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
@@ -6917,17 +7949,22 @@ canvas#lava-lamp-canvas {
     margin-top: 0 !important;
     margin-bottom: 0 !important;
     padding-top: 0 !important;
-    padding-bottom: 0 !important;
+    padding-bottom: 0.15rem !important; /* Allow padding to prevent bottom cutoff */
+    line-height: 1.5 !important; /* Ensure proper line-height for text visibility */
+    overflow: visible !important; /* Prevent text cutoff */
+    min-height: 1.2rem !important; /* Ensure minimum height */
   }
   .sticky-filter-bar .form-select,
   .sticky-filter-bar select,
   .sticky-filter-bar .form-select-sm {
     margin-top: 0 !important;
     margin-bottom: 0 !important;
-    padding-top: 2px !important;
-    padding-bottom: 2px !important;
-    min-height: 24px !important;
-    height: 28px !important;
+    padding-top: 0.5rem !important; /* Significantly increased to prevent cutoff */
+    padding-bottom: 0.6rem !important; /* Significantly increased to prevent cutoff */
+    min-height: 2.5rem !important; /* Increased for better visibility */
+    height: auto !important; /* Allow height to adjust to content */
+    line-height: 1.6 !important; /* Increased line-height to prevent cutoff */
+    overflow: visible !important; /* Prevent content clipping */
   }
   .sticky-filter-bar > div:not(:last-child) {
     margin-bottom: 6px !important;
@@ -6937,20 +7974,29 @@ canvas#lava-lamp-canvas {
     margin-bottom: 2px !important;
     padding: 0 !important;
   }
+  
+  /* Ensure filter columns have proper bottom padding */
+  .sticky-filter-bar .filter-column {
+    padding-bottom: 0.75rem !important; /* Override the padding: 0 above */
+  }
 
   /* Make sidebar filter bar and filters slightly smaller */
   .sticky-filter-bar .form-label,
   .sticky-filter-bar .filter-label {
     font-size: 0.92em !important;
-    padding: 0 0 2px 0 !important;
+    padding: 0 0 0.15rem 0 !important; /* Increased bottom padding to prevent cutoff */
+    line-height: 1.5 !important; /* Ensure proper line-height */
+    overflow: visible !important; /* Prevent text cutoff */
   }
   .sticky-filter-bar select,
   .sticky-filter-bar .form-select,
   .sticky-filter-bar .form-select-sm {
     font-size: 0.97em !important;
-    padding: 4px 10px !important;
-    min-height: 20px !important;
-    height: 26px !important;
+    padding: 0.5rem 10px 0.6rem 10px !important; /* Significantly increased vertical padding to prevent cutoff */
+    min-height: 2.5rem !important; /* Increased for better visibility */
+    height: auto !important; /* Allow height to adjust to content */
+    line-height: 1.6 !important; /* Increased line-height to prevent cutoff */
+    overflow: visible !important; /* Prevent content clipping */
   }
 
   /* Ensure sidebar filter dropdowns fit container */
@@ -6989,12 +8035,13 @@ canvas#lava-lamp-canvas {
   .form-select,
   .form-select-sm,
   .compact-filter {
-      min-height: 38px !important;
-      height: 38px !important;
+      min-height: 2.5rem !important;
+      height: auto !important;
       font-size: 1.05em !important;
-      padding-top: 6px !important;
-      padding-bottom: 6px !important;
-      line-height: 1.2 !important;
+      padding-top: 0.5rem !important;
+      padding-bottom: 0.6rem !important;
+      line-height: 1.6 !important;
+      overflow: visible !important;
   }
 
   /* Slightly increase label spacing for filter labels */
@@ -8553,8 +9600,8 @@ canvas#lava-lamp-canvas {
 
   /* Force DOH logo to be reasonable size */
   img[src*="DOH.png"] {
-    height: 21px !important;
-    max-height: 21px !important;
+    height: 32px !important;
+    max-height: 32px !important;
     width: auto !important;
     vertical-align: middle !important;
     display: inline-block !important;
@@ -8700,7 +9747,7 @@ canvas#lava-lamp-canvas {
   .vendor-section > .vendor-header.collapsible-header,
   .vendor-section > .vendor-header.align-items-center,
   .vendor-section > .vendor-header * {
-    font-size: 1.1em !important;
+    font-size: 1.25em !important;
     font-weight: 700 !important;
     line-height: 1.2 !important;
   }
@@ -8789,7 +9836,7 @@ canvas#lava-lamp-canvas {
   }
   
   .vendor-header .text-container {
-    font-size: clamp(12px, 1.05rem, 20px) !important;
+    font-size: clamp(14px, 1.2rem, 20px) !important;
     font-weight: 600 !important;
   }
   
@@ -8875,7 +9922,7 @@ canvas#lava-lamp-canvas {
       font-size: clamp(11px, 3.2vw, 17px) !important;
     }
   }
-  @media (301px) and (max-width: 500px) {
+  @media (min-width: 301px) and (max-width: 500px) {
     .text-container {
       font-size: clamp(12px, 3.4vw, 19px) !important;
     }
@@ -9141,6 +10188,14 @@ canvas#lava-lamp-canvas {
     
     /* Native-like behavior */
     transition: border-color 0.15s ease !important;
+    
+    /* CRITICAL: Prevent text cutoff - ensure adequate padding and no height constraints */
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.6rem !important;
+    min-height: 2.5rem !important;
+    height: auto !important;
+    line-height: 1.6 !important;
+    overflow: visible !important;
   }
 
   /* Ensure consistent arrow positioning and styling */
@@ -9157,12 +10212,12 @@ canvas#lava-lamp-canvas {
     background-size: 18px 18px !important;
   }
 
-  /* Special handling for lineage dropdowns with left-positioned arrows */
+  /* Special handling for lineage dropdowns with right-positioned arrows */
   .lineage-dropdown, .lineage-dropdown-mini {
-    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m1 6 7 7 7-7'/%3e%3c/svg%3e") !important;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
     background-repeat: no-repeat !important;
-    background-position: left 12px center !important;
-    background-size: 12px !important;
+    background-position: right 2px center !important;
+    background-size: 10px !important;
   }
 
   /* Ensure consistent option styling across platforms */
@@ -9391,10 +10446,11 @@ canvas#lava-lamp-canvas {
       background-color: inherit !important;
     }
 
-    /* Special handling for lineage dropdowns (left-positioned arrows) */
+    /* Special handling for lineage dropdowns (right-positioned arrows) */
     .lineage-dropdown, .lineage-dropdown-mini {
-      background-image: url('data:image/svg+xml;utf8,<svg fill="%23ffffff" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
-      background-position: left 14px center !important;
+      background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='white' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
+      background-position: right 2px center !important;
+      background-size: 10px !important;
     }
   }
 
@@ -9530,6 +10586,135 @@ canvas#lava-lamp-canvas {
   100% { transform: rotate(360deg); }
 }
 
+/* Action Splash Overlay - for loading/export messages */
+.action-splash {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.action-splash-content {
+  background: rgba(45, 34, 58, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(160, 132, 232, 0.3);
+  border-radius: 15px;
+  padding: 36px 42px;
+  min-width: 300px;
+  max-width: 400px;
+  box-shadow: 
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(160, 132, 232, 0.1);
+  color: #ffffff;
+  text-align: center;
+  animation: scaleIn 0.3s ease-out;
+}
+
+.action-splash-message {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #ffffff;
+  margin-top: 1rem;
+}
+
+/* Ensure Bootstrap spinner-border spins continuously */
+.spinner-border {
+  animation: spinner-border 0.75s linear infinite !important;
+  display: inline-block;
+  width: 2rem;
+  height: 2rem;
+  vertical-align: text-bottom;
+  border: 0.25em solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+}
+
+@keyframes spinner-border {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Export splash specific styles */
+.export-splash-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.export-splash-content {
+  background: rgba(45, 34, 58, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(160, 132, 232, 0.3);
+  border-radius: 15px;
+  padding: 36px 42px;
+  min-width: 300px;
+  max-width: 400px;
+  box-shadow: 
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(160, 132, 232, 0.1);
+  color: #ffffff;
+  text-align: center;
+  animation: scaleIn 0.3s ease-out;
+}
+
+.export-splash-icon .spinner-border {
+  animation: spinner-border 0.75s linear infinite !important;
+}
+
+.export-splash-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.export-splash-message {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 1rem;
+}
+
+.export-splash-progress {
+  margin-top: 1rem;
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* Form validation styles */
 .is-valid {
   border-color: #28a745 !important;
@@ -9603,69 +10788,7 @@ canvas#lava-lamp-canvas {
 /* ========================================================================
    FINAL OVERRIDE: Control Button Styling - Must be at end of file
    ======================================================================== */
-.control-panel .btn-control,
-.control-panel .btn-glass.btn-control,
-.control-panel .d-grid .btn-control,
-.btn-control {
-  padding: 14px 16px !important;
-  font-size: 0.95rem !important;
-  font-weight: 600 !important;
-  min-height: 56px !important;
-  width: 90% !important;
-  max-width: 260px !important;
-  margin: 0 auto !important;
-  margin-bottom: 0 !important;
-  border-radius: 10px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
-  backdrop-filter: blur(15px) !important;
-  -webkit-backdrop-filter: blur(15px) !important;
-  border: 1px solid rgba(139, 92, 246, 0.8) !important;
-  color: #fff !important;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
-  box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
-}
-
-.control-panel .btn-control:hover,
-.control-panel .btn-glass.btn-control:hover,
-.control-panel .d-grid .btn-control:hover,
-.btn-control:hover {
-  background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
-  border-color: rgba(159, 122, 234, 1) !important;
-  color: #fff !important;
-  transform: translateY(-2px) scale(1.02) !important;
-  box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5), 0 8px 28px rgba(139, 92, 246, 0.35) !important;
-}
-
-.control-panel .btn-control:active,
-.control-panel .btn-glass.btn-control:active,
-.control-panel .d-grid .btn-control:active,
-.btn-control:active {
-  transform: translateY(0) scale(0.98) !important;
-  transition: transform 0.1s ease !important;
-}
-
-.control-panel .btn-control .icon-btn,
-.control-panel .btn-glass.btn-control .icon-btn,
-.btn-control .icon-btn {
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  width: 100% !important;
-  justify-content: center !important;
-}
-
-.control-panel .btn-control svg,
-.control-panel .btn-glass.btn-control svg,
-.btn-control svg {
-  flex-shrink: 0 !important;
-  opacity: 0.95 !important;
-  width: 18px !important;
-  height: 18px !important;
-}
+/* Duplicate button styles removed - using the glass morphism design from line 2943 instead */
 
 /* ========================================
    FULLSCREEN CANVAS FIX - FINAL OVERRIDE
@@ -9965,5 +11088,462 @@ html, body {
     }
     40% {
         transform: scale(1);
+    }
+}
+
+/* ============================================
+   Analytics Modal - Modern Redesign
+   ============================================ */
+
+#databaseModal .modal-content {
+    background: linear-gradient(135deg, rgba(26, 22, 35, 0.98) 0%, rgba(45, 34, 58, 0.98) 100%);
+    border: 1px solid rgba(160, 132, 232, 0.3);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(160, 132, 232, 0.1);
+    backdrop-filter: blur(20px);
+    overflow: hidden;
+}
+
+#databaseModal .modal-header {
+    background: linear-gradient(135deg, rgba(160, 132, 232, 0.15) 0%, rgba(255, 143, 171, 0.15) 100%);
+    border-bottom: 1px solid rgba(160, 132, 232, 0.2);
+    padding: 1.5rem 2rem;
+    border-radius: 16px 16px 0 0;
+}
+
+#databaseModal .modal-title {
+    background: var(--primary-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-weight: 700;
+    font-size: 1.5rem;
+    margin: 0;
+}
+
+#databaseModal .btn-close {
+    filter: brightness(0) invert(1);
+    opacity: 0.8;
+    transition: all 0.2s ease;
+}
+
+#databaseModal .btn-close:hover {
+    opacity: 1;
+    transform: rotate(90deg);
+}
+
+#databaseModal .modal-body {
+    padding: 2rem;
+    color: rgba(255, 255, 255, 0.9);
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+}
+
+/* Analytics Cards */
+.analytics-card {
+    background: rgba(45, 34, 58, 0.6);
+    border: 1px solid rgba(160, 132, 232, 0.2);
+    border-radius: 16px;
+    padding: 1.5rem;
+    height: 100%;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.analytics-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--primary-gradient);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.analytics-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(160, 132, 232, 0.4);
+    box-shadow: 0 8px 24px rgba(160, 132, 232, 0.2);
+}
+
+.analytics-card:hover::before {
+    opacity: 1;
+}
+
+.analytics-card-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.analytics-card-icon i {
+    font-size: 1.5rem;
+    color: white;
+}
+
+.analytics-card-content {
+    position: relative;
+}
+
+.analytics-card-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0.5rem 0;
+    line-height: 1.2;
+}
+
+.analytics-card-label {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9rem;
+    margin: 0.5rem 0 1rem 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.analytics-card-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(160, 132, 232, 0.1);
+}
+
+.detail-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.detail-label {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.85rem;
+}
+
+.detail-value {
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.analytics-card-badge {
+    margin-top: 1rem;
+}
+
+.badge-modern {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    background: rgba(160, 132, 232, 0.2);
+    border: 1px solid rgba(160, 132, 232, 0.3);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+/* Section Cards */
+.analytics-section-card {
+    background: rgba(45, 34, 58, 0.6);
+    border: 1px solid rgba(160, 132, 232, 0.2);
+    border-radius: 16px;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+}
+
+.analytics-section-card:hover {
+    border-color: rgba(160, 132, 232, 0.4);
+    box-shadow: 0 8px 24px rgba(160, 132, 232, 0.15);
+}
+
+.analytics-section-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem 1.5rem;
+    background: rgba(160, 132, 232, 0.08);
+    border-bottom: 1px solid rgba(160, 132, 232, 0.15);
+}
+
+.section-header-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.section-header-icon i {
+    font-size: 1.25rem;
+    color: white;
+}
+
+.section-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.section-subtitle {
+    margin: 0.25rem 0 0 0;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.analytics-section-body {
+    padding: 1.5rem;
+    flex: 1;
+    overflow-y: auto;
+    max-height: 400px;
+}
+
+/* List Items */
+.analytics-list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 0;
+    transition: all 0.2s ease;
+}
+
+.analytics-list-item.has-border {
+    border-bottom: 1px solid rgba(160, 132, 232, 0.1);
+}
+
+.analytics-list-item:hover {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    background: rgba(160, 132, 232, 0.05);
+    border-radius: 8px;
+    margin: 0 -0.5rem;
+}
+
+.list-item-content {
+    flex: 1;
+}
+
+.list-item-title {
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.list-item-meta {
+    display: flex;
+    gap: 1rem;
+    margin: 0;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.list-item-meta span {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.list-item-meta i {
+    font-size: 0.75rem;
+}
+
+.list-item-badge {
+    margin-left: 1rem;
+}
+
+.badge-gradient {
+    display: inline-block;
+    padding: 0.4rem 0.9rem;
+    background: var(--primary-gradient);
+    border-radius: 10px;
+    color: white;
+    font-weight: 600;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 8px rgba(160, 132, 232, 0.3);
+}
+
+.badge-gradient.badge-success {
+    background: var(--success-gradient);
+    box-shadow: 0 2px 8px rgba(67, 233, 123, 0.3);
+}
+
+/* Chart Container */
+.chart-container {
+    height: 280px;
+    position: relative;
+    padding: 1rem 0;
+}
+
+/* Info Card */
+.analytics-info-card {
+    background: rgba(160, 132, 232, 0.1);
+    border: 1px solid rgba(160, 132, 232, 0.3);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.info-card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: var(--primary-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.info-card-icon i {
+    font-size: 1.25rem;
+    color: white;
+}
+
+.info-card-content {
+    flex: 1;
+}
+
+.info-card-title {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.info-card-text {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.6;
+    font-size: 0.95rem;
+}
+
+.info-card-text strong {
+    color: rgba(255, 255, 255, 0.95);
+    font-weight: 600;
+}
+
+.info-card-warning {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.85rem;
+}
+
+.info-card-warning i {
+    color: #f59e0b;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.empty-state p {
+    margin: 0;
+    font-size: 0.95rem;
+}
+
+/* Actions */
+.analytics-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(160, 132, 232, 0.15);
+}
+
+.btn-analytics-export {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1.5rem;
+    background: var(--primary-gradient);
+    border: none;
+    border-radius: 10px;
+    color: white;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(160, 132, 232, 0.3);
+}
+
+.btn-analytics-export:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(160, 132, 232, 0.4);
+}
+
+.btn-analytics-export i {
+    font-size: 1.1rem;
+}
+
+/* Scrollbar Styling */
+#databaseModal .modal-body::-webkit-scrollbar,
+.analytics-section-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+#databaseModal .modal-body::-webkit-scrollbar-track,
+.analytics-section-body::-webkit-scrollbar-track {
+    background: rgba(45, 34, 58, 0.5);
+    border-radius: 4px;
+}
+
+#databaseModal .modal-body::-webkit-scrollbar-thumb,
+.analytics-section-body::-webkit-scrollbar-thumb {
+    background: rgba(160, 132, 232, 0.4);
+    border-radius: 4px;
+}
+
+#databaseModal .modal-body::-webkit-scrollbar-thumb:hover,
+.analytics-section-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(160, 132, 232, 0.6);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    #databaseModal .modal-body {
+        padding: 1.5rem;
+    }
+    
+    .analytics-card-value {
+        font-size: 2rem;
+    }
+    
+    .analytics-section-header {
+        padding: 1rem;
+    }
+    
+    .analytics-section-body {
+        padding: 1rem;
     }
 }

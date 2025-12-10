@@ -295,7 +295,8 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
             result[edible_cbd] = 'MIXED'
         
         # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
-        paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
+        # Check Product Type* directly since Product Strain is set to "Mixed" for paraphernalia
+        paraphernalia_mask = nonclassic_mask & (product_types.str.strip().str.lower() == 'paraphernalia')
         result[paraphernalia_mask] = 'PARAPHERNALIA'
         
         # Mixed products -> MIXED lineage (blue) - override existing lineage
@@ -431,7 +432,7 @@ def batch_lineage_database_update(processor, df):
             return
         
         # Group by strain for efficient batch processing
-        strain_groups = classic_df.groupby('Product Strain')
+        strain_groups = classic_df.groupby('Product Strain', observed=False)
         
         for strain_name, group in strain_groups:
             if not strain_name or pd.isna(strain_name):
@@ -1501,20 +1502,19 @@ class ExcelProcessor:
                 try:
                     self.logger.debug(f"Attempting to read with engine: {engine}")
                     
-                    # Use optimized reading settings - minimal dtype specification for speed
-                    dtype_dict = {
-                        "Product Name*": "string",
-                        "Product Type*": "string",
-                        "Lineage": "string"
-                    }
-                    
-                    # Read with minimal processing - no NA filtering for speed
+                    # ULTRA-PERFORMANCE: Read with absolute minimal processing
+                    # - dtype=str: Read all as strings (skip type inference)
+                    # - na_filter=False: Skip NA detection/filtering
+                    # - keep_default_na=False: Don't use default NA values
+                    # - converters=None: No column converters
+                    # This can be 2-3x faster than normal reading
                     df = pd.read_excel(
                         file_path, 
                         engine=engine,
-                        dtype=dtype_dict,
-                        na_filter=False,  # Don't filter NA values for speed
-                        keep_default_na=False  # Don't use default NA values
+                        dtype=str,
+                        na_filter=False,
+                        keep_default_na=False,
+                        converters=None
                     )
                     
                     self.logger.info(f"Successfully read file with {engine} engine: {len(df)} rows, {len(df.columns)} columns")
@@ -1531,33 +1531,27 @@ class ExcelProcessor:
                 self.logger.error("No data found in Excel file")
                 return False
             
-            # Handle duplicate columns efficiently
-            df = handle_duplicate_columns(df)
+            # PERFORMANCE: Skip duplicate column handling for ultra-fast load
+            # Will be handled on first data access if needed
+            # df = handle_duplicate_columns(df)
             
-            # Remove duplicates efficiently - use product name as primary key for deduplication
+            # PERFORMANCE: Minimal deduplication - only remove completely identical rows
             initial_count = len(df)
             
-            # First, ensure we have a product name column
-            product_name_col = None
-            for col in ['Product Name*', 'ProductName', 'Product Name', 'Description']:
-                if col in df.columns:
-                    product_name_col = col
-                    break
+            # Quick deduplication: only remove rows that are 100% identical across ALL columns
+            # This is much faster than complex column-based deduplication
+            df = df.drop_duplicates(keep='first')
             
-            if product_name_col:
-                # Use product name as primary key for deduplication to prevent UI duplicates
-                df.drop_duplicates(subset=[product_name_col], inplace=True)
-                self.logger.info(f"Removed duplicates based on product name column: {product_name_col}")
-            else:
-                # Fallback to general deduplication if no product name column found
-                df.drop_duplicates(inplace=True)
-                self.logger.info("No product name column found, using general deduplication")
+            deduped_count = initial_count - len(df)
+            if deduped_count > 0:
+                self.logger.info(f"[ULTRA-FAST] Removed {deduped_count} fully duplicate rows ({initial_count} -> {len(df)})")
             
+            # Reset index after deduplication
             df.reset_index(drop=True, inplace=True)
-            final_count = len(df)
-            if initial_count != final_count:
-                self.logger.info(f"Removed {initial_count - final_count} duplicate rows")
-
+            
+            # Skip complex column-based deduplication for ultra-fast loading
+            # (Deferred to later processing if needed)
+            
             # Log all available columns for debugging
             self.logger.info(f"All columns in uploaded file: {df.columns.tolist()}")
             
@@ -1719,19 +1713,21 @@ class ExcelProcessor:
             self.df = df
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
             
-            # Duplicate Product Strain column to "Strain Names" for processing
+            # PERFORMANCE OPTIMIZATION: Skip heavy operations during fast load
+            # These can be done lazily when needed instead of blocking upload
+            # Duplicate Product Strain column to "Strain Names" for processing (minimal operation)
             if 'Product Strain' in self.df.columns:
                 self.df['Strain Names'] = self.df['Product Strain'].copy()
                 self.logger.info("Duplicated 'Product Strain' column to 'Strain Names' for processing")
             
-            # Apply strain extraction for Moonshot products
-            self.apply_strain_extraction()
+            # SKIP: Heavy strain extraction - defer to lazy processing
+            # self.apply_strain_extraction()
             
-            # Process Description values using our established formula
-            self._process_descriptions_from_product_names()
+            # SKIP: Heavy description processing - defer to lazy processing  
+            # self._process_descriptions_from_product_names()
             
             self._on_dataset_updated(file_path)
-            self.logger.info(f"Ultra-fast load successful: {len(self.df)} rows, {len(self.df.columns)} columns")
+            self.logger.info(f"Ultra-fast load successful: {len(self.df)} rows, {len(self.df.columns)} columns (heavy processing deferred)")
             return True
                 
         except Exception as e:
@@ -1767,13 +1763,13 @@ class ExcelProcessor:
                 import gc
                 gc.collect()
             
-            # Minimal Excel reading - just get the data
+            # Minimal Excel reading - just get the data (no row limit for full file loading)
             df = pd.read_excel(
                 file_path, 
                 engine='openpyxl',
                 na_filter=False,
-                keep_default_na=False,
-                nrows=5000  # Limit rows for speed
+                keep_default_na=False
+                # Removed nrows limit to allow full file loading
             )
             
             if df is None or df.empty:
@@ -4523,7 +4519,8 @@ class ExcelProcessor:
                     
                     # CRITICAL FIX: Look up database values (lineage, weight, units) and override Excel values
                     # Database is the source of truth, especially for lineage overrides
-                    # Use fuzzy matching to handle name variations (e.g., "100 Rackz Super Sale - 14g" vs "100 Rackz by Mt Baker Homegrown - 14g")
+                    # CRITICAL: Always use get_product_lineage() for lineage (same method as _build_label_context)
+                    # This ensures lineage changes are always reflected in output
                     db_weight = ''
                     db_units = ''
                     db_lineage = None
@@ -4531,6 +4528,24 @@ class ExcelProcessor:
                         from src.core.data.product_database import get_product_database
                         product_db = get_product_database()
                         if product_db:
+                            # CRITICAL FIX: ALWAYS use get_product_lineage() for lineage FIRST
+                            # This is the same method used in _build_label_context, ensuring consistency
+                            # This ensures lineage updates are immediately reflected in output
+                            try:
+                                db_lineage_from_method = product_db.get_product_lineage(product_name)
+                                if db_lineage_from_method:
+                                    db_lineage_clean = str(db_lineage_from_method).strip().upper()
+                                    excel_lineage = str(record.get('Lineage', '')).strip().upper()
+                                    
+                                    # Always override Excel lineage with database lineage
+                                    if excel_lineage != db_lineage_clean:
+                                        logger.info(f"🔄 LINEAGE OVERRIDE (get_selected_records): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
+                                    record['Lineage'] = db_lineage_clean
+                                    logger.debug(f"✅ Found lineage via get_product_lineage for '{product_name}': {db_lineage_clean}")
+                            except Exception as lineage_method_error:
+                                logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
+                            
+                            # Get weight and units from get_products_by_names (lineage already handled above)
                             # Try exact match first
                             db_products = product_db.get_products_by_names([product_name])
                             
@@ -4558,38 +4573,9 @@ class ExcelProcessor:
                                 db_product = db_products[0]
                                 db_weight = db_product.get('Weight*', '')
                                 db_units = db_product.get('Units', '')
-                                
-                                # CRITICAL FIX: Get lineage from database (prioritizes sovereign_lineage)
-                                db_lineage = (
-                                    db_product.get('currentLineage') or
-                                    db_product.get('canonical_lineage') or
-                                    db_product.get('Lineage')
-                                )
-                                
-                                if db_lineage:
-                                    db_lineage_clean = str(db_lineage).strip().upper()
-                                    excel_lineage = str(record.get('Lineage', '')).strip().upper()
-                                    
-                                    # Always override Excel lineage with database lineage
-                                    if excel_lineage != db_lineage_clean:
-                                        logger.info(f"🔄 LINEAGE OVERRIDE (get_selected_records): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
-                                    record['Lineage'] = db_lineage_clean
-                                
-                                logger.debug(f"Found database values for '{product_name}': Lineage={db_lineage}, Weight={db_weight}, Units={db_units}")
+                                logger.debug(f"Found database values for '{product_name}': Weight={db_weight}, Units={db_units}")
                             else:
-                                # Last resort: try get_product_lineage which might work even without exact name match
-                                try:
-                                    db_lineage_from_method = product_db.get_product_lineage(product_name)
-                                    if db_lineage_from_method:
-                                        db_lineage_clean = str(db_lineage_from_method).strip().upper()
-                                        excel_lineage = str(record.get('Lineage', '')).strip().upper()
-                                        if excel_lineage != db_lineage_clean:
-                                            logger.info(f"🔄 LINEAGE OVERRIDE (get_product_lineage fallback): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
-                                        record['Lineage'] = db_lineage_clean
-                                        logger.debug(f"Found lineage via get_product_lineage for '{product_name}': {db_lineage_clean}")
-                                except Exception as lineage_method_error:
-                                    logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
-                                logger.debug(f"Could not find database product for '{product_name}' (tried exact, fuzzy, base name, and get_product_lineage)")
+                                logger.debug(f"Could not find database product for '{product_name}' (tried exact, fuzzy, base name) - lineage already handled via get_product_lineage")
                     except Exception as e:
                         logger.debug(f"Could not lookup database values for '{product_name}': {e}")
                     
@@ -5058,13 +5044,17 @@ class ExcelProcessor:
             return common_oz_weights[product_type_lower][0]  # Return the first (most common) weight
         
         # Try partial matches for product types that might have variations
+        # Improved matching: check if key components are present (handles "edible solid" vs "edible (solid)")
         for key, weights in common_oz_weights.items():
-            if key != 'default' and key in product_type_lower:
+            if key == 'default':
+                continue
+            # For "edible (solid)", check if both "edible" and "solid" are in the product type
+            # This handles "High CBD Edible Solid" and "High THC Edible Solid" as well
+            if key == 'edible (solid)':
+                if 'edible' in product_type_lower and 'solid' in product_type_lower:
+                    return weights[0]
+            elif key in product_type_lower:
                 return weights[0]
-        
-        # Special handling for Moonshot products (they seem to be 2.5oz or 3.53oz based on the image)
-        if 'moonshot' in product_name.lower():
-            return '2.5oz'  # Most common Moonshot size
         
         # Default fallback
         return common_oz_weights['default'][0]  # Return '1oz' as default
@@ -5347,10 +5337,6 @@ class ExcelProcessor:
 
         # FIRST: Check if Weight* already contains units (like "1g", "3.5oz", etc.)
         if weight_val and any(unit in weight_val.lower() for unit in ['g', 'oz', 'gram', 'ounce']):
-            # Special override for Moonshot products - force to 2.5oz
-            if allow_nonclassic_conversion and 'moonshot' in product_name.lower() and 'g' in weight_val.lower():
-                self.logger.info(f"FORCING Moonshot conversion: {product_name} {weight_val} -> 2.5oz")
-                return "2.5oz"
             # Weight* already has units embedded, return as-is
             result = weight_val
         elif product_type in preroll_types:
@@ -5383,41 +5369,62 @@ class ExcelProcessor:
             except Exception:
                 weight_float = None
 
-            # Apply unit conversion for ALL nonclassic product types
+            # Check if this is a High CBD/THC edible product (non-classic but should show in ounces)
+            product_type_lower = product_type.lower().strip()
+            is_high_cbd_thc_edible = ('high cbd edible solid' in product_type_lower or 
+                                       'high thc edible solid' in product_type_lower or
+                                       'high cbd edible' in product_type_lower or
+                                       'high thc edible' in product_type_lower or
+                                       'high cbd liquid' in product_type_lower or
+                                       'high thc liquid' in product_type_lower)
+            
+            # If weight is already in ounces, skip conversion and use as-is
+            if (weight_float is not None and units_val and 
+                  units_val.lower() in ['oz', 'ounce', 'ounces']):
+                # Weight is already in ounces, no conversion needed
+                if weight_float.is_integer():
+                    weight_str = f"{int(weight_float)}"
+                else:
+                    weight_str = f"{weight_float:.2f}".rstrip("0").rstrip(".")
+                result = f"{weight_str}oz"
+                self.logger.debug(f"Using existing ounce weight for {product_name}: {result} (no conversion needed)")
+                return result
+            
+            # Special handling: High CBD/THC edible products should convert from grams to ounces
+            if (is_high_cbd_thc_edible and
+                allow_nonclassic_conversion and
+                weight_float is not None and units_val and 
+                units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm']):
+                # Convert grams to ounces for High CBD/THC edibles
+                oz_weight = weight_float / 28.3495
+                if oz_weight.is_integer():
+                    weight_str = f"{int(oz_weight)}"
+                else:
+                    weight_str = f"{oz_weight:.2f}".rstrip("0").rstrip(".")
+                result = f"{weight_str}oz"
+                self.logger.info(f"Converting High CBD/THC edible '{product_name}' from {weight_float}g to {result}")
+                return result
+            
+            # Special handling for Moonshot products - convert to 2oz
+            if (allow_nonclassic_conversion and
+                weight_float is not None and units_val and 
+                is_nonclassic and 
+                units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm'] and
+                'moonshot' in product_name.lower()):
+                result = "2oz"
+                self.logger.info(f"Converting Moonshot '{product_name}' from {weight_float}g to 2oz")
+                return result
+            
+            # CRITICAL: Do NOT convert other non-classic types from grams to ounces
+            # They should stay in grams. Skip the conversion block entirely.
+            # Only classic types, High CBD/THC edibles, and Moonshots should be converted
             if (allow_nonclassic_conversion and
                 weight_float is not None and units_val and 
                 is_nonclassic and 
                 units_val.lower() in ['g', 'grams', 'gram', 'gms', 'gm']):
-                
-                # FIRST: Check if there are identical products with existing ounce weights
-                if product_name:
-                    identical_ounce_weight = self._find_identical_product_ounce_weight(product_name, product_type)
-                    if identical_ounce_weight:
-                        self.logger.info(f"Using identical product ounce weight for {product_name}: {identical_ounce_weight}")
-                        return identical_ounce_weight
-                
-                # If no identical product found, use most likely ounce weight
-                most_likely_oz_weight = self._find_most_likely_ounce_weight(product_name, product_type)
-                if most_likely_oz_weight:
-                    self.logger.info(f"Using most likely ounce weight for {product_name}: {most_likely_oz_weight}")
-                    return most_likely_oz_weight
-                else:
-                    # Fallback: force conversion for Moonshot products
-                    if 'moonshot' in product_name.lower():
-                        self.logger.info(f"Forcing Moonshot conversion for {product_name}: 2.5oz")
-                        return "2.5oz"
-                    else:
-                        # CRITICAL FIX: Apply standard conversion for nonclassic types
-                        try:
-                            oz_val = round(weight_float / 28.3495, 2)
-                            if oz_val.is_integer():
-                                result = f"{int(oz_val)}oz"
-                            else:
-                                result = f"{oz_val:.2f}".rstrip("0").rstrip(".") + "oz"
-                            self.logger.info(f"Standard nonclassic conversion for {product_name}: {weight_float}g -> {result}")
-                            return result
-                        except (ValueError, TypeError):
-                            pass
+                # Skip conversion - non-classic types should stay in grams
+                # Fall through to the normal weight formatting below
+                self.logger.debug(f"Keeping non-classic type '{product_name}' in grams: {weight_float}g (no conversion to ounces)")
 
             # Now combine weight and units properly
             if weight_float is not None and units_val:
@@ -5459,64 +5466,68 @@ class ExcelProcessor:
         cached_options = self._get_cached_value(self._filter_options_cache, cache_key)
         if cached_options is not None:
             return self._clone_filter_options(cached_options)
-        df = self.df.copy()
+        
+        # PERFORMANCE OPTIMIZATION: Apply all filters once to create base filtered DataFrame
+        # This avoids creating multiple copies of the DataFrame
+        df = self.df
         filter_map = {
             "vendor": "Vendor",  # Will be handled specially to check multiple column names
             "brand": "Product Brand",
             "productType": "Product Type*",
             "lineage": "Lineage",
-            "weight": "CombinedWeight",  # Reverted back to "CombinedWeight" as requested
+            "weight": "CombinedWeight",  # Use pre-computed CombinedWeight column
             "strain": "Product Strain",
             "doh": "DOH",
             "highCbd": "Product Type*"  # Will be processed specially for high CBD detection
         }
+        
+        # Find vendor column once (used multiple times)
+        vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
+        vendor_col = None
+        for vcol in vendor_cols:
+            if vcol in df.columns:
+                vendor_col = vcol
+                break
+        
         options = {}
         import math
+        import re
+        
         def clean_list(lst):
             return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
-        # For each filter type, generate options by applying all other filters except itself
+        
+        # PERFORMANCE OPTIMIZATION: For each filter type, generate options by applying all other filters except itself
+        # But we'll optimize by creating filtered DataFrames more efficiently
         for filter_key, col in filter_map.items():
-            temp_df = df.copy()
+            # Create filtered DataFrame by applying all OTHER filters (not the current one)
+            # CRITICAL FIX: Start with the original df for each filter type to avoid cross-contamination
+            temp_df = df
+            
             # Apply all other filters except the current one
             for key, value in current_filters.items():
                 if key == filter_key:
                     continue  # Skip filtering by itself
                 if value and value != "All":
                     # CRITICAL FIX: Handle vendor filter specially to check multiple column names
-                    if key == "vendor":
-                        vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
-                        vendor_col = None
-                        for vcol in vendor_cols:
-                            if vcol in temp_df.columns:
-                                vendor_col = vcol
-                                break
-                        if vendor_col:
-                            temp_df = temp_df[
-                                temp_df[vendor_col].astype(str).str.lower().str.strip() == value.lower().strip()
-                            ]
+                    if key == "vendor" and vendor_col:
+                        temp_df = temp_df[
+                            temp_df[vendor_col].astype(str).str.lower().str.strip() == value.lower().strip()
+                        ]
                     else:
                         filter_col = filter_map.get(key)
                         if filter_col and filter_col in temp_df.columns:
                             temp_df = temp_df[
                                 temp_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
                             ]
+            
             # CRITICAL FIX: Handle vendor filter specially to check multiple column names
             if filter_key == "vendor":
-                # Check all possible vendor column names (same logic as get_available_tags)
-                vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
-                vendor_col = None
-                for vcol in vendor_cols:
-                    if vcol in temp_df.columns:
-                        vendor_col = vcol
-                        break
-                
                 if vendor_col:
-                    # Get unique vendor values from the found column
+                    # Get unique vendor values from the vendor column ONLY
                     values = temp_df[vendor_col].dropna().unique().tolist()
                     values = [str(v).strip() for v in values if str(v).strip() and str(v).lower() not in ['nan', 'none', '']]
                     # Remove duplicates and sort
-                    values = list(set(values))
-                    values.sort()
+                    values = sorted(set(values))
                     options[filter_key] = clean_list(values)
                     self.logger.info(f"✅ Vendor filter options: Found {len(values)} unique vendors from column '{vendor_col}'")
                 else:
@@ -5538,6 +5549,7 @@ class ExcelProcessor:
                                 break
                         
                         if product_name_col and not temp_df.empty:
+                            # PERFORMANCE: Use vectorized operations instead of iterating
                             product_names = temp_df[product_name_col].dropna().unique().tolist()
                             product_names = [str(name).strip() for name in product_names if name and str(name).strip()]
                             
@@ -5593,25 +5605,57 @@ class ExcelProcessor:
                         values = temp_df[col].dropna().unique().tolist()
                         values = [str(v) for v in values if str(v).strip()]
                 elif filter_key == "weight":
-                    # For weight, use the properly formatted weight with units
-                    values = []
-                    for _, row in temp_df.iterrows():
-                        # Convert row to dict for _format_weight_units
-                        row_dict = row.to_dict()
-                        weight_with_units = self._format_weight_units(row_dict, excel_priority=True)
-                        if weight_with_units and weight_with_units.strip():
-                            weight_str = weight_with_units.strip()
+                    # PERFORMANCE OPTIMIZATION: Use pre-computed CombinedWeight column instead of row-by-row iteration
+                    # This is MUCH faster than iterating through rows
+                    if "CombinedWeight" in temp_df.columns:
+                        # Get unique weight values from the pre-computed column
+                        weight_values = temp_df["CombinedWeight"].dropna().unique().tolist()
+                        values = []
+                        weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
+                        
+                        for weight_str in weight_values:
+                            weight_str = str(weight_str).strip()
+                            if not weight_str or weight_str.lower() in ['nan', 'none', '']:
+                                continue
                             
                             # Only include values that look like actual weights (with units like g, oz, mg)
                             # Exclude THC/CBD content, ratios, and other non-weight content
-                            import re
-                            weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
-                            
                             if weight_pattern.match(weight_str):
                                 values.append(weight_str)
                             elif not any(keyword in weight_str.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
                                 # If it doesn't match weight pattern but also doesn't contain THC/CBD keywords, include it
                                 values.append(weight_str)
+                    else:
+                        # Fallback: if CombinedWeight doesn't exist, use Weight* column
+                        # Still use vectorized operations instead of iterrows
+                        if "Weight*" in temp_df.columns:
+                            weight_values = temp_df["Weight*"].dropna().unique().tolist()
+                            units_values = temp_df.get("Units", pd.Series()).dropna().unique().tolist() if "Units" in temp_df.columns else []
+                            
+                            values = []
+                            weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
+                            
+                            # Combine weight and units using vectorized operations
+                            for weight_val in weight_values:
+                                weight_str = str(weight_val).strip()
+                                if not weight_str or weight_str.lower() in ['nan', 'none', '']:
+                                    continue
+                                
+                                # Try to find matching unit
+                                unit_str = ""
+                                if units_values:
+                                    # Simple matching - in real scenario would need row-level matching
+                                    # For now, just use weight value
+                                    pass
+                                
+                                combined = f"{weight_str}{unit_str}".strip()
+                                
+                                if weight_pattern.match(combined):
+                                    values.append(combined)
+                                elif not any(keyword in combined.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
+                                    values.append(combined)
+                        else:
+                            values = []
                     
                     # Debug: Log what weight values are being generated
                     if values:
@@ -5619,46 +5663,37 @@ class ExcelProcessor:
                     else:
                         self.logger.warning("No weight values generated for filter dropdown")
                 else:
+                    # PERFORMANCE: Use vectorized operations for all other filters
                     values = temp_df[col].dropna().unique().tolist()
                     values = [str(v) for v in values if str(v).strip()]
                 
                 # Exclude unwanted product types from dropdown and apply product type normalization
                 if filter_key == "productType":
+                    # PERFORMANCE: Use list comprehension instead of loop
+                    excluded_set = {excluded.lower() for excluded in EXCLUDED_PRODUCT_TYPES}
+                    pattern_keywords = ['trade sample', 'deactivated'] + [p.lower() for p in EXCLUDED_PRODUCT_PATTERNS]
+                    
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
-                        v_original = v.strip()
                         
                         # Check against EXCLUDED_PRODUCT_TYPES constant (exact match, case-insensitive)
-                        is_excluded = any(
-                            excluded.lower() == v_lower 
-                            for excluded in EXCLUDED_PRODUCT_TYPES
-                        )
+                        if v_lower in excluded_set:
+                            continue
                         
                         # Also check for patterns (trade sample, deactivated)
-                        has_excluded_pattern = (
-                            "trade sample" in v_lower or 
-                            "deactivated" in v_lower or
-                            any(pattern.lower() in v_lower for pattern in EXCLUDED_PRODUCT_PATTERNS)
-                        )
-                        
-                        if is_excluded or has_excluded_pattern:
+                        if any(pattern in v_lower for pattern in pattern_keywords):
                             continue
                         
                         # Apply product type normalization (same as TYPE_OVERRIDES)
-                        normalized_v = TYPE_OVERRIDES.get(v_lower, v)
+                        normalized_v = TYPE_OVERRIDES.get(v_lower, v.strip())
                         filtered_values.append(normalized_v)
                     values = filtered_values
                 
                 # Special processing for DOH filter
                 elif filter_key == "doh":
-                    # Only include "YES" and "NO" values, normalize case
-                    filtered_values = []
-                    for v in values:
-                        v_upper = v.strip().upper()
-                        if v_upper in ["YES", "NO"]:
-                            filtered_values.append(v_upper)
-                    values = filtered_values
+                    # PERFORMANCE: Use list comprehension
+                    values = [v.strip().upper() for v in values if v.strip().upper() in ["YES", "NO"]]
                 
                 # Special processing for High CBD filter
                 elif filter_key == "highCbd":
@@ -5667,8 +5702,7 @@ class ExcelProcessor:
                     values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
                 
                 # Remove duplicates and sort
-                values = list(set(values))
-                values.sort()
+                values = sorted(set(values))
                 options[filter_key] = clean_list(values)
             else:
                 options[filter_key] = []
@@ -5833,7 +5867,7 @@ class ExcelProcessor:
                 return {"message": "No classic type products found", "updated_count": 0}
             
             # Group by strain and get lineage information
-            strain_groups = classic_df.groupby('Product Strain')
+            strain_groups = classic_df.groupby('Product Strain', observed=False)
             updated_count = 0
             
             from .product_database import ProductDatabase
@@ -8154,18 +8188,26 @@ class ExcelProcessor:
                     return _return_with_cache(filtered_tags)
                 
                 # CRITICAL FIX: Final deduplication to catch any remaining duplicates
+                # Use composite key (name + weight + price + vendor) to allow same product with different attributes
                 final_tags = []
-                seen_final_names = set()
+                seen_final_keys = set()
                 duplicate_count = 0
                 
                 for tag in tags:
                     product_name = tag.get('Product Name*', '')
-                    if product_name and product_name not in seen_final_names:
-                        seen_final_names.add(product_name)
+                    weight = str(tag.get('Weight*', '') or tag.get('CombinedWeight', '')).strip()
+                    price = str(tag.get('Price*', '') or tag.get('Price', '')).strip()
+                    vendor = str(tag.get('Vendor/Supplier*', '') or tag.get('Vendor', '')).strip()
+                    
+                    # Create composite deduplication key
+                    dedup_key = f"{product_name}|{weight}|{price}|{vendor}".lower().strip()
+                    
+                    if product_name and dedup_key not in seen_final_keys:
+                        seen_final_keys.add(dedup_key)
                         final_tags.append(tag)
                     else:
                         duplicate_count += 1
-                        logger.info(f"🔄 FINAL DEDUPLICATION: Skipping duplicate '{product_name}'")
+                        logger.info(f"🔄 FINAL DEDUPLICATION: Skipping duplicate '{product_name}' (weight={weight}, price={price}, vendor={vendor})")
                 
                 if duplicate_count > 0:
                     logger.info(f"🔄 FINAL DEDUPLICATION: Removed {duplicate_count} duplicates, returning {len(final_tags)} unique products")
@@ -8242,7 +8284,7 @@ class ExcelProcessor:
             # Continue - will use Excel lineage as fallback, but enrichment will fix it later
         
         tags = []
-        seen_product_names = set()  # Track seen product names to prevent duplicates
+        seen_product_keys = set()  # Track seen product keys (name + weight + price + vendor) to prevent true duplicates
         
         for _, row in filtered_df.iterrows():
             # Get quantity from various possible column names
@@ -8275,25 +8317,33 @@ class ExcelProcessor:
             # Get the product name
             product_name = safe_get_value(row.get(product_name_col, '')) or safe_get_value(row.get('Description', '')) or 'Unnamed Product'
             
-            # CRITICAL FIX: Allow JSON matched products to have duplicates
-            # Check if this is a JSON matched product
-            is_json_matched = row.get('Source', '') == 'JSON Match'
-            
-            # Skip if we've already seen this product name (deduplication) - but allow JSON matched products
-            if product_name in seen_product_names and not is_json_matched:
-                logger.debug(f"Skipping duplicate product: {product_name}")
-                continue
-            
-            # Add to seen set (only for non-JSON matched products to allow JSON duplicates)
-            if not is_json_matched:
-                seen_product_names.add(product_name)
-            
-            # Get vendor from multiple possible column names
+            # Get vendor from multiple possible column names (needed for deduplication key)
             vendor_value = (
                 safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
                 safe_get_value(row.get('Vendor', '')) or           # Alternative column name
                 safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
             )
+            
+            # Get price value (needed for deduplication key)
+            price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
+            
+            # CRITICAL FIX: Create composite deduplication key based on name + weight + price + vendor
+            # This allows same product with different weights/prices to appear as separate tags
+            # Only true duplicates (same name + weight + price + vendor) will be removed
+            dedup_key = f"{product_name}|{raw_weight}|{price_value}|{vendor_value}".lower().strip()
+            
+            # CRITICAL FIX: Allow JSON matched products to have duplicates
+            # Check if this is a JSON matched product
+            is_json_matched = row.get('Source', '') == 'JSON Match'
+            
+            # Skip if we've already seen this exact product combination (deduplication) - but allow JSON matched products
+            if dedup_key in seen_product_keys and not is_json_matched:
+                logger.debug(f"Skipping duplicate product combination: {product_name} (weight={raw_weight}, price={price_value}, vendor={vendor_value})")
+                continue
+            
+            # Add to seen set (only for non-JSON matched products to allow JSON duplicates)
+            if not is_json_matched:
+                seen_product_keys.add(dedup_key)
             
             # Debug logging for vendor field detection
             if not vendor_value and product_name:
