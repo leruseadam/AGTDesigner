@@ -91,7 +91,7 @@ except ImportError as e:
             return f  # Return function unchanged (no invalidation)
         return decorator
 # Startup Performance Optimization
-DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs - ENABLED for faster initialization
+# DISABLE_STARTUP_FILE_LOADING = True  # Disable startup file loading to prevent hangs
 
 # PythonAnywhere Performance Optimization
 PYTHONANYWHERE_OPTIMIZATION = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
@@ -104,17 +104,17 @@ if PYTHONANYWHERE_OPTIMIZATION:
     # Memory optimization settings (allow environment overrides for hosted deployments)
     MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '425'))  # Allow up to ~425MB unless overridden
     CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '50'))  # Reduced cache size
-    BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '500'))  # Larger batches for better throughput
+    BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '250'))  # Smaller batch sizes
 else:
-    # Local development settings - optimized for large uploads (2000+ items)
-    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB for large Excel files
+    # Local development settings
+    MAX_CONTENT_LENGTH = 25 * 1024 * 1024  # 25MB for local development
     SEND_FILE_MAX_AGE_DEFAULT = 300
     PERMANENT_SESSION_LIFETIME = 1800
     
     # More generous memory settings for local (still overridable)
-    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '1000'))  # 1GB for large datasets
-    CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '200'))  # Larger cache
-    BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '1000'))  # Process 1000 items at once
+    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '500'))
+    CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '100'))
+    BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '500'))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
@@ -252,53 +252,6 @@ def make_json_safe(obj):
     if isinstance(obj, list):
         return [make_json_safe(item) for item in obj]
     return json_safe_value(obj)
-
-
-def chunk_list(items, chunk_size):
-    """
-    Split a list into chunks for batch processing.
-    Optimizes memory usage and processing for large datasets (2000+ items).
-    
-    Args:
-        items: List to chunk
-        chunk_size: Maximum items per chunk
-        
-    Returns:
-        Generator yielding chunks
-    """
-    for i in range(0, len(items), chunk_size):
-        yield items[i:i + chunk_size]
-
-
-def process_records_in_chunks(records, processor_func, chunk_size=None):
-    """
-    Process records in chunks to handle large datasets efficiently.
-    
-    Args:
-        records: List of records to process
-        processor_func: Function to apply to each chunk
-        chunk_size: Size of each chunk (defaults to BATCH_SIZE_LIMIT)
-        
-    Returns:
-        List of processed results
-    """
-    if chunk_size is None:
-        chunk_size = BATCH_SIZE_LIMIT
-    
-    results = []
-    total_chunks = (len(records) + chunk_size - 1) // chunk_size
-    
-    for i, chunk in enumerate(chunk_list(records, chunk_size)):
-        logging.info(f"Processing chunk {i+1}/{total_chunks} ({len(chunk)} items)")
-        try:
-            chunk_results = processor_func(chunk)
-            if chunk_results:
-                results.extend(chunk_results if isinstance(chunk_results, list) else [chunk_results])
-        except Exception as e:
-            logging.error(f"Error processing chunk {i+1}: {e}")
-            continue
-    
-    return results
 
 
 def _normalize_store_key(store_name):
@@ -1568,11 +1521,9 @@ def get_product_database(store_name=None):
         if getattr(_product_database, 'db_path', db_path) != db_path:
             logging.warning(f"ProductDatabase db_path mismatch: {_product_database.db_path} != {db_path}")
         logging.info(f"✅ ProductDatabase created with db_path: {_product_database.db_path}")
-        # PERFORMANCE: Lazy initialize database - only init when actually needed (on first query)
-        # This speeds up app startup significantly
-        # _product_database.init_database()  # Deferred until first use
+        _product_database.init_database()
         if os.path.exists(db_path):
-            logging.info(f"✅ ProductDatabase loaded for store '{effective_store}' at: {db_path} (lazy init enabled)")
+            logging.info(f"✅ ProductDatabase loaded for store '{effective_store}' at: {db_path}")
 
     return _product_database
 
@@ -1724,29 +1675,21 @@ def create_app():
     logging.getLogger().setLevel(logging.DEBUG)
     logging.getLogger('werkzeug').setLevel(logging.DEBUG)
     
-    # Performance optimizations for large uploads (2000+ items)
+    # Performance optimizations
     app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000  # 1 year cache for static files
     app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session timeout
     
-    # Large file handling optimizations
-    app.config['MAX_FORM_MEMORY_SIZE'] = 10 * 1024 * 1024  # 10MB form data limit
-    app.config['MAX_FORM_PARTS'] = 10000  # Allow many form parts for large datasets
-    
-    # Request timeout for large file processing
-    app.config['REQUEST_TIMEOUT'] = 300  # 5 minutes for large uploads
-    
     # PythonAnywhere-specific optimizations
     if PYTHONANYWHERE_OPTIMIZATION:
-        app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024  # 15MB for PythonAnywhere (increased for large uploads)
+        app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB for PythonAnywhere
         app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300  # 5 minutes for PythonAnywhere
         app.config['PERMANENT_SESSION_LIFETIME'] = 7200  # 2 hours for PythonAnywhere (increased for file persistence)
-        app.config['REQUEST_TIMEOUT'] = 180  # 3 minutes for PythonAnywhere
         # Reduce logging verbosity for PythonAnywhere
         logging.getLogger('werkzeug').setLevel(logging.WARNING)
         logging.getLogger('urllib3').setLevel(logging.WARNING)
         logging.getLogger('requests').setLevel(logging.WARNING)
-        logging.info("PythonAnywhere optimizations applied (with large upload support)")
+        logging.info("PythonAnywhere optimizations applied")
     
     # Compression for better performance
     if Compress:
@@ -2375,24 +2318,17 @@ class LabelMakerApp:
         print(f"🌐 App will be available at: http://{host}:{port}")
         logging.info(f"Development mode: {development_mode}")
         
-        # OPTIMIZED MODE: Threading and process settings for large uploads (2000+ items)
+        # DEVELOPMENT MODE: Keep debug but disable reloader to prevent multiple restarts
         self.app.run(
             host=host, 
             port=port, 
             debug=development_mode, 
             use_reloader=False,  # Disable reloader to prevent multiple restarts
-            threaded=True,  # Enable threading for concurrent requests
-            processes=1  # Single process to avoid database locking issues
+            threaded=True  # Enable threading for better performance
         )
 # === SESSION-BASED HELPERS ===
 def get_session_excel_processor():
-    """Get ExcelProcessor instance for the current session with proper error handling.
-
-    PERFORMANCE DIAGNOSTIC:
-    This function is a key part of the upload → available-tags pipeline.
-    We log timing for its main steps so we can see where Excel processing
-    is spending time on PythonAnywhere.
-    """
+    """Get ExcelProcessor instance for the current session with proper error handling."""
     session_file_path = None  # Initialize to prevent variable scoping errors
     
     # CRITICAL: Recursion protection - prevent infinite loop
@@ -2409,15 +2345,12 @@ def get_session_excel_processor():
             return None
     
     try:
-        diag_start = time.time()
         g._getting_excel_processor = True  # Set recursion guard
         
         if 'excel_processor' not in g:
-            step_start = time.time()
             # Use the global Excel processor instead of creating a new one
             # This ensures we always have the most up-to-date data
             g.excel_processor = get_excel_processor()
-            logging.info(f"[PERF] get_session_excel_processor: get_excel_processor() took {(time.time() - step_start) * 1000:.1f}ms")
             
             # CRITICAL FIX: Keep ProductDB integration enabled for lineage support
             # Direct database queries (get_product_lineage) still work even if integration is disabled
@@ -2469,19 +2402,14 @@ def get_session_excel_processor():
                     selected_store = get_current_store_name(allow_fallback=True)
                     default_file = get_default_upload_file(selected_store)
                     if default_file and os.path.exists(default_file):
-                        load_start = time.time()
-                        logging.info(f"[PERF] Loading default Excel file: {default_file}")
+                        logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
                         success = g.excel_processor.load_file(default_file)
-                        load_elapsed = (time.time() - load_start) * 1000
-                        logging.info(f"[PERF] Default Excel file load took {load_elapsed:.1f}ms (success={success})")
                         if success:
                             logging.info(f"CRITICAL FIX: Successfully loaded default file")
                             # Populate dropdown cache
                             if hasattr(g.excel_processor, '_cache_dropdown_values'):
                                 try:
-                                    cache_start = time.time()
                                     g.excel_processor._cache_dropdown_values()
-                                    logging.info(f"[PERF] Dropdown cache build took {(time.time() - cache_start) * 1000:.1f}ms")
                                     logging.info(f"Successfully populated dropdown cache from default file")
                                 except Exception as e:
                                     logging.error(f"Failed to populate dropdown cache from default file: {e}")
@@ -2579,8 +2507,6 @@ def get_session_excel_processor():
         if hasattr(g, '_getting_excel_processor'):
             delattr(g, '_getting_excel_processor')
         
-        total_elapsed = (time.time() - diag_start) * 1000
-        logging.info(f"[PERF] get_session_excel_processor TOTAL time: {total_elapsed:.1f}ms")
         return g.excel_processor
         
     except Exception as e:
@@ -2740,8 +2666,7 @@ def _enhance_json_with_excel_data(json_tag, excel_product):
     # Ensure we have a proper display name
     if 'displayName' not in enhanced_tag or not enhanced_tag['displayName']:
         product_name = enhanced_tag.get(get_canonical_field('Product Name*'), enhanced_tag.get(get_canonical_field('ProductName'), ''))
-        # CRITICAL FIX: Use Vendor field strictly, don't fall back to Product Brand
-        vendor = enhanced_tag.get(get_canonical_field('Vendor/Supplier*'), enhanced_tag.get(get_canonical_field('Vendor'), ''))
+        vendor = enhanced_tag.get(get_canonical_field('Vendor'), enhanced_tag.get(get_canonical_field('Product Brand'), ''))
         if product_name and vendor:
             enhanced_tag['displayName'] = f"{product_name} by {vendor}"
         elif product_name:
@@ -3131,10 +3056,9 @@ def upload_file():
 
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
             # CRITICAL: Also clear cache to ensure old Excel data doesn't persist
-            global _excel_processor
             _excel_processor = None
             logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
-
+            
             # CRITICAL: Clear cache again after marking as ready to ensure old data is gone
             try:
                 cache_key = get_session_cache_key('available_tags')
@@ -3143,9 +3067,10 @@ def upload_file():
             except Exception as e:
                 logging.warning(f"⚠️ Error clearing cache after marking ready: {e}")
 
-            # NOTE: DON'T mark as ready yet - wait for background thread to finish loading
-            # This prevents race condition where frontend tries to fetch tags before file is loaded
-            logging.info(f"⏳ File saved, waiting for background thread to load before marking ready")
+            # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
+            # Background processing will handle database storage and cache clearing
+            update_processing_status(file.filename, 'ready')
+            logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
 
             def process_in_background():
                 # CRITICAL FIX: Use application context for background thread
@@ -3155,29 +3080,12 @@ def upload_file():
                         logging.info(f"[BACKGROUND] Processing file: {file_path}")
 
                         processor = get_excel_processor()
-                        # PERFORMANCE: Use fast_load_file instead of load_file for much faster processing
-                        # fast_load_file skips heavy normalization and processing
-                        if hasattr(processor, 'fast_load_file'):
-                            success = processor.fast_load_file(file_path)
-                            logging.info("[BACKGROUND] Using fast_load_file for optimized performance")
-                        else:
-                            # Fallback to minimal_load_file if fast_load_file doesn't exist
-                            if hasattr(processor, 'minimal_load_file'):
-                                success = processor.minimal_load_file(file_path)
-                                logging.info("[BACKGROUND] Using minimal_load_file (fallback)")
-                            else:
-                                success = processor.load_file(file_path)
-                                logging.info("[BACKGROUND] Using standard load_file (slower)")
+                        success = processor.load_file(file_path)
 
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
-
-                            # CRITICAL: Mark as ready NOW after file is loaded but before DB storage
-                            # This ensures frontend can fetch tags as soon as Excel data is available
-                            update_processing_status(original_filename, 'ready')
-                            logging.info(f"✅ [BACKGROUND] Marked {original_filename} as ready after loading")
-
+                            
                             # Update preroll items from newly loaded Excel data
                             if hasattr(processor, 'df') and processor.df is not None:
                                 # Pass session_id from outer scope since we're in background thread
@@ -3193,19 +3101,8 @@ def upload_file():
                                     logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
                                     result = product_db.store_excel_data(processor.df, file_path)
                                     logging.info(f"[BACKGROUND] Database storage result: {result}")
-                                    if result:
-                                        stored = result.get('stored', 0)
-                                        updated = result.get('updated', 0)
-                                        errors = result.get('errors', 0)
-                                        logging.info(f"[BACKGROUND] ✅ Database storage: {stored} new, {updated} updated, {errors} errors")
-                                    else:
-                                        logging.warning(f"[BACKGROUND] ⚠️ Database storage returned no result")
-                                else:
-                                    logging.warning(f"[BACKGROUND] ⚠️ ProductDatabase not available or missing store_excel_data method")
                             except Exception as db_error:
-                                logging.error(f"[BACKGROUND] ❌ Database storage failed: {db_error}")
-                                import traceback
-                                logging.error(f"[BACKGROUND] Traceback: {traceback.format_exc()}")
+                                logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
 
                             logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
 
@@ -3244,13 +3141,13 @@ def upload_file():
             thread.start()
 
             upload_time = time.time() - start_time
-            logging.info(f"=== UPLOAD COMPLETE (processing in background): {upload_time:.3f}s ===")
+            logging.info(f"=== UPLOAD COMPLETE (ready immediately, processing in background): {upload_time:.3f}s ===")
 
             response_data = {
                 'success': True,
-                'message': 'File uploaded successfully, loading in background...',
+                'message': 'File uploaded and ready',
                 'filename': file.filename,
-                'processing': True  # Mark as processing so frontend knows to wait/poll
+                'processing': False  # CHANGED: Marked as not processing so frontend loads immediately
             }
             if warning_to_return:
                 response_data['warning'] = warning_to_return
@@ -3259,26 +3156,52 @@ def upload_file():
             return jsonify(response_data)
             
         else:
-            # Local development: ULTRA-FAST UPLOAD - save file only, zero processing
+            # Local development: FAST UPLOAD - save file only
             # Let the first tag/filter request lazily load the Excel file instead of blocking the upload.
-            logging.info("[LOCAL] Ultra-fast upload mode - saving file only (zero processing, instant response)")
+            logging.info("[LOCAL] Fast upload mode - saving file only (lazy Excel load on first tag request)")
             
             # Ensure any existing in‑memory processor doesn't hold on to the old file
             try:
-                _excel_processor = None  # global already declared at function start
+                _excel_processor = None  # type: ignore[name-defined]
                 logging.info("✅ Cleared in‑memory Excel processor; new file will be loaded lazily")
             except Exception as load_error:
                 logging.warning(f"⚠️ Could not clear in‑memory Excel processor: {load_error}")
             
-            # PERFORMANCE: Defer cache clearing to first data fetch for instant upload
-            # Cache will be auto-cleared when get_available_tags detects new file
-            logging.info("⚡ Deferring cache clearing to first data fetch for instant upload response")
+            # CRITICAL: Clear ALL caches to force complete refresh
+            try:
+                # Clear file-specific cache (uses file path in key)
+                session_file_path = session.get('file_path', '')
+                cache_keys_to_clear = [
+                    f'available_tags_{session_file_path}',
+                    'selected_tags', 
+                    'vendor_tags', 
+                    'initial_data'
+                ]
+                
+                # Also clear any old available_tags caches (from previous uploads)
+                # Try to delete with empty path (legacy cache key)
+                try:
+                    legacy_cache_key = get_session_cache_key('available_tags_')
+                    cache.delete(legacy_cache_key)
+                    logging.info(f"✅ Cleared legacy cache: available_tags_")
+                except:
+                    pass
+                
+                for key_base in cache_keys_to_clear:
+                    cache_key = get_session_cache_key(key_base)
+                    cache.delete(cache_key)
+                    logging.info(f"✅ Cleared cache: {key_base}")
+            except Exception as cache_err:
+                logging.warning(f"Failed to clear cache: {cache_err}")
             
-            # Mark as ready immediately for instant response
+            # CRITICAL: Verify session file path is set correctly
+            logging.info(f"✅ Session file_path after upload: {session.get('file_path')}")
+            logging.info(f"✅ Uploaded file saved at: {file_path}")
+
             update_processing_status(file.filename, 'ready')
             
             upload_time = time.time() - start_time
-            logging.info(f"⚡ UPLOAD COMPLETE (ultra-fast, zero processing): {upload_time:.3f}s ===")
+            logging.info(f"=== UPLOAD COMPLETE (instant): {upload_time:.3f}s ===")
             
             response_data = {
                 'success': True,
@@ -3588,19 +3511,27 @@ def upload_file_simple_pythonanywhere():
                 processor.enable_product_db_integration(True)
                 logging.info("[UPLOAD] Product database integration enabled for new product storage")
             
-            # OPTIMIZATION: Try multiple loading methods with increased row limits
+            # OPTIMIZATION: Try multiple loading methods with optimized order
             import pandas as pd
             success = False
             
-            # Method 1: Try ultra-fast load if available
+            # Method 1: Try ultra-fast load (now optimized for large files)
             if hasattr(processor, 'ultra_fast_load'):
                 try:
                     success = processor.ultra_fast_load(temp_path)
-                    logging.info("[UPLOAD] Used ultra_fast_load method")
+                    logging.info("[UPLOAD] Used ultra_fast_load method (optimized)")
                 except Exception as e:
                     logging.warning(f"Ultra-fast load failed: {e}")
             
-            # Method 2: Try PythonAnywhere fast load
+            # Method 2: Try fast_load_file (optimized with chunking for large files)
+            if not success and hasattr(processor, 'fast_load_file'):
+                try:
+                    success = processor.fast_load_file(temp_path)
+                    logging.info("[UPLOAD] Used fast_load_file method (optimized)")
+                except Exception as e:
+                    logging.warning(f"Fast load failed: {e}")
+            
+            # Method 3: Try PythonAnywhere fast load
             if not success and hasattr(processor, 'pythonanywhere_fast_load'):
                 try:
                     success = processor.pythonanywhere_fast_load(temp_path)
@@ -3608,37 +3539,28 @@ def upload_file_simple_pythonanywhere():
                 except Exception as e:
                     logging.warning(f"PythonAnywhere fast load failed: {e}")
             
-            # Method 3: Try optimized pandas read with NO row limit for large datasets
+            # Method 4: Try optimized pandas read (no row limit, optimized parameters)
             if not success:
                 try:
-                    # OPTIMIZATION: Remove row limit entirely for 2000+ item support
-                    # Use chunks for memory efficiency on very large files
-                    file_size = os.path.getsize(temp_path) / (1024 * 1024)  # MB
-                    
-                    if file_size > 10:  # Large file - use chunked reading
-                        logging.info(f"[UPLOAD] Large file detected ({file_size:.1f}MB), using chunked reading...")
-                        chunks = []
-                        chunk_size = 1000
-                        for chunk in pd.read_excel(temp_path, engine='openpyxl', dtype=str, na_filter=False, chunksize=chunk_size):
-                            chunks.append(chunk)
-                            logging.info(f"[UPLOAD] Loaded chunk ({len(chunk)} rows)")
-                        df = pd.concat(chunks, ignore_index=True)
-                        logging.info(f"[UPLOAD] Combined {len(chunks)} chunks into {len(df)} total rows")
-                    else:
-                        # Regular file - load all at once
-                        df = pd.read_excel(temp_path, engine='openpyxl', dtype=str, na_filter=False)
-                        logging.info(f"[UPLOAD] Loaded {len(df)} rows (standard)")
-                    
+                    # OPTIMIZATION: No row limit, optimized parameters for speed
+                    df = pd.read_excel(
+                        temp_path, 
+                        engine='openpyxl', 
+                        dtype=str, 
+                        na_filter=False,  # Major speedup
+                        keep_default_na=False,
+                        converters=None
+                    )
                     if not df.empty:
                         processor.df = df
                         success = True
-                        logging.info(f"[UPLOAD] ✅ Successfully loaded {len(df)} rows (optimized pandas)")
+                        logging.info(f"[UPLOAD] Loaded {len(df)} rows (optimized pandas, no limit)")
                     else:
                         success = False
                 except Exception as e:
                     logging.warning(f"Optimized pandas load failed: {e}")
             
-            # Method 4: Fallback to standard load
+            # Method 5: Fallback to standard load
             if not success:
                 try:
                     success = processor.load_file(temp_path)
@@ -4110,21 +4032,39 @@ def process_excel_background(filename, temp_path):
                     new_processor.enable_product_db_integration(False)
                     logging.info("[BG] Product database integration disabled for faster loading")
             
-            # PC optimization: Use optimized loading strategy
-            if is_windows:
-                # PC: Use ultra-fast loading with minimal processing
-                success = new_processor.load_file(temp_path)  # This will use the PC-optimized version
-                if not success or new_processor.df is None or new_processor.df.empty:
-                    update_processing_status(filename, f'error: Failed to load file')
-                    return
-                logging.info(f"[PC-BG] Ultra-fast load complete: {len(new_processor.df)} rows")
-            else:
-                # Mac: Use original loading strategy
+            # OPTIMIZED: Use fastest available loading method for all platforms
+            success = False
+            
+            # Try ultra_fast_load first (now optimized for large files)
+            if hasattr(new_processor, 'ultra_fast_load'):
+                try:
+                    success = new_processor.ultra_fast_load(temp_path)
+                    if success:
+                        logging.info(f"[BG] Ultra-fast load complete: {len(new_processor.df)} rows")
+                except Exception as e:
+                    logging.warning(f"[BG] Ultra-fast load failed: {e}")
+            
+            # Fallback to fast_load_file if ultra_fast_load failed
+            if not success and hasattr(new_processor, 'fast_load_file'):
+                try:
+                    success = new_processor.fast_load_file(temp_path)
+                    if success:
+                        logging.info(f"[BG] Fast load complete: {len(new_processor.df)} rows")
+                except Exception as e:
+                    logging.warning(f"[BG] Fast load failed: {e}")
+            
+            # Final fallback to standard load_file
+            if not success:
+                try:
                 success = new_processor.load_file(temp_path)
+                    if success:
+                        logging.info(f"[BG] Standard load complete: {len(new_processor.df)} rows")
+                except Exception as e:
+                    logging.error(f"[BG] Standard load failed: {e}")
+            
                 if not success or new_processor.df is None or new_processor.df.empty:
                     update_processing_status(filename, f'error: Failed to load file')
                     return
-                logging.info(f"[BG] File loaded successfully: {len(new_processor.df)} rows")
             
             # Mark as ready immediately
             update_processing_status(filename, 'ready')
@@ -4735,45 +4675,17 @@ def get_current_file():
                     session.pop('upload_timestamp', None)
                     logging.info(f"File from session no longer exists: {file_path}")
         
-        # Check if processor has data, and load file if it exists but processor is empty
+        # Check if processor has data
         has_data = False
         row_count = 0
         if file_exists:
             try:
                 processor = get_excel_processor()
-                if processor:
-                    # Check if processor has data
-                    if hasattr(processor, 'df') and processor.df is not None and not processor.df.empty:
-                        has_data = True
-                        row_count = len(processor.df)
-                        logging.info(f"✅ Processor already has data: {row_count} rows")
-                    else:
-                        # File exists but processor is empty - load it now
-                        logging.info(f"📂 File exists in session but processor is empty - loading file: {file_path}")
-                        current_file = getattr(processor, '_last_loaded_file', None)
-                        if current_file != file_path:
-                            logging.info(f"🔄 Loading persisted file into processor: {file_path}")
-                            success = processor.load_file(file_path)
-                            if success:
-                                processor._last_loaded_file = file_path
-                                has_data = True
-                                row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                                logging.info(f"✅ Successfully loaded persisted file: {row_count} rows")
-                                
-                                # CRITICAL: Update DataFrame lineage from database after loading
-                                if hasattr(processor, '_update_dataframe_lineage_from_database'):
-                                    try:
-                                        logging.info("🔄 Updating DataFrame lineage from database after loading persisted file...")
-                                        processor._update_dataframe_lineage_from_database()
-                                        logging.info("✅ DataFrame lineage updated from database")
-                                    except Exception as df_update_err:
-                                        logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
-                            else:
-                                logging.error(f"❌ Failed to load persisted file: {file_path}")
-                        else:
-                            logging.info(f"File already loaded in processor: {file_path}")
+                if processor and hasattr(processor, 'df') and processor.df is not None and not processor.df.empty:
+                    has_data = True
+                    row_count = len(processor.df)
             except Exception as e:
-                logging.warning(f"Error checking/loading processor data: {e}")
+                logging.warning(f"Error checking processor data: {e}")
         
         return jsonify({
             'success': True,
@@ -5208,23 +5120,23 @@ def move_tags():
                 'selected_tags': selected_tags
             })
         
-        # Save current state for undo (inline to avoid HTTP call dependency)
-        try:
-            undo_stack = session.get(UNDO_STACK_KEY, [])
-            undo_stack.append({
-                'available_tag_names': available_tag_names.copy(),
-                'selected_tag_names': selected_tags.copy(),
-                'action_type': 'move_tags',
-                'timestamp': datetime.now().isoformat()
-            })
-            # Limit undo stack size to prevent session bloat
-            if len(undo_stack) > 5:
-                undo_stack = undo_stack[-5:]
-            session[UNDO_STACK_KEY] = undo_stack
-            logging.info(f"Selection state saved for undo - Stack size: {len(undo_stack)}")
-        except Exception as e:
-            logging.warning(f"Failed to save selection state for undo: {str(e)}")
-            # Continue with the operation even if undo save fails
+        # Save current state for undo using the dedicated endpoint
+        if REQUESTS_AVAILABLE and requests:
+            try:
+                undo_response = requests.post(
+                    f"http://127.0.0.1:{app.config.get('PORT', 8001)}/api/save-selection-state",
+                    json={'action_type': 'move_tags'},
+                    headers={'Content-Type': 'application/json'}
+                )
+                if undo_response.ok:
+                    logging.info(f"Selection state saved for undo - Stack size: {undo_response.json().get('undo_stack_size', 0)}")
+                else:
+                    logging.warning(f"Failed to save selection state for undo: {undo_response.status_code}")
+            except Exception as e:
+                logging.warning(f"Failed to save selection state for undo: {str(e)}")
+                # Continue with the operation even if undo save fails
+        else:
+            logging.debug("Requests library not available; skipping undo state persistence")
         
         if direction == 'to_selected':
             if select_all:
@@ -5296,90 +5208,42 @@ def undo_move():
     try:
         # Check session size but don't optimize unless necessary
         check_session_size()
-
+        
         excel_processor = get_session_excel_processor()
         undo_stack = session.get(UNDO_STACK_KEY, [])
-
+        
         # Debug logging for undo stack
-        logging.info(f"Undo requested - Stack size: {len(undo_stack)}")
+        logging.info(f"Undo move requested - Stack size: {len(undo_stack)}")
         logging.info(f"Undo stack contents: {undo_stack}")
-
+        
         if not undo_stack:
-            logging.warning("No undo history available - user tried to undo without any previous actions")
-            return jsonify({'success': False, 'error': 'No undo history available', 'message': 'No actions to undo. Try moving some tags first, then use the undo button.'}), 200
-
+            logging.warning("No undo history available - user tried to undo without any previous moves")
+            return jsonify({'error': 'No undo history available'}), 400
+        
         # Get the last state
         last_state = undo_stack.pop()
         session[UNDO_STACK_KEY] = undo_stack
-
-        action_type = last_state.get('action_type', 'checkbox_selection')
-        logging.info(f"Undoing action type: {action_type}")
-
-        # Handle different action types
-        if action_type == 'lineage_edit':
-            # Restore lineage changes
-            lineage_changes = last_state.get('lineage_changes', [])
-            store_name = get_current_store_name()
-            product_db = get_product_database(store_name)
-
-            if product_db:
-                conn = product_db._get_connection()
-                cursor = conn.cursor()
-
-                for change in lineage_changes:
-                    product_name = change.get('product_name')
-                    old_lineage = change.get('old_lineage')
-
-                    # Restore the old lineage
-                    cursor.execute('''
-                        UPDATE products
-                        SET Lineage = ?
-                        WHERE "Product Name*" = ? OR ProductName = ?
-                    ''', (old_lineage, product_name, product_name))
-
-                    logging.info(f"Restored lineage for '{product_name}' to '{old_lineage}'")
-
-                conn.commit()
-
-                return jsonify({
-                    'success': True,
-                    'action_type': 'lineage_edit',
-                    'changes_reverted': len(lineage_changes),
-                    'message': f'Reverted lineage changes for {len(lineage_changes)} product(s)'
-                })
-            else:
-                return jsonify({'success': False, 'error': 'Product database not available'}), 500
-
-        else:
-            # Handle selection/move actions (existing functionality)
-            if not excel_processor:
-                logging.error("Excel processor not available for undo operation")
-                return jsonify({'success': False, 'error': 'Excel file not loaded. Please upload an Excel file first.'}), 400
-            
-            # Restore selected tags from undo state
-            selected_tag_names = last_state.get('selected_tag_names', [])
-            excel_processor.selected_tags = selected_tag_names.copy()
-            session['selected_tags'] = excel_processor.selected_tags.copy()
-
-            # Get current available tags
-            available_tags = excel_processor.get_available_tags()
-            available_tag_names = [tag.get('Product Name*', '') for tag in available_tags if tag.get('Product Name*', '')]
-
-            # Return only the necessary data for UI updates
-            updated_available_names = [name for name in available_tag_names if name not in excel_processor.selected_tags]
-            updated_selected_names = excel_processor.selected_tags.copy()
-
-            return jsonify({
-                'success': True,
-                'action_type': action_type,
-                'available_tags': updated_available_names,
-                'selected_tags': updated_selected_names
-            })
-
+        
+        # Restore the previous state
+        excel_processor.selected_tags = last_state['selected_tag_names'].copy()
+        session['selected_tags'] = excel_processor.selected_tags.copy()
+        
+        # Get current available tags
+        available_tags = excel_processor.get_available_tags()
+        available_tag_names = [tag.get('Product Name*', '') for tag in available_tags if tag.get('Product Name*', '')]
+        
+        # Return only the necessary data for UI updates
+        updated_available_names = [name for name in available_tag_names if name not in excel_processor.selected_tags]
+        updated_selected_names = excel_processor.selected_tags.copy()
+        
+        return jsonify({
+            'success': True,
+            'available_tags': updated_available_names,
+            'selected_tags': updated_selected_names
+        })
+        
     except Exception as e:
         logging.error(f"Error in undo_move: {str(e)}")
-        import traceback
-        logging.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/save-selection-state', methods=['POST'])
@@ -5389,18 +5253,7 @@ def save_selection_state():
         # Check session size but don't optimize unless necessary
         check_session_size()
         
-        # Handle both regular JSON requests and sendBeacon Blob requests
         data = request.get_json()
-        if data is None:
-            # Try to parse from raw data (for sendBeacon with Blob)
-            try:
-                raw_data = request.get_data(as_text=True)
-                if raw_data:
-                    data = json.loads(raw_data)
-            except (ValueError, json.JSONDecodeError):
-                logging.warning("Could not parse request data as JSON in save_selection_state")
-                data = {}
-        
         action_type = data.get('action_type', 'checkbox_selection')  # 'checkbox_selection', 'move', etc.
         
         excel_processor = get_session_excel_processor()
@@ -5435,7 +5288,6 @@ def save_selection_state():
         # Debug logging for undo stack
         logging.info(f"Selection state saved - Stack size: {len(undo_stack)}, Action type: {action_type}")
         logging.info(f"Current selected tags: {len(selected_tags)}")
-        logging.debug(f"Undo stack contents: {undo_stack}")
         
         return jsonify({
             'success': True,
@@ -6329,13 +6181,13 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
             break
     
     if product_name_column:
-        # PERFORMANCE: Use to_dict('records') instead of iterrows() for 100x speedup on large datasets
-        for row in excel_processor.df.to_dict('records'):
-            product_name_value = row.get(product_name_column)
+        for _, row in excel_processor.df.iterrows():
+            # Handle pandas Series objects properly
+            product_name_value = row[product_name_column]
             if isinstance(product_name_value, pd.Series):
                 product_name = str(product_name_value.iloc[0]).strip() if len(product_name_value) > 0 else ''
             else:
-                product_name = str(product_name_value).strip() if product_name_value is not None else ''
+                product_name = str(product_name_value).strip()
             if product_name and product_name != 'nan':
                 # CRITICAL FIX: Store all products with the same name, not just the last one
                 if product_name.lower() not in available_product_names_lower:
@@ -6481,17 +6333,9 @@ def _create_desc_and_weight(product_name, weight_units):
     import re
     description = re.sub(r' - [\d.].*$', '', description)
     
-    # Get weight units, clean them up and normalize abbreviations
+    # Get weight units, clean them up
     weight = str(weight_units).strip() if weight_units else ''
     if weight and weight.lower() not in ['nan', 'none', 'null', '']:
-        # CRITICAL FIX: Normalize unit abbreviations (grams -> g, ounces -> oz)
-        # Handle patterns like "1grams", "1 grams", "1ounces", "1 ounces", etc.
-        weight_normalized = re.sub(r'(\d+(?:\.\d+)?)\s*grams?\b', r'\1g', weight, flags=re.IGNORECASE)
-        weight_normalized = re.sub(r'(\d+(?:\.\d+)?)\s*ounces?\b', r'\1oz', weight_normalized, flags=re.IGNORECASE)
-        weight_normalized = re.sub(r'(\d+(?:\.\d+)?)\s*milligrams?\b', r'\1mg', weight_normalized, flags=re.IGNORECASE)
-        weight_normalized = re.sub(r'(\d+(?:\.\d+)?)\s*milliliters?\b', r'\1ml', weight_normalized, flags=re.IGNORECASE)
-        weight = weight_normalized
-        
         # Combine product name and weight with hyphen staying with weight (space after hyphen)
         # Use same format as Excel processor: -\u00A0 (hyphen + non-breaking space)
         return f"{description} -\u00A0{weight}"
@@ -6642,7 +6486,10 @@ def clear_generation_cache():
 def generate_labels():
     try:
         logging.info("=== GENERATE LABELS ACTION START ===")
-        # PERFORMANCE: Reduced excessive logging
+        logging.info(f"Generate labels request at {datetime.now().strftime('%H:%M:%S')}")
+        logging.info(f"Request method: {request.method}")
+        logging.info(f"Request URL: {request.url}")
+        logging.info(f"Request headers: {dict(request.headers)}")
         
         # TRACE: Check current store at start of generation
         current_store_at_start = get_current_store_name()
@@ -7073,6 +6920,21 @@ def generate_labels():
                 store_name = get_current_store_name() or 'AGT_Bothell'
                 product_db = get_product_database(store_name)
                 if product_db:
+                    # LOG: Check DOH values in database for first selected tag
+                    if selected_tags_from_request and len(selected_tags_from_request) > 0:
+                        first_tag = selected_tags_from_request[0]
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute('SELECT "DOH", "DOH Compliant (Yes/No)", "Product Name*" FROM products WHERE normalized_name = ?', (product_db._normalize_product_name(first_tag),))
+                        row = cursor.fetchone()
+                        if row:
+                            logging.info(f"🔍 DOH in database for {first_tag}: DOH='{row[0]}', Compliant='{row[1]}'")
+                        else:
+                            logging.info(f"🔍 Product {first_tag} not found in database")
+                    else:
+                        logging.info(f"🔍 No selected tags to check DOH values for")
+                
+                if product_db:
                     # Check if database is empty
                     try:
                         conn = product_db._get_connection()
@@ -7093,86 +6955,51 @@ def generate_labels():
                     
                     if has_database:
                         # ENHANCED: Replace JSON matched tags with database data
+                        logging.info(f"Original valid_selected_tags: {valid_selected_tags}")
                         enhanced_tags = _replace_json_tags_with_database_data(valid_selected_tags, product_db)
-
+                        logging.info(f"Enhanced {len(valid_selected_tags)} tags with database data, result: {len(enhanced_tags)} tags")
+                        
                         # Get products from database using the enhanced tags
+                        logging.info(f"Looking up products for enhanced tags: {enhanced_tags}")
                         db_records = product_db.get_products_by_names(enhanced_tags)
-                        logging.info(f"🔍 Database lookup: Found {len(db_records) if db_records else 0} records for {len(enhanced_tags)} tags")
-                    else:
-                        db_records = []
-                    
+                        logging.info(f"Found {len(db_records)} database records")
                     if db_records:
                         # Filter out products with None or empty ProductName
                         valid_db_records = [record for record in db_records if record.get('Product Name*') and record.get('Product Name*') != 'None']
-
+                        logging.info(f"Filtered {len(db_records)} database records to {len(valid_db_records)} valid records")
+                        
                         if not valid_db_records:
                             # CRITICAL FIX: When database is empty, fall back to Excel data
                             logging.warning("⚠️ Database returned 0 valid records - falling back to Excel data")
+                            logging.info(f"Switching to Excel data for {len(valid_selected_tags)} tags")
                             has_database = False  # Force Excel fallback
                         else:
                             # Convert database records to the format expected by TemplateProcessor
-                            # CRITICAL: Get Excel price and DOH for each product (these change frequently)
-                            excel_price_doh_map = {}
-                            if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
-                                product_name_col = 'Product Name*'
-                                if product_name_col not in excel_processor.df.columns:
-                                    product_name_col = next((col for col in ['ProductName', 'Product Name', 'Description'] if col in excel_processor.df.columns), None)
-                                
-                                if product_name_col:
-                                    # PERFORMANCE: Use to_dict('records') for much faster iteration on large datasets
-                                    for excel_row in excel_processor.df.to_dict('records'):
-                                        excel_name = str(excel_row.get(product_name_col, '')).strip()
-                                        if excel_name:
-                                            excel_price = str(excel_row.get('Price*', '') or excel_row.get('Price', '') or excel_row.get('Price* (Tier Name for Bulk)', '')).strip()
-                                            excel_doh = str(excel_row.get('DOH', '') or excel_row.get('DOH Compliant (Yes/No)', '')).strip()
-                                            excel_price_doh_map[excel_name] = {
-                                                'price': excel_price,
-                                                'doh': excel_doh
-                                            }
-                            
                             records = []
                             for db_record in valid_db_records:
+                                product_name_for_record = db_record.get('Product Name*', '')
+                                logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
+                                
                                 # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                 processed_record = process_database_product_for_api(db_record)
-                                product_name = processed_record.get('Product Name*', '')
-                                
-                                # CRITICAL: Get Excel price and DOH if available (these change frequently)
-                                excel_data = excel_price_doh_map.get(product_name, {})
-                                excel_price = excel_data.get('price', '')
-                                excel_doh = excel_data.get('doh', '')
-                                
-                                # CRITICAL FIX: Default lineage based on product type (HYBRID for classic, MIXED for non-classic)
-                                db_lineage = processed_record.get('Lineage', '')
-                                product_type_for_lineage = processed_record.get('Product Type*', '').strip().lower()
-                                from src.core.constants import CLASSIC_TYPES
-                                is_classic_for_lineage = product_type_for_lineage in [ct.lower() for ct in CLASSIC_TYPES]
-                                
-                                # If database has MIXED for classic type, convert to HYBRID
-                                if db_lineage and str(db_lineage).upper() == 'MIXED' and is_classic_for_lineage:
-                                    logging.debug(f"🔄 Converting database MIXED to HYBRID for classic type '{product_type_for_lineage}': '{product_name}'")
-                                    db_lineage = 'HYBRID'
-                                
-                                # Default to HYBRID for classic types, MIXED for non-classic
-                                if not db_lineage:
-                                    db_lineage = 'HYBRID' if is_classic_for_lineage else 'MIXED'
                                 
                                 # Map database fields to template fields (using correct field names from database)
                                 record = {
-                                    'Product Name*': product_name,
-                                    'ProductName': product_name,  # Add ProductName for Excel processor compatibility
+                                    'Product Name*': processed_record.get('Product Name*', ''),
+                                    'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
                                     'ProductType': processed_record.get('Product Type*', ''),
-                                    'Lineage': db_lineage,
-                                    'ProductBrand': processed_record.get('Product Brand', ''),  # FIXED: Use Vendor, not Product Brand
+                                    'Lineage': processed_record.get('Lineage', 'MIXED'),
+                                    'ProductBrand': processed_record.get('Product Brand', ''),
                                     'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
                                     'Vendor': processed_record.get('Vendor/Supplier*', ''),
                                     'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                     'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                    # CRITICAL: Price and DOH come from Excel (they change frequently)
-                                    'Price': _format_price_value(excel_price) if excel_price else '',  # Use Excel price if available
-                                    'Price*': _format_price_value(excel_price) if excel_price else '',  # Use Excel price if available
-                                    'Price* (Tier Name for Bulk)': _format_price_value(excel_price) if excel_price else '',  # Use Excel price if available
-                                    'DOH': excel_doh if excel_doh else '',  # Use Excel DOH if available
-                                    'DOH Compliant (Yes/No)': excel_doh if excel_doh else '',  # Use Excel DOH if available
+                                    'Price': _format_price_value(_extract_price_from_database_product(processed_record)),  # Extract and format price
+                                    'Price*': _format_price_value(_extract_price_from_database_product(processed_record)),  # Also set Price* for generation compatibility
+                                    'Price* (Tier Name for Bulk)': _format_price_value(_extract_price_from_database_product(processed_record)),  # Set all price field variations
+                                    'DOH': processed_record.get('DOH', ''),
+                                    'DOH Compliant (Yes/No)': processed_record.get('DOH Compliant (Yes/No)', processed_record.get('DOH', '')),
                                     'Ratio': processed_record.get('Ratio', ''),
                                     'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
                                     'Units': processed_record.get('Units', 'g'),  # Default units if missing
@@ -7223,113 +7050,55 @@ def generate_labels():
                                     'Barcode': processed_record.get('Barcode*', ''),
                                     'Quantity': processed_record.get('Quantity*', '1')
                                 }
+                                print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
+                                print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
+                                print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
                                 records.append(record)
-
-                        # PERFORMANCE FIX: Batch lineage override to avoid N+1 queries
+                        logging.info(f"✅ Generated {len(records)} records from database")
+                        
+                        # CRITICAL FIX: Override lineage from database if it has been updated
+                        logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database...")
                         store_name = get_current_store_name()
                         product_db = get_product_database(store_name)
-
-                        if product_db:
-                            # PERFORMANCE: Batch query all product lineages at once
-                            product_names = [r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')]
-                            if product_names:
+                        # Log which database path is being used for override
+                        override_db_path = getattr(product_db, 'db_path', 'Unknown')
+                        logging.info(f"🔄 LINEAGE OVERRIDE: Using database at {override_db_path} for store {store_name}")
+                        for record in records:
+                            product_name = record.get('Product Name*', record.get('ProductName', ''))
+                            if product_name:
                                 try:
-                                    from src.core.generation.fast_generation import BatchedDatabaseQuerier
-                                    batched_querier = BatchedDatabaseQuerier(product_db)
-                                    db_records = batched_querier.get_products_batch(product_names, batch_size=100)
-                                    
-                                    # Create lookup map
-                                    lineage_map = {}
-                                    for db_record in db_records:
-                                        name = db_record.get('Product Name*', '')
-                                        if name:
-                                            # CRITICAL FIX: Prioritize product Lineage first (user's explicit changes), then strain lineage
-                                            db_lineage = (
-                                                db_record.get('Lineage') or  # Product Lineage (user's explicit changes)
-                                                db_record.get('currentLineage') or
-                                                db_record.get('canonical_lineage')
-                                            )
-                                            if db_lineage:
-                                                lineage_map[name] = str(db_lineage).strip().upper()
-                                    
-                                    # Apply lineage overrides from batch results
-                                    for record in records:
-                                        product_name = record.get('Product Name*', record.get('ProductName', ''))
-                                        if product_name and product_name in lineage_map:
-                                            db_lineage_clean = lineage_map[product_name]
+                                    # Get the most up-to-date lineage from the database
+                                    if product_db:
+                                        # Try to get lineage by product name first
+                                        db_lineage = product_db.get_product_lineage(product_name)
+                                        if db_lineage:
+                                            original_lineage = record.get('Lineage', '')
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            original_lineage_clean = str(original_lineage).strip().upper()
                                             
-                                            # CRITICAL FIX: Convert MIXED to HYBRID for classic types
-                                            product_type = str(record.get('Product Type*', '') or record.get('ProductType', '') or '').strip().lower()
-                                            from src.core.constants import CLASSIC_TYPES
-                                            is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
-                                            
-                                            if db_lineage_clean == 'MIXED' and is_classic_type:
-                                                logging.debug(f"🔄 Converting batch MIXED to HYBRID for classic type '{product_type}': '{product_name}'")
-                                                db_lineage_clean = 'HYBRID'
-                                            
-                                            record['Lineage'] = db_lineage_clean
-                                    
-                                    # PERFORMANCE: Batch query strain lineages for records without product-level lineage
-                                    strain_names = []
-                                    strain_record_map = {}
-                                    for record in records:
-                                        product_name = record.get('Product Name*', record.get('ProductName', ''))
-                                        if product_name and product_name not in lineage_map:
+                                            # Always update to ensure database value is used
+                                            if db_lineage_clean != original_lineage_clean:
+                                                logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                                record['Lineage'] = db_lineage_clean
+                                            else:
+                                                logging.debug(f"LINEAGE SKIP: '{product_name}' - Already matches database: '{original_lineage_clean}'")
+                                                # Still update to ensure consistency
+                                                record['Lineage'] = db_lineage_clean
+                                        else:
+                                            # Try to get lineage by strain name
                                             product_strain = record.get('Product Strain', '')
                                             if product_strain:
-                                                strain_names.append(product_strain)
-                                                if product_strain not in strain_record_map:
-                                                    strain_record_map[product_strain] = []
-                                                strain_record_map[product_strain].append(record)
-                                    
-                                    # Batch query unique strains
-                                    unique_strains = list(set(strain_names))
-                                    for strain_name in unique_strains:
-                                        if strain_name in strain_record_map:
-                                            try:
-                                                strain_info = product_db.get_strain_info(strain_name)
+                                                strain_info = product_db.get_strain_info(product_strain)
                                                 if strain_info and strain_info.get('canonical_lineage'):
-                                                    db_lineage = str(strain_info['canonical_lineage']).strip().upper()
-                                                    
-                                                    # CRITICAL FIX: Convert MIXED to HYBRID for classic types
-                                                    for record in strain_record_map[strain_name]:
-                                                        product_type = str(record.get('Product Type*', '') or record.get('ProductType', '') or '').strip().lower()
-                                                        from src.core.constants import CLASSIC_TYPES
-                                                        is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
-                                                        
-                                                        # Convert MIXED to HYBRID for classic types
-                                                        lineage_to_set = db_lineage
-                                                        if db_lineage == 'MIXED' and is_classic_type:
-                                                            logging.debug(f"🔄 Converting strain MIXED to HYBRID for classic type '{product_type}': '{record.get('Product Name*', 'Unknown')}'")
-                                                            lineage_to_set = 'HYBRID'
-                                                        
-                                                        if not record.get('Lineage') or record.get('Lineage') in ['', 'None', 'nan']:
-                                                            record['Lineage'] = lineage_to_set
-                                            except Exception as e:
-                                                logging.warning(f"Error checking strain lineage for '{strain_name}': {e}")
-                                except Exception as batch_err:
-                                    logging.warning(f"Batch lineage override failed, falling back to individual queries: {batch_err}")
-                                    # Fallback to individual queries (slower but works)
-                                    for record in records:
-                                        product_name = record.get('Product Name*', record.get('ProductName', ''))
-                                        if product_name:
-                                            try:
-                                                db_lineage = product_db.get_product_lineage(product_name)
-                                                if db_lineage:
-                                                    db_lineage_clean = str(db_lineage).strip().upper()
-                                                    
-                                                    # CRITICAL FIX: Convert MIXED to HYBRID for classic types
-                                                    product_type = str(record.get('Product Type*', '') or record.get('ProductType', '') or '').strip().lower()
-                                                    from src.core.constants import CLASSIC_TYPES
-                                                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
-                                                    
-                                                    if db_lineage_clean == 'MIXED' and is_classic_type:
-                                                        logging.debug(f"🔄 Converting individual query MIXED to HYBRID for classic type '{product_type}': '{product_name}'")
-                                                        db_lineage_clean = 'HYBRID'
-                                                    
-                                                    record['Lineage'] = db_lineage_clean
-                                            except Exception as e:
-                                                logging.warning(f"Error checking lineage override for '{product_name}': {e}")
+                                                    db_lineage = strain_info['canonical_lineage']
+                                                    original_lineage = record.get('Lineage', '')
+                                                    if str(db_lineage).strip() != str(original_lineage).strip():
+                                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                        record['Lineage'] = str(db_lineage).strip()
+                                                    else:
+                                                        logging.debug(f"LINEAGE SKIP: '{product_name}' - Strain lineage already matches: '{original_lineage}'")
+                                except Exception as e:
+                                    logging.warning(f"Error checking lineage override for '{product_name}': {e}")
                         
                         # NOTE: Removed Excel processor override - database lineage takes precedence
                         # The old logic would incorrectly revert manual lineage changes back to the original Excel values.
@@ -7375,10 +7144,10 @@ def generate_labels():
                     lineage = record.get('Lineage', 'NOT_FOUND')
                     logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
             
-            # PERFORMANCE FIX: Batch apply database lineage override to ALL records
+            # CRITICAL FIX: Apply database lineage override to ALL records (not just JSON matched)
             # This ensures that any lineage updates saved to database will always be reflected in output
             if records:
-                logging.info("LINEAGE OVERRIDE: Batch checking database for updated lineage values for all records...")
+                logging.info("LINEAGE OVERRIDE: Checking database for updated lineage values for all records...")
                 try:
                     store_name = get_current_store_name()
                     product_db = get_product_database(store_name)
@@ -7386,191 +7155,73 @@ def generate_labels():
                         # Log which database path is being used for override
                         override_db_path = getattr(product_db, 'db_path', 'Unknown')
                         logging.info(f"🔄 LINEAGE OVERRIDE (all records): Using database at {override_db_path} for store {store_name}")
-                        
-                        # PERFORMANCE: Batch query all product lineages at once
-                        product_names = [r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')]
                         lineage_overrides_applied = 0
-                        
-                        if product_names:
+                        for record in records:
+                            product_name = record.get('Product Name*', record.get('ProductName', ''))
+                            if not product_name:
+                                continue
+                            
                             try:
-                                from src.core.generation.fast_generation import BatchedDatabaseQuerier
-                                batched_querier = BatchedDatabaseQuerier(product_db)
-                                # Larger batch size for better performance with 2000+ items
-                                db_records = batched_querier.get_products_batch(product_names, batch_size=200)
-                                db_records = batched_querier.get_products_batch(product_names, batch_size=200)
+                                # GUARANTEED FIX: Use get_products_by_names for more reliable matching
+                                # This handles normalized names, case-insensitive matching, etc.
+                                db_records = product_db.get_products_by_names([product_name])
+                                db_lineage = None
                                 
-                                # CRITICAL FIX: Create lookup map for database fields (EXCEPT price and DOH - those come from Excel)
-                                product_db_data_map = {}
-                                for db_record in db_records:
-                                    name = db_record.get('Product Name*', '')
-                                    if name:
-                                        # CRITICAL FIX: Prioritize product Lineage first (user's explicit changes), then strain lineage
-                                        # This ensures frontend lineage changes are reflected in DOCX generation
-                                        db_lineage = (
-                                            db_record.get('Lineage') or  # Product Lineage (user's explicit changes)
-                                            db_record.get('currentLineage') or
-                                            db_record.get('canonical_lineage')
-                                        )
-                                        
-                                        # Store database data (EXCEPT price and DOH - those stay from Excel)
-                                        product_db_data_map[name] = {
-                                            'lineage': str(db_lineage).strip().upper() if db_lineage else None,
-                                            'weight': db_record.get('Weight*', ''),
-                                            'units': db_record.get('Units', ''),
-                                            'combined_weight': db_record.get('CombinedWeight', ''),
-                                            'thc': db_record.get('THC test result', ''),
-                                            'cbd': db_record.get('CBD test result', ''),
-                                            'product_strain': db_record.get('Product Strain', ''),
-                                            'product_brand': db_record.get('Product Brand', ''),
-                                            'vendor': db_record.get('Vendor/Supplier*', ''),
-                                            'product_type': db_record.get('Product Type*', ''),
-                                            'ratio': db_record.get('Ratio', ''),
-                                            'joint_ratio': db_record.get('JointRatio', ''),
-                                            'concentrate_type': db_record.get('Concentrate Type', ''),
-                                            'total_thc': db_record.get('Total THC', ''),
-                                            'thca': db_record.get('THCA', ''),
-                                            'cbda': db_record.get('CBDA', ''),
-                                            'cbn': db_record.get('CBN', ''),
-                                            'description': db_record.get('Description', ''),
-                                        }
+                                if db_records:
+                                    db_record = db_records[0]
+                                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
+                                    db_lineage = (
+                                        db_record.get('currentLineage') or
+                                        db_record.get('canonical_lineage') or
+                                        db_record.get('Lineage')
+                                    )
                                 
-                                # CRITICAL FIX: Apply database data to records (EXCEPT price and DOH - preserve from Excel)
-                                # PERFORMANCE: Add progress logging for large datasets
-                                total_records = len(records)
-                                if total_records > 500:
-                                    logging.info(f"⚡ Processing {total_records} records with database enrichment...")
+                                # Fallback to get_product_lineage if get_products_by_names didn't find it
+                                if not db_lineage:
+                                    db_lineage = product_db.get_product_lineage(product_name)
                                 
-                                for idx, record in enumerate(records):
-                                    # Progress logging for large datasets
-                                    if total_records > 500 and (idx + 1) % 500 == 0:
-                                        logging.info(f"⚡ Progress: {idx + 1}/{total_records} records processed ({(idx + 1) / total_records * 100:.1f}%)")
+                                if db_lineage:
+                                    original_lineage = record.get('Lineage', '')
+                                    db_lineage_clean = str(db_lineage).strip().upper()
+                                    original_lineage_clean = str(original_lineage).strip().upper()
                                     
-                                    product_name = record.get('Product Name*', record.get('ProductName', ''))
-                                    if not product_name:
-                                        continue
+                                    # GUARANTEED FIX: Always update with database lineage (database is source of truth)
+                                    record['Lineage'] = db_lineage_clean
+                                    record['currentLineage'] = db_lineage_clean
+                                    record['canonical_lineage'] = db_lineage_clean
+                                    record['lineage'] = db_lineage_clean.lower()
                                     
-                                    if product_name in product_db_data_map:
-                                        db_data = product_db_data_map[product_name]
-                                        
-                                        # PRESERVE Excel price and DOH (these change frequently)
-                                        excel_price = record.get('Price', '') or record.get('Price*', '')
-                                        excel_doh = record.get('DOH', '') or record.get('DOH Compliant (Yes/No)', '')
-                                        
-                                        # Update lineage from database (database is source of truth)
-                                        if db_data['lineage']:
+                                    # Only log if different
+                                    if db_lineage_clean != original_lineage_clean:
+                                        logging.info(f"🔄 GUARANTEED FIX (output): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                        lineage_overrides_applied += 1
+                                    else:
+                                        logging.debug(f"✅ GUARANTEED FIX (output): '{product_name}' - Lineage confirmed: '{db_lineage_clean}'")
+                                else:
+                                    # Try strain-level lookup as fallback
+                                    product_strain = record.get('Product Strain', '')
+                                    if product_strain and str(product_strain).strip():
+                                        strain_info = product_db.get_strain_info(str(product_strain).strip())
+                                        if strain_info and strain_info.get('canonical_lineage'):
+                                            db_lineage = strain_info['canonical_lineage']
                                             original_lineage = record.get('Lineage', '')
+                                            db_lineage_clean = str(db_lineage).strip().upper()
                                             original_lineage_clean = str(original_lineage).strip().upper()
-                                            db_lineage_clean = db_data['lineage']
-                                            
-                                            # CRITICAL FIX: Convert MIXED to HYBRID for classic types
-                                            product_type = str(record.get('Product Type*', '') or record.get('ProductType', '') or '').strip().lower()
-                                            from src.core.constants import CLASSIC_TYPES
-                                            is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
-                                            
-                                            if db_lineage_clean == 'MIXED' and is_classic_type:
-                                                logging.debug(f"🔄 Converting Excel fallback MIXED to HYBRID for classic type '{product_type}': '{product_name}'")
-                                                db_lineage_clean = 'HYBRID'
-                                            
-                                            record['Lineage'] = db_lineage_clean
-                                            record['currentLineage'] = db_lineage_clean
-                                            record['canonical_lineage'] = db_lineage_clean
-                                            record['lineage'] = db_lineage_clean.lower()
                                             
                                             if db_lineage_clean != original_lineage_clean:
-                                                logging.debug(f"🔄 DATABASE-FIRST (lineage): '{product_name}' - Excel: '{original_lineage}' -> DB: '{db_lineage_clean}'")
+                                                logging.info(f"LINEAGE OVERRIDE (strain): '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                                record['Lineage'] = db_lineage_clean
                                                 lineage_overrides_applied += 1
-                                        
-                                        # Update weight and related fields from database
-                                        if db_data['weight']:
-                                            record['Weight*'] = db_data['weight']
-                                        if db_data['units']:
-                                            record['Units'] = db_data['units']
-                                        if db_data['combined_weight']:
-                                            record['CombinedWeight'] = db_data['combined_weight']
-                                            record['WeightUnits'] = db_data['combined_weight']
-                                        
-                                        # Update THC/CBD from database
-                                        if db_data['thc']:
-                                            record['THC test result'] = db_data['thc']
-                                        if db_data['cbd']:
-                                            record['CBD test result'] = db_data['cbd']
-                                        if db_data['total_thc']:
-                                            record['Total THC'] = db_data['total_thc']
-                                        if db_data['thca']:
-                                            record['THCA'] = db_data['thca']
-                                        if db_data['cbda']:
-                                            record['CBDA'] = db_data['cbda']
-                                        if db_data['cbn']:
-                                            record['CBN'] = db_data['cbn']
-                                        
-                                        # Update product info from database
-                                        if db_data['product_strain']:
-                                            record['Product Strain'] = db_data['product_strain']
-                                            record['ProductStrain'] = db_data['product_strain']
-                                        if db_data['product_brand']:
-                                            record['Product Brand'] = db_data['product_brand']
-                                            record['ProductBrand'] = db_data['product_brand']
-                                        if db_data['vendor']:
-                                            record['Vendor/Supplier*'] = db_data['vendor']
-                                            record['Vendor'] = db_data['vendor']
-                                        if db_data['product_type']:
-                                            record['Product Type*'] = db_data['product_type']
-                                            record['ProductType'] = db_data['product_type']
-                                        if db_data['ratio']:
-                                            record['Ratio'] = db_data['ratio']
-                                        if db_data['joint_ratio']:
-                                            record['JointRatio'] = db_data['joint_ratio']
-                                        if db_data['concentrate_type']:
-                                            record['Concentrate Type'] = db_data['concentrate_type']
-                                        if db_data['description']:
-                                            record['Description'] = db_data['description']
-                                        
-                                        # RESTORE Excel price and DOH (these change frequently, Excel is source of truth)
-                                        if excel_price:
-                                            record['Price'] = excel_price
-                                            record['Price*'] = excel_price
-                                            record['Price* (Tier Name for Bulk)'] = excel_price
-                                        if excel_doh:
-                                            record['DOH'] = excel_doh
-                                            record['DOH Compliant (Yes/No)'] = excel_doh
-                                    
-                                    # PERFORMANCE: Batch query strain lineages for records without product-level lineage
-                                    if product_name not in product_lineage_map:
-                                        product_strain = record.get('Product Strain', '')
-                                        if product_strain and str(product_strain).strip():
-                                            try:
-                                                strain_info = product_db.get_strain_info(str(product_strain).strip())
-                                                if strain_info and strain_info.get('canonical_lineage'):
-                                                    db_lineage_clean = str(strain_info['canonical_lineage']).strip().upper()
-                                                    original_lineage = record.get('Lineage', '')
-                                                    original_lineage_clean = str(original_lineage).strip().upper()
-                                                    
-                                                    record['Lineage'] = db_lineage_clean
-                                                    if db_lineage_clean != original_lineage_clean:
-                                                        logging.debug(f"LINEAGE OVERRIDE (strain): '{product_name}' (strain: '{product_strain}') -> '{db_lineage_clean}'")
-                                                        lineage_overrides_applied += 1
-                                            except Exception as strain_err:
-                                                logging.warning(f"Error checking strain lineage for '{product_strain}': {strain_err}")
-                                
-                                if lineage_overrides_applied > 0:
-                                    logging.info(f"✅ LINEAGE OVERRIDE: Applied {lineage_overrides_applied} database lineage updates to records (batch mode)")
-                                else:
-                                    logging.debug("LINEAGE OVERRIDE: No lineage updates needed - all records match database")
-                            except Exception as batch_err:
-                                logging.warning(f"Batch lineage override failed, falling back to individual queries: {batch_err}")
-                                # Fallback to individual queries (slower but works)
-                                for record in records:
-                                    product_name = record.get('Product Name*', record.get('ProductName', ''))
-                                    if not product_name:
-                                        continue
-                                    try:
-                                        db_lineage = product_db.get_product_lineage(product_name)
-                                        if db_lineage:
-                                            db_lineage_clean = str(db_lineage).strip().upper()
-                                            record['Lineage'] = db_lineage_clean
-                                            lineage_overrides_applied += 1
-                                    except Exception as e:
-                                        logging.warning(f"Error checking lineage override for product '{product_name}': {e}")
+                                            else:
+                                                record['Lineage'] = db_lineage_clean
+                            except Exception as e:
+                                logging.warning(f"Error checking lineage override for product '{product_name}': {e}")
+                                continue
+                        
+                        if lineage_overrides_applied > 0:
+                            logging.info(f"✅ LINEAGE OVERRIDE: Applied {lineage_overrides_applied} database lineage updates to records")
+                        else:
+                            logging.debug("LINEAGE OVERRIDE: No lineage updates needed - all records match database")
                 except Exception as e:
                     logging.warning(f"Error during lineage override check: {e}")
                     logging.warning(traceback.format_exc())
@@ -7665,9 +7316,12 @@ def generate_labels():
                 price = record.get('Price', 'NOT_FOUND')
                 price_star = record.get('Price*', 'NOT_FOUND')
                 logging.info(f"🔍 PRICE DEBUG Record {i+1}: '{product_name}' - Price={price}, Price*={price_star}")
+        
+        if not records:
+            logging.error("No selected tags found in the data or failed to process records.")
+            return jsonify({'error': 'No selected tags found in the data or failed to process records. Please ensure you have selected tags and they exist in the loaded data.'}), 400
 
         # SPECIAL CASE: Inventory template now generates inventory lists directly from Excel
-        # CRITICAL: Check inventory template BEFORE the general no-records check
         if template_type == 'inventory':
             try:
                 from src.core.generation.inventory_list import generate_inventory_list
@@ -7676,33 +7330,11 @@ def generate_labels():
                 logging.error(f"INVENTORY LIST: Failed to import generator: {import_err}")
                 return jsonify({'error': 'Inventory list generator is unavailable.'}), 500
 
-            # Let the inventory_list generator handle all record processing and name resolution
-            # It's now more lenient and will create fallback names for records without product names
-            logging.info(f"INVENTORY LIST: Preparing {len(records)} records for inventory list generation")
-
-            # CRITICAL: Ensure records is not empty
-            if not records or len(records) == 0:
-                logging.error(f"INVENTORY LIST: No records to process! Records count: {len(records) if records else 0}")
-                return jsonify({'error': 'No products selected. Please select products before generating inventory list.'}), 400
-
-            # Log sample record structure
-            if records:
-                logging.info(f"INVENTORY LIST: Sample record keys: {list(records[0].keys())[:15]}")
-                logging.info(f"INVENTORY LIST: Sample record - Product Name*: '{records[0].get('Product Name*', 'N/A')}', ProductName: '{records[0].get('ProductName', 'N/A')}'")
-
             logging.info("INVENTORY LIST: Generating inventory list from selected Excel products")
-            try:
-                inventory_doc = generate_inventory_list(records)
-                if inventory_doc is None:
-                    logging.error(f"INVENTORY LIST: Generator returned None for {len(records)} records")
-                    logging.error("INVENTORY LIST: This should never happen - generator should always create a document if records exist")
-                    return jsonify({'error': 'Failed to generate inventory list. Check logs for details - generator returned None.'}), 500
-            except Exception as gen_error:
-                logging.error(f"INVENTORY LIST: Exception during generation: {gen_error}")
-                logging.error(f"INVENTORY LIST: Exception type: {type(gen_error).__name__}")
-                import traceback
-                logging.error(f"INVENTORY LIST: Traceback: {traceback.format_exc()}")
-                return jsonify({'error': f'Failed to generate inventory list: {str(gen_error)}'}), 500
+            inventory_doc = generate_inventory_list(records)
+            if inventory_doc is None:
+                logging.error("INVENTORY LIST: No inventory items to generate")
+                return jsonify({'error': 'No inventory items found for the selected products.'}), 400
 
             # Enforce Arial Bold formatting for consistency
             try:
@@ -7732,11 +7364,6 @@ def generate_labels():
             response = set_download_filename(response, filename)
             response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             return response
-
-        # General check for other templates - ensure we have records
-        if not records:
-            logging.error("No selected tags found in the data or failed to process records.")
-            return jsonify({'error': 'No selected tags found in the data or failed to process records. Please ensure you have selected tags and they exist in the loaded data.'}), 400
 
         # PREROLL TEMPLATE: Group by unique vendor + description combination
         if template_type == 'preroll':
@@ -7815,14 +7442,13 @@ def generate_labels():
         # Log the number of records passed to the template processor
         logging.info(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
 
-        # PERFORMANCE: For horizontal/vertical/double templates, increase chunk size for better throughput
-        if template_type in ['horizontal', 'vertical', 'double', 'preroll']:
+        # For horizontal/vertical/double templates, ensure all records are processed (no chunking)
+        if template_type in ['horizontal', 'vertical', 'double']:
             if hasattr(processor, 'CHUNK_SIZE_LIMIT'):
-                # PERFORMANCE: Use larger chunks (up to 200) for better throughput, but keep reasonable limit
-                processor.CHUNK_SIZE_LIMIT = min(max(len(records), 100), 200)
+                processor.CHUNK_SIZE_LIMIT = max(len(records), 1000)  # Remove chunking limit
             if hasattr(processor, 'chunk_size'):
-                processor.chunk_size = min(max(len(records), 100), 200)
-            logging.info(f"🔍 LABEL RENDER: Optimized chunk size to {processor.chunk_size if hasattr(processor, 'chunk_size') else 'N/A'} for template '{template_type}'")
+                processor.chunk_size = max(len(records), 1000)
+            logging.info(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
 
         # Apply DOH session overrides just before generation to guarantee latest UI choice wins
         try:
@@ -7892,87 +7518,38 @@ def generate_labels():
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
             logging.error(f"DOH override error details: {traceback.format_exc()}")
 
-        # PERFORMANCE FIX: Batch lineage enrichment to avoid N+1 queries
+        # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
         try:
             store_name = session.get('current_store')
             if store_name:
                 product_db = get_product_database(store_name)
                 if product_db:
                     enriched_count = 0
-                    # PERFORMANCE: Batch all product names and strains for single query
-                    product_names = []
-                    strain_names = []
-                    record_map = {}  # Map product_name -> record
-                    strain_map = {}  # Map strain_name -> [records]
-                    
                     for record in records:
                         product_name = record.get('ProductName') or record.get('Product Name*', '')
                         if product_name:
-                            product_names.append(product_name)
-                            record_map[product_name] = record
+                            # Get lineage from database (product-level first, then strain-level)
+                            db_lineage = product_db.get_product_lineage(product_name)
                             
-                            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
-                            if product_strain:
-                                strain_names.append(product_strain)
-                                if product_strain not in strain_map:
-                                    strain_map[product_strain] = []
-                                strain_map[product_strain].append(record)
-                    
-                    # PERFORMANCE: Batch query all product lineages at once
-                    if product_names:
-                        try:
-                            # Use batched query if available
-                            from src.core.generation.fast_generation import BatchedDatabaseQuerier
-                            batched_querier = BatchedDatabaseQuerier(product_db)
-                            db_records = batched_querier.get_products_batch(product_names, batch_size=100)
+                            # Try strain-level if no product-level lineage
+                            if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
+                                product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+                                if product_strain:
+                                    strain_info = product_db.get_strain_info(product_strain)
+                                    if strain_info:
+                                        db_lineage = (
+                                            strain_info.get('display_lineage') or
+                                            strain_info.get('sovereign_lineage') or
+                                            strain_info.get('canonical_lineage')
+                                        )
                             
-                            # Extract lineages from batch results
-                            for db_record in db_records:
-                                product_name = db_record.get('Product Name*', '')
-                                if product_name in record_map:
-                                    record = record_map[product_name]
-                                    db_lineage = (
-                                        db_record.get('currentLineage') or
-                                        db_record.get('canonical_lineage') or
-                                        db_record.get('Lineage')
-                                    )
-                                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                                        record['Lineage'] = str(db_lineage).strip().upper()
-                                        record['lineage'] = str(db_lineage).strip().upper()
-                                        enriched_count += 1
-                        except Exception as batch_err:
-                            logging.warning(f"Batch lineage query failed, falling back to individual queries: {batch_err}")
-                            # Fallback to individual queries (slower but works)
-                            for product_name in product_names:
-                                if product_name in record_map:
-                                    record = record_map[product_name]
-                                    db_lineage = product_db.get_product_lineage(product_name)
-                                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                                        record['Lineage'] = str(db_lineage).strip().upper()
-                                        record['lineage'] = str(db_lineage).strip().upper()
-                                        enriched_count += 1
-                    
-                    # PERFORMANCE: Batch query all strain lineages at once
-                    if strain_names:
-                        unique_strains = list(set(strain_names))
-                        for strain_name in unique_strains:
-                            if strain_name in strain_map:
-                                strain_info = product_db.get_strain_info(strain_name)
-                                if strain_info:
-                                    db_lineage = (
-                                        strain_info.get('display_lineage') or
-                                        strain_info.get('sovereign_lineage') or
-                                        strain_info.get('canonical_lineage')
-                                    )
-                                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                                        for record in strain_map[strain_name]:
-                                            if not record.get('Lineage') or record.get('Lineage') in ['', 'None', 'nan']:
-                                                record['Lineage'] = str(db_lineage).strip().upper()
-                                                record['lineage'] = str(db_lineage).strip().upper()
-                                                enriched_count += 1
+                            if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                record['Lineage'] = str(db_lineage).strip().upper()
+                                record['lineage'] = str(db_lineage).strip().upper()
+                                enriched_count += 1
                     
                     if enriched_count > 0:
-                        logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage")
+                        logging.info(f"✅ Enriched {enriched_count}/{len(records)} records with lineage")
         except Exception as enrich_err:
             logging.error(f"Lineage enrichment failed: {enrich_err}")
         
@@ -8074,8 +7651,8 @@ def generate_labels():
         
         # Count vendors and product types from processed records efficiently
         for record in records:
-            # Get vendor from Vendor field (not ProductBrand - that's the brand!)
-            vendor = str(record.get('Vendor', record.get('Vendor/Supplier*', ''))).strip()
+            # Get vendor from ProductBrand field
+            vendor = str(record.get('ProductBrand', '')).strip()
             if vendor and vendor != 'Unknown' and vendor != '':
                 vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
             
@@ -8234,31 +7811,8 @@ def download_transformed_excel():
         if not product_name_column:
             return jsonify({'error': 'No product name column found in data'}), 400
         
-        # CRITICAL FIX: Use same composite key logic as get_available_tags for consistency
-        # This ensures output matches what's shown in the available tags list
-        filtered_df_rows = []
-        for _, row in excel_processor.df.iterrows():
-            product_name = str(row.get(product_name_column, '')).strip()
-            if product_name and product_name.lower() not in ['nan', 'none', '']:
-                # Check if this product name is in selected tags
-                if product_name in selected_tags:
-                    # Create composite key to match get_available_tags logic
-                    weight = str(row.get('Weight*', '') or row.get('Weight', '')).strip()
-                    price = str(row.get('Price*', '') or row.get('Price', '') or row.get('Price* (Tier Name for Bulk)', '')).strip()
-                    vendor = str(row.get('Vendor/Supplier*', '') or row.get('Vendor', '')).strip()
-                    # Include this row - the composite key matching happens in get_available_tags
-                    # Here we just match by name to include all variants, matching the available tags behavior
-                    filtered_df_rows.append(row)
-        
-        if filtered_df_rows:
-            filtered_df = pd.DataFrame(filtered_df_rows)
-            # Reset index to avoid issues
-            filtered_df.reset_index(drop=True, inplace=True)
-        else:
-            # Fallback to original method if no matches found
-            filtered_df = excel_processor.df[excel_processor.df[product_name_column].isin(selected_tags)]
-        
-        logging.info(f"✅ Filtered DataFrame: {len(filtered_df)} rows match {len(selected_tags)} selected tags")
+        # Simple direct filtering like the working version - just use isin() for exact matches
+        filtered_df = excel_processor.df[excel_processor.df[product_name_column].isin(selected_tags)]
         processed_records = []
         for _, row in filtered_df.iterrows():
             processed_records.append(process_record(row, data.get('template_type', ''), get_excel_processor()))
@@ -8312,8 +7866,6 @@ def download_transformed_excel():
         return jsonify({'error': str(e)}), 500
 
 def get_session_cache_key(base_key):
-    # CRITICAL FIX: Use ONLY file path for cache key to prevent fluctuations
-    # Session ID was causing cache misses when data hasn't changed
     # Use session id and actual loaded file path for cache isolation
     try:
         from flask import has_request_context
@@ -8324,23 +7876,13 @@ def get_session_cache_key(base_key):
     except:
         sid = 'background'  # Fallback for any session access issues
 
-    # CRITICAL FIX: Get file path from session (more reliable than processor state)
+    # OPTIMIZATION: Get file path from global _excel_processor if it exists, without loading
+    global _excel_processor
     file_path = ''
-    try:
-        if has_request_context():
-            file_path = session.get('file_path', '')
-    except:
-        pass
-    
-    # CRITICAL: Use file path as primary cache key component
-    # Only include session ID for tags that don't depend on file (like selected_tags)
-    if 'available_tags' in base_key or 'vendor' in base_key:
-        # For file-based data, use only file path (no session ID) for consistency
-        key_str = f"{base_key}:{file_path}"
-    else:
-        # For session-specific data, include session ID
-        key_str = f"{base_key}:{sid}:{file_path}"
-    
+    if _excel_processor is not None:
+        file_path = getattr(_excel_processor, '_last_loaded_file', '')
+
+    key_str = f"{base_key}:{sid}:{file_path}"
     return hashlib.sha256(key_str.encode()).hexdigest()
 
 def clear_available_tags_cache(reason=None):
@@ -8456,6 +7998,10 @@ def _find_most_likely_ounce_weight_for_database(product_name, product_type):
         if key != 'default' and key in product_type_lower:
             return weights[0]
     
+    # Special handling for Moonshot products (they seem to be 2.5oz or 3.53oz based on the image)
+    if 'moonshot' in product_name.lower():
+        return '2.5oz'  # Most common Moonshot size
+    
     # Default fallback
     return common_oz_weights['default'][0]  # Return '1oz' as default
 
@@ -8495,22 +8041,25 @@ def process_database_product_for_api(db_product):
                     combined_weight = calculated_joint_ratio
                 else:
                     combined_weight = "0.5g x 2 Pack"  # Default for pre-rolls
+        # Special override for Moonshot products - force to 2.5oz
+        elif 'moonshot' in product_name.lower() and weight_value and units and units.lower() in ['g', 'grams', 'gram']:
+            combined_weight = "2.5oz"
         elif weight_value and units and str(units) != 'None' and str(units) != '':
             # Check if this is a nonclassic product that needs weight conversion
             CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
             is_nonclassic = product_type not in [ct.lower() for ct in CLASSIC_TYPES]
             
             if is_nonclassic and units.lower() in ['g', 'grams', 'gram']:
-                # Special handling for Moonshot products - convert to 2oz
-                if 'moonshot' in product_name.lower():
-                    combined_weight = "2oz"
+                # Find the most common ounce weight for this product type
+                most_likely_oz_weight = _find_most_likely_ounce_weight_for_database(product_name, product_type)
+                if most_likely_oz_weight:
+                    combined_weight = most_likely_oz_weight
                 else:
-                    # Find the most common ounce weight for this product type
-                    most_likely_oz_weight = _find_most_likely_ounce_weight_for_database(product_name, product_type)
-                    if most_likely_oz_weight:
-                        combined_weight = most_likely_oz_weight
+                    # Fallback: force conversion for Moonshot products
+                    if 'moonshot' in product_name.lower():
+                        combined_weight = "2.5oz"
                     else:
-                        # Use original weight with units from data
+                        # Use original logic
                         try:
                             weight_float = float(weight_value)
                             if weight_float == int(weight_float):
@@ -8638,36 +8187,6 @@ def get_available_tags():
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
-        # CRITICAL FIX: Check if file is still being processed before attempting to load tags
-        # This prevents 503 errors when upload is still in progress
-        # Use the global processing_status from app.py (not from excel_processor - it doesn't exist there)
-        session_file_path = session.get('file_path', '')
-        if session_file_path:
-            uploaded_filename = session.get('uploaded_filename', '')
-            if uploaded_filename and uploaded_filename in processing_status:
-                status = processing_status[uploaded_filename]
-                if status in ['processing', 'uploading']:
-                    logging.info(f"⏳ File '{uploaded_filename}' is still processing (status: {status}) - returning wait response")
-                    # Try to return cached data if available, even while processing
-                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                    cached_tags = cache.get(cache_key)
-                    if cached_tags:
-                        logging.info(f"✅ Returning {len(cached_tags)} cached tags while file is processing")
-                        return jsonify({
-                            'tags': cached_tags,
-                            'total_count': len(cached_tags),
-                            'source': 'cache-while-processing',
-                            'status': 'processing',
-                            'message': f'File is still being processed, showing cached data...'
-                        })
-                    return jsonify({
-                        'tags': [],
-                        'total_count': 0,
-                        'source': 'processing',
-                        'status': 'processing',
-                        'message': f'File is still being processed. Please wait...'
-                    }), 202  # 202 Accepted - processing
-        
         # Check memory before processing - but don't block if we have cached data
         memory_ok = check_memory_limit()
         if not memory_ok:
@@ -8682,16 +8201,9 @@ def get_available_tags():
                     'source': 'cache-memory-fallback',
                     'warning': 'Memory usage high, serving cached data'
                 })
-            # CRITICAL FIX: Instead of 503, return empty tags array with processing status
-            # This allows frontend to fall back gracefully instead of showing error
-            logging.warning("Memory usage too high and no cached data available - returning empty array for fallback")
-            return jsonify({
-                'tags': [],
-                'total_count': 0,
-                'source': 'memory-limit',
-                'status': 'memory_high',
-                'message': 'Memory usage high, please use fallback endpoint'
-            }), 202  # 202 Accepted - indicates fallback should be used
+            # Only return 503 if we have no cached data
+            logging.error("Memory usage too high and no cached data available")
+            return jsonify({'error': 'Memory usage too high, please try again later'}), 503
         
         # Rate limiting: prevent rapid successive requests
         client_ip = request.remote_addr
@@ -8728,9 +8240,6 @@ def get_available_tags():
         
         logging.info("=== AVAILABLE TAGS REQUEST START ===")
         start_time = time.time()
-        # PERFORMANCE FIX: Set a maximum processing time (3 seconds for ultra-fast response)
-        # Reduced from 5s to 3s to ensure very fast response and prevent freezes
-        MAX_PROCESSING_TIME = 3.0
         
         # Log current database for this request
         try:
@@ -8760,54 +8269,6 @@ def get_available_tags():
                 logging.warning(f"Error checking file path: {path_err}")
                 file_exists = False
         
-        # PERFORMANCE FIX: Use cache more aggressively for fast loads
-        # CRITICAL FIX: Don't use cache immediately after upload - force fresh data
-        # Check if file was recently uploaded (within last 10 seconds) to prevent stale cache
-        recently_uploaded = False
-        upload_timestamp = session.get('upload_timestamp')
-        if upload_timestamp:
-            try:
-                time_since_upload = time.time() - float(upload_timestamp)
-                recently_uploaded = time_since_upload < 10.0  # Within last 10 seconds (extended for consistency)
-                if recently_uploaded:
-                    logging.info(f"🔄 File uploaded {time_since_upload:.1f}s ago - skipping cache to ensure fresh data")
-            except Exception:
-                pass
-        
-        # PYTHONANYWHERE PERFORMANCE: On PythonAnywhere, always use cache if available (except for nocache flag)
-        # This dramatically improves performance by avoiding expensive database queries
-        if PYTHONANYWHERE_OPTIMIZATION and not nocache and not recently_uploaded:
-            cache_key = get_session_cache_key(f'available_tags_{session_file_path}') if session_file_path else get_session_cache_key('available_tags')
-            cached_tags = cache.get(cache_key)
-            
-            # CRITICAL FIX: Verify cache is for current file by checking upload timestamp
-            # If file was uploaded after cache was created, invalidate cache
-            if cached_tags and isinstance(cached_tags, list) and len(cached_tags) > 0:
-                cache_upload_time = cached_tags[0].get('_cache_timestamp') if isinstance(cached_tags[0], dict) else None
-                current_upload_time = session.get('upload_timestamp')
-                
-                # Cache is invalid if current file was uploaded after cache was created
-                if cache_upload_time and current_upload_time and float(current_upload_time) > float(cache_upload_time):
-                    logging.info(f"⚠️ Cache invalidated: file uploaded after cache ({current_upload_time} > {cache_upload_time})")
-                    cached_tags = None
-                    cache.delete(cache_key)
-            
-            if cached_tags:
-                elapsed = time.time() - start_time
-                logging.info(f"⚡ PYTHONANYWHERE: Returning {len(cached_tags)} cached tags in {elapsed:.2f}s")
-                resp = jsonify({
-                    'tags': cached_tags,
-                    'total_count': len(cached_tags),
-                    'source': 'cache-pythonanywhere-fast',
-                    'cache_age': elapsed
-                })
-                try:
-                    resp.headers['Cache-Control'] = 'public, max-age=300'
-                    resp.headers['X-Cache'] = 'HIT-PA'
-                except Exception:
-                    pass
-                return resp
-        
         if not session_file_path or not file_exists:
             logging.info("⚠️ No uploaded file in session - skipping cache, will fetch fresh data")
             cached_tags = None
@@ -8815,28 +8276,7 @@ def get_available_tags():
             cache_key = get_session_cache_key('available_tags')
         else:
             cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-            # CRITICAL FIX: Skip cache if file was recently uploaded to prevent stale data
-            if recently_uploaded:
-                logging.info(f"🔄 Skipping cache for recently uploaded file (uploaded {time_since_upload:.1f}s ago)")
-                cached_tags = None
-            # PERFORMANCE: Use cache even with prefer_db if fast_load is enabled
-            # prefer_db only affects lineage queries, not whether we use cached tags
-            elif fast_load and not nocache:
-                cached_tags = cache.get(cache_key)
-                if cached_tags:
-                    logging.info(f"⚡ FAST LOAD: Returning {len(cached_tags)} cached tags (fast_load enabled)")
-                    resp = jsonify({
-                        'tags': cached_tags,
-                        'total_count': len(cached_tags),
-                        'source': 'cache-fast'
-                    })
-                    try:
-                        resp.headers['Cache-Control'] = 'public, max-age=300'  # Cache for 5 minutes
-                    except Exception:
-                        pass
-                    return resp
-            else:
-                cached_tags = cache.get(cache_key) if not prefer_db else None
+            cached_tags = cache.get(cache_key) if not prefer_db else None
         
         # Initialize flags
         all_tags = []  # Initialize all_tags before checking cache
@@ -8846,14 +8286,8 @@ def get_available_tags():
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         # PERFORMANCE: Enable fast_load by default for better performance
         # User can explicitly request full lineage alignment by setting fast_load=0
-        # CRITICAL: Always default to fast_load=True unless explicitly disabled
         if request.args.get('fast_load') not in ('0', 'false', 'False'):
             fast_load = True  # Default to fast loading
-        
-        # PERFORMANCE: If no explicit fast_load parameter, assume fast_load=True for speed
-        # This ensures tags load quickly by default
-        if 'fast_load' not in request.args:
-            fast_load = True
         
         # If lineage was recently changed, force a full refresh even if fast_load requested
         lineage_update_ts = session.get('lineage_update_timestamp')
@@ -8883,496 +8317,16 @@ def get_available_tags():
             except Exception as cache_clear_err:
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
-        # CRITICAL FIX: Don't fallback to database tags if Excel isn't uploaded
-        # Only show tags when an Excel file is actually uploaded
-        if not session_file_path or not file_exists:
-            logging.info("📦 No Excel file loaded - returning empty tags (no database fallback)")
-            resp = jsonify({
-                'tags': [],
-                'total_count': 0,
-                'source': 'no-excel-file'
-            })
+        # ULTRA-FAST PATH: If this is the first fast_load request after upload and
+        # we don't have cached tags yet, return Excel-only tags without doing any
+        # database lineage alignment. This gets something on screen as quickly as
+        # possible; slower DB alignment can happen on later non-fast loads.
+        if (fast_load and not prefer_db and not force_full_refresh and not cached_tags):
             try:
-                resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                resp.headers['Pragma'] = 'no-cache'
-            except Exception:
-                pass
-            return resp
-
-        # ULTRA-FAST PATHS:
-        # 1) If the store has fully-ingested database products, serve tags directly from DB
-        #    (no Excel processor needed). This is the new primary fast path.
-        # 2) If we don't have DB products yet but do have an uploaded Excel file,
-        #    fall back to Excel-only tags without database lineage alignment.
-        #    This keeps something on screen quickly while DB ingest catches up.
-
-        # --- 1) DB-FIRST FAST PATH -------------------------------------------------
-        try:
-            store_name = get_current_store_name()
-            product_db = get_product_database(store_name) if store_name else None
-        except Exception as db_err:
-            logging.warning(f"FAST DB path: failed to resolve product database: {db_err}")
-            product_db = None
-        
-        # NOTE: Even when force_full_refresh is set due to recent lineage edits,
-        # the database already holds the canonical lineage values. It's safe and
-        # desirable to serve tags directly from DB here instead of falling back
-        # to the slower Excel/lineage-alignment path.
-        if fast_load and not prefer_db and product_db and hasattr(product_db, 'get_available_tags_fast'):
-            try:
-                # PERFORMANCE FIX: Check timeout before starting expensive operations
-                elapsed = time.time() - start_time
-                if elapsed > MAX_PROCESSING_TIME:
-                    logging.warning(f"⏱️ Timeout check: {elapsed:.2f}s elapsed, returning cached data if available")
-                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}') if session_file_path else get_session_cache_key('available_tags')
-                    cached_tags = cache.get(cache_key)
-                    if cached_tags:
-                        return jsonify({
-                            'tags': cached_tags,
-                            'total_count': len(cached_tags),
-                            'source': 'cache-timeout-fallback',
-                            'warning': 'Request timed out, returning cached data'
-                        })
-                    # If no cache, return empty to allow frontend to retry
-                    return jsonify({
-                        'tags': [],
-                        'total_count': 0,
-                        'source': 'timeout',
-                        'status': 'timeout',
-                        'message': 'Request timed out, please retry'
-                    }), 202
-                
-                db_fast_start = time.time()
-                logging.info("⚡ ULTRA-FAST DB: Using ProductDatabase.get_available_tags_fast() for available-tags")
-                db_tags = product_db.get_available_tags_fast()
-                
-                # CRITICAL FIX: Build Excel product names set directly from DataFrame (FAST)
-                # Then only get Excel tags for products not in database (lazy loading)
-                excel_processor = get_session_excel_processor()
-                excel_product_names = set()
-                excel_product_keys = {}  # Map of (name, weight, price, vendor) -> row data for fast tag building
-                
-                if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-                    # PERFORMANCE OPTIMIZATION: Use vectorized pandas operations instead of iterating
-                    product_name_col = 'Product Name*'
-                    if product_name_col not in excel_processor.df.columns:
-                        possible_cols = ['ProductName', 'Product Name', 'Description']
-                        product_name_col = next((col for col in possible_cols if col in excel_processor.df.columns), None)
-                    
-                    if product_name_col:
-                        # PERFORMANCE: Vectorized operations - much faster than iterating
-                        df = excel_processor.df.copy()
-                        
-                        # Get product names using vectorized operations
-                        product_names_series = df[product_name_col].astype(str).str.strip()
-                        valid_mask = ~product_names_series.isin(['', 'nan', 'none', 'NaN', 'None'])
-                        valid_names = product_names_series[valid_mask]
-                        
-                        # Add to set (vectorized)
-                        excel_product_names.update(valid_names.tolist())
-                        
-                        # Normalize names in batch (if normalization function available)
-                        if hasattr(product_db, '_normalize_product_name'):
-                            try:
-                                normalized_names = [product_db._normalize_product_name(name) for name in valid_names]
-                                excel_product_names.update(normalized_names)
-                            except Exception:
-                                pass
-                        
-                        # Build dedup keys and store row data (vectorized where possible)
-                        # Get weight, price, vendor columns
-                        weight_col = 'Weight*' if 'Weight*' in df.columns else 'Weight'
-                        price_col = 'Price*' if 'Price*' in df.columns else ('Price* (Tier Name for Bulk)' if 'Price* (Tier Name for Bulk)' in df.columns else 'Price')
-                        vendor_col = 'Vendor/Supplier*' if 'Vendor/Supplier*' in df.columns else 'Vendor'
-                        
-                        # Vectorized string operations for dedup keys
-                        weights = df[weight_col].astype(str).str.strip() if weight_col in df.columns else pd.Series([''] * len(df))
-                        prices = df[price_col].astype(str).str.strip() if price_col in df.columns else pd.Series([''] * len(df))
-                        vendors = df[vendor_col].astype(str).str.strip() if vendor_col in df.columns else pd.Series([''] * len(df))
-                        
-                        # Normalize weights to avoid 1.0 vs 1 duplicates
-                        def normalize_weight_series(weight_str):
-                            try:
-                                num = float(weight_str)
-                                if num == int(num):
-                                    return str(int(num))
-                                else:
-                                    return f"{num:.10f}".rstrip('0').rstrip('.')
-                            except:
-                                return str(weight_str).strip()
-                        
-                        weights_normalized = weights.apply(normalize_weight_series)
-                        
-                        # Build dedup keys vectorized
-                        dedup_keys = (product_names_series + '|' + weights_normalized + '|' + prices + '|' + vendors).str.lower().str.strip()
-                        
-                        # Convert valid rows to dicts (only for valid products)
-                        valid_indices = valid_mask[valid_mask].index
-                        for idx in valid_indices:
-                            try:
-                                row_dict = df.loc[idx].to_dict()
-                                dedup_key = dedup_keys.loc[idx]
-                                excel_product_keys[dedup_key] = row_dict
-                            except Exception:
-                                pass
-                
-                if db_tags:
-                    # CRITICAL FIX: Only filter database tags if we have Excel product names
-                    # If no Excel file is loaded, don't show database products (they should be handled by DATABASE-ONLY mode above)
-                    if not excel_product_names:
-                        logging.warning(f"⚠️ No Excel product names found - skipping database tags to prevent showing all DB products")
-                        filtered_db_tags = []
-                    else:
-                        # Filter database tags to only include products that are in the Excel file
-                        # This prevents showing database-only products
-                        filtered_db_tags = []
-                        db_product_names = set()
-                        
-                        for tag in db_tags:
-                            tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                            if tag_name:
-                                tag_name_str = str(tag_name).strip()
-                                db_product_names.add(tag_name_str)
-                                
-                                # Check if tag name matches any Excel product name (exact or normalized)
-                                if tag_name_str in excel_product_names:
-                                    filtered_db_tags.append(tag)
-                                else:
-                                    # Try normalized matching
-                                    try:
-                                        normalized_tag_name = product_db._normalize_product_name(tag_name_str) if hasattr(product_db, '_normalize_product_name') else tag_name_str.strip().lower()
-                                        if normalized_tag_name in excel_product_names:
-                                            filtered_db_tags.append(tag)
-                                    except Exception:
-                                        pass
-                        
-                        logging.info(f"✅ Filtered database tags: {len(filtered_db_tags)} tags match Excel file (from {len(db_tags)} total DB tags, {len(excel_product_names)} Excel product names)")
-                else:
-                    filtered_db_tags = []
-                
-                # CRITICAL FIX: Merge Excel tags with database tags (FAST - build Excel tags from DataFrame rows)
-                # Excel tags that aren't in database will be included
-                # Database tags will override Excel tags for products that exist in both
-                merged_tags = []
-                merged_product_keys = set()  # Track merged products to avoid duplicates
-                
-                # Helper function to normalize weight for deduplication
-                def normalize_weight_for_dedup(weight_str):
-                    """Normalize weight strings to avoid duplicates like 1.0g vs 1g"""
-                    if not weight_str:
-                        return ''
-                    try:
-                        # Extract numeric value and units
-                        import re
-                        match = re.match(r'([0-9.]+)\s*([a-zA-Z]*)', str(weight_str).strip())
-                        if match:
-                            num_str, units = match.groups()
-                            num = float(num_str)
-                            # Convert to integer if it's a whole number
-                            if num == int(num):
-                                return f"{int(num)}{units}"
-                            else:
-                                # Remove trailing zeros from decimals
-                                return f"{num:.10f}".rstrip('0').rstrip('.') + units
-                    except:
-                        pass
-                    return str(weight_str).strip()
-                
-                # First, add all database tags (they have priority for lineage/data)
-                for db_tag in filtered_db_tags:
-                    tag_name = db_tag.get('Product Name*') or db_tag.get('ProductName') or ''
-                    if tag_name:
-                        # Create composite key for deduplication
-                        weight = str(db_tag.get('Weight*', '') or db_tag.get('CombinedWeight', '')).strip()
-                        price = str(db_tag.get('Price*', '') or db_tag.get('Price', '')).strip()
-                        vendor = str(db_tag.get('Vendor/Supplier*', '') or db_tag.get('Vendor', '')).strip()
-                        # Normalize weight to avoid 1.0g vs 1g duplicates
-                        weight_normalized = normalize_weight_for_dedup(weight)
-                        dedup_key = f"{tag_name}|{weight_normalized}|{price}|{vendor}".lower().strip()
-                        
-                        if dedup_key not in merged_product_keys:
-                            merged_product_keys.add(dedup_key)
-                            merged_tags.append(db_tag)
-                
-                # Then, add Excel tags that aren't already in merged_tags (FAST - build from DataFrame rows)
-                # Only process Excel rows that don't match database tags
-                excel_only_count = 0
-                excel_only_product_names = []
-                excel_only_rows = []
-                
-                # First pass: collect Excel-only products
-                for dedup_key, row in excel_product_keys.items():
-                    if dedup_key not in merged_product_keys:
-                        tag_name = str(row.get(product_name_col, '')).strip()
-                        if tag_name and tag_name.lower() not in ['nan', 'none', '']:
-                            excel_only_product_names.append(tag_name)
-                            excel_only_rows.append((dedup_key, row))
-                
-                # Batch query database for lineage for Excel-only products (FAST)
-                # PERFORMANCE FIX: Check timeout AFTER collecting Excel-only products but before expensive DB queries
-                # PERFORMANCE FIX: Limit batch size and add timeout to prevent slow queries
-                lineage_map = {}
-                
-                # PERFORMANCE: Check timeout before starting lineage queries
-                elapsed = time.time() - start_time
-                if elapsed > MAX_PROCESSING_TIME * 0.6:
-                    logging.warning(f"⏱️ Timeout approaching before lineage queries ({elapsed:.2f}s) - skipping lineage lookup")
-                    lineage_map = {}
-                elif excel_only_product_names and product_db:
-                    try:
-                        # Limit batch size to prevent slow queries (process in chunks if needed)
-                        # Reduced from 500 to 200 for faster processing
-                        max_batch_size = 200
-                        if len(excel_only_product_names) > max_batch_size:
-                            logging.info(f"⚠️ Large batch ({len(excel_only_product_names)} products) - processing in chunks of {max_batch_size}")
-                            # Process in chunks
-                            for i in range(0, len(excel_only_product_names), max_batch_size):
-                                # PERFORMANCE: Check timeout before each chunk
-                                elapsed = time.time() - start_time
-                                if elapsed > MAX_PROCESSING_TIME * 0.7:
-                                    logging.warning(f"⏱️ Timeout approaching during chunk processing ({elapsed:.2f}s) - stopping")
-                                    break
-                                
-                                chunk = excel_only_product_names[i:i + max_batch_size]
-                                try:
-                                    db_lineage_records = product_db.get_products_by_names(chunk)
-                                    for db_record in db_lineage_records:
-                                        db_product_name = db_record.get('Product Name*', '')
-                                        if db_product_name:
-                                            # Get lineage from database (prioritize currentLineage/canonical_lineage)
-                                            db_lineage = (
-                                                db_record.get('currentLineage') or
-                                                db_record.get('canonical_lineage') or
-                                                db_record.get('Lineage')
-                                            )
-                                            if db_lineage:
-                                                lineage_map[db_product_name] = str(db_lineage).strip().upper()
-                                except Exception as chunk_err:
-                                    logging.warning(f"Error processing lineage chunk: {chunk_err}")
-                                    break  # Stop processing chunks if one fails
-                        else:
-                            # Use get_products_by_names for batch lineage lookup
-                            db_lineage_records = product_db.get_products_by_names(excel_only_product_names)
-                            for db_record in db_lineage_records:
-                                db_product_name = db_record.get('Product Name*', '')
-                                if db_product_name:
-                                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
-                                    db_lineage = (
-                                        db_record.get('currentLineage') or
-                                        db_record.get('canonical_lineage') or
-                                        db_record.get('Lineage')
-                                    )
-                                    if db_lineage:
-                                        lineage_map[db_product_name] = str(db_lineage).strip().upper()
-                        
-                        # PERFORMANCE: Skip individual queries - batch query should cover most cases
-                        # Individual queries are slow and can cause timeouts
-                        # If batch query missed some, they'll use Excel/default lineage
-                    except Exception as lineage_err:
-                        logging.warning(f"Could not batch query lineage: {lineage_err}")
-                
-                # CRITICAL FIX: Batch add Excel-only products to database
-                # Collect all Excel-only products first, then add them in batch
-                excel_products_to_add = []
-                
-                # Second pass: build Excel tags with database lineage
-                for dedup_key, row_dict in excel_only_rows:
-                    # PERFORMANCE: Check timeout during Excel tag building loop
-                    elapsed = time.time() - start_time
-                    if elapsed > MAX_PROCESSING_TIME * 0.8:
-                        logging.warning(f"⏱️ Timeout approaching during Excel tag building ({elapsed:.2f}s) - stopping early")
-                        break
-                    
-                    # CRITICAL FIX: Include ALL fields from DataFrame row, not just minimal set
-                    # row_dict is already a dict (converted when stored in excel_product_keys)
-                    try:
-                        tag_name = str(row_dict.get(product_name_col, '') or '').strip()
-                        if tag_name and tag_name.lower() not in ['nan', 'none', '']:
-                            # Get lineage: try database first, then Excel row, then default
-                            lineage = lineage_map.get(tag_name)  # Database lineage
-                            
-                            # Get product type to check if it's classic
-                            product_type = str(row_dict.get('Product Type*', '') or row_dict.get('ProductType', '') or '').strip().lower()
-                            from src.core.constants import CLASSIC_TYPES
-                            is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
-                            
-                            # CRITICAL FIX: If database returned MIXED for a classic type, convert to HYBRID
-                            if lineage and lineage.upper() == 'MIXED' and is_classic_type:
-                                logging.debug(f"🔄 Converting MIXED to HYBRID for classic type '{product_type}': '{tag_name}'")
-                                lineage = 'HYBRID'
-                            
-                            if not lineage:
-                                # Try Excel row lineage
-                                excel_lineage = str(row_dict.get('Lineage', '') or '').strip()
-                                if excel_lineage and excel_lineage.upper() not in ['', 'NAN', 'NONE', 'NULL']:
-                                    lineage = excel_lineage.upper()
-                                    # CRITICAL FIX: If Excel has MIXED for classic type, convert to HYBRID
-                                    if lineage == 'MIXED' and is_classic_type:
-                                        logging.debug(f"🔄 Converting Excel MIXED to HYBRID for classic type '{product_type}': '{tag_name}'")
-                                        lineage = 'HYBRID'
-                                else:
-                                    # Default based on product type
-                                    if is_classic_type:
-                                        lineage = 'HYBRID'  # Default for classic types (flower, pre-roll, concentrate, etc.)
-                                    else:
-                                        lineage = 'MIXED'  # Default for non-classic types (edibles, topicals, etc.)
-                            
-                            # CRITICAL FIX: Start with ALL fields from the row dict (complete DataFrame row)
-                            excel_tag = dict(row_dict)  # Copy all fields from DataFrame row
-                            
-                            # Ensure required fields are set (override with processed values)
-                            excel_tag['Product Name*'] = tag_name
-                            excel_tag['ProductName'] = tag_name
-                            excel_tag['Lineage'] = lineage
-                            excel_tag['lineage'] = lineage.lower()
-                            excel_tag['currentLineage'] = lineage
-                            excel_tag['canonical_lineage'] = lineage
-                            excel_tag['Source'] = 'Excel'
-                            
-                            # Ensure weight fields are properly set (use CombinedWeight if available)
-                            if not excel_tag.get('Weight*'):
-                                excel_tag['Weight*'] = str(row_dict.get('Weight*', '') or row_dict.get('Weight', '')).strip()
-                            if not excel_tag.get('CombinedWeight'):
-                                weight_val = excel_tag.get('Weight*', '')
-                                units_val = excel_tag.get('Units', 'g')
-                                excel_tag['CombinedWeight'] = f"{weight_val}{units_val}" if weight_val else ''
-                            
-                            # Ensure price fields are set
-                            if not excel_tag.get('Price*'):
-                                excel_tag['Price*'] = str(row_dict.get('Price*', '') or row_dict.get('Price', '') or row_dict.get('Price* (Tier Name for Bulk)', '')).strip()
-                            
-                            # Clean up any NaN values that might have been converted to strings
-                            for key, value in excel_tag.items():
-                                if isinstance(value, str) and value.lower() in ['nan', 'none', 'null']:
-                                    excel_tag[key] = ''
-                            
-                            merged_product_keys.add(dedup_key)
-                            merged_tags.append(excel_tag)
-                            excel_only_count += 1
-                            
-                            # Collect product data for batch database addition
-                            product_data_for_db = dict(row_dict)  # Start with all fields
-                            product_data_for_db['Product Name*'] = tag_name
-                            product_data_for_db['Lineage'] = lineage
-                            
-                            # Ensure required fields have defaults
-                            if not product_data_for_db.get('Vendor/Supplier*') and not product_data_for_db.get('Vendor'):
-                                product_data_for_db['Vendor/Supplier*'] = 'Unknown Vendor'
-                                product_data_for_db['Vendor'] = 'Unknown Vendor'
-                            if not product_data_for_db.get('Product Type*'):
-                                product_data_for_db['Product Type*'] = 'Unknown'
-                            
-                            excel_products_to_add.append(product_data_for_db)
-                    except Exception as tag_build_err:
-                        logging.warning(f"Could not build Excel tag from row: {tag_build_err}")
-                        import traceback
-                        logging.debug(f"Traceback: {traceback.format_exc()}")
-                        continue
-                
-                # PERFORMANCE FIX: Defer database product addition to background thread
-                # This prevents tag loading from being slowed down by database writes
-                if excel_products_to_add and product_db and hasattr(product_db, 'add_or_update_product'):
-                    def add_products_in_background():
-                        try:
-                            with app.app_context():
-                                added_count = 0
-                                # Use batch operations if available
-                                if hasattr(product_db, 'batch_add_or_update_products'):
-                                    try:
-                                        result = product_db.batch_add_or_update_products(excel_products_to_add)
-                                        added_count = result.get('added', 0) if isinstance(result, dict) else len(excel_products_to_add)
-                                        logging.info(f"✅ [BACKGROUND] Batch added {added_count} Excel-only products to database")
-                                    except Exception as batch_err:
-                                        logging.warning(f"[BACKGROUND] Batch add failed, falling back to individual adds: {batch_err}")
-                                        # Fallback to individual adds
-                                        for product_data_for_db in excel_products_to_add:
-                                            try:
-                                                product_id = product_db.add_or_update_product(product_data_for_db)
-                                                if product_id:
-                                                    added_count += 1
-                                            except Exception as db_add_err:
-                                                logging.debug(f"[BACKGROUND] Could not add product '{product_data_for_db.get('Product Name*', 'Unknown')}': {db_add_err}")
-                                        if added_count > 0:
-                                            logging.info(f"✅ [BACKGROUND] Added {added_count} Excel-only products to database (individual)")
-                                else:
-                                    # No batch method, use individual adds but in background
-                                    for product_data_for_db in excel_products_to_add:
-                                        try:
-                                            product_id = product_db.add_or_update_product(product_data_for_db)
-                                            if product_id:
-                                                added_count += 1
-                                        except Exception as db_add_err:
-                                            logging.debug(f"[BACKGROUND] Could not add product '{product_data_for_db.get('Product Name*', 'Unknown')}': {db_add_err}")
-                                    if added_count > 0:
-                                        logging.info(f"✅ [BACKGROUND] Added {added_count} Excel-only products to database")
-                        except Exception as bg_err:
-                            logging.warning(f"[BACKGROUND] Error in background product addition: {bg_err}")
-                    
-                    # Start background thread for database addition
-                    import threading
-                    bg_thread = threading.Thread(target=add_products_in_background)
-                    bg_thread.daemon = True
-                    bg_thread.start()
-                    logging.info(f"🚀 Started background thread to add {len(excel_products_to_add)} Excel-only products to database")
-                
-                logging.info(f"✅ Merged tags: {len(merged_tags)} total (DB: {len(filtered_db_tags)}, Excel-only: {excel_only_count})")
-                safe_all_tags = make_json_safe(merged_tags)
-                
-                # PERFORMANCE FIX: Final timeout check - but don't return early, just log warning
-                # We want to ensure ALL products (both DB and Excel-only) are included
-                elapsed = time.time() - start_time
-                response_source = 'db-fast-merged'
-                warning_message = None
-                if elapsed > MAX_PROCESSING_TIME:
-                    logging.warning(f"⏱️ Final timeout check: {elapsed:.2f}s elapsed, but returning all products (DB: {len(filtered_db_tags)}, Excel-only: {excel_only_count})")
-                    response_source = 'db-fast-merged-timeout'
-                    warning_message = f'Request took {elapsed:.1f}s, but all products included'
-                
-                # PERFORMANCE FIX: Cache the result for fast subsequent loads
-                if fast_load and session_file_path and file_exists:
-                    try:
-                        cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                        cache.set(cache_key, safe_all_tags, timeout=300)  # Cache for 5 minutes
-                        logging.info(f"✅ Cached {len(safe_all_tags)} tags for fast loading")
-                    except Exception as cache_err:
-                        logging.warning(f"Could not cache tags: {cache_err}")
-                
-                elapsed_ms = (time.time() - start_time) * 1000
-                db_elapsed = (time.time() - db_fast_start) * 1000
-                logging.info(f"[PERF] ULTRA-FAST DB path total time {db_elapsed:.1f}ms")
-                logging.info(f"✅ ULTRA-FAST DB available-tags completed ({elapsed_ms:.1f}ms) - returning {len(safe_all_tags)} merged tags")
-                resp_data = {
-                    'tags': safe_all_tags,
-                    'total_count': len(safe_all_tags),
-                    'source': response_source
-                }
-                if warning_message:
-                    resp_data['warning'] = warning_message
-                resp = jsonify(resp_data)
-                try:
-                    # PERFORMANCE: Allow caching for fast loads
-                    if fast_load:
-                        resp.headers['Cache-Control'] = 'public, max-age=300'  # Cache for 5 minutes
-                    else:
-                        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                        resp.headers['Pragma'] = 'no-cache'
-                except Exception:
-                    pass
-                return resp
-            except Exception as db_fast_err:
-                logging.warning(f"ULTRA-FAST DB path failed, falling back to Excel/standard flow: {db_fast_err}")
-
-        # --- 2) EXCEL-ONLY FAST PATH (fallback when DB path not available) -------
-        if (fast_load and not prefer_db and not force_full_refresh and not cached_tags and (not product_db or not hasattr(product_db, 'get_available_tags_fast'))):
-            try:
-                excel_diag_start = time.time()
                 excel_processor = get_session_excel_processor()
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                     logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for initial fast_load request (no DB lineage alignment).")
-                    tags_start = time.time()
                     excel_tags = excel_processor.get_available_tags()
-                    tags_elapsed = (time.time() - tags_start) * 1000
-                    logging.info(f"[PERF] excel_processor.get_available_tags() took {tags_elapsed:.1f}ms (rows={len(excel_tags)})")
                     safe_all_tags = make_json_safe(excel_tags)
                     # Cache for this session/file so subsequent requests are instant
                     try:
@@ -9387,9 +8341,7 @@ def get_available_tags():
                     except Exception as cache_err:
                         logging.warning(f"Could not cache ultra-fast Excel tags: {cache_err}")
                     
-                    excel_total = (time.time() - excel_diag_start) * 1000
                     elapsed = (time.time() - start_time) * 1000
-                    logging.info(f"[PERF] ULTRA-FAST Excel path total time {excel_total:.1f}ms")
                     logging.info(f"✅ ULTRA-FAST available-tags completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} Excel-only tags")
                     resp = jsonify({
                         'tags': safe_all_tags,
@@ -9511,139 +8463,107 @@ def get_available_tags():
                         updated = 0
                         
                         # OPTIMIZATION: Batch load all lineage data in a single query instead of per-tag queries
-                        # PERFORMANCE: Check timeout before starting expensive batch operations
-                        elapsed = time.time() - start_time
-                        if elapsed > MAX_PROCESSING_TIME * 0.6:  # If we've used 60% of time, skip batch processing
-                            logging.warning(f"⏱️ Timeout approaching ({elapsed:.2f}s) - skipping batch lineage processing")
-                            lineage_cache = {}
-                        else:
-                            product_names = []
-                            normalized_names = []
-                            name_to_tag = {}
-                            
-                            for tag in cached_tags:
-                                # PERFORMANCE: Check timeout during loop
-                                elapsed = time.time() - start_time
-                                if elapsed > MAX_PROCESSING_TIME * 0.7:  # Stop if we've used 70% of time
-                                    logging.warning(f"⏱️ Timeout approaching during product name collection ({elapsed:.2f}s) - stopping early")
-                                    break
-                                
-                                name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                if not name:
-                                    continue
-                                product_names.append(name)
-                                try:
-                                    normalized = product_db._normalize_product_name(name)
-                                except Exception:
-                                    normalized = name.strip().lower()
-                                normalized_names.append(normalized)
-                                name_to_tag[name] = tag
+                        product_names = []
+                        normalized_names = []
+                        name_to_tag = {}
+                        
+                        for tag in cached_tags:
+                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                            if not name:
+                                continue
+                            product_names.append(name)
+                            try:
+                                normalized = product_db._normalize_product_name(name)
+                            except Exception:
+                                normalized = name.strip().lower()
+                            normalized_names.append(normalized)
+                            name_to_tag[name] = tag
                         
                         # Batch query: fetch all lineage data at once
                         if product_names:
-                            # PERFORMANCE: Check timeout before expensive batch query
-                            elapsed = time.time() - start_time
-                            if elapsed > MAX_PROCESSING_TIME * 0.7:
-                                logging.warning(f"⏱️ Timeout approaching before batch query ({elapsed:.2f}s) - skipping")
-                                lineage_cache = {}
-                            else:
-                                try:
-                                    all_search_names = list(set(product_names + normalized_names))
+                            try:
+                                all_search_names = list(set(product_names + normalized_names))
 
-                                    # PERFORMANCE: Reduce batch size to prevent slow queries
-                                    # Smaller batches are faster and less likely to timeout
-                                    MAX_BATCH_SIZE = 1000  # Reduced from 5000 for faster queries
-                                    if len(all_search_names) > MAX_BATCH_SIZE:
-                                        # Process in chunks but use smaller chunks for speed
-                                        all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
-                                        # Process all chunks, not just the first one, to ensure complete coverage
-                                        all_batch_results = []
-                                        for chunk in all_search_names_chunks:
-                                            # PERFORMANCE: Check timeout before each chunk
-                                            elapsed = time.time() - start_time
-                                            if elapsed > MAX_PROCESSING_TIME * 0.7:
-                                                logging.warning(f"⏱️ Timeout approaching during chunk processing ({elapsed:.2f}s) - stopping")
-                                                break
-                                            
-                                            try:
-                                                placeholders = ','.join(['?'] * len(chunk))
-                                                chunk_query = f'''
-                                                    SELECT DISTINCT
-                                                        COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
-                                                        COALESCE(s.strain_name, p."Product Strain") AS current_strain,
-                                                        p."Product Name*" AS product_name,
-                                                        p.normalized_name AS normalized_name
-                                                    FROM products p
-                                                    LEFT JOIN strains s ON p.strain_id = s.id
-                                                    WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
-                                                    ORDER BY p.id DESC
-                                                '''
-                                                cur.execute(chunk_query, chunk + chunk)
-                                                all_batch_results.extend(cur.fetchall())
-                                            except Exception as chunk_err:
-                                                logging.warning(f"Batch chunk query failed: {chunk_err}")
-                                        batch_results = all_batch_results
-                                    else:
-                                        # Single batch query for all names
-                                        placeholders = ','.join(['?'] * len(all_search_names))
-                                        batch_query = f'''
-                                            SELECT DISTINCT
-                                                COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
-                                                COALESCE(s.strain_name, p."Product Strain") AS current_strain,
-                                                p."Product Name*" AS product_name,
-                                                p.normalized_name AS normalized_name
-                                            FROM products p
-                                            LEFT JOIN strains s ON p.strain_id = s.id
-                                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
-                                            ORDER BY p.id DESC
-                                        '''
-                                        # Add query timing to detect slow queries
-                                        query_start = time.time()
-                                        # PERFORMANCE: Add aggressive timeout to prevent slow queries from blocking response
-                                        # Target: <300ms for fast loading, abort if >500ms
-                                        MAX_QUERY_TIME = 0.3  # 300ms max query time (reduced from 500ms)
+                                # PERFORMANCE: Use larger batch size for faster processing
+                                # SQLite handles up to 10000 items efficiently with proper indexing
+                                # For very large datasets, use even larger batches to reduce query overhead
+                                MAX_BATCH_SIZE = 10000  # Increased for better performance with large datasets
+                                if len(all_search_names) > MAX_BATCH_SIZE:
+                                    # Process in chunks but use larger chunks for speed
+                                    all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
+                                    # Process all chunks, not just the first one, to ensure complete coverage
+                                    all_batch_results = []
+                                    for chunk in all_search_names_chunks:
+                                        try:
+                                            placeholders = ','.join(['?'] * len(chunk))
+                                            chunk_query = f'''
+                                                SELECT DISTINCT
+                                                    COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
+                                                    COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                                    p."Product Name*" AS product_name,
+                                                    p.normalized_name AS normalized_name
+                                                FROM products p
+                                                LEFT JOIN strains s ON p.strain_id = s.id
+                                                WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                                ORDER BY p.id DESC
+                                            '''
+                                            cur.execute(chunk_query, chunk + chunk)
+                                            all_batch_results.extend(cur.fetchall())
+                                        except Exception as chunk_err:
+                                            logging.warning(f"Batch chunk query failed: {chunk_err}")
+                                    batch_results = all_batch_results
+                                else:
+                                    # Single batch query for all names
+                                    placeholders = ','.join(['?'] * len(all_search_names))
+                                    batch_query = f'''
+                                        SELECT DISTINCT
+                                            COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
+                                            COALESCE(s.strain_name, p."Product Strain") AS current_strain,
+                                            p."Product Name*" AS product_name,
+                                            p.normalized_name AS normalized_name
+                                        FROM products p
+                                        LEFT JOIN strains s ON p.strain_id = s.id
+                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                                        ORDER BY p.id DESC
+                                    '''
+                                    # Add query timing to detect slow queries
+                                    query_start = time.time()
+                                    # PERFORMANCE: Add timeout to prevent slow queries from blocking response
+                                    # Target: <200ms for fast loading, abort if >500ms
+                                    MAX_QUERY_TIME = 0.5  # 500ms max query time
+                                    try:
+                                        cur.execute(batch_query, all_search_names + all_search_names)
+                                        batch_results = cur.fetchall()
                                         
-                                        # Check overall timeout before query
-                                        elapsed = time.time() - start_time
-                                        if elapsed > MAX_PROCESSING_TIME * 0.8:
-                                            logging.warning(f"⏱️ Timeout approaching before query ({elapsed:.2f}s) - skipping batch query")
-                                            lineage_cache = {}
-                                            batch_results = []
-                                        else:
-                                            try:
-                                                cur.execute(batch_query, all_search_names + all_search_names)
-                                                batch_results = cur.fetchall()
-                                                
-                                                query_duration = (time.time() - query_start) * 1000
-                                                # PERFORMANCE: Abort if query takes too long
-                                                if query_duration > MAX_QUERY_TIME * 1000:
-                                                    logging.warning(f"⏱️ Query too slow ({query_duration:.0f}ms > {MAX_QUERY_TIME*1000:.0f}ms) - using partial results")
-                                                    # Use partial results instead of skipping entirely
-                                            except Exception as query_err:
-                                                logging.warning(f"Lineage query failed, using cached lineage: {query_err}")
-                                                lineage_cache = {}  # Skip lineage alignment on error
-                                                batch_results = []
+                                        query_duration = (time.time() - query_start) * 1000
+                                        # PERFORMANCE: Allow longer queries (1s) for better completeness
+                                        if query_duration > 1000:
+                                            logging.debug(f"Slow lineage query ({query_duration:.0f}ms) - using partial results")
+                                            # Use partial results instead of skipping entirely
+                                    except Exception as query_err:
+                                        logging.warning(f"Lineage query failed, using cached lineage: {query_err}")
+                                        lineage_cache = {}  # Skip lineage alignment on error
+                                        batch_results = []
+                                
+                                # Build lookup map from results
+                                for row in batch_results:
+                                    db_lin = row[0]
+                                    db_strain = row[1] if len(row) > 1 else None
+                                    result_product_name = row[2] if len(row) > 2 else None
+                                    result_normalized = row[3] if len(row) > 3 else None
                                     
-                                    # Build lookup map from results
-                                    if 'batch_results' in locals() and batch_results:
-                                        for row in batch_results:
-                                            db_lin = row[0]
-                                            db_strain = row[1] if len(row) > 1 else None
-                                            result_product_name = row[2] if len(row) > 2 else None
-                                            result_normalized = row[3] if len(row) > 3 else None
-                                            
-                                            if result_product_name and result_product_name in name_to_tag:
-                                                if result_product_name not in lineage_cache:
-                                                    lineage_cache[result_product_name] = (db_lin, db_strain)
-                                            if result_normalized:
-                                                for name, normalized in zip(product_names, normalized_names):
-                                                    if normalized == result_normalized and name not in lineage_cache:
-                                                        lineage_cache[name] = (db_lin, db_strain)
-                                                        break
-                                except Exception as batch_err:
-                                    logging.warning(f"Batch lineage query (cache) failed, using fallback: {batch_err}")
-                                    lineage_cache = {}
-                                    batch_results = []
+                                    if result_product_name and result_product_name in name_to_tag:
+                                        if result_product_name not in lineage_cache:
+                                            lineage_cache[result_product_name] = (db_lin, db_strain)
+                                    if result_normalized:
+                                        for name, normalized in zip(product_names, normalized_names):
+                                            if normalized == result_normalized and name not in lineage_cache:
+                                                lineage_cache[name] = (db_lin, db_strain)
+                                                break
+                            except Exception as batch_err:
+                                logging.warning(f"Batch lineage query (cache) failed, using fallback: {batch_err}")
+                                # Fallback to individual queries
+                                for name in product_names:
                                     if name not in lineage_cache:
                                         try:
                                             normalized = normalized_names[product_names.index(name)]
@@ -9665,12 +8585,6 @@ def get_available_tags():
                         # If batch was limited, do individual lookups for remaining tags
                         tags_needing_individual_query = []  # Track tags that need individual DB queries
                         for tag in cached_tags:
-                            # PERFORMANCE: Check timeout during tag processing loop
-                            elapsed = time.time() - start_time
-                            if elapsed > MAX_PROCESSING_TIME * 0.85:  # Stop if we've used 85% of time
-                                logging.warning(f"⏱️ Timeout approaching during tag processing ({elapsed:.2f}s) - stopping early")
-                                break
-                            
                             try:
                                 name = tag.get('Product Name*') or tag.get('ProductName') or ''
                                 if not name:
@@ -9680,8 +8594,7 @@ def get_available_tags():
                                 
                                 # CRITICAL FIX: If not found in batch cache, add to list for individual query
                                 # This handles cases where product name doesn't match exactly (e.g., apostrophe differences)
-                                # PERFORMANCE: Limit individual queries to prevent timeout
-                                if not db_lin and len(tags_needing_individual_query) < 50:  # Limit to 50 individual queries
+                                if not db_lin:
                                     tags_needing_individual_query.append((tag, name))
                                     continue
                                 
@@ -9704,56 +8617,33 @@ def get_available_tags():
                             except Exception as _loop_err:
                                 logging.debug(f"UI lineage alignment (cache) error for a tag: {_loop_err}")
                         
-                            # PERFORMANCE OPTIMIZATION: Only verify tags with individual queries when lineage alignment is needed
-                            # When fast_load is enabled, skip individual queries to dramatically improve performance
-                            # Individual queries are only needed when we need guaranteed fresh lineage values
-                            if not fast_load and (prefer_db or force_full_refresh):
-                                # CRITICAL FIX: Verify tags with individual database queries only when needed
-                                # This ensures we get the latest database lineage values when explicitly requested
-                                # Skip this for fast_load to improve performance (batch query is sufficient)
-                                
-                                # PERFORMANCE: Check timeout before starting individual queries
-                                elapsed = time.time() - start_time
-                                if elapsed > MAX_PROCESSING_TIME * 0.8:
-                                    logging.warning(f"⏱️ Timeout approaching ({elapsed:.2f}s) - skipping individual queries")
-                                    tags_needing_individual_query = []
-                                else:
-                                    logging.info(f"🔄 Verifying tags with individual database queries (prefer_db={prefer_db}, force_full_refresh={force_full_refresh})...")
-                                    # Only add tags that weren't found in batch query to individual query list
-                                    for tag in cached_tags:
-                                        # PERFORMANCE: Check timeout during loop
-                                        elapsed = time.time() - start_time
-                                        if elapsed > MAX_PROCESSING_TIME * 0.85:
-                                            break
-                                        
-                                        name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                        if name and name not in lineage_cache:
-                                            # Only query tags that weren't in batch results
-                                            if (tag, name) not in tags_needing_individual_query and len(tags_needing_individual_query) < 30:  # Limit to 30
-                                                tags_needing_individual_query.append((tag, name))
+                        # PERFORMANCE OPTIMIZATION: Only verify tags with individual queries when lineage alignment is needed
+                        # When fast_load is enabled, skip individual queries to dramatically improve performance
+                        # Individual queries are only needed when we need guaranteed fresh lineage values
+                        if not fast_load and (prefer_db or force_full_refresh):
+                            # CRITICAL FIX: Verify tags with individual database queries only when needed
+                            # This ensures we get the latest database lineage values when explicitly requested
+                            # Skip this for fast_load to improve performance (batch query is sufficient)
+                            logging.info(f"🔄 Verifying {len(cached_tags)} tags with individual database queries (prefer_db={prefer_db}, force_full_refresh={force_full_refresh})...")
+                            # Only add tags that weren't found in batch query to individual query list
+                            for tag in cached_tags:
+                                name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                if name and name not in lineage_cache:
+                                    # Only query tags that weren't in batch results
+                                    if (tag, name) not in tags_needing_individual_query:
+                                        tags_needing_individual_query.append((tag, name))
                             
                             # Perform individual queries only for tags not found in batch
                             if tags_needing_individual_query:
-                                # PERFORMANCE: Check timeout before starting individual queries
-                                elapsed = time.time() - start_time
-                                if elapsed > MAX_PROCESSING_TIME * 0.85:
-                                    logging.warning(f"⏱️ Timeout approaching ({elapsed:.2f}s) - skipping individual queries")
-                                    tags_needing_individual_query = []
-                                
                                 if not product_db:
                                     logging.warning("⚠️ Product database not available for individual lineage queries")
-                                elif tags_needing_individual_query:
+                                else:
                                     logging.info(f"🔄 Performing {len(tags_needing_individual_query)} individual database queries for tags not in batch...")
                                     individual_updated_count = 0
                                     try:
-                                        # Limit individual queries to prevent timeout (max 30 queries, reduced from 100)
-                                        max_individual_queries = 30
+                                        # Limit individual queries to prevent timeout (max 100 queries)
+                                        max_individual_queries = 100
                                         for tag, name in tags_needing_individual_query[:max_individual_queries]:
-                                            # PERFORMANCE: Check timeout during individual query loop
-                                            elapsed = time.time() - start_time
-                                            if elapsed > MAX_PROCESSING_TIME * 0.9:  # Stop if we've used 90% of time
-                                                logging.warning(f"⏱️ Timeout approaching during individual queries ({elapsed:.2f}s) - stopping")
-                                                break
                                             try:
                                                 # Use get_product_lineage which handles normalization and case-insensitive matching
                                                 db_lineage = product_db.get_product_lineage(name)
@@ -9929,71 +8819,52 @@ def get_available_tags():
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                 # PERFORMANCE: Skip expensive DataFrame lineage update when fast_load is enabled
                 # This dramatically speeds up tag loading after upload
-                # CRITICAL: NEVER update DataFrame lineage during fast_load - it's too slow
                 if not fast_load and hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
-                    # PERFORMANCE: Check timeout before expensive DataFrame update
-                    elapsed = time.time() - start_time
-                    if elapsed > MAX_PROCESSING_TIME * 0.3:  # Skip if we've used 30% of time
-                        logging.warning(f"⏱️ Timeout approaching ({elapsed:.2f}s) - skipping DataFrame lineage update")
-                    else:
-                        try:
-                            logging.info("🔄 CRITICAL FIX: Updating DataFrame lineage from database before loading tags...")
-                            excel_processor._update_dataframe_lineage_from_database()
-                            logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database")
-                            # CRITICAL: Invalidate caches after DataFrame update to force fresh tag loading
-                            if hasattr(excel_processor, '_invalidate_caches'):
-                                excel_processor._invalidate_caches()
-                                logging.info("✅ CRITICAL FIX: Invalidated caches after DataFrame lineage update")
-                        except Exception as df_update_err:
-                            logging.error(f"❌ CRITICAL FAILURE: Could not update DataFrame lineage from database: {df_update_err}")
-                            import traceback
-                            logging.error(traceback.format_exc())
-                            # Continue anyway - the guaranteed fix below will handle it
-                elif fast_load:
-                    logging.info("⚡ Fast load enabled - skipping DataFrame lineage update for speed")
-                
-                # PERFORMANCE: Check timeout before loading tags from Excel
-                elapsed = time.time() - start_time
-                if elapsed > MAX_PROCESSING_TIME * 0.5:  # If we've used 50% of time, return early
-                    logging.warning(f"⏱️ Timeout approaching before Excel tag loading ({elapsed:.2f}s) - returning empty")
-                    all_tags = []
-                else:
                     try:
-                        # CRITICAL: ALWAYS use enrichment to get database lineage - NEVER skip it
-                        # Database lineage is the source of truth and must always be used for persistence
-                        # PERFORMANCE: Log start time for monitoring
-                        tags_start_time = time.time()
-                        logging.info(f"📊 Loading tags from Excel processor (DataFrame: {len(excel_processor.df)} rows)...")
-                        
-                        # PERFORMANCE: Skip enrichment when fast_load is enabled for faster loading
-                        # Enrichment adds database lineage but is expensive - skip it for fast loads
-                        if fast_load:
-                            # Fast load: skip enrichment to speed up tag loading
-                            excel_processor._skip_enrichment = True
-                        excel_tags = excel_processor.get_available_tags()
-                        if fast_load:
-                            excel_processor._skip_enrichment = False  # Reset flag
-                    
-                        tags_elapsed = (time.time() - tags_start_time) * 1000
-                        logging.info(f"✅ Excel processor returned {len(excel_tags)} tags in {tags_elapsed:.0f}ms")
-                        
-                        # PERFORMANCE: Check timeout after Excel tag loading
-                        elapsed = time.time() - start_time
-                        if elapsed > MAX_PROCESSING_TIME * 0.8:
-                            logging.warning(f"⏱️ Timeout approaching after Excel tag loading ({elapsed:.2f}s) - using partial results")
-                        
-                        # CRITICAL FIX: Verify Excel tags have database lineage fields (skip check during fast_load for speed)
-                        if not fast_load:
-                            tags_with_db_lineage = sum(1 for tag in excel_tags if tag.get('currentLineage') or tag.get('canonical_lineage'))
-                            logging.info(f"📊 Tags with DB lineage: {tags_with_db_lineage}/{len(excel_tags)}")
-                            if tags_with_db_lineage < len(excel_tags) * 0.5:  # Less than 50% have DB lineage
-                                logging.warning(f"⚠️ Only {tags_with_db_lineage}/{len(excel_tags)} Excel tags have database lineage - enrichment may have failed")
-                        
-                        all_tags.extend(excel_tags)
-                    except Exception as e:
-                        logging.error(f"❌ Excel processor error: {e}")
+                        logging.info("🔄 CRITICAL FIX: Updating DataFrame lineage from database before loading tags...")
+                        excel_processor._update_dataframe_lineage_from_database()
+                        logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database")
+                        # CRITICAL: Invalidate caches after DataFrame update to force fresh tag loading
+                        if hasattr(excel_processor, '_invalidate_caches'):
+                            excel_processor._invalidate_caches()
+                            logging.info("✅ CRITICAL FIX: Invalidated caches after DataFrame lineage update")
+                    except Exception as df_update_err:
+                        logging.error(f"❌ CRITICAL FAILURE: Could not update DataFrame lineage from database: {df_update_err}")
                         import traceback
                         logging.error(traceback.format_exc())
+                        # Continue anyway - the guaranteed fix below will handle it
+                elif fast_load:
+                    logging.info("⚡ Fast load enabled - skipping DataFrame lineage update for speed")
+                try:
+                    # CRITICAL: ALWAYS use enrichment to get database lineage - NEVER skip it
+                    # Database lineage is the source of truth and must always be used for persistence
+                    # PERFORMANCE: Log start time for monitoring
+                    tags_start_time = time.time()
+                    logging.info(f"📊 Loading tags from Excel processor (DataFrame: {len(excel_processor.df)} rows)...")
+                    
+                    # PERFORMANCE: Skip enrichment when fast_load is enabled for faster loading
+                    # Enrichment adds database lineage but is expensive - skip it for fast loads
+                    if fast_load:
+                        # Fast load: skip enrichment to speed up tag loading
+                        excel_processor._skip_enrichment = True
+                    excel_tags = excel_processor.get_available_tags()
+                    if fast_load:
+                        excel_processor._skip_enrichment = False  # Reset flag
+                    
+                    tags_elapsed = (time.time() - tags_start_time) * 1000
+                    logging.info(f"✅ Excel processor returned {len(excel_tags)} tags in {tags_elapsed:.0f}ms")
+                    
+                    # CRITICAL FIX: Verify Excel tags have database lineage fields
+                    tags_with_db_lineage = sum(1 for tag in excel_tags if tag.get('currentLineage') or tag.get('canonical_lineage'))
+                    logging.info(f"📊 Tags with DB lineage: {tags_with_db_lineage}/{len(excel_tags)}")
+                    if tags_with_db_lineage < len(excel_tags) * 0.5:  # Less than 50% have DB lineage
+                        logging.warning(f"⚠️ Only {tags_with_db_lineage}/{len(excel_tags)} Excel tags have database lineage - enrichment may have failed")
+                    
+                    all_tags.extend(excel_tags)
+                except Exception as e:
+                    logging.error(f"❌ Excel processor error: {e}")
+                    import traceback
+                    logging.error(traceback.format_exc())
             
             # CRITICAL FIX: If no Excel data and prefer_db not set, fall back to database instead of returning empty
             if not all_tags:
@@ -10005,12 +8876,7 @@ def get_available_tags():
         # PERFORMANCE: Query database for lineage for ALL tags using optimized batch query
         # Database lineage is the source of truth and overrides Excel/cached lineage
         # CRITICAL: Only do database queries when not using fast_load (fast_load skips this for speed)
-        # PERFORMANCE: Check timeout before starting expensive database queries
-        elapsed = time.time() - start_time
-        if elapsed > MAX_PROCESSING_TIME * 0.6:
-            logging.warning(f"⏱️ Timeout approaching before database queries ({elapsed:.2f}s) - skipping database lineage update")
-            all_tags = all_tags[:]  # Use existing tags without database update
-        elif all_tags and not fast_load:
+        if all_tags and not fast_load:
             try:
                 store_name = get_current_store_name(allow_fallback=True)  # Use fallback to ensure we have a store
                 if not store_name:
@@ -10027,148 +8893,106 @@ def get_available_tags():
                                 product_names.append(name)
                         
                         if product_names:
-                            # PERFORMANCE: Check timeout before expensive batch query
-                            elapsed = time.time() - start_time
-                            if elapsed > MAX_PROCESSING_TIME * 0.7:
-                                logging.warning(f"⏱️ Timeout approaching before batch query ({elapsed:.2f}s) - skipping")
-                            else:
-                                try:
-                                    # PERFORMANCE: Single batch query instead of individual queries
-                                    db_records = product_db.get_products_by_names(product_names)
+                            try:
+                                # PERFORMANCE: Single batch query instead of individual queries
+                                db_records = product_db.get_products_by_names(product_names)
                                 
-                                    # PERFORMANCE: Build lineage map and normalized map in single pass
-                                    lineage_map = {}
-                                    normalized_to_lineage = {}
-                                    for db_record in db_records:
-                                        db_product_name = db_record.get('Product Name*', '')
-                                        if db_product_name:
-                                            db_lineage = (
-                                                db_record.get('currentLineage') or
-                                                db_record.get('canonical_lineage') or
-                                                db_record.get('Lineage')
-                                            )
-                                            if db_lineage:
-                                                db_lineage_clean = str(db_lineage).strip().upper()
-                                                lineage_map[db_product_name] = db_lineage_clean
-                                                try:
-                                                    normalized_name = product_db._normalize_product_name(db_product_name)
-                                                    if normalized_name:
-                                                        normalized_to_lineage[normalized_name] = db_lineage_clean
-                                                except Exception:
-                                                    pass
-                                
-                                    # OPTIMIZED: Update tags using batch query results - much faster than individual queries
-                                    updated_count = 0
-                                    tags_needing_individual_query_guaranteed = []  # Track tags that need individual queries
-                                    for tag in all_tags:
-                                        tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                                        if not tag_name:
-                                            continue
-                                
-                                        # Fast lookup: try exact match first, then normalized, then case-insensitive
-                                        db_lineage = lineage_map.get(tag_name)
-                                        if not db_lineage:
+                                # PERFORMANCE: Build lineage map and normalized map in single pass
+                                lineage_map = {}
+                                normalized_to_lineage = {}
+                                for db_record in db_records:
+                                    db_product_name = db_record.get('Product Name*', '')
+                                    if db_product_name:
+                                        db_lineage = (
+                                            db_record.get('currentLineage') or
+                                            db_record.get('canonical_lineage') or
+                                            db_record.get('Lineage')
+                                        )
+                                        if db_lineage:
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            lineage_map[db_product_name] = db_lineage_clean
                                             try:
-                                                normalized_name = product_db._normalize_product_name(tag_name)
-                                                db_lineage = normalized_to_lineage.get(normalized_name) or lineage_map.get(normalized_name)
+                                                normalized_name = product_db._normalize_product_name(db_product_name)
+                                                if normalized_name:
+                                                    normalized_to_lineage[normalized_name] = db_lineage_clean
                                             except Exception:
                                                 pass
                                 
-                                        if not db_lineage:
-                                            tag_name_lower = tag_name.lower()
-                                            for db_name, db_lin in lineage_map.items():
-                                                if db_name and isinstance(db_name, str) and db_name.lower() == tag_name_lower:
-                                                    db_lineage = db_lin
-                                                    break
+                                # OPTIMIZED: Update tags using batch query results - much faster than individual queries
+                                updated_count = 0
+                                tags_needing_individual_query_guaranteed = []  # Track tags that need individual queries
+                                for tag in all_tags:
+                                    tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                    if not tag_name:
+                                        continue
                                 
-                                        # Update tag with database lineage
-                                        if db_lineage:
-                                            tag['currentLineage'] = db_lineage
-                                            tag['canonical_lineage'] = db_lineage
-                                            tag['Lineage'] = db_lineage
-                                            tag['lineage'] = db_lineage.lower()
-                                            updated_count += 1
-                                        else:
-                                            # CRITICAL FIX: If not found in batch, add to individual query list
-                                            # This handles products with name mismatches (e.g., apostrophe differences)
-                                            tags_needing_individual_query_guaranteed.append((tag, tag_name))
+                                # Fast lookup: try exact match first, then normalized, then case-insensitive
+                                db_lineage = lineage_map.get(tag_name)
+                                if not db_lineage:
+                                    try:
+                                        normalized_name = product_db._normalize_product_name(tag_name)
+                                        db_lineage = normalized_to_lineage.get(normalized_name) or lineage_map.get(normalized_name)
+                                    except Exception:
+                                        pass
                                 
-                                    # PERFORMANCE OPTIMIZATION: Only do individual queries for tags NOT found in batch query
-                                    # Batch query is fast and sufficient for most cases - individual queries only for edge cases
-                                    # This dramatically improves performance (from 30-60s to <2s for large datasets)
-                                    # PERFORMANCE: Check timeout before individual queries
-                                    elapsed = time.time() - start_time
-                                    if elapsed > MAX_PROCESSING_TIME * 0.8:
-                                        logging.warning(f"⏱️ Timeout approaching before individual queries ({elapsed:.2f}s) - skipping")
-                                        tags_needing_individual_query_guaranteed = []
+                                if not db_lineage:
+                                    tag_name_lower = tag_name.lower()
+                                    for db_name, db_lin in lineage_map.items():
+                                        if db_name and isinstance(db_name, str) and db_name.lower() == tag_name_lower:
+                                            db_lineage = db_lin
+                                            break
                                 
-                                    if tags_needing_individual_query_guaranteed and product_db:
-                                        # Only query tags that weren't found in batch - limit to prevent timeout
-                                        max_individual_queries = 20  # Reduced from 50 to 20 for faster processing
-                                        tags_to_query = tags_needing_individual_query_guaranteed[:max_individual_queries]
-                                        if len(tags_needing_individual_query_guaranteed) > max_individual_queries:
-                                            logging.info(f"⚠️ Limiting individual queries to {max_individual_queries} (out of {len(tags_needing_individual_query_guaranteed)} needed) for performance")
-                                        
-                                        if tags_to_query:
-                                            logging.info(f"🔄 Performing {len(tags_to_query)} individual database queries for tags not found in batch query...")
-                                            individual_updated = 0
-                                            for tag, tag_name in tags_to_query:
-                                                # PERFORMANCE: Check timeout during individual query loop
-                                                elapsed = time.time() - start_time
-                                                if elapsed > MAX_PROCESSING_TIME * 0.9:
-                                                    logging.warning(f"⏱️ Timeout approaching during individual queries ({elapsed:.2f}s) - stopping")
-                                                    break
-                                                try:
-                                                    # CRITICAL: Use get_product_lineage which handles normalization and case-insensitive matching
-                                                    # This ALWAYS queries the database directly, never uses cache
-                                                    db_lineage = product_db.get_product_lineage(tag_name)
-                                                    if db_lineage:
-                                                        db_lineage_clean = str(db_lineage).strip().upper()
-                                                        
-                                                        # CRITICAL: Use database lineage directly - respect database values
-                                                        # Don't convert or modify - database is the source of truth
-                                                        old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                                        
-                                                        # CRITICAL: ALWAYS override with database value - database is the source of truth
-                                                        tag['currentLineage'] = db_lineage_clean
-                                                        tag['canonical_lineage'] = db_lineage_clean
-                                                        tag['Lineage'] = db_lineage_clean
-                                                        tag['lineage'] = db_lineage_clean.lower()
-                                                        
-                                                        updated_count += 1
-                                                        individual_updated += 1
-                                                        if old_lineage != db_lineage_clean:
-                                                            logging.debug(f"🔄 Lineage updated (individual query): '{tag_name}' - '{old_lineage}' → '{db_lineage_clean}'")
-                                                        else:
-                                                            logging.debug(f"✅ Lineage confirmed by database (individual query): '{tag_name}' = '{db_lineage_clean}'")
+                                # Update tag with database lineage
+                                if db_lineage:
+                                    tag['currentLineage'] = db_lineage
+                                    tag['canonical_lineage'] = db_lineage
+                                    tag['Lineage'] = db_lineage
+                                    tag['lineage'] = db_lineage.lower()
+                                    updated_count += 1
+                                else:
+                                    # CRITICAL FIX: If not found in batch, add to individual query list
+                                    # This handles products with name mismatches (e.g., apostrophe differences)
+                                    tags_needing_individual_query_guaranteed.append((tag, tag_name))
+                                
+                                # PERFORMANCE OPTIMIZATION: Only do individual queries for tags NOT found in batch query
+                                # Batch query is fast and sufficient for most cases - individual queries only for edge cases
+                                # This dramatically improves performance (from 30-60s to <2s for large datasets)
+                                if tags_needing_individual_query_guaranteed and product_db:
+                                    # Only query tags that weren't found in batch - limit to prevent timeout
+                                    max_individual_queries = 50  # Limit individual queries to prevent slow loading
+                                    tags_to_query = tags_needing_individual_query_guaranteed[:max_individual_queries]
+                                    if len(tags_needing_individual_query_guaranteed) > max_individual_queries:
+                                        logging.info(f"⚠️ Limiting individual queries to {max_individual_queries} (out of {len(tags_needing_individual_query_guaranteed)} needed) for performance")
+                                    
+                                    if tags_to_query:
+                                        logging.info(f"🔄 Performing {len(tags_to_query)} individual database queries for tags not found in batch query...")
+                                        individual_updated = 0
+                                        for tag, tag_name in tags_to_query:
+                                            try:
+                                                # CRITICAL: Use get_product_lineage which handles normalization and case-insensitive matching
+                                                # This ALWAYS queries the database directly, never uses cache
+                                                db_lineage = product_db.get_product_lineage(tag_name)
+                                                if db_lineage:
+                                                    db_lineage_clean = str(db_lineage).strip().upper()
+                                                    
+                                                    # CRITICAL: Use database lineage directly - respect database values
+                                                    # Don't convert or modify - database is the source of truth
+                                                    old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
+                                                    
+                                                    # CRITICAL: ALWAYS override with database value - database is the source of truth
+                                                    tag['currentLineage'] = db_lineage_clean
+                                                    tag['canonical_lineage'] = db_lineage_clean
+                                                    tag['Lineage'] = db_lineage_clean
+                                                    tag['lineage'] = db_lineage_clean.lower()
+                                                    
+                                                    updated_count += 1
+                                                    individual_updated += 1
+                                                    if old_lineage != db_lineage_clean:
+                                                        logging.debug(f"🔄 Lineage updated (individual query): '{tag_name}' - '{old_lineage}' → '{db_lineage_clean}'")
                                                     else:
-                                                        # Even if no DB lineage found, ensure fields are consistent
-                                                        # CRITICAL: Classic types should NOT default to MIXED
-                                                        product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
-                                                        from src.core.constants import CLASSIC_TYPES
-                                                        is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
-                                                        default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
-                                                        current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
-                                                        
-                                                        # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
-                                                        if current_lineage == 'THC':
-                                                            current_lineage = 'MIXED'
-                                                        
-                                                        # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID
-                                                        # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
-                                                        if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
-                                                            current_lineage = 'HYBRID'
-                                                        
-                                                        # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
-                                                        # Even if one exists, ensure both are set to the same value
-                                                        if current_lineage:
-                                                            tag['currentLineage'] = current_lineage
-                                                            tag['canonical_lineage'] = current_lineage
-                                                            tag['Lineage'] = current_lineage
-                                                            tag['lineage'] = current_lineage.lower()
-                                                except Exception as individual_err:
-                                                    logging.debug(f"Individual query failed for '{tag_name}': {individual_err}")
-                                                    # Even if query fails, ensure fields are consistent
+                                                        logging.debug(f"✅ Lineage confirmed by database (individual query): '{tag_name}' = '{db_lineage_clean}'")
+                                                else:
+                                                    # Even if no DB lineage found, ensure fields are consistent
                                                     # CRITICAL: Classic types should NOT default to MIXED
                                                     product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
                                                     from src.core.constants import CLASSIC_TYPES
@@ -10184,18 +9008,44 @@ def get_available_tags():
                                                     # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
                                                     if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
                                                         current_lineage = 'HYBRID'
-                                                    if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
-                                                        if current_lineage:
-                                                            tag['currentLineage'] = current_lineage
-                                                            tag['canonical_lineage'] = current_lineage
+                                                    
+                                                    # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
+                                                    # Even if one exists, ensure both are set to the same value
+                                                    if current_lineage:
+                                                        tag['currentLineage'] = current_lineage
+                                                        tag['canonical_lineage'] = current_lineage
+                                                        tag['Lineage'] = current_lineage
+                                                        tag['lineage'] = current_lineage.lower()
+                                            except Exception as individual_err:
+                                                logging.debug(f"Individual query failed for '{tag_name}': {individual_err}")
+                                                # Even if query fails, ensure fields are consistent
+                                                # CRITICAL: Classic types should NOT default to MIXED
+                                                product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
+                                                from src.core.constants import CLASSIC_TYPES
+                                                is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                                default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
+                                                current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
+                                                
+                                                # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
+                                                if current_lineage == 'THC':
+                                                    current_lineage = 'MIXED'
+                                                
+                                                # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID
+                                                # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
+                                                if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
+                                                    current_lineage = 'HYBRID'
+                                                if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
+                                                    if current_lineage:
+                                                        tag['currentLineage'] = current_lineage
+                                                        tag['canonical_lineage'] = current_lineage
                                         
-                                            if individual_updated > 0:
-                                                logging.info(f"✅ Verified {individual_updated}/{len(tags_to_query)} tags with individual database queries")
+                                        if individual_updated > 0:
+                                            logging.info(f"✅ Verified {individual_updated}/{len(tags_to_query)} tags with individual database queries")
                                 
-                                    if updated_count > 0:
-                                        logging.debug(f"✅ Updated {updated_count}/{len(all_tags)} tags with database lineage")
-                                except Exception as db_query_err:
-                                    logging.debug(f"Database lineage query failed: {db_query_err}")
+                                if updated_count > 0:
+                                    logging.debug(f"✅ Updated {updated_count}/{len(all_tags)} tags with database lineage")
+                            except Exception as db_query_err:
+                                logging.debug(f"Database lineage query failed: {db_query_err}")
                     else:
                         logging.debug("No product database available for lineage alignment")
             except Exception as e:
@@ -10304,8 +9154,8 @@ def get_available_tags():
                                         SELECT {quoted_columns}, COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                         FROM products p
                                         LEFT JOIN strains s ON p.strain_id = s.id
-                                        WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes')
-                                        ORDER BY p.id DESC
+                                ORDER BY p.id DESC
+                                LIMIT 2000
                                     '''
                                     try:
                                         main_cursor.execute(query)
@@ -10314,7 +9164,7 @@ def get_available_tags():
                                         logging.info(f"Main database query with strain join returned {len(rows)} rows")
                                     except Exception as join_err:
                                         logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
-                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != \'yes\') ORDER BY p.id DESC'
+                                        query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
                                         main_cursor.execute(query)
                                         rows = main_cursor.fetchall()
                                         columns = columns_to_query + ['preferred_lineage']
@@ -10364,14 +9214,14 @@ def get_available_tags():
                             
                             # PERFORMANCE: Use simpler query without strain join for faster loading
                             # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
-                            # Removed LIMIT to show all products
+                            # OPTIMIZATION: Reduce limit and skip expensive join initially
                             lineage_query_join_by_name = f'''
                                 SELECT {quoted_columns}, 
                                        COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                 FROM products p
                                 LEFT JOIN strains s ON p.strain_id = s.id
-                                WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes')
                                 ORDER BY p.id DESC
+                                LIMIT 2000
                             '''
                             
                             # Fallback query if strains table/join fails - use this first for speed
@@ -10379,8 +9229,8 @@ def get_available_tags():
                                 SELECT {quoted_columns}, 
                                        p."Lineage" AS preferred_lineage
                                 FROM products p
-                                WHERE (p."Is Archived? (yes/no)" IS NULL OR p."Is Archived? (yes/no)" != 'yes')
                                 ORDER BY p.id DESC
+                                LIMIT 2000
                             '''
                             
                             # PERFORMANCE: Use simpler fallback query first (no join) for faster loading
@@ -10908,17 +9758,8 @@ def get_available_tags():
                     cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
                 else:
                     cache_key = get_session_cache_key('available_tags')
-            
-            # CRITICAL FIX: Add cache timestamp to each tag for version tracking
-            # This prevents serving stale cache when file is re-uploaded
-            current_upload_time = session.get('upload_timestamp', time.time())
-            if isinstance(safe_all_tags, list) and len(safe_all_tags) > 0:
-                for tag in safe_all_tags:
-                    if isinstance(tag, dict):
-                        tag['_cache_timestamp'] = current_upload_time
-            
             cache.set(cache_key, safe_all_tags, timeout=300)  # Cache for 5 minutes
-            logging.info(f"✅ Cached {len(safe_all_tags)} tags for future requests (timestamp: {current_upload_time})")
+            logging.info(f"✅ Cached {len(safe_all_tags)} tags for future requests")
         try:
             final_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
             save_available_tags_cache(_normalize_store_key(final_store_for_cache), safe_all_tags)
@@ -11092,13 +9933,7 @@ def get_selected_tags():
             return jsonify([])
         
         # Get the selected tags - return full dictionary objects
-        # CRITICAL FIX: Handle case where selected_tags might be None or not exist
-        selected_tags = getattr(excel_processor, 'selected_tags', None)
-        if selected_tags is None:
-            selected_tags = []
-        if not isinstance(selected_tags, list):
-            # Convert to list if it's not already
-            selected_tags = list(selected_tags) if hasattr(selected_tags, '__iter__') else []
+        selected_tags = excel_processor.selected_tags
         selected_tag_objects = []
         
         # CRITICAL FIX: Get database lineage for all products
@@ -11108,16 +9943,7 @@ def get_selected_tags():
             excel_processor.enable_product_db_integration(True)
             logging.debug("Enabled ProductDB integration for lineage queries in selected-tags")
         
-        # CRITICAL FIX: Handle database errors gracefully
-        product_db = None
-        try:
-            product_db = get_product_database(store_name)
-        except FileNotFoundError as db_err:
-            logging.warning(f"Product database not found for store '{store_name}': {db_err}. Continuing without database lineage.")
-            product_db = None
-        except Exception as db_err:
-            logging.error(f"Error getting product database for store '{store_name}': {db_err}. Continuing without database lineage.")
-            product_db = None
+        product_db = get_product_database(store_name)
         
         for tag in selected_tags:
             if isinstance(tag, dict):
@@ -11223,13 +10049,8 @@ def get_selected_tags():
         
         return jsonify(selected_tag_objects)
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
         logging.error(f"Error getting selected tags: {str(e)}")
-        logging.error(f"Traceback: {error_traceback}")
-        # CRITICAL FIX: Return empty array instead of error to prevent frontend issues
-        # This allows the app to continue functioning even if selected tags can't be loaded
-        return jsonify([])
+        return jsonify({'error': str(e)}), 500
 @app.route('/api/selected-tags', methods=['POST'])
 def set_selected_tags():
     """Set selected tags in the backend."""
@@ -11462,117 +10283,59 @@ def update_lineage():
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
-        # CRITICAL FIX: Check if this is a nonclassic product type
-        # For nonclassic types, only update the specific product, don't propagate to strain or other products
-        from src.core.constants import CLASSIC_TYPES
-        try:
-            cursor.execute("""
-                SELECT "Product Type*"
-                FROM products 
-                WHERE ("Product Name*" = ? OR ProductName = ?)
-                LIMIT 1
-            """, (tag_name, tag_name))
-            product_row = cursor.fetchone()
-            
-            is_nonclassic = True  # Default to nonclassic if we can't determine
-            if product_row and product_row[0]:
-                product_type = str(product_row[0]).strip().lower()
-                is_nonclassic = product_type not in [ct.lower() for ct in CLASSIC_TYPES]
-                logging.info(f"Product '{tag_name}' type: '{product_type}', is_nonclassic: {is_nonclassic}")
-            else:
-                logging.warning(f"Could not determine product type for '{tag_name}', defaulting to nonclassic")
-        except Exception as e:
-            logging.error(f"Error checking product type for '{tag_name}': {e}")
-            is_nonclassic = True  # Default to nonclassic on error to be safe
-
-        # SAVE STATE FOR UNDO: Get current lineage before updating
-        lineage_changes = []
-        try:
-            cursor.execute("""
-                SELECT "Product Name*", Lineage
-                FROM products
-                WHERE "Product Name*" = ? OR ProductName = ?
-            """, (tag_name, tag_name))
-            for product_name, old_lineage in cursor.fetchall():
-                lineage_changes.append({
-                    'product_name': product_name,
-                    'old_lineage': old_lineage,
-                    'new_lineage': new_lineage
-                })
-
-            # Save to undo stack
-            if lineage_changes:
-                undo_stack = session.get(UNDO_STACK_KEY, [])
-                undo_stack.append({
-                    'action_type': 'lineage_edit',
-                    'product_name': tag_name,
-                    'lineage_changes': lineage_changes,
-                    'timestamp': datetime.now().isoformat()
-                })
-                # Limit undo stack size
-                if len(undo_stack) > 5:
-                    undo_stack = undo_stack[-5:]
-                session[UNDO_STACK_KEY] = undo_stack
-                logging.info(f"Saved lineage edit to undo stack for product '{tag_name}'")
-        except Exception as e:
-            logging.warning(f"Could not save undo state for lineage edit: {e}")
-
         # Step 1: Update product lineage using ProductDatabase method
         products_updated = 0
-        excel_updated = 0
         try:
-            # Use the ProductDatabase method which handles normalization and matching
+            # Use the ProductDatabase method which handles normalization
             success = product_db.update_product_lineage(tag_name, new_lineage)
             if success:
                 # Get the actual count of updated rows
                 cursor.execute("""
                     SELECT COUNT(*) FROM products 
-                    WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                """, (tag_name, tag_name, product_db._normalize_product_name(tag_name)))
+                    WHERE "Product Name*" = ? OR ProductName = ?
+                """, (tag_name, tag_name))
                 products_updated = cursor.fetchone()[0]
                 logging.info(f"✅ Updated {products_updated} product(s) with lineage '{new_lineage}'")
             else:
-                logging.warning(f"⚠️ ProductDatabase.update_product_lineage returned False for '{tag_name}' - product may not exist in database")
+                logging.warning(f"⚠️ ProductDatabase.update_product_lineage returned False for '{tag_name}'")
         except Exception as e:
             logging.error(f"Error updating product lineage: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
         
-        # Step 2 & 3: Only update strain and propagate to other products if this is a CLASSIC type
-        # For nonclassic types, each product should have its own lineage, not shared by strain
+        # Step 2: CRITICAL - Also update strain lineage if product has a strain
+        # This ensures the lineage persists because strain lineage is the source of truth
+        cursor.execute("""
+            SELECT DISTINCT s.id, s.strain_name
+            FROM products p
+            JOIN strains s ON p.strain_id = s.id
+            WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+            AND p.strain_id IS NOT NULL
+        """, (tag_name, tag_name))
+        strain_rows = cursor.fetchall()
+        
         strains_updated = 0
-        similar_products_updated = 0
-        
-        if not is_nonclassic:
-            # CLASSIC TYPES: Update strain lineage for reference, but DON'T overwrite individual product lineages
-            # CRITICAL FIX: Individual product lineage changes should persist, even for classic types
-            # We update the strain lineage as a reference, but prioritize product Lineage when querying
+        for strain_id, strain_name in strain_rows:
+            # Update both sovereign_lineage and canonical_lineage
             cursor.execute("""
-                SELECT DISTINCT s.id, s.strain_name
-                FROM products p
-                JOIN strains s ON p.strain_id = s.id
-                WHERE (p."Product Name*" = ? OR p.ProductName = ?)
-                AND p.strain_id IS NOT NULL
-            """, (tag_name, tag_name))
-            strain_rows = cursor.fetchall()
-            
+                UPDATE strains 
+                SET sovereign_lineage = ?, canonical_lineage = ?
+                WHERE id = ?
+            """, (new_lineage, new_lineage, strain_id))
+            if cursor.rowcount > 0:
+                strains_updated += 1
+                logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{new_lineage}'")
+        
+        # Step 3: Also update all products with the same strain (sovereign lineage propagation)
+        similar_products_updated = 0
+        if strains_updated > 0:
             for strain_id, strain_name in strain_rows:
-                # Update strain lineage for reference (but product Lineage takes priority when querying)
                 cursor.execute("""
-                    UPDATE strains 
-                    SET sovereign_lineage = ?, canonical_lineage = ?
-                    WHERE id = ?
-                """, (new_lineage, new_lineage, strain_id))
-                if cursor.rowcount > 0:
-                    strains_updated += 1
-                    logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{new_lineage}' (reference only - product Lineage takes priority)")
-            
-            # CRITICAL FIX: DO NOT propagate to all products - let each product keep its own lineage
-            # This allows individual product lineage changes to persist
-            logging.info(f"🔄 Classic type product '{tag_name}' - updated strain lineage for reference, but preserving individual product lineages")
-        else:
-            # NONCLASSIC TYPES: Only update the specific product, don't propagate to strain or other products
-            logging.info(f"🔄 Nonclassic product '{tag_name}' - skipping strain propagation (only updating specific product)")
+                    UPDATE products 
+                    SET Lineage = ?
+                    WHERE strain_id = ?
+                """, (new_lineage, strain_id))
+                similar_products_updated = cursor.rowcount
+                if similar_products_updated > 0:
+                    logging.info(f"✅ Updated {similar_products_updated} products with strain '{strain_name}' to lineage '{new_lineage}'")
         
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
@@ -11705,20 +10468,15 @@ def update_lineage():
         total_updated = products_updated + strains_updated
         logging.info(f"✅ Updated {products_updated} products and {strains_updated} strains to lineage '{new_lineage}'")
         
-        # Calculate total updated (products + strains + similar products)
-        total_updated = products_updated + strains_updated + similar_products_updated
-        
         return jsonify({
             'success': True,
             'products_updated': products_updated,
             'strains_updated': strains_updated,
-            'similar_products_updated': similar_products_updated,
             'db_updated': total_updated,
-            'excel_updated': excel_updated,
+            'excel_updated': 0,
             'new_lineage': new_lineage,
             'verified_lineage': verified_lineage or new_lineage,
-            'verification_passed': verified_lineage and str(verified_lineage).strip().upper() == str(new_lineage).strip().upper(),
-            'message': f'Updated {total_updated} product(s) with lineage {new_lineage}' if total_updated > 0 else f'No products found to update for {tag_name}'
+            'verification_passed': verified_lineage and str(verified_lineage).strip().upper() == str(new_lineage).strip().upper()
         })
         
     except Exception as e:
@@ -11822,7 +10580,7 @@ def batch_update_lineage():
                     try:
                         product_type = excel_processor.df.loc[mask, 'Product Type*'].iloc[0]
                         if str(product_type).strip().lower() == 'paraphernalia':
-                            # Force paraphernalia products to always have PARAPHERNALIA lineage (frontend shows pink 'P')
+                            # Force paraphernalia products to always have PARAPHERNALIA lineage
                             new_lineage = 'PARAPHERNALIA'
                             logging.info(f"Enforcing PARAPHERNALIA lineage for paraphernalia product: {tag_name}")
                     except (IndexError, KeyError):
@@ -12604,12 +11362,12 @@ def _get_filter_options_from_database(store_name=None):
             lineages = set()
         
         for product in all_products:
-            # Vendor - ONLY from vendor column
+            # Vendor
             vendor = product.get('Vendor/Supplier*', '') or product.get('Vendor', '')
             if vendor and str(vendor).strip():
                 vendors.add(str(vendor).strip())
             
-            # Brand - ONLY from brand column
+            # Brand
             brand = product.get('Product Brand', '') or product.get('Brand', '')
             if brand and str(brand).strip():
                 brands.add(str(brand).strip())
@@ -12649,7 +11407,7 @@ def _get_filter_options_from_database(store_name=None):
             if product_type_lower.startswith('high cbd'):
                 high_cbd_types.add(product_type)
         
-        # Convert to sorted lists - vendors ONLY from vendor column, brands ONLY from brand column
+        # Convert to sorted lists
         options = {
             'vendor': sorted(list(vendors)),
             'brand': sorted(list(brands)),
@@ -15188,7 +13946,7 @@ def trend_analysis():
             ''', conn)
             
             # Calculate trend metrics
-            trending_products = trends_df.groupby('product_name', observed=False).agg({
+            trending_products = trends_df.groupby('product_name').agg({
                 'occurrence_count': ['sum', 'mean', 'std']
             }).reset_index()
             
@@ -17525,60 +16283,21 @@ def update_preroll_items_from_excel(df, session_id=None):
             
             grouped_items[group_key]['items'].append(item)
         
-        # CRITICAL FIX: Aggregate items by group_id (across all price tiers) before storing
-        # This ensures all items for a group are available when QR codes are scanned
-        aggregated_by_group = {}
+        # Store items by group in cache
         for group_key, group_data in grouped_items.items():
             price_tier, group_id = group_key
             group_info = group_data['group_info']
             items = group_data['items']
-            
-            # Aggregate items by group_id (combine all price tiers)
-            if group_id not in aggregated_by_group:
-                aggregated_by_group[group_id] = {
-                    'items': [],
-                    'group_info': group_info,
-                    'vendors': set()  # Track unique vendors for vendor-specific storage
-                }
-            
-            aggregated_by_group[group_id]['items'].extend(items)
-            # Track vendors for vendor-specific cache keys
-            for item in items:
-                vendor = item.get('vendor', '').strip()
-                if vendor:
-                    aggregated_by_group[group_id]['vendors'].add(vendor)
-        
-        # Store aggregated items by group in cache
-        for group_id, group_data in aggregated_by_group.items():
-            items = group_data['items']
-            group_info = group_data['group_info']
-            vendors = group_data['vendors']
             
             # Store group items in cache (with session_id for session-specific access)
             cache.set(f"preroll_group_{session_id}_{group_id}", items, timeout=86400)
             # CRITICAL: Also store with session-independent key so QR codes work across sessions
             # This ensures QR codes can be scanned by anyone, not just the original session
             cache.set(f"preroll_group_latest_{group_id}", items, timeout=86400)
-            
-            # CRITICAL FIX: Store vendor-specific cache keys for better QR code lookup
-            # This allows QR codes with vendor filters to find items more efficiently
-            for vendor in vendors:
-                if vendor:
-                    # Normalize vendor name consistently (same as lookup)
-                    vendor_clean = str(vendor).strip()
-                    # Use normalized vendor for cache key to ensure consistent lookup
-                    group_key = f"{group_id}|{vendor_clean}"
-                    # Store vendor-specific items (filtered)
-                    vendor_items = [item for item in items if str(item.get('vendor', '')).strip() == vendor_clean]
-                    if vendor_items:
-                        cache.set(f"preroll_group_latest_{group_key}", vendor_items, timeout=86400)
-                        cache.set(f"preroll_group_{session_id}_{group_key}", vendor_items, timeout=86400)
-                        logging.info(f"PREROLL: Stored {len(vendor_items)} vendor-specific items for group '{group_id}', vendor '{vendor_clean}' (cache key: preroll_group_latest_{group_key})")
-            
             # Also store group info for display purposes
             cache.set(f"preroll_group_info_{session_id}_{group_id}", group_info, timeout=86400)
             cache.set(f"preroll_group_info_latest_{group_id}", group_info, timeout=86400)
-            logging.info(f"PREROLL: Stored {len(items)} items (aggregated across all price tiers) for group '{group_info['display_name']}' (group_id: {group_id}) from Excel upload with session-independent key for QR codes")
+            logging.info(f"PREROLL: Stored {len(items)} items for group '{group_info['display_name']}' (group_id: {group_id}) from Excel upload with session-independent key for QR codes")
         
         # Update session if in request context
         try:
@@ -17618,10 +16337,9 @@ def get_initial_data():
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
         # PERFORMANCE: Check fast_load flag FIRST before any expensive operations
-        # Default to fast loading for faster initialization - only disable if explicitly requested
-        fast_load = request.args.get('fast_load') not in ('0', 'false', 'False')
-        if request.args.get('fast_load') in ('1', 'true', 'True'):
-            fast_load = True  # Explicitly enabled
+        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        if request.args.get('fast_load') not in ('0', 'false', 'False'):
+            fast_load = True  # Default to fast loading
         
         # PERFORMANCE: For fast_load, check cache and session BEFORE loading any files
         if fast_load:
@@ -18512,76 +17230,36 @@ def set_strain_lineage():
         data = request.get_json()
         strain_name = data.get('strain_name')
         lineage = data.get('lineage')
-
+        
         if not strain_name:
             return jsonify({'error': 'Missing strain_name'}), 400
-
+        
         if not lineage:
             return jsonify({'error': 'Missing lineage'}), 400
-
+        
         try:
             store_name = get_current_store_name()
             product_db = get_product_database(store_name)
             if not product_db:
                 return jsonify({'error': 'Product database not available'}), 500
-
+            
             # Update the strain lineage in the database
             conn = product_db._get_connection()
             cursor = conn.cursor()
-
+            
             # First check if the strain exists
             cursor.execute('SELECT id FROM strains WHERE strain_name = ?', (strain_name,))
             strain_result = cursor.fetchone()
-
+            
             if not strain_result:
                 return jsonify({'error': f'Strain "{strain_name}" not found in database'}), 404
-
+            
             strain_id = strain_result[0]
-
-            # SAVE STATE FOR UNDO: Get all products affected by this change before updating
-            has_strain_id = product_db._products_has_column('strain_id')
-            lineage_changes = []
-
-            if has_strain_id:
-                cursor.execute('''
-                    SELECT "Product Name*", Lineage
-                    FROM products
-                    WHERE strain_id = ?
-                       OR (strain_id IS NULL AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?)))
-                ''', (strain_id, strain_name))
-            else:
-                cursor.execute('''
-                    SELECT "Product Name*", Lineage
-                    FROM products
-                    WHERE TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
-                ''', (strain_name,))
-
-            for product_name, old_lineage in cursor.fetchall():
-                lineage_changes.append({
-                    'product_name': product_name,
-                    'old_lineage': old_lineage,
-                    'new_lineage': lineage
-                })
-
-            # Save to undo stack
-            if lineage_changes:
-                undo_stack = session.get(UNDO_STACK_KEY, [])
-                undo_stack.append({
-                    'action_type': 'lineage_edit',
-                    'strain_name': strain_name,
-                    'lineage_changes': lineage_changes,
-                    'timestamp': datetime.now().isoformat()
-                })
-                # Limit undo stack size
-                if len(undo_stack) > 5:
-                    undo_stack = undo_stack[-5:]
-                session[UNDO_STACK_KEY] = undo_stack
-                logging.info(f"Saved lineage edit to undo stack - {len(lineage_changes)} products affected")
-
+            
             # Update the sovereign lineage (preferred over canonical)
             cursor.execute('''
-                UPDATE strains
-                SET sovereign_lineage = ?,
+                UPDATE strains 
+                SET sovereign_lineage = ?, 
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             ''', (lineage, strain_id))
@@ -18679,7 +17357,7 @@ def vendor_strain_browser():
         
         # Get vendors with their strains and product counts
         vendors_data = []
-        vendor_groups = df.groupby('Vendor/Supplier*', observed=False)
+        vendor_groups = df.groupby('Vendor/Supplier*')
         
         for vendor, group in vendor_groups:
             unique_strains = group[strain_col].nunique()
@@ -18704,7 +17382,7 @@ def vendor_strain_browser():
 
         # Get strains with vendor/brand/lineage info
         strains_data = []
-        strain_groups = df.groupby(strain_col, observed=False)
+        strain_groups = df.groupby(strain_col)
         
         for strain_name, group in strain_groups:
             if pd.isna(strain_name) or str(strain_name).strip() == '':
@@ -18757,7 +17435,7 @@ def vendor_strain_browser():
         
         # Get vendor-strain combinations with detailed info
         vendor_strains_data = []
-        vendor_strain_groups = df.groupby(['Vendor/Supplier*', strain_col], observed=False)
+        vendor_strain_groups = df.groupby(['Vendor/Supplier*', strain_col])
         
         for (vendor, strain_name), group in vendor_strain_groups:
             if pd.isna(strain_name) or str(strain_name).strip() == '':
@@ -18807,7 +17485,7 @@ def vendor_strain_browser():
         # Get product types distribution
         product_types_data = []
         if 'Product Type*' in df.columns:
-            product_type_groups = df.groupby('Product Type*', observed=False)
+            product_type_groups = df.groupby('Product Type*')
             for product_type, group in product_type_groups:
                 product_count = len(group)
                 strain_count = group[strain_col].nunique()
@@ -22006,52 +20684,21 @@ def display_preroll_items(group_id):
         # Format: group_key = "group_id|vendor"
         preroll_items = None
         if vendor_filter:
-            # Normalize vendor name for cache lookup (must match storage format exactly)
-            vendor_normalized = str(vendor_filter).strip()
-            group_key = f"{group_id}|{vendor_normalized}"
-            logging.info(f"PREROLL ROUTE: Looking up vendor-specific cache with key: 'preroll_group_latest_{group_key}'")
-            
-            # CRITICAL FIX: Try database first for persistence across site refreshes
-            from src.core.generation.preroll_tag_generator import _get_preroll_group_from_database
-            preroll_items, group_info_from_db = _get_preroll_group_from_database(group_key=group_key)
-            if preroll_items:
-                logging.info(f"PREROLL ROUTE: Retrieved {len(preroll_items)} items from database for group_key '{group_key}'")
-                # Also update cache for faster future access
-                cache.set(f"preroll_group_latest_{group_key}", preroll_items, timeout=86400)
-            
-            # If not in database, try session-independent cache key
-            if not preroll_items:
-                preroll_items = cache.get(f"preroll_group_latest_{group_key}")
-                logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            group_key = f"{group_id}|{vendor_filter}"
+            # Try session-independent key first (most recent items for this vendor+group)
+            preroll_items = cache.get(f"preroll_group_latest_{group_key}")
+            logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
             
             # If not found, try current session
             if not preroll_items:
                 current_session_id = session.get('session_id', 'default')
                 preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key}")
-            
-            # If still not found, try case-insensitive vendor matching
-            if not preroll_items:
-                # Get all items for this group and filter by vendor
-                all_items = cache.get(f"preroll_group_latest_{group_id}")
-                if all_items:
-                    logging.info(f"PREROLL ROUTE: Vendor-specific cache not found, filtering {len(all_items)} items by vendor '{vendor_filter}'")
-                    # Will filter below in the vendor filtering section
-                    preroll_items = all_items
         
         # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
         if not preroll_items:
-            # CRITICAL FIX: Try database first for persistence across site refreshes
-            from src.core.generation.preroll_tag_generator import _get_preroll_group_from_database
-            preroll_items, group_info_from_db = _get_preroll_group_from_database(group_id=group_id)
-            if preroll_items:
-                logging.info(f"PREROLL ROUTE: Retrieved {len(preroll_items)} items from database for group_id '{group_id}'")
-                # Also update cache for faster future access
-                cache.set(f"preroll_group_latest_{group_id}", preroll_items, timeout=86400)
-            
-            # If not in database, try session-independent cache key
-            if not preroll_items:
-                preroll_items = cache.get(f"preroll_group_latest_{group_id}")
-                logging.info(f"PREROLL ROUTE: Cache lookup for 'preroll_group_latest_{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            # Try session-independent key first (most recent items for this group)
+            preroll_items = cache.get(f"preroll_group_latest_{group_id}")
+            logging.info(f"PREROLL ROUTE: Cache lookup for 'preroll_group_latest_{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
             
             # If not found, try current session
             if not preroll_items:
@@ -22065,16 +20712,8 @@ def display_preroll_items(group_id):
         # Get group display name from group_id or items
         group_display_name = "Preroll Items"
         if group_id:
-            # CRITICAL FIX: Try database first for persistence
-            if 'group_info_from_db' in locals() and group_info_from_db:
-                group_info = group_info_from_db
-            else:
-                from src.core.generation.preroll_tag_generator import _get_preroll_group_from_database
-                _, group_info = _get_preroll_group_from_database(group_id=group_id)
-            
-            # If not in database, try session-independent cache
-            if not group_info:
-                group_info = cache.get(f"preroll_group_info_latest_{group_id}")
+            # Try session-independent group info first
+            group_info = cache.get(f"preroll_group_info_latest_{group_id}")
             
             # If not found, try current session
             if not group_info:
@@ -22131,46 +20770,7 @@ def display_preroll_items(group_id):
             if preroll_items:
                 group_display_name = f"{group_display_name} - {vendor_filter}"
         
-        # CRITICAL FIX: Filter items by allowed brands if configured
-        # This ensures only products from allowed brands are shown in QR code pages
-        if preroll_items:
-            from src.core.constants import PREROLL_ALLOWED_BRANDS
-            if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
-                original_count = len(preroll_items)
-                allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
-                
-                filtered_items = []
-                for item in preroll_items:
-                    item_brand = str(item.get('brand', '')).strip()
-                    item_brand_lower = item_brand.lower().strip()
-                    
-                    if item_brand_lower in allowed_brands_lower:
-                        filtered_items.append(item)
-                    else:
-                        logging.debug(f"PREROLL ROUTE BRAND FILTER: Excluding item '{item.get('product_name', 'Unknown')}' with brand '{item_brand}' (not in allowed brands)")
-                
-                preroll_items = filtered_items
-                logging.info(f"PREROLL ROUTE: Filtered {original_count} items to {len(preroll_items)} items based on allowed brands: {PREROLL_ALLOWED_BRANDS}")
-        
-        # CRITICAL FIX: Better error handling and debugging
         if not preroll_items:
-            # Log all available cache keys for debugging
-            logging.warning(f"PREROLL ROUTE: No items found for group_id: '{group_id}', vendor: '{vendor_filter}'")
-            logging.warning(f"PREROLL ROUTE: Attempted cache keys:")
-            logging.warning(f"  - preroll_group_latest_{group_id}")
-            if vendor_filter:
-                logging.warning(f"  - preroll_group_latest_{group_id}|{vendor_filter}")
-            
-            # Try to get any available cache keys for debugging
-            try:
-                # Check if cache has any preroll items at all
-                from flask_caching import Cache
-                if hasattr(cache, 'cache'):
-                    # Try to inspect cache (if possible)
-                    logging.warning(f"PREROLL ROUTE: Cache type: {type(cache)}")
-            except Exception as debug_err:
-                logging.debug(f"PREROLL ROUTE: Could not inspect cache: {debug_err}")
-            
             # Return error page if items not found
             return f"""
             <!DOCTYPE html>

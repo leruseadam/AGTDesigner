@@ -2523,7 +2523,14 @@ const TagManager = {
         
         uniqueTags.forEach(tag => {
             // Use the correct field names from the tag object - check multiple possible field names
+            // CRITICAL FIX: Always extract vendor from vendor fields only, never from brand
             let vendor = tag.vendor || tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || '';
+            // Normalize empty strings and 'Unknown' to ensure consistent handling
+            if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
+                vendor = '';
+            } else {
+                vendor = vendor.trim();
+            }
             let brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || this.extractBrand(tag) || '';
             const rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
             const normalizedProductType = normalizeProductType(rawProductType.trim());
@@ -2605,24 +2612,15 @@ const TagManager = {
                 }
             }
 
-            // If no vendor found, try to extract from product name
-            if (!vendor) {
-                const productName = tag['Product Name*'] || tag.ProductName || tag.Description || '';
-                // Look for "by [Brand]" pattern
-                const byMatch = productName.match(/by\s+([A-Za-z0-9\s]+)(?:\s|$)/i);
-                if (byMatch) {
-                    vendor = byMatch[1].trim();
-                }
-            }
-
-            // If still no vendor, use brand as vendor
-            if (!vendor && brand) {
-                vendor = brand;
-            }
-
-            // If still no vendor, use a default
-            if (!vendor) {
+            // CRITICAL FIX: Never extract vendor from product name - "by Vendor" in product names is actually the brand
+            // Vendor should always be in the tag data from Excel - if missing, it's a data quality issue
+            // Never use brand as vendor - this causes brands to appear in vendor list
+            if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
+                // Vendor should always be present in Excel data - if missing, log it but use fallback
+                console.warn(`⚠️ Missing vendor for product '${tag['Product Name*'] || tag.ProductName || 'Unknown'}'. Vendor should always be in Excel data.`);
                 vendor = 'Unknown Vendor';
+            } else {
+                vendor = vendor.trim();
             }
 
             // Determine subcategory for vape products

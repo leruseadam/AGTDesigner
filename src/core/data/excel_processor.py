@@ -8342,13 +8342,22 @@ class ExcelProcessor:
             product_name = safe_get_value(row.get(product_name_col, '')) or safe_get_value(row.get('Description', '')) or 'Unnamed Product'
             
             # Get vendor from multiple possible column names (needed for deduplication key)
-            # CRITICAL: Never fall back to Product Brand - use explicit vendor columns only
+            # CRITICAL: Never fall back to Product Brand or extract from product name - vendor is always in Excel data
+            # The "by Vendor" in product names is actually the brand, not the vendor
             vendor_value = (
                 safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
                 safe_get_value(row.get('Vendor', '')) or           # Alternative column name
                 safe_get_value(row.get('Vendor/Supplier', '')) or  # Fallback column name
-                'Unknown'  # Default if no vendor specified
+                ''  # Empty if no vendor column found - should not happen as every item has a vendor
             )
+            
+            # CRITICAL: Every item should and will have a vendor in the Excel data
+            # If vendor is missing, it's a data issue - log it but don't extract from product name
+            if not vendor_value or vendor_value.strip() == '':
+                logger.warning(f"⚠️ Missing vendor for product '{product_name}'. Vendor should always be in Excel data.")
+                vendor_value = 'Unknown Vendor'  # Fallback only for data quality issues
+            else:
+                vendor_value = vendor_value.strip()
             
             # Get price value (needed for deduplication key)
             price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))

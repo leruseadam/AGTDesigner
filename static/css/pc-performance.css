@@ -198,6 +198,8 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     font-weight: 600 !important; /* Bolder for better visibility */
     text-align: center !important;
     text-align-last: center !important;
+    direction: ltr !important;
+    display: block !important;
     padding: 12px 16px !important; /* More padding for better clickability */
     line-height: 1.6 !important;
 }
