@@ -70,7 +70,7 @@ IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
 MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
-CHUNK_SIZE_LIMIT = 100              # PERFORMANCE: Increased from 50 to 100 for faster generation of large batches
+CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
 
 def get_font_scheme(template_type, base_size=12):
     schemes = {
@@ -588,24 +588,14 @@ class TemplateProcessor:
                     cell._tc.append(deepcopy(el))
                 
                 cnt += 1
-
+        
         # Add cell spacing
         tblPr2 = tbl._element.find(qn('w:tblPr'))
         spacing = OxmlElement('w:tblCellSpacing')
         spacing.set(qn('w:w'), str(cut_line_twips))
         spacing.set(qn('w:type'), 'dxa')
         tblPr2.append(spacing)
-
-        # PREROLL: Add 0.2" buffer spacing below table
-        if self.template_type == 'preroll':
-            # Add paragraph after table with 0.2" spacing
-            paragraph = doc.add_paragraph()
-            pPr = paragraph._element.get_or_add_pPr()
-            # Add spacing after paragraph (0.2 inches = 0.2 * 1440 twips = 288 twips)
-            spacing_elem = OxmlElement('w:spacing')
-            spacing_elem.set(qn('w:after'), '288')  # 0.2" in twips
-            pPr.append(spacing_elem)
-
+        
         # Save and return
         buf = BytesIO()
         doc.save(buf)
@@ -622,148 +612,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Failed to create dynamic template: {e}")
             return False
-
-    def _expand_template_to_4x4_fixed_preroll(self, num_products=None):
-        """Expand template to 4x4 grid for preroll templates (1.5" x 1.9" labels)."""
-        from docx import Document
-        from docx.shared import Pt
-        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        from io import BytesIO
-        from copy import deepcopy
-
-        num_cols, num_rows = 4, 4  # 4x4 grid for 16 labels
-        col_width_twips = str(int(1.5 * 1440))  # 1.5 inches width per column
-        row_height_pts = Pt(1.9 * 72)  # 1.9 inches height per row
-        cut_line_twips = int(0.001 * 1440)
-
-        template_path = self._get_template_path()
-        doc = Document(template_path)
-        if not doc.tables:
-            raise RuntimeError("Template must contain at least one table.")
-
-        # Get the original table and its properties
-        original_table = doc.tables[0]
-        original_table_xml = original_table._element
-
-        # Extract original table properties (colors, borders, styling)
-        original_tblPr = original_table_xml.find(qn('w:tblPr'))
-        original_shd = original_tblPr.find(qn('w:shd')) if original_tblPr is not None else None
-        original_borders = original_tblPr.find(qn('w:tblBorders')) if original_tblPr is not None else None
-
-        # Get the original cell structure and content
-        original_cell = original_table.cell(0, 0)
-        src_tc = deepcopy(original_cell._tc)
-
-        # Remove the original table
-        original_table._element.getparent().remove(original_table._element)
-
-        # Remove empty paragraphs
-        while doc.paragraphs and not doc.paragraphs[0].text.strip():
-            doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
-
-        # Create new 4x4 table
-        tbl = doc.add_table(rows=num_rows, cols=num_cols)
-        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-        # Set up table properties
-        tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
-
-        # Preserve original shading if it exists
-        if original_shd is not None:
-            shd = deepcopy(original_shd)
-            tblPr.insert(0, shd)
-        else:
-            # Default shading
-            shd = OxmlElement('w:shd')
-            shd.set(qn('w:val'), 'clear')
-            shd.set(qn('w:color'), 'auto')
-            shd.set(qn('w:fill'), 'D3D3D3')
-            tblPr.insert(0, shd)
-
-        # Set table layout
-        layout = OxmlElement('w:tblLayout')
-        layout.set(qn('w:type'), 'fixed')
-        tblPr.append(layout)
-        tbl._element.insert(0, tblPr)
-
-        # Set up grid columns
-        grid = OxmlElement('w:tblGrid')
-        for _ in range(num_cols):
-            gc = OxmlElement('w:gridCol')
-            gc.set(qn('w:w'), col_width_twips)
-            grid.append(gc)
-        tbl._element.insert(0, grid)
-
-        # Set row heights and individual cell widths
-        for row in tbl.rows:
-            row.height = row_height_pts
-            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-
-            # Set individual cell widths to ensure exact 1.5" x 1.9" dimensions
-            for cell in row.cells:
-                tcPr = cell._tc.get_or_add_tcPr()
-                tcW = tcPr.find(qn('w:tcW'))
-                if tcW is None:
-                    tcW = OxmlElement('w:tcW')
-                    tcPr.append(tcW)
-                tcW.set(qn('w:w'), col_width_twips)
-                tcW.set(qn('w:type'), 'dxa')
-
-        # Add cut line borders if original had them
-        if original_borders is not None:
-            borders = deepcopy(original_borders)
-            tblPr.append(borders)
-
-        # Populate cells with original content, updating labels
-        cnt = 1
-        max_cells = num_products if num_products else (num_rows * num_cols)
-
-        for r in range(num_rows):
-            for c in range(num_cols):
-                if cnt > max_cells:
-                    # Clear extra cells completely and set white background
-                    cell = tbl.cell(r, c)
-                    for paragraph in cell.paragraphs:
-                        paragraph.clear()
-                    # Set white background for empty cells
-                    tcPr = cell._tc.get_or_add_tcPr()
-                    shd = tcPr.find(qn('w:shd'))
-                    if shd is None:
-                        shd = OxmlElement('w:shd')
-                        tcPr.append(shd)
-                    shd.set(qn('w:val'), 'clear')
-                    shd.set(qn('w:fill'), 'FFFFFF')
-                else:
-                    # Copy original cell content
-                    cell = tbl.cell(r, c)
-                    dest_tc = cell._tc
-
-                    # Replace destination tc with a deep copy of source tc
-                    new_tc = deepcopy(src_tc)
-                    dest_tc.getparent().replace(dest_tc, new_tc)
-
-                    # Update label placeholders (e.g., {{Label1}} -> {{Label16}})
-                    for paragraph in tbl.cell(r, c).paragraphs:
-                        for run in paragraph.runs:
-                            if run.text:
-                                run.text = run.text.replace('{{Label1}}', f'{{{{Label{cnt}}}}}')
-                cnt += 1
-
-        # Add cell spacing (cut lines)
-        tblPr2 = tbl._element.find(qn('w:tblPr'))
-        spacing = OxmlElement('w:tblCellSpacing')
-        spacing.set(qn('w:w'), str(cut_line_twips))
-        spacing.set(qn('w:type'), 'dxa')
-        tblPr2.append(spacing)
-
-        # Save and return
-        buf = BytesIO()
-        doc.save(buf)
-        buf.seek(0)
-        return buf
-
     def _expand_template_to_4x3_fixed_double(self, num_products=None):
         """Expand template to 4x3 grid for double templates (4 columns, 3 rows)."""
         from docx import Document
@@ -1331,12 +1179,6 @@ class TemplateProcessor:
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
             # QR code functionality enabled
-            # Debug: Log QR code presence in context before rendering
-            qr_count = sum(1 for label_key, label_data in context.items() 
-                          if isinstance(label_data, dict) and label_data.get('QR') and 
-                          not (isinstance(label_data.get('QR'), str) and label_data.get('QR').strip() == ''))
-            self.logger.info(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
-            
             try:
                 doc.render(context)
                 self.logger.debug("DocxTemplate render completed successfully")
@@ -1775,15 +1617,11 @@ class TemplateProcessor:
             
             self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                # Format JointRatio with soft hyphen and nonbreaking space, then prefix with newline for prerolls
-                formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
-                label_context['WeightUnits'] = f"\n{formatted_joint_ratio}"
-                self.logger.debug(f"PRE-ROLL WeightUnits: Using formatted JointRatio '{formatted_joint_ratio}' (with newline) for {product_type}")
+                label_context['WeightUnits'] = joint_ratio.strip()
+                self.logger.debug(f"PRE-ROLL WeightUnits: Using JointRatio '{joint_ratio}' for {product_type}")
             else:
-                # Format default with soft hyphen and nonbreaking space, then prefix with newline
-                formatted_default = self.format_joint_ratio_pack("0.5g x 2 Pack")
-                label_context['WeightUnits'] = f"\n{formatted_default}"
-                self.logger.debug(f"PRE-ROLL WeightUnits: Using formatted default '{formatted_default}' (with newline) for {product_type}")
+                label_context['WeightUnits'] = "0.5g x 2 Pack"  # Default for pre-rolls
+                self.logger.debug(f"PRE-ROLL WeightUnits: Using default '0.5g x 2 Pack' for {product_type}")
         else:
             # For non-pre-roll products, construct WeightUnits from available fields
             weight_units = (
@@ -1900,26 +1738,13 @@ class TemplateProcessor:
                     self.logger.info(f"🔍 DOUBLE TEMPLATE DESC: Using primary text '{primary_text}'")
                     label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
                 elif self.template_type == 'preroll':
-                    # PREROLL TEMPLATE: Use group display name with JointRatio-derived weight
+                    # PREROLL TEMPLATE: Use group display name ONLY (no weight, no individual product details)
                     # Check if we already set DescAndWeight for grouped preroll (above)
                     if not (record.get('_group_id') and label_context.get('DescAndWeight')):
                         # Use description (should be group name if grouping worked) or product_name_display as fallback
                         primary_text = (desc or product_name_display or '').strip()
-                        
-                        # Get JointRatio-derived weight from WeightUnits (set earlier for preroll products)
-                        weight_units = label_context.get('WeightUnits', '') or record.get('WeightUnits', '')
-                        if weight_units:
-                            # Remove newline prefix if present, and strip whitespace
-                            clean_weight = weight_units.replace('\n', '').strip()
-                            # Add non-breaking hyphen and weight to description (use \u2011 for non-breaking hyphen)
-                            desc_and_weight = f"{primary_text} \u2011\u00A0{clean_weight}"
-                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' with weight '{clean_weight}' -> '{desc_and_weight}'")
-                        else:
-                            # No weight available, use description only
-                            desc_and_weight = primary_text
-                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' (no weight available)")
-                        
-                        label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
+                        self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' (no weight)")
+                        label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
                     else:
                         self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Already set to group name, skipping reconstruction")
                 else:
@@ -1952,11 +1777,7 @@ class TemplateProcessor:
                                     self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         
                         # Keep weight on the same line as description with non-breaking space
-                        # For preroll template, use non-breaking hyphen to keep hyphen and weight together
-                        if self.template_type == 'preroll':
-                            desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
-                        else:
-                            desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                        desc_and_weight = f"{desc} -\u00A0{clean_weight}"
                         self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
                     else:
                         # Fallback to constructing from Weight* + Units
@@ -1972,11 +1793,7 @@ class TemplateProcessor:
                         
                         if weight_value and units_value:
                             clean_weight = f"{weight_value}{units_value}"
-                            # For preroll template, use non-breaking hyphen to keep hyphen and weight together
-                            if self.template_type == 'preroll':
-                                desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
-                            else:
-                                desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                            desc_and_weight = f"{desc} -\u00A0{clean_weight}"
                             self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             desc_and_weight = desc
@@ -2740,15 +2557,6 @@ class TemplateProcessor:
                         label_context['Description'] = universal_desc
                         self.logger.info(f"PREROLL DESC TRUNCATE: '{description}' -> '{universal_desc}'")
                         break
-            
-            # CRITICAL FIX: Apply non-breaking hyphens to Description for preroll templates
-            # This ensures entries like "Pre-Roll - 1g" (without "Assorted") have non-breaking hyphens
-            # Do this after truncation so the final Description has non-breaking hyphens
-            if self.template_type == 'preroll' and label_context.get('Description'):
-                from src.core.generation.text_processing import make_nonbreaking_hyphens
-                original_description = label_context['Description']
-                label_context['Description'] = make_nonbreaking_hyphens(label_context['Description'])
-                self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG (PREROLL): Description '{original_description}' -> '{label_context['Description']}'")
 
         # CRITICAL FIX: Apply non-breaking hyphens to ProductName to prevent "Pre-Roll" splitting
         if label_context.get('ProductName'):
@@ -2839,7 +2647,6 @@ class TemplateProcessor:
 
         # Generate QR code - special handling for preroll template
         product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
-        qr_url_for_log = None  # Initialize for logging
         if product_name and str(product_name).strip():
             # For preroll template, generate URL to preroll items page
             # For all other templates, use product name as before
@@ -2871,9 +2678,15 @@ class TemplateProcessor:
                 except Exception:
                     base_url = ''
 
-                # If host_url is unavailable (very unusual), allow an override via env
+                # If host_url is unavailable (very unusual), allow an override via env;
+                # otherwise, skip generating a QR for this record.
                 if not base_url:
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
+                if not base_url:
+                    self.logger.warning("PREROLL QR: No base URL available; skipping QR generation for this label")
+                    qr_code = None
+                    label_context['QR'] = ''
+                    return label_context
                 
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
@@ -2882,23 +2695,15 @@ class TemplateProcessor:
                     # URL encode vendor to handle special characters
                     from urllib.parse import quote
                     vendor_encoded = quote(vendor_clean)
-                    if base_url:
-                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
-                    else:
-                        # Use relative URL if no base_url available
-                        qr_url = f"/preroll-items/{group_id}?vendor={vendor_encoded}"
+                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
                 else:
                     # Fallback to group_id only if no vendor (backward compatibility)
-                    if base_url:
-                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
-                    else:
-                        # Use relative URL if no base_url available
-                        qr_url = f"/preroll-items/{group_id}"
+                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
                 
                 # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
                 # If we detect a local host, just drop the scheme/host and use a relative path; most
                 # modern scanners will still treat this as a URL when opened from a browser context.
-                if base_url and ('localhost' in qr_url.lower() or '127.0.0.1' in qr_url):
+                if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
                     from urllib.parse import urlparse
                     parsed = urlparse(qr_url)
                     qr_url = parsed.path or qr_url
@@ -2906,28 +2711,18 @@ class TemplateProcessor:
                         qr_url = f"{qr_url}?{parsed.query}"
                     self.logger.warning(f"QR URL used a localhost base, converted to relative path: {qr_url}")
                 
-                # Log if using relative URL (no base_url)
-                if not base_url:
-                    self.logger.info(f"PREROLL QR: No base URL available; using relative URL: {qr_url}")
-                
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
-                qr_url_for_log = qr_url  # Store for logging
-                if qr_code:
-                    self.logger.info(f"PREROLL QR: Successfully generated QR code for URL: {qr_url}")
-                else:
-                    self.logger.error(f"PREROLL QR: Failed to generate QR code for URL: {qr_url}")
             else:
                 # All other templates: use product name as before
                 qr_code = self._generate_qr_code(product_name, doc)
             
             if qr_code:
                 label_context['QR'] = qr_code
-                log_product = qr_url_for_log if (self.template_type == 'preroll' and qr_url_for_log) else product_name
-                self.logger.info(f"✅ QR CODE SET: Template '{self.template_type}', Product: '{log_product}', QR object type: {type(qr_code)}")
+                self.logger.debug(f"Generated QR code for template '{self.template_type}': '{product_name if self.template_type != 'preroll' else qr_url}'")
             else:
                 label_context['QR'] = ''
-                self.logger.warning(f"❌ QR CODE MISSING: Failed to generate QR code for product: '{product_name}' (template: {self.template_type})")
+                self.logger.warning(f"Failed to generate QR code for product: '{product_name}'")
         else:
             label_context['QR'] = ''
             self.logger.debug("No product name available for QR code generation")
@@ -3012,17 +2807,11 @@ class TemplateProcessor:
             qr_size = Mm(qr_size_mm)
             
             # Check if doc is a DocxTemplate or Document
-            # CRITICAL FIX: Always use the doc parameter for InlineImage creation
-            # DocxTemplate requires the template object to properly render InlineImage
             if hasattr(doc, 'docx'):
                 # This is a DocxTemplate - use it directly for InlineImage
-                # This is required for DocxTemplate to properly render the image
                 qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
-                self.logger.debug(f"Created InlineImage with DocxTemplate for QR code: {clean_name[:50]}")
             else:
                 # This is a Document - create InlineImage with None template for manual insertion
-                # This shouldn't happen during normal rendering, but handle it gracefully
-                self.logger.warning(f"QR code generation received Document instead of DocxTemplate - creating InlineImage with None")
                 qr_inline_image = InlineImage(None, img_buffer, width=qr_size)
                 # Store document reference for manual insertion
                 qr_inline_image._doc = doc
@@ -3264,10 +3053,6 @@ class TemplateProcessor:
             
             # FINAL ENFORCEMENT: Absolutely ensure DOH images are centered - this overrides all other positioning
             self._final_doh_positioning_enforcement(doc)
-            
-            # PREROLL TEMPLATE: Center QR codes
-            if self.template_type == 'preroll':
-                self._ensure_preroll_qr_centering(doc)
         except Exception as e:
             self.logger.warning(f"DOH centering failed: {e}")
         
@@ -5059,67 +4844,43 @@ class TemplateProcessor:
             
             # Add each part as a separate run, with line breaks between them
             size_index = 0
-            previous_was_empty = False
             for i, part in enumerate(parts):
-                stripped_part = part.strip() if part else ''
-                is_empty = not stripped_part
-                
-                # CRITICAL FIX: Handle empty parts to ensure text starts on new lines
-                # If previous part was empty or this is the first part and it's empty,
-                # we need to ensure the next part starts on a new line
-                if is_empty:
-                    previous_was_empty = True
-                    # If there's a next part, we'll add a line break before it
-                    continue
-                
-                # If previous part was empty, add a line break before this part
-                if previous_was_empty:
-                    break_run = paragraph.add_run()
-                    break_run.add_break(WD_BREAK.LINE)
-                    previous_was_empty = False
-                
-                # This part has content - add it
-                # CRITICAL FIX: Preserve non-breaking hyphens when stripping whitespace
-                # Check for non-breaking hyphens before stripping
-                if '\u2011' in part:
-                    self.logger.debug(f"BR CONVERSION DEBUG: Found non-breaking hyphens in part: '{part}'")
-                # Strip whitespace for all content to remove extra spaces, but preserve non-breaking hyphens
-                # First, temporarily replace non-breaking hyphens with a placeholder
-                temp_part = part.replace('\u2011', '___NONBREAKING_HYPHEN___')
-                # Then strip whitespace
-                stripped_part = temp_part.strip()
-                # Finally, restore non-breaking hyphens
-                stripped_part = stripped_part.replace('___NONBREAKING_HYPHEN___', '\u2011')
-                # Check for non-breaking hyphens after stripping
-                if '\u2011' in stripped_part:
-                    self.logger.debug(f"BR CONVERSION DEBUG: Preserved non-breaking hyphens after strip: '{stripped_part}'")
-                else:
-                    self.logger.debug(f"BR CONVERSION DEBUG: Lost non-breaking hyphens after strip: '{stripped_part}'")
-                
-                run = paragraph.add_run(stripped_part)
-                run.font.name = "Arial"
-                
-                # ALL text should be Arial Bold - NO EXCEPTIONS
-                run.font.bold = True
-                
-                # Use consistent font size for all runs
-                if consistent_font_size:
-                    run.font.size = consistent_font_size
-                else:
-                    # Use unified font sizing for default size
-                    from src.core.generation.unified_font_sizing import get_font_size
-                    default_font_size = get_font_size(stripped_part, 'default', self.template_type, self.scale_factor)
-                    run.font.size = default_font_size
-                
-                # Add a line break after this part if there's a next part
-                # This ensures that text after |BR| or \n starts on a new line
-                if i < len(parts) - 1:
-                    # Check if next part is empty - if so, we'll handle it in the next iteration
-                    next_part = parts[i + 1].strip() if i + 1 < len(parts) else ''
-                    if next_part:
-                        # Next part has content - add line break after current part
+                if part.strip():  # Only add non-empty parts
+                    # CRITICAL FIX: Preserve non-breaking hyphens when stripping whitespace
+                    # Check for non-breaking hyphens before stripping
+                    if '\u2011' in part:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Found non-breaking hyphens in part: '{part}'")
+                    # Strip whitespace for all content to remove extra spaces, but preserve non-breaking hyphens
+                    # First, temporarily replace non-breaking hyphens with a placeholder
+                    temp_part = part.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                    # Then strip whitespace
+                    stripped_part = temp_part.strip()
+                    # Finally, restore non-breaking hyphens
+                    stripped_part = stripped_part.replace('___NONBREAKING_HYPHEN___', '\u2011')
+                    # Check for non-breaking hyphens after stripping
+                    if '\u2011' in stripped_part:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Preserved non-breaking hyphens after strip: '{stripped_part}'")
+                    else:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Lost non-breaking hyphens after strip: '{stripped_part}'")
+                    run = paragraph.add_run(stripped_part)
+                    run.font.name = "Arial"
+                    
+                    # ALL text should be Arial Bold - NO EXCEPTIONS
+                    run.font.bold = True
+                    
+                    # Use consistent font size for all runs
+                    if consistent_font_size:
+                        run.font.size = consistent_font_size
+                    else:
+                        # Use unified font sizing for default size
+                        from src.core.generation.unified_font_sizing import get_font_size
+                        default_font_size = get_font_size(stripped_part, 'default', self.template_type, self.scale_factor)
+                        run.font.size = default_font_size
+                    
+                    # Add a line break after this part only if the next part is not empty
+                    if i < len(parts) - 1 and parts[i + 1].strip():
+                        # Use add_break() with WD_BREAK.LINE to create proper line breaks within the same paragraph
                         run.add_break(WD_BREAK.LINE)
-                    # If next part is empty, we'll add the break before the part after that
             
             # All content now uses standard 1.0 line spacing
             
@@ -6327,81 +6088,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"DOH centering enforcement skipped: {e}")
 
-    def _ensure_preroll_qr_centering(self, doc):
-        """Ensure QR code paragraphs are centered in preroll templates."""
-        try:
-            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-            from docx.oxml.ns import qn
-            from docx.oxml import OxmlElement
-            from docx.shared import Pt
-
-            fixed = 0
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        qr_paragraphs = []
-                        has_qr_image = False
-                        cell_text = cell.text.strip().upper()
-                        
-                        # Check all paragraphs in the cell for images
-                        for paragraph in cell.paragraphs:
-                            paragraph_text = paragraph.text.strip().upper()
-                            for run in paragraph.runs:
-                                if hasattr(run, '_element') and (
-                                    run._element.find(qn('w:drawing')) is not None or
-                                    run._element.find(qn('w:pict')) is not None
-                                ):
-                                    # In preroll templates, QR codes are typically the only images
-                                    # (DOH images are handled separately if present)
-                                    # Center all images in preroll templates as they are likely QR codes
-                                    has_qr_image = True
-                                    qr_paragraphs.append(paragraph)
-                                    break
-                            if has_qr_image:
-                                break
-
-                        if not has_qr_image or not qr_paragraphs:
-                            continue
-
-                        fixed += 1
-                        # Center the cell content vertically
-                        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-                        
-                        # Center all QR code paragraphs
-                        for paragraph in qr_paragraphs:
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            
-                            # Set proper spacing for QR code
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(2)
-                            paragraph.paragraph_format.line_spacing = 1.0
-                            
-                            try:
-                                # Ensure XML-level centering
-                                pPr = paragraph._element.get_or_add_pPr()
-                                
-                                # Set paragraph justification to center
-                                existing_jc = pPr.find(qn('w:jc'))
-                                if existing_jc is not None:
-                                    pPr.remove(existing_jc)
-                                jc = OxmlElement('w:jc')
-                                jc.set(qn('w:val'), 'center')
-                                pPr.append(jc)
-
-                                # Remove any indentation that might offset the QR code
-                                existing_ind = pPr.find(qn('w:ind'))
-                                if existing_ind is not None:
-                                    pPr.remove(existing_ind)
-                                    
-                            except Exception as xml_error:
-                                self.logger.warning(f"Error centering QR code paragraph: {xml_error}")
-
-            if fixed:
-                self.logger.info(f"PREROLL QR centering: centered {fixed} QR code cell(s)")
-        except Exception as e:
-            self.logger.warning(f"PREROLL QR centering enforcement skipped: {e}")
-
     def _ensure_standalone_cannabinoid_font_sizing(self, doc):
         """
         Ensure any standalone cannabinoid text (CBD, THC, CBC, CBG, CBN) uses appropriate font sizing.
@@ -6656,18 +6342,17 @@ class TemplateProcessor:
                     if count and count.isdigit():
                         count_int = int(count)
                         if count_int == 1:
-                            # For single units, just show the weight with non-breaking hyphen and non-breaking space
-                            formatted = f"\u2011\u00A0{amount}g"
+                            # For single units, just show the weight with hyphen and non-breaking space
+                            formatted = f"-\u00A0{amount}g"
                         else:
-                            # For multiple units, show the full pack format with non-breaking hyphen and non-breaking space
-                            # Use non-breaking hyphen to prevent "1g x 5 Pack" from breaking across lines
-                            formatted = f"\u2011\u00A0{amount}g\u00A0x\u00A0{count}\u00A0Pack"
+                            # For multiple units, show the full pack format with hyphen and non-breaking space
+                            formatted = f"-\u00A0{amount}g x {count} Pack"
                     else:
-                        # Only amount found (like "1g") - show just the weight with non-breaking hyphen and non-breaking space
-                        formatted = f"\u2011\u00A0{amount}g"
+                        # Only amount found (like "1g") - show just the weight with hyphen and non-breaking space
+                        formatted = f"-\u00A0{amount}g"
                 except IndexError:
-                    # Only amount found (like "1g") - show just the weight with non-breaking hyphen and non-breaking space
-                    formatted = f"\u2011\u00A0{amount}g"
+                    # Only amount found (like "1g") - show just the weight with hyphen and non-breaking space
+                    formatted = f"-\u00A0{amount}g"
                 return formatted
         
         # If no pattern matches, return the original text

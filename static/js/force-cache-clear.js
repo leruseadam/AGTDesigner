@@ -66,16 +66,9 @@
                     document.body.appendChild(message);
                     
                     // Auto-refresh after 1 second
-                    if (window.safeReload) {
-                        window.safeReload(1000);
-                    } else {
-                        setTimeout(() => {
-                            if (!window._reloadInProgress) {
-                                window._reloadInProgress = true;
-                                window.location.reload(true);
-                            }
-                        }, 1000);
-                    }
+                    setTimeout(() => {
+                        window.location.reload(true);
+                    }, 1000);
                 });
             } else {
                 console.log('✅ Cache version is up to date');

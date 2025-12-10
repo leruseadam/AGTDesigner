@@ -195,16 +195,9 @@ async function handleFiles(files) {
             pollUploadStatus(data.filename || file.name);
           } else {
             console.warn('pollUploadStatus function not available; falling back to manual reload');
-            if (window.safeReload) {
-              window.safeReload(2000);
-            } else {
-              setTimeout(() => {
-                if (!window._reloadInProgress) {
-                  window._reloadInProgress = true;
-                  window.location.reload();
-                }
-              }, 2000);
-            }
+            setTimeout(() => {
+              window.location.reload();
+            }, 2000);
           }
           return;
         }
@@ -256,16 +249,9 @@ async function handleFiles(files) {
                     }).catch(fallbackErr => {
                       console.error('All tag loading methods failed, reloading as last resort', fallbackErr);
                       // Only reload as absolute last resort after all methods fail
-                      if (window.safeReload) {
-                        window.safeReload(2000);
-                      } else {
-                        setTimeout(() => {
-                          if (!window._reloadInProgress) {
-                            window._reloadInProgress = true;
-                            window.location.reload();
-                          }
-                        }, 2000);
-                      }
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 2000);
                     });
                   });
               } else {
@@ -287,16 +273,9 @@ async function handleFiles(files) {
               console.log('✅ Fallback tag loading completed');
             }).catch(fallbackErr => {
               console.error('All tag loading methods failed, reloading as last resort', fallbackErr);
-              if (window.safeReload) {
-                window.safeReload(2000);
-              } else {
-                setTimeout(() => {
-                  if (!window._reloadInProgress) {
-                    window._reloadInProgress = true;
-                    window.location.reload();
-                  }
-                }, 2000);
-              }
+              setTimeout(() => {
+                window.location.reload();
+              }, 2000);
             });
           }
         } else {
@@ -310,14 +289,7 @@ async function handleFiles(files) {
               TagManager.fetchAndPopulateFilters?.();
             } else {
               console.warn('TagManager still not available, reloading as last resort');
-              if (window.safeReload) {
-                window.safeReload(1000);
-              } else {
-                if (!window._reloadInProgress) {
-                  window._reloadInProgress = true;
-                  window.location.reload();
-                }
-              }
+              window.location.reload();
             }
           }, 2000);
         }
@@ -574,14 +546,7 @@ function pollUploadStatus(filename) {
                 TagManager.refreshTagLists({ preserveFilters: true, force: true })
                   .catch(err => {
                     console.error('refreshTagLists failed after poll-ready', err);
-                    if (window.safeReload) {
-                      window.safeReload(1000);
-                    } else {
-                      if (!window._reloadInProgress) {
-                        window._reloadInProgress = true;
-                        window.location.reload();
-                      }
-                    }
+                    window.location.reload();
                   });
               } else {
                 TagManager.fetchAndUpdateAvailableTags?.();
@@ -591,24 +556,10 @@ function pollUploadStatus(filename) {
             }, 0);
           } catch (e) {
             console.error('Async refresh setup failed after poll-ready', e);
-            if (window.safeReload) {
-              window.safeReload(1000);
-            } else {
-              if (!window._reloadInProgress) {
-                window._reloadInProgress = true;
-                window.location.reload();
-              }
-            }
+            window.location.reload();
           }
         } else {
-          if (window.safeReload) {
-            window.safeReload(500);
-          } else {
-            if (!window._reloadInProgress) {
-              window._reloadInProgress = true;
-              window.location.reload();
-            }
-          }
+          window.location.reload();
         }
         
         return; // Stop polling
@@ -855,8 +806,9 @@ document.addEventListener('DOMContentLoaded', function() {
     html.setAttribute('data-app-scale', String(s));
   }
 
-  const BASELINE_WIDTH = 1920;
-  const BASELINE_HEIGHT = 1080;
+  // MacBook Pro 16" effective resolution (matches user's reference screen)
+  const BASELINE_WIDTH = 1728;
+  const BASELINE_HEIGHT = 1117;
   const LARGE_VIEWPORT_SOFTENING = 0.3;
   const LARGE_VIEWPORT_MIN_SCALE = 0.7;
 
@@ -867,9 +819,23 @@ document.addEventListener('DOMContentLoaded', function() {
       return Math.max(LARGE_VIEWPORT_MIN_SCALE, softened);
     };
 
+    // For larger screens, scale down to match MacBook Pro 16" appearance
+    // Calculate scale factor: if screen is larger than baseline, scale down proportionally
     const widthRatio = BASELINE_WIDTH / Math.max(viewportWidth, BASELINE_WIDTH);
     const heightRatio = BASELINE_HEIGHT / Math.max(viewportHeight, BASELINE_HEIGHT);
-    const normalized = Math.min(scale, softenRatio(widthRatio), softenRatio(heightRatio));
+    
+    // Use the smaller ratio to ensure content fits, but scale down on larger screens
+    let targetScale = Math.min(widthRatio, heightRatio);
+    
+    // If viewport is larger than baseline, scale down to match MacBook Pro appearance
+    if (viewportWidth > BASELINE_WIDTH || viewportHeight > BASELINE_HEIGHT) {
+      // Scale down proportionally: larger screen = smaller scale factor
+      const widthScale = BASELINE_WIDTH / viewportWidth;
+      const heightScale = BASELINE_HEIGHT / viewportHeight;
+      targetScale = Math.min(widthScale, heightScale);
+    }
+    
+    const normalized = Math.min(scale, softenRatio(targetScale));
     return Math.min(scale, Math.max(normalized, minScale));
   }
 
@@ -929,9 +895,28 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
 
-    let scale = Math.min(vw / contentWidth, vh / contentHeight);
-    if (!isFinite(scale) || scale <= 0) scale = 1;
-    scale = Math.min(scale, 1);
+    // Calculate scale to match MacBook Pro 16" baseline appearance
+    // On larger screens, scale down proportionally to maintain consistent appearance
+    let targetScale = 1;
+    if (vw > BASELINE_WIDTH || vh > BASELINE_HEIGHT) {
+      // Scale down on larger screens to match MacBook Pro 16" appearance
+      const widthScale = BASELINE_WIDTH / vw;
+      const heightScale = BASELINE_HEIGHT / vh;
+      targetScale = Math.min(widthScale, heightScale);
+    } else if (vw < BASELINE_WIDTH || vh < BASELINE_HEIGHT) {
+      // Scale up on smaller screens (but cap at 1 to prevent zooming in)
+      const widthScale = vw / BASELINE_WIDTH;
+      const heightScale = vh / BASELINE_HEIGHT;
+      targetScale = Math.min(Math.max(widthScale, heightScale), 1);
+    }
+    
+    // Also calculate fit scale to ensure content fits
+    let fitScale = Math.min(vw / contentWidth, vh / contentHeight);
+    if (!isFinite(fitScale) || fitScale <= 0) fitScale = 1;
+    
+    // Use the smaller of the two: target scale (for appearance) or fit scale (for content)
+    // This ensures content fits while maintaining consistent appearance
+    let scale = Math.min(targetScale, fitScale, 1);
 
     // Apply to body with width/height compensation so layout reflows to fit
     const applyScaleToBody = (s) => {

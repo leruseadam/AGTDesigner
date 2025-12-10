@@ -41,40 +41,29 @@ html {
   min-height: 100vh;
   margin: 0;
   padding: 0;
-  overflow-x: hidden; /* Prevent horizontal scrolling */
-  overflow-y: auto; /* Allow vertical scrolling when needed */
   /* Ensure no browser defaults interfere with fullscreen canvas */
   box-sizing: border-box;
   /* Enable smooth zoom scaling */
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  /* Ensure background covers full viewport */
-  background: linear-gradient(135deg, #1a1623 0%, #2d223a 50%, #1a1623 100%);
-  background-attachment: fixed;
-  background-size: cover;
 }
-
 
 body {
   font-size: 1.1rem;
   line-height: 1.5;
   width: 100%;
+  height: 100%;
   min-height: 100vh;
   margin: 0;
-  padding: 0; /* Remove all padding to prevent white bars */
+  padding: 0 0 0.5rem 0; /* Reduced bottom gutter from 1.5rem */
   overflow-x: hidden;
-  overflow-y: auto; /* Allow vertical scrolling when content exceeds viewport */
   /* Ensure body doesn't interfere with fullscreen canvas */
   position: relative;
   /* Ensure smooth zoom scaling */
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  /* Ensure background covers full viewport */
-  background: linear-gradient(135deg, #1a1623 0%, #2d223a 50%, #1a1623 100%);
-  background-attachment: fixed;
-  background-size: cover;
 }
 
 /* Global zoom responsiveness - all elements scale with browser zoom */
@@ -107,180 +96,6 @@ body > .container,
 body > .container-fluid {
   max-width: 100% !important;
   margin: 0 auto !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
-}
-
-/* CRITICAL FIX: Prevent any direct child of body from causing white space at bottom */
-/* But allow internal scrollable containers (like tag lists) to work */
-body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
-  /* Removed max-height restriction to allow full content visibility */
-}
-
-/* Ensure main content containers allow scrolling when needed */
-.main-content,
-.main-container,
-#main-container {
-  overflow-x: hidden !important;
-  overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
-}
-
-/* Constrain large monitors - reduce font sizes and spacing directly */
-@media (min-width: 1921px) {
-  html {
-    font-size: 14px !important; /* Reduce base font from 18px */
-  }
-  
-  body {
-    overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
-    overflow-x: hidden !important;
-    min-height: 100vh !important;
-  }
-  
-  body > .container,
-  body > .container-fluid,
-  .main-content {
-    max-width: 1920px !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    height: auto !important;
-    min-height: auto !important;
-  }
-  
-  /* Reduce all font sizes - EXCEPT tag lists */
-  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
-    font-size: 0.78em !important; /* Scale down all fonts by 22% */
-  }
-  
-  html {
-    font-size: 14px !important; /* Base size */
-  }
-  
-  /* Override: Keep inventory list at readable size on large screens - use absolute px to avoid scaling issues */
-  #availableTags,
-  #availableTags *,
-  #availableTags .tag-item,
-  #availableTags .tag-entry,
-  #availableTags .tag-name,
-  #availableTags .tag-text,
-  #availableTags .tag-info,
-  #selectedTags,
-  #selectedTags *,
-  #selectedTags .tag-item,
-  #selectedTags .tag-entry,
-  #selectedTags .tag-name,
-  #selectedTags .tag-text,
-  #selectedTags .tag-info,
-  .tag-list-container,
-  .tag-list-container *,
-  .tag-list-container .tag-item,
-  .tag-list-container .tag-entry,
-  .tag-list-container .tag-name,
-  .tag-list-container .tag-text,
-  .tag-list-container .tag-info {
-    font-size: 30px !important; /* Increased from 22px for better readability on big monitors */
-  }
-  
-  /* Reduce padding and margins */
-  .btn-modern, .btn-modern2, .btn-modern3, .btn-glass {
-    padding: 6px 12px !important;
-    font-size: 0.9rem !important;
-    min-height: 36px !important;
-    min-width: 80px !important;
-  }
-  
-  /* Remove height restrictions - allow scrolling */
-  #availableTags,
-  #selectedTags,
-  [data-container-type="available"],
-  [data-container-type="selected"],
-  .tag-list-container,
-  .main-content {
-    overflow-y: auto !important;
-    max-height: none !important;
-    height: auto !important;
-    min-height: auto !important;
-  }
-}
-
-@media (min-width: 2560px) {
-  html {
-    font-size: 12px !important;
-  }
-  
-  /* Reduce font sizes - EXCEPT tag lists */
-  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
-    font-size: 0.67em !important; /* Scale down all fonts by 33% */
-  }
-  
-  html {
-    font-size: 12px !important;
-  }
-  
-  /* Override: Keep inventory list at readable size on very large screens - use absolute px */
-  #availableTags,
-  #availableTags *,
-  #availableTags .tag-item,
-  #availableTags .tag-entry,
-  #availableTags .tag-name,
-  #availableTags .tag-text,
-  #availableTags .tag-info,
-  #selectedTags,
-  #selectedTags *,
-  #selectedTags .tag-item,
-  #selectedTags .tag-entry,
-  #selectedTags .tag-name,
-  #selectedTags .tag-text,
-  #selectedTags .tag-info,
-  .tag-list-container,
-  .tag-list-container *,
-  .tag-list-container .tag-item,
-  .tag-list-container .tag-entry,
-  .tag-list-container .tag-name,
-  .tag-list-container .tag-text,
-  .tag-list-container .tag-info {
-    font-size: 34px !important; /* Increased from 26px for very large screens */
-  }
-}
-
-@media (min-width: 3840px) {
-  html {
-    font-size: 10px !important;
-  }
-  
-  /* Reduce font sizes - EXCEPT tag lists */
-  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
-    font-size: 0.56em !important; /* Scale down all fonts by 44% */
-  }
-  
-  html {
-    font-size: 10px !important;
-  }
-  
-  /* Override: Keep inventory list at readable size on ultra-large screens - use absolute px */
-  #availableTags,
-  #availableTags *,
-  #availableTags .tag-item,
-  #availableTags .tag-entry,
-  #availableTags .tag-name,
-  #availableTags .tag-text,
-  #availableTags .tag-info,
-  #selectedTags,
-  #selectedTags *,
-  #selectedTags .tag-item,
-  #selectedTags .tag-entry,
-  #selectedTags .tag-name,
-  #selectedTags .tag-text,
-  #selectedTags .tag-info,
-  .tag-list-container,
-  .tag-list-container *,
-  .tag-list-container .tag-item,
-  .tag-list-container .tag-entry,
-  .tag-list-container .tag-name,
-  .tag-list-container .tag-text,
-  .tag-list-container .tag-info {
-    font-size: 38px !important; /* Increased from 30px for ultra-large screens */
-  }
 }
   
 /* Tag lists and containers - ensure they scale with zoom */
@@ -299,15 +114,8 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 
 /* Larger scaling for key UI elements - zoom responsive */
 .tag-item, .tag-entry {
-  font-size: 28px !important; /* Increased from 20px for better readability */
+  font-size: 0.8rem !important; /* Reduced for more compact tag lists */
   min-height: 2.4rem !important;
-}
-
-/* Highlight items with 5 or more units */
-.tag-item.high-units {
-  background-color: rgba(255, 215, 0, 0.3) !important; /* Gold/yellow highlight */
-  border-left: 3px solid rgba(255, 215, 0, 0.8) !important;
-  font-weight: 600 !important;
 }
 
 .quick-start-guide, .help-text {
@@ -358,11 +166,9 @@ h6 { font-size: 1.15rem !important; font-weight: 600 !important; }
 
 .filter-bar select, .filter-bar .form-select, .filter-bar option {
   font-size: 1.05rem !important;
-  padding: 0.5rem 0.9rem 0.6rem 0.9rem !important;
-  min-height: 2.5rem !important;
-  height: auto !important;
-  line-height: 1.6 !important;
-  overflow: visible !important;
+  padding: 0.75rem 0.9rem !important;
+  min-height: 52px !important;
+  line-height: 1.5 !important;
 }
 
 /* Larger list items */
@@ -743,36 +549,8 @@ canvas#lava-lamp-canvas {
   min-height: var(--center-panel-height) !important;
 }
 
-/* FORCE control-section to center its children, especially template select */
-.control-panel .control-section,
-.control-section {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 100% !important;
-}
-
-/* Ensure control-panel also centers its content */
-.control-panel {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  width: 100% !important;
-}
-
 .control-panel > * {
   width: 100% !important;
-}
-
-/* Allow template dropdown to be centered on PC */
-@media (min-width: 992px) {
-  .control-panel > .control-section {
-    width: 100% !important;
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-  }
 }
 
 .control-panel > .control-section + .control-section {
@@ -787,7 +565,6 @@ canvas#lava-lamp-canvas {
   width: 100% !important;
   display: flex !important;
   flex-direction: column !important;
-  align-items: center !important;
   gap: 0.50rem !important;
 }
  
@@ -869,17 +646,13 @@ canvas#lava-lamp-canvas {
     z-index: 1;
   }
   
-  /* CRITICAL FIX: Ensure body::before doesn't cause white space */
   body::before {
     content: '';
-    position: fixed; /* Fixed to viewport, not document */
+    position: fixed;
     top: 0;
     left: 0;
     width: 100%;
-    height: 100vh; /* Fixed to viewport height */
-    max-height: 100vh; /* Prevent exceeding viewport */
-    pointer-events: none;
-    z-index: -1; /* Behind content */
+    height: 100%;
     background: linear-gradient(135deg, 
       #ff0066 0%, 
       #ff3366 15%,
@@ -889,6 +662,7 @@ canvas#lava-lamp-canvas {
       #3300ff 75%,
       #0033cc 90%,
       #001a66 100%);
+    z-index: -1;
   }
   
   @keyframes trippyTieDye {
@@ -2068,20 +1842,11 @@ canvas#lava-lamp-canvas {
     display: block !important;
     position: relative !important;
     pointer-events: auto !important;
-    font-size: 20px !important; /* Even larger font size for better readability */
   }
   
   /* Force all content to fill the container */
   #availableTags * {
     box-sizing: border-box !important;
-  }
-  
-  /* Ensure all text in inventory list uses readable size */
-  #availableTags .tag-item,
-  #availableTags .tag-entry,
-  #availableTags .tag-name,
-  #availableTags .tag-text {
-    font-size: 20px !important;
   }
   
   /* Fix selected tags container height */
@@ -2836,16 +2601,6 @@ canvas#lava-lamp-canvas {
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
   }
   
-  /* CRITICAL: Override for template select specifically to ensure centering */
-  .control-panel #templateSelect.form-select-modern,
-  .control-panel #templateSelectModal.form-select-modern {
-    margin: 0.5rem auto 0.75rem auto !important;
-    text-align: center !important;
-    text-align-last: center !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
-  
   /* Generate button - Professional and Prominent */
   .control-panel #generateBtn {
     margin: 0.2rem auto !important;
@@ -2939,88 +2694,46 @@ canvas#lava-lamp-canvas {
   
   /* Enhanced Control Button Styling - Matching Generate Button */
   /* High specificity to override media query rules */
-  /* Professional Center Column Buttons - Glass Morphism Design */
   .control-panel .btn-control,
   .control-panel .btn-glass.btn-control,
   .btn-control {
-    padding: 0.75rem 1rem !important;
-    font-size: 0.95rem !important;
-    font-weight: 500 !important;
-    min-height: 44px !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    border-radius: 12px !important;
+    padding: 12px 14px !important;
+    font-size: 1.05rem !important;
+    font-weight: 600 !important;
+    min-height: 50px !important;
+    width: 70% !important;
+    max-width: 185px !important;
+    margin: 0 auto !important;
+    border-radius: 10px !important;
     display: flex !important;
     align-items: center !important;
-    justify-content: flex-start !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    /* Professional glass morphism - matches glass-card theme */
-    background: rgba(45, 34, 58, 0.75) !important;
-    backdrop-filter: blur(20px) saturate(1.2) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(1.2) !important;
-    border: 1.5px solid rgba(160, 132, 232, 0.25) !important;
-    color: rgba(255, 255, 255, 0.95) !important;
-    box-shadow: 
-      0 2px 8px rgba(0, 0, 0, 0.15),
-      0 1px 3px rgba(160, 132, 232, 0.1),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-    position: relative !important;
-    overflow: hidden !important;
-  }
-  
-  /* Subtle shine effect on hover */
-  .control-panel .btn-control::before,
-  .control-panel .btn-glass.btn-control::before,
-  .btn-control::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
-    transition: left 0.5s ease;
-    pointer-events: none;
-  }
-  
-  .control-panel .btn-control:hover::before,
-  .control-panel .btn-glass.btn-control:hover::before,
-  .btn-control:hover::before {
-    left: 100%;
+    justify-content: center !important;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    /* Match Generate button gradient */
+    background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%) !important;
+    backdrop-filter: blur(15px) !important;
+    -webkit-backdrop-filter: blur(15px) !important;
+    border: 1px solid rgba(139, 92, 246, 0.8) !important;
+    color: #fff !important;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+    box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
   }
   
   .control-panel .btn-control:hover,
   .control-panel .btn-glass.btn-control:hover,
   .btn-control:hover {
-    background: rgba(55, 44, 68, 0.85) !important;
-    border-color: rgba(160, 132, 232, 0.45) !important;
-    color: #ffffff !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 
-      0 4px 16px rgba(0, 0, 0, 0.2),
-      0 2px 8px rgba(160, 132, 232, 0.2),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    background: linear-gradient(135deg, #9F7AEA 0%, #8B5CF6 100%) !important;
+    border-color: rgba(159, 122, 234, 1) !important;
+    color: #fff !important;
+    transform: translateY(-2px) scale(1.02) !important;
+    box-shadow: 0 5px 18px rgba(139, 92, 246, 0.5), 0 8px 28px rgba(139, 92, 246, 0.35) !important;
   }
   
   .control-panel .btn-control:active,
   .control-panel .btn-glass.btn-control:active,
   .btn-control:active {
-    transform: translateY(0) !important;
+    transform: translateY(0) scale(0.98) !important;
     transition: transform 0.1s ease !important;
-    box-shadow: 
-      0 1px 4px rgba(0, 0, 0, 0.15),
-      inset 0 1px 2px rgba(0, 0, 0, 0.1) !important;
-  }
-  
-  .control-panel .btn-control:focus,
-  .control-panel .btn-glass.btn-control:focus,
-  .btn-control:focus {
-    outline: none !important;
-    border-color: rgba(160, 132, 232, 0.6) !important;
-    box-shadow: 
-      0 0 0 3px rgba(160, 132, 232, 0.15),
-      0 4px 16px rgba(0, 0, 0, 0.2) !important;
   }
   
   .control-panel .btn-control .icon-btn,
@@ -3028,26 +2741,16 @@ canvas#lava-lamp-canvas {
   .btn-control .icon-btn {
     display: flex !important;
     align-items: center !important;
-    gap: 0.65rem !important;
+    gap: 8px !important;
     width: 100% !important;
-    justify-content: flex-start !important;
+    justify-content: center !important;
   }
   
   .control-panel .btn-control svg,
   .control-panel .btn-glass.btn-control svg,
   .btn-control svg {
     flex-shrink: 0 !important;
-    opacity: 0.9 !important;
-    width: 18px !important;
-    height: 18px !important;
-    stroke-width: 2.2 !important;
-    transition: opacity 0.2s ease !important;
-  }
-  
-  .control-panel .btn-control:hover svg,
-  .control-panel .btn-glass.btn-control:hover svg,
-  .btn-control:hover svg {
-    opacity: 1 !important;
+    opacity: 0.95 !important;
   }
   
   /* Section spacing improvements */
@@ -3242,7 +2945,7 @@ canvas#lava-lamp-canvas {
   }
   
   .tag-name {
-    font-size: inherit !important; /* Use inherited font size from parent tag-item */
+    font-size: 0.8rem !important;
     line-height: 1.3 !important;
     margin-right: 8px !important;
     white-space: normal !important;
@@ -4182,12 +3885,8 @@ canvas#lava-lamp-canvas {
     
     .filter-bar select {
       font-size: 0.8rem;
-      padding: 0.5rem 8px 0.6rem 8px !important;
+      padding: 5px 8px;
       margin-bottom: 0.5rem;
-      height: auto !important;
-      min-height: 2.5rem !important;
-      line-height: 1.6 !important;
-      overflow: visible !important;
     }
   }
   
@@ -4357,9 +4056,7 @@ canvas#lava-lamp-canvas {
     z-index: -1;
     background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
     background-size: 400% 400%;
-    animation: lava-placeholder-fade 3s ease-in-out infinite !important;
-    animation-play-state: running !important;
-    will-change: background-position;
+    animation: lava-placeholder-fade 3s ease-in-out infinite;
     pointer-events: none;
   }
 
@@ -4845,11 +4542,8 @@ canvas#lava-lamp-canvas {
     min-width: 160px !important;
     max-width: 250px !important;
     font-size: 1.05rem !important;
-    height: auto !important;
-    min-height: 2.5rem !important;
-    padding: 0.5rem 12px 0.6rem 12px !important;
-    line-height: 1.6 !important;
-    overflow: visible !important;
+    height: 36px !important;
+    padding: 6px 12px !important;
     background: rgba(45, 34, 58, 0.8) !important;
     color: var(--text-primary) !important;
     border: 1px solid rgba(160, 132, 232, 0.3) !important;
@@ -5251,21 +4945,6 @@ canvas#lava-lamp-canvas {
     background: rgba(160, 132, 232, 0.1);
   }
   
-  /* Make name column wider in tags table */
-  .table .tag-name-header,
-  .table .tag-name-cell {
-    min-width: 250px !important;
-    width: 30% !important;
-    max-width: 400px !important;
-  }
-  
-  /* Make other columns appropriately sized */
-  .table thead th:not(.tag-name-header),
-  .table tbody td:not(.tag-name-cell) {
-    width: auto !important;
-    min-width: 80px !important;
-  }
-  
   /* Database buttons in control panel */
   .d-grid .btn-glass.btn-sm {
     font-size: 0.75rem;
@@ -5647,7 +5326,7 @@ canvas#lava-lamp-canvas {
     gap: 4px !important;
   }
   .tag-name {
-      font-size: 20px !important; /* Even larger font size for better readability */
+      font-size: 0.95rem !important;
       line-height: 1.4 !important;
     white-space: normal !important;
     word-break: break-word !important;
@@ -6017,11 +5696,10 @@ canvas#lava-lamp-canvas {
     max-width: 100% !important;
     min-height: 60px !important;
     height: 60px !important;
-    margin: 0.5rem auto 0.75rem auto !important; /* Center with auto margins */
+    margin: 0.5rem 0 0.75rem 0 !important;
     text-align: center !important;
     text-align-last: center !important;
-    direction: ltr !important; /* Ensure left-to-right for proper centering */
-    padding: 12px 50px 12px 50px !important; /* Symmetric padding for proper centering */
+    padding: 12px 40px 12px 40px !important; /* Symmetric padding for centered text */
     font-size: 0.95em !important; /* Reduced from 1.1em for better PC UI */
     font-weight: 700 !important;
     color: #e0d6f6 !important;
@@ -6036,184 +5714,11 @@ canvas#lava-lamp-canvas {
     white-space: nowrap !important; /* Prevent text wrapping */
     text-overflow: ellipsis !important;
     
-    /* CRITICAL: Force centering - override any conflicting rules */
-    margin-left: auto !important;
-    margin-right: auto !important;
-    float: none !important;
-    position: relative !important;
-    left: auto !important;
-    right: auto !important;
-    transform: none !important;
-    
     /* Ensure consistent arrow across platforms - positioned to not interfere with centering */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
     background-position: right 14px center !important;
     background-size: 18px 18px !important;
-  }
-  
-  /* OVERRIDE form-select-modern class for template select */
-  #templateSelect.form-select-modern,
-  #templateSelectModal.form-select-modern {
-    margin: 0.5rem auto 0.75rem auto !important;
-    text-align: center !important;
-    text-align-last: center !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    padding-left: 50px !important; /* Match right padding to center text accounting for arrow */
-    padding-right: 50px !important;
-  }
-  
-  /* CRITICAL: Force text centering by adjusting padding to account for arrow */
-  #templateSelect option,
-  #templateSelectModal option {
-    text-align: center !important;
-    text-align-last: center !important;
-  }
-  
-  /* FORCE CENTERING - Override any conflicting rules - UNIVERSAL RULE */
-  .control-section #templateSelect,
-  .control-section #templateSelectModal,
-  .control-panel #templateSelect,
-  .control-panel #templateSelectModal,
-  .control-panel .control-section #templateSelect,
-  .control-panel .control-section #templateSelectModal,
-  [data-container-type="center"] #templateSelect,
-  [data-container-type="center"] #templateSelectModal,
-  [data-container-type="center"] .control-section #templateSelect,
-  [data-container-type="center"] .control-section #templateSelectModal,
-  #templateSelect,
-  #templateSelectModal {
-    margin-left: auto !important;
-    margin-right: auto !important;
-    display: block !important;
-    text-align: center !important;
-    text-align-last: center !important;
-    float: none !important;
-    position: relative !important;
-    left: auto !important;
-    right: auto !important;
-    transform: none !important;
-  }
-  
-  /* CRITICAL: Ensure control-section centers ALL its content including template select */
-  .control-section {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    justify-content: center !important;
-    text-align: center !important;
-    width: 100% !important;
-  }
-  
-  /* Ensure the Template label is also centered */
-  .control-section .filter-label,
-  .control-section label[for="templateSelect"],
-  .control-section > label:first-child {
-    text-align: center !important;
-    width: 100% !important;
-    display: block !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
-  
-  /* FORCE template select to be centered within control-section */
-  .control-section #templateSelect,
-  .control-section #templateSelectModal {
-    margin-left: auto !important;
-    margin-right: auto !important;
-    display: block !important;
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-  
-  /* Fix template dropdown on large monitors (Windows PC) */
-  @media (min-width: 1921px) {
-    #templateSelect,
-    #templateSelectModal {
-      font-size: 0.8em !important; /* Smaller font on large monitors */
-      margin: 0.5rem auto 0.75rem auto !important; /* Ensure centered */
-      margin-left: auto !important;
-      margin-right: auto !important;
-      display: block !important;
-      width: 100% !important;
-    }
-    
-    /* Force control-section to center on large monitors */
-    .control-section {
-      display: flex !important;
-      flex-direction: column !important;
-      align-items: center !important;
-      justify-content: center !important;
-    }
-  }
-  
-  /* PC-specific: Reduce template select font size on Windows/PC screens */
-  /* Target larger screens (typically PC monitors) - Mac screens are usually smaller */
-  @media screen and (min-width: 1400px) {
-    #templateSelect,
-    #templateSelectModal {
-      font-size: 0.75em !important; /* Smaller font size for PC */
-    }
-  }
-  
-  /* PC-specific: Ensure template dropdown is centered in control-section */
-  @media (min-width: 992px) {
-    /* CRITICAL: Override control-panel's stretch alignment to center content on PC */
-    .control-panel {
-      align-items: center !important;
-      display: flex !important;
-      flex-direction: column !important;
-      justify-content: flex-start !important;
-    }
-    
-    /* Center the control-section itself - ensure it centers its children */
-    .control-section {
-      align-items: center !important;
-      display: flex !important;
-      flex-direction: column !important;
-      width: 100% !important;
-      text-align: center !important;
-      justify-content: center !important;
-    }
-    
-    /* FORCE template dropdown to be centered - override everything */
-    .control-section #templateSelect,
-    .control-section #templateSelectModal,
-    .control-panel .control-section #templateSelect,
-    .control-panel .control-section #templateSelectModal {
-      display: block !important;
-      width: 100% !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
-      text-align: center !important;
-      text-align-last: center !important;
-      transform: none !important;
-    }
-    
-    /* Ensure the center column container properly centers its children */
-    [data-container-type="center"] {
-      align-items: center !important;
-      text-align: center !important;
-    }
-    
-    /* Force center alignment for template select in center container */
-    [data-container-type="center"] #templateSelect,
-    [data-container-type="center"] #templateSelectModal {
-      margin-left: auto !important;
-      margin-right: auto !important;
-      text-align: center !important;
-      text-align-last: center !important;
-    }
-    
-    /* Ensure Template label is centered */
-    .control-section .filter-label,
-    .control-section label:first-child {
-      text-align: center !important;
-      width: 100% !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
-    }
   }
   
   /* Override inline styles on template select */
@@ -6243,9 +5748,7 @@ canvas#lava-lamp-canvas {
     background: rgba(34, 34, 51, 0.95) !important;
     font-size: 0.95em !important; /* Match select font size */
     font-weight: 500;
-    text-align: center !important;
-    text-align-last: center !important;
-    padding: 8px 12px !important;
+    text-align: center;
   }
 
   #templateSelect:focus,
@@ -6638,9 +6141,7 @@ canvas#lava-lamp-canvas {
     z-index: -1;
     background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
     background-size: 400% 400%;
-    animation: lava-placeholder-fade 3s ease-in-out infinite !important;
-    animation-play-state: running !important;
-    will-change: background-position;
+    animation: lava-placeholder-fade 3s ease-in-out infinite;
     pointer-events: none;
   }
 
@@ -6652,9 +6153,7 @@ canvas#lava-lamp-canvas {
       radial-gradient(circle at 60% 40%, rgba(102, 0, 255, 0.2) 0%, transparent 50%),
       linear-gradient(45deg, rgba(26, 0, 51, 0.9), rgba(51, 0, 102, 0.9), rgba(102, 0, 204, 0.9), rgba(153, 0, 255, 0.9));
     background-size: 200% 200%, 150% 150%, 180% 180%, 220% 220%, 100% 100%;
-    animation: excelLoadingBackground 30s ease-in-out infinite !important;
-    animation-play-state: running !important;
-    will-change: background-position, filter;
+    animation: excelLoadingBackground 30s ease-in-out infinite;
     padding: 80px 100px; /* Increased for BIGGER splash */
     max-width: 900px; /* Increased container size */
     border: 1px solid rgba(160, 132, 232, 0.5);
@@ -6675,9 +6174,7 @@ canvas#lava-lamp-canvas {
 
   .excel-loading-icon {
     margin-bottom: 40px; /* Increased for bigger spacing */
-    animation: excelIconPulse 4s ease-in-out infinite !important;
-    animation-play-state: running !important;
-    will-change: transform, opacity;
+    animation: excelIconPulse 4s ease-in-out infinite;
   }
 
   .excel-loading-icon svg {
@@ -6757,11 +6254,9 @@ canvas#lava-lamp-canvas {
     height: 16px; /* Increased from 12px */
     background: #00d4aa;
     border-radius: 50%;
-    animation: excelDotPulse 2.5s ease-in-out infinite !important;
-    animation-play-state: running !important;
-    will-change: transform, opacity;
+    animation: excelDotPulse 2.5s ease-in-out infinite;
   }
-  
+
   .excel-loading-dots span:nth-child(1) { animation-delay: 0s; }
   .excel-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
   .excel-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
@@ -6979,7 +6474,7 @@ canvas#lava-lamp-canvas {
       0 4px 16px rgba(160,132,232,0.1),
       0 2px 8px rgba(160,132,232,0.08) !important; /* Match glass-card shadows */
     margin: 0 0 0.75rem 0; /* Reduced bottom margin */
-    padding: 0.75rem 0.75rem 1rem 0.75rem !important; /* Increased bottom padding to prevent cutoff */
+    padding: 0.75rem; /* Reduced from 1.5rem */
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important; /* Match glass-card transition */
     position: relative;
     display: flex !important;
@@ -6987,7 +6482,6 @@ canvas#lava-lamp-canvas {
     gap: 0.75rem !important;
     align-items: stretch !important;
     justify-content: stretch !important;
-    overflow: visible !important; /* Prevent content cutoff */
   }
 
   /* Hover effect to match glass-card */
@@ -7006,7 +6500,7 @@ canvas#lava-lamp-canvas {
 
   /* Filter column styling - updated to match glass-card aesthetic and equal sizing */
   .sticky-filter-bar .filter-column {
-    padding: 0.5rem 0.5rem 0.75rem 0.5rem !important; /* Increased bottom padding to prevent cutoff */
+    padding: 0.5rem !important; /* Reduced from 1rem */
     margin: 0 !important;
     background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
     border-radius: 10px !important; /* Reduced from 12px */
@@ -7018,7 +6512,6 @@ canvas#lava-lamp-canvas {
     display: flex !important;
     flex-direction: column !important;
     gap: 0.35rem !important;
-    overflow: visible !important; /* Prevent content cutoff */
   }
 
   .sticky-filter-bar .filter-column:hover {
@@ -7035,20 +6528,12 @@ canvas#lava-lamp-canvas {
     font-weight: 700 !important; /* Match tag column header weight */
     color: #ffffff !important; /* Match tag column header color */
     margin-bottom: 0.4rem !important; /* Reduced from 0.75rem */
-    margin-top: 0 !important; /* Remove top margin */
-    padding-top: 0 !important; /* Remove top padding */
-    padding-bottom: 0.2rem !important; /* Increased bottom padding to prevent cutoff */
-    padding-left: 0 !important;
-    padding-right: 0 !important;
     text-transform: uppercase !important;
     letter-spacing: 0.5px !important;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7) !important; /* Match tag column styling */
     white-space: nowrap !important; /* Prevent label wrapping */
-    overflow: visible !important; /* Changed from hidden to visible to prevent cutoff */
-    text-overflow: clip !important; /* Changed from ellipsis to clip to show full text */
-    line-height: 1.6 !important; /* Increased line-height to prevent bottom cutoff */
-    min-height: 1.3rem !important; /* Increased minimum height for text visibility */
-    box-sizing: border-box !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   /* Filter dropdowns styling - updated to match overall theme and equal sizing */
@@ -7059,13 +6544,11 @@ canvas#lava-lamp-canvas {
     border-radius: 8px !important;
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
-    padding: 0.5rem 0.55rem 0.6rem 0.55rem !important; /* Significantly increased vertical padding to prevent text cutoff */
+    padding: 0.35rem 0.55rem !important; /* Reduced padding */
     padding-right: 1.75rem !important; /* Extra space for dropdown arrow */
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
     min-width: 140px !important; /* Minimum width to fit "All" text and arrow */
-    min-height: 2.5rem !important; /* Increased minimum height for text visibility */
-    height: auto !important; /* Allow height to adjust to content */
     white-space: nowrap !important; /* Prevent text wrapping */
     overflow: visible !important; /* Allow dropdown to expand */
     text-overflow: clip !important; /* Don't truncate text */
@@ -7074,7 +6557,7 @@ canvas#lava-lamp-canvas {
     flex: 1 1 auto !important; /* Flex grow and shrink */
     box-sizing: border-box !important;
     font-size: 0.85rem !important; /* Reduced font size */
-    line-height: 1.6 !important; /* Increased line-height to prevent cutoff */
+    line-height: 1.3 !important;
   }
 
   .sticky-filter-bar .form-select:focus,
@@ -7271,7 +6754,7 @@ canvas#lava-lamp-canvas {
 
   /* Explicit filter column styling */
   .sticky-filter-bar .filter-column {
-    padding: 0.5rem 0.5rem 0.75rem 0.5rem !important; /* Increased bottom padding to prevent cutoff */
+    padding: 1rem !important;
     margin: 0 0.5rem !important;
     background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
     border-radius: 12px !important; /* Slightly smaller than parent */
@@ -7280,7 +6763,6 @@ canvas#lava-lamp-canvas {
     flex: 1 1 auto !important; /* Allow growth to fit content */
     min-width: 140px !important; /* Prevent shrinking below content size */
     max-width: none !important; /* Remove max-width constraints */
-    overflow: visible !important; /* Prevent content cutoff */
   }
 
   .sticky-filter-bar .filter-column:hover {
@@ -7404,12 +6886,10 @@ canvas#lava-lamp-canvas {
     color: #fff;
     border-radius: 8px;
     border: 1.5px solid #a084e8;
-    height: auto !important;
-    min-height: 2.5rem !important;
-    padding: 0.5rem 10px 0.6rem 10px !important;
+    height: 36px;
+    min-height: 36px;
+    padding: 6px 10px;
     font-size: 0.95rem;
-    line-height: 1.6 !important;
-    overflow: visible !important;
     /* Bright blue arrow */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%2300BFFF" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
@@ -7437,22 +6917,17 @@ canvas#lava-lamp-canvas {
     margin-top: 0 !important;
     margin-bottom: 0 !important;
     padding-top: 0 !important;
-    padding-bottom: 0.15rem !important; /* Allow padding to prevent bottom cutoff */
-    line-height: 1.5 !important; /* Ensure proper line-height for text visibility */
-    overflow: visible !important; /* Prevent text cutoff */
-    min-height: 1.2rem !important; /* Ensure minimum height */
+    padding-bottom: 0 !important;
   }
   .sticky-filter-bar .form-select,
   .sticky-filter-bar select,
   .sticky-filter-bar .form-select-sm {
     margin-top: 0 !important;
     margin-bottom: 0 !important;
-    padding-top: 0.5rem !important; /* Significantly increased to prevent cutoff */
-    padding-bottom: 0.6rem !important; /* Significantly increased to prevent cutoff */
-    min-height: 2.5rem !important; /* Increased for better visibility */
-    height: auto !important; /* Allow height to adjust to content */
-    line-height: 1.6 !important; /* Increased line-height to prevent cutoff */
-    overflow: visible !important; /* Prevent content clipping */
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+    min-height: 24px !important;
+    height: 28px !important;
   }
   .sticky-filter-bar > div:not(:last-child) {
     margin-bottom: 6px !important;
@@ -7462,29 +6937,20 @@ canvas#lava-lamp-canvas {
     margin-bottom: 2px !important;
     padding: 0 !important;
   }
-  
-  /* Ensure filter columns have proper bottom padding */
-  .sticky-filter-bar .filter-column {
-    padding-bottom: 0.75rem !important; /* Override the padding: 0 above */
-  }
 
   /* Make sidebar filter bar and filters slightly smaller */
   .sticky-filter-bar .form-label,
   .sticky-filter-bar .filter-label {
     font-size: 0.92em !important;
-    padding: 0 0 0.15rem 0 !important; /* Increased bottom padding to prevent cutoff */
-    line-height: 1.5 !important; /* Ensure proper line-height */
-    overflow: visible !important; /* Prevent text cutoff */
+    padding: 0 0 2px 0 !important;
   }
   .sticky-filter-bar select,
   .sticky-filter-bar .form-select,
   .sticky-filter-bar .form-select-sm {
     font-size: 0.97em !important;
-    padding: 0.5rem 10px 0.6rem 10px !important; /* Significantly increased vertical padding to prevent cutoff */
-    min-height: 2.5rem !important; /* Increased for better visibility */
-    height: auto !important; /* Allow height to adjust to content */
-    line-height: 1.6 !important; /* Increased line-height to prevent cutoff */
-    overflow: visible !important; /* Prevent content clipping */
+    padding: 4px 10px !important;
+    min-height: 20px !important;
+    height: 26px !important;
   }
 
   /* Ensure sidebar filter dropdowns fit container */
@@ -7523,13 +6989,12 @@ canvas#lava-lamp-canvas {
   .form-select,
   .form-select-sm,
   .compact-filter {
-      min-height: 2.5rem !important;
-      height: auto !important;
+      min-height: 38px !important;
+      height: 38px !important;
       font-size: 1.05em !important;
-      padding-top: 0.5rem !important;
-      padding-bottom: 0.6rem !important;
-      line-height: 1.6 !important;
-      overflow: visible !important;
+      padding-top: 6px !important;
+      padding-bottom: 6px !important;
+      line-height: 1.2 !important;
   }
 
   /* Slightly increase label spacing for filter labels */
@@ -9676,14 +9141,6 @@ canvas#lava-lamp-canvas {
     
     /* Native-like behavior */
     transition: border-color 0.15s ease !important;
-    
-    /* CRITICAL: Prevent text cutoff - ensure adequate padding and no height constraints */
-    padding-top: 0.5rem !important;
-    padding-bottom: 0.6rem !important;
-    min-height: 2.5rem !important;
-    height: auto !important;
-    line-height: 1.6 !important;
-    overflow: visible !important;
   }
 
   /* Ensure consistent arrow positioning and styling */
