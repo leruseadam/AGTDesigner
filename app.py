@@ -4056,15 +4056,15 @@ def process_excel_background(filename, temp_path):
             # Final fallback to standard load_file
             if not success:
                 try:
-                success = new_processor.load_file(temp_path)
+                    success = new_processor.load_file(temp_path)
                     if success:
                         logging.info(f"[BG] Standard load complete: {len(new_processor.df)} rows")
                 except Exception as e:
                     logging.error(f"[BG] Standard load failed: {e}")
             
-                if not success or new_processor.df is None or new_processor.df.empty:
-                    update_processing_status(filename, f'error: Failed to load file')
-                    return
+            if not success or new_processor.df is None or new_processor.df.empty:
+                update_processing_status(filename, f'error: Failed to load file')
+                return
             
             # Mark as ready immediately
             update_processing_status(filename, 'ready')
