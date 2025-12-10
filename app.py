@@ -4016,27 +4016,35 @@ def process_excel_background(filename, temp_path):
         
         start_time = time.time()
         
-        # ULTRA-FAST LOADING: Load file with minimal processing
+        # ULTRA-FAST LOADING: Load file with ABSOLUTE MINIMAL processing
         from src.core.data.excel_processor import ExcelProcessor
         new_processor = ExcelProcessor()
         
         try:
-            # PC optimization: Skip database integration for faster loading
-            if is_windows:
-                if hasattr(new_processor, 'enable_product_db_integration'):
-                    new_processor.enable_product_db_integration(False)
-                    logging.info("[PC-BG] Product database integration disabled for faster loading")
-            else:
-                # Disable product database integration for faster loading
-                if hasattr(new_processor, 'enable_product_db_integration'):
-                    new_processor.enable_product_db_integration(False)
-                    logging.info("[BG] Product database integration disabled for faster loading")
+            # CRITICAL: Disable ALL expensive operations for fastest possible loading
+            if hasattr(new_processor, 'enable_product_db_integration'):
+                new_processor.enable_product_db_integration(False)
+                logging.info("[BG] Product database integration disabled for fastest loading")
             
-            # OPTIMIZED: Use fastest available loading method for all platforms
+            # CRITICAL: Skip enrichment for fastest loading
+            if hasattr(new_processor, '_skip_enrichment'):
+                new_processor._skip_enrichment = True
+                logging.info("[BG] Enrichment disabled for fastest loading")
+            
+            # OPTIMIZED: Use fastest available loading method
             success = False
             
-            # Try ultra_fast_load first (now optimized for large files)
-            if hasattr(new_processor, 'ultra_fast_load'):
+            # Try minimal_load_file first (fastest - skips all processing)
+            if hasattr(new_processor, 'minimal_load_file'):
+                try:
+                    success = new_processor.minimal_load_file(temp_path)
+                    if success:
+                        logging.info(f"[BG] Minimal load complete: {len(new_processor.df)} rows")
+                except Exception as e:
+                    logging.warning(f"[BG] Minimal load failed: {e}")
+            
+            # Try ultra_fast_load if minimal failed
+            if not success and hasattr(new_processor, 'ultra_fast_load'):
                 try:
                     success = new_processor.ultra_fast_load(temp_path)
                     if success:
@@ -4066,9 +4074,10 @@ def process_excel_background(filename, temp_path):
                 update_processing_status(filename, f'error: Failed to load file')
                 return
             
-            # Mark as ready immediately
+            # CRITICAL: Mark as ready IMMEDIATELY after basic file load
+            # Don't wait for database storage or any other operations
             update_processing_status(filename, 'ready')
-            logging.info(f"[BG] Marked {filename} as ready")
+            logging.info(f"[BG] ✅ Marked {filename} as ready IMMEDIATELY (file loaded, {len(new_processor.df)} rows)")
             
         except Exception as load_error:
             logging.error(f"[BG] Load error: {load_error}")
@@ -4081,15 +4090,26 @@ def process_excel_background(filename, temp_path):
             _excel_processor = new_processor
             logging.info(f"[BG] ✅ Global processor updated with {len(new_processor.df)} rows")
         
-        # Store in database (non-blocking) - only if enabled
+        # CRITICAL: Defer ALL expensive operations to separate background thread
+        # Database storage, enrichment, etc. should NOT block the upload response
+        def deferred_expensive_operations():
+            try:
+                # Store in database (non-blocking, deferred)
+                if hasattr(new_processor, 'enable_product_db_integration') and hasattr(new_processor, '_store_upload_in_database'):
+                    new_processor.enable_product_db_integration(True)
+                    storage_result = new_processor._store_upload_in_database(new_processor.df, temp_path)
+                    logging.info(f"[BG-DEFERRED] ✅ Database storage completed: {storage_result}")
+            except Exception as storage_error:
+                logging.warning(f"[BG-DEFERRED] Database storage failed: {storage_error}")
+        
+        # Start deferred operations in separate thread (non-blocking)
         try:
-            if hasattr(new_processor, 'enable_product_db_integration') and hasattr(new_processor, '_store_upload_in_database'):
-                # Re-enable database integration for storage
-                new_processor.enable_product_db_integration(True)
-                storage_result = new_processor._store_upload_in_database(new_processor.df, temp_path)
-                logging.info(f"[BG] ✅ Database storage completed: {storage_result}")
-        except Exception as storage_error:
-            logging.warning(f"[BG] Database storage failed: {storage_error}")
+            deferred_thread = threading.Thread(target=deferred_expensive_operations)
+            deferred_thread.daemon = True
+            deferred_thread.start()
+            logging.info("[BG] Started deferred expensive operations in background thread")
+        except Exception as deferred_error:
+            logging.warning(f"[BG] Failed to start deferred operations: {deferred_error}")
         
         processing_time = time.time() - start_time
         logging.info(f"[BG] ===== ULTRA-FAST PROCESSING COMPLETE =====")
@@ -8284,10 +8304,10 @@ def get_available_tags():
         
         # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
-        # PERFORMANCE: Enable fast_load by default for better performance
+        # PERFORMANCE: ALWAYS enable fast_load by default for maximum speed
         # User can explicitly request full lineage alignment by setting fast_load=0
         if request.args.get('fast_load') not in ('0', 'false', 'False'):
-            fast_load = True  # Default to fast loading
+            fast_load = True  # Default to fast loading - CRITICAL for upload speed
         
         # If lineage was recently changed, force a full refresh even if fast_load requested
         lineage_update_ts = session.get('lineage_update_timestamp')
@@ -16106,8 +16126,18 @@ def get_available_tags_lite():
         excel_processor = get_excel_processor()
         if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
             try:
-                # Get just the first 1000 tags to reduce memory usage
+                # CRITICAL: Skip enrichment for maximum speed in lite mode
+                if hasattr(excel_processor, '_skip_enrichment'):
+                    excel_processor._skip_enrichment = True
+                
+                # Get tags without database enrichment for speed
                 excel_tags = excel_processor.get_available_tags()
+                
+                # Reset enrichment flag
+                if hasattr(excel_processor, '_skip_enrichment'):
+                    excel_processor._skip_enrichment = False
+                
+                # Limit to first 1000 tags to reduce memory usage
                 if len(excel_tags) > 1000:
                     excel_tags = excel_tags[:1000]
                 

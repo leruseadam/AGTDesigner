@@ -577,9 +577,18 @@
     
     function checkStoreRequired(onStoreConfirmed) {
       // CRITICAL FIX: Don't check again if store was already confirmed
-      // This prevents the modal from reappearing after uploads
-      if (window.storeConfirmed && !window.checkingStoreRequired) {
-        console.log('✅ Store already confirmed, skipping check');
+      // This prevents the modal from reappearing after uploads or page reloads
+      // Check both in-memory flag and sessionStorage for persistence across reloads
+      const storeJustSelected = sessionStorage.getItem('store_just_selected') === 'true';
+      const selectedStore = sessionStorage.getItem('selected_store');
+      const storeConfirmed = window.storeConfirmed || (storeJustSelected && selectedStore);
+      
+      if (storeConfirmed && !window.checkingStoreRequired) {
+        console.log('✅ Store already confirmed (in memory or sessionStorage), skipping check');
+        // Restore the in-memory flag if it was in sessionStorage
+        if (!window.storeConfirmed && storeJustSelected) {
+          window.storeConfirmed = true;
+        }
         // Store is already confirmed, just call the callback if provided
         if (typeof onStoreConfirmed === 'function') {
           onStoreConfirmed();
@@ -673,8 +682,11 @@
             // USER HAS STORE - Show content, hide modal
             console.log('🎉 STORE FOUND:', data.store);
             
-            // CRITICAL FIX: Mark store as confirmed to prevent re-checking after uploads
+            // CRITICAL FIX: Mark store as confirmed to prevent re-checking after uploads or reloads
             window.storeConfirmed = true;
+            // Also persist in sessionStorage to survive page reloads
+            sessionStorage.setItem('store_just_selected', 'true');
+            sessionStorage.setItem('selected_store', data.store);
             
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');

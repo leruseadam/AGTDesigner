@@ -11888,6 +11888,8 @@ const TagManager = {
             const maxRetries = 5;  // Increased retries for more reliability
 
             for (let attempt = 0; attempt < maxRetries; attempt++) {
+                let tagsTimeout = null;
+                let tagsController = null;
                 try {
                     // PERFORMANCE: Progressive backoff for reliability
                     // 500ms, 1000ms, 2000ms, 3000ms, 5000ms delays
@@ -11899,9 +11901,9 @@ const TagManager = {
                         verboseLog('🔄 Loading tags after upload (no initial delay – trying immediately)...');
                     }
                     
-                    const tagsController = new AbortController();
+                    tagsController = new AbortController();
                     // PERFORMANCE: Reduced timeout to keep UI responsive (15s max)
-                    const tagsTimeout = setTimeout(() => {
+                    tagsTimeout = setTimeout(() => {
                         verboseLog('⏱️ Tag loading timeout - aborting request');
                         tagsController.abort();
                     }, 15000); // 15s timeout to avoid long waits
@@ -11956,6 +11958,15 @@ const TagManager = {
                         }
                     }
                 } catch (tagsError) {
+                    // CRITICAL FIX: Always clear timeout and abort controller on error
+                    if (tagsTimeout) {
+                        clearTimeout(tagsTimeout);
+                        tagsTimeout = null;
+                    }
+                    if (tagsController) {
+                        tagsController = null;
+                    }
+                    
                     const isTimeout = tagsError.name === 'AbortError' || tagsError.message?.includes('aborted');
                     if (isTimeout) {
                         verboseLog(`⏱️ Tag loading timeout (attempt ${attempt + 1}/${maxRetries}) - file may still be processing`);
@@ -11966,6 +11977,8 @@ const TagManager = {
                     if (attempt === maxRetries - 1) {
                         // Last attempt failed - try using the standard tag loading method instead of reloading
                         console.warn('⚠️ Failed to load tags after all retries, trying standard method:', tagsError);
+                        // CRITICAL FIX: Reset fetching flag to allow fallback to proceed
+                        this._fetchingAvailableTags = false;
                         // Use the existing fetchAndUpdateAvailableTags which has better error handling
                         // This avoids unnecessary page reloads that cause glitches
                         try {
@@ -11988,6 +12001,8 @@ const TagManager = {
             // If we get here, tags didn't load after all retries - try standard method instead of reloading
             if (!tagsLoaded) {
                 console.warn('⚠️ Tags not loaded after retries, trying standard method...');
+                // CRITICAL FIX: Reset fetching flag to allow fallback to proceed
+                this._fetchingAvailableTags = false;
                 try {
                     await this.fetchAndUpdateAvailableTags();
                     tagsLoaded = true;

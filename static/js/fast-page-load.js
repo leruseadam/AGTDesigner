@@ -76,6 +76,60 @@
         TagManager.checkForExistingData = async function() {
             console.log('⚡ Optimized checkForExistingData called');
             
+            // CRITICAL FIX: Check for uploaded file FIRST before trying to load tags
+            let hasFile = false;
+            try {
+                const fileResponse = await fetch('/api/current-file');
+                if (fileResponse.ok) {
+                    const fileData = await fileResponse.json();
+                    if (fileData && fileData.success && fileData.has_file && fileData.filename) {
+                        hasFile = true;
+                        console.log(`📄 Found uploaded file: ${fileData.filename}`);
+                        // Update file info
+                        const fileInfoText = document.getElementById('fileInfoText');
+                        if (fileInfoText) {
+                            fileInfoText.textContent = fileData.filename;
+                        }
+                        const currentFileInfo = document.getElementById('currentFileInfo');
+                        if (currentFileInfo) {
+                            currentFileInfo.textContent = fileData.filename;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.log('Error checking for current file:', error);
+            }
+            
+            // If no file exists, show upload prompt and exit early
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (!hasFile && availableTagsContainer) {
+                console.log('📤 No file uploaded - showing upload prompt');
+                // Hide any loading splash
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                // Show upload prompt instead of loading tags
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-5">
+                        <div class="upload-prompt">
+                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No product data loaded</h5>
+                            <p class="text-muted">Upload an Excel file to get started</p>
+                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                <i class="fas fa-upload me-2"></i>Upload Excel File
+                            </button>
+                        </div>
+                    </div>
+                `;
+                // Complete splash screen
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                return; // Exit early - no file, no tags to load
+            }
+            
+            // File exists - proceed with loading tags
             // CRITICAL: Try cache FIRST for instant load
             console.log('🔍 Checking for cached tags...');
             const cachedTags = this.loadAvailableTagsFromCache ? this.loadAvailableTagsFromCache() : null;
