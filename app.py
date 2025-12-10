@@ -4076,16 +4076,30 @@ def process_excel_background(filename, temp_path):
                 new_processor._skip_enrichment = True
                 logging.info("[BG] Enrichment disabled for fastest loading")
             
-            # CRITICAL OPTIMIZATION: Check file size to choose best loading method for large files
+            # CRITICAL OPTIMIZATION: Check file size and environment to choose best loading method
             import os
             file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
             logging.info(f"[BG] File size: {file_size_mb:.1f} MB - using optimized loading strategy")
             
-            # OPTIMIZED: Use fastest available loading method (prioritize minimal for large files)
+            # Check if running on PythonAnywhere
+            is_pythonanywhere = IS_PYTHONANYWHERE or PYTHONANYWHERE_OPTIMIZATION
+            if is_pythonanywhere:
+                logging.info("[BG] PythonAnywhere detected - using optimized loading strategy")
+            
+            # OPTIMIZED: Use fastest available loading method (prioritize PythonAnywhere method on production)
             success = False
             
+            # CRITICAL: On PythonAnywhere, prioritize pythonanywhere_fast_load first (optimized for production)
+            if is_pythonanywhere and hasattr(new_processor, 'pythonanywhere_fast_load'):
+                try:
+                    success = new_processor.pythonanywhere_fast_load(temp_path)
+                    if success:
+                        logging.info(f"[BG] ✅ PythonAnywhere fast load complete: {len(new_processor.df)} rows (production optimized)")
+                except Exception as e:
+                    logging.warning(f"[BG] PythonAnywhere fast load failed: {e}")
+            
             # For large files (>10MB), use minimal_load_file first (fastest - no processing)
-            if file_size_mb > 10:
+            if not success and file_size_mb > 10:
                 logging.info("[BG] Large file detected - using minimal_load_file for maximum speed")
                 if hasattr(new_processor, 'minimal_load_file'):
                     try:
