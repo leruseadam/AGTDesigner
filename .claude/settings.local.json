@@ -15,7 +15,8 @@
       "Bash(node -c:*)",
       "Bash(git push:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(timeout 60 python3:*)"
     ],
     "deny": [],
     "ask": []

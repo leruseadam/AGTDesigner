@@ -800,6 +800,7 @@ const AppLoadingSplash = {
             clearTimeout(this._emergencyTimer);
         }
         this._emergencyTimer = setTimeout(() => {
+            console.log('⚡ Emergency hide splash - 5 second timeout');
             this.emergencyHide();
         }, 5000); // Reduced from 7000 to 5000 for faster recovery
         
@@ -8104,12 +8105,27 @@ const TagManager = {
             // If still in progress after waiting, skip to prevent hang
             if (this._fetchingAvailableTags) {
                 console.log('⏸️ Tag fetch still in progress after wait, skipping duplicate call');
+                // CRITICAL FIX: Force hide splash if we're stuck waiting
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    console.log('⚡ Force hiding splash - tag fetch stuck');
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
                 return false;
             }
         }
         
         // Set flag to prevent concurrent calls
         this._fetchingAvailableTags = true;
+        
+        // CRITICAL FIX: Add timeout to force hide splash if fetch takes too long
+        const splashTimeout = setTimeout(() => {
+            if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                console.log('⚡ Force hiding splash - tag fetch timeout (30s)');
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+        }, 30000); // 30 second timeout
         
         // CRITICAL FIX: Use try-finally to ensure flag is always reset
         try {
