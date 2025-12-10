@@ -903,6 +903,7 @@ const TagManager = {
     state: {
         selectedTags: new Set(),
         isProcessingDeselection: false, // Flag to prevent filter updates during deselection
+        isUpdatingSelectedTags: false, // Flag to prevent concurrent updateSelectedTags calls
         isClearing: false, // Flag to prevent multiple simultaneous clear operations
         persistentSelectedTags: [], // Array to maintain order
         initialized: false,
@@ -2356,12 +2357,19 @@ const TagManager = {
         // we now trust the backend and work with the full tag list.
         const uniqueTags = tags;
         
+        // PERFORMANCE: For very large datasets, optimize processing
+        const LARGE_DATASET_THRESHOLD = 1000;
+        const isLargeDataset = uniqueTags.length > LARGE_DATASET_THRESHOLD;
+        
         // Debug: Log the first few tags to see their structure
         if (uniqueTags.length > 0) {
             verboseLog('First tag structure:', uniqueTags[0]);
         }
         
-        uniqueTags.forEach(tag => {
+        // PERFORMANCE: Use for loop for large datasets (faster than forEach)
+        for (let i = 0; i < uniqueTags.length; i++) {
+            const tag = uniqueTags[i];
+            
             // Use the correct field names from the tag object - check multiple possible field names
             let vendor = tag.vendor || tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || '';
             let brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || this.extractBrand(tag) || '';
@@ -2535,7 +2543,7 @@ const TagManager = {
             }
             const productsAtPrice = priceGroups.get(normalizedTag.priceGroup);
             productsAtPrice.push(normalizedTag);
-        });
+        }
 
         if (skippedTags > 0) {
             console.info(`Skipped ${skippedTags} tags due to missing vendor information`);
@@ -4954,7 +4962,18 @@ const TagManager = {
     _renderTagsInBatches(tags, container) {
         if (!tags || tags.length === 0) return;
         
-        const BATCH_SIZE = 50; // Render 50 tags at a time
+        // PERFORMANCE: Adaptive batch size based on dataset size
+        // Small datasets: render all at once for instant display
+        // Large datasets: use progressive rendering to prevent UI freeze
+        const LARGE_DATASET_THRESHOLD = 500;
+        const isLargeDataset = tags.length > LARGE_DATASET_THRESHOLD;
+        
+        // Adaptive batch size: larger batches for very large datasets to reduce overhead
+        const BATCH_SIZE = isLargeDataset ? 100 : tags.length;
+        
+        // For very large datasets, render initial batch immediately, then continue progressively
+        const INITIAL_BATCH_SIZE = isLargeDataset ? 200 : tags.length;
+        
         let index = 0;
         
         const renderBatch = () => {
@@ -4971,8 +4990,13 @@ const TagManager = {
             
             // Continue rendering if there are more tags
             if (index < tags.length) {
-                // Use requestAnimationFrame for smooth rendering
-                requestAnimationFrame(renderBatch);
+                // For large datasets, use setTimeout with small delay to allow UI updates
+                // For small datasets, use requestAnimationFrame for smooth rendering
+                if (isLargeDataset && index > INITIAL_BATCH_SIZE) {
+                    setTimeout(renderBatch, 10); // 10ms delay for large datasets
+                } else {
+                    requestAnimationFrame(renderBatch);
+                }
             }
         };
         
@@ -5033,11 +5057,18 @@ const TagManager = {
             return;
         }
         
-        // Add debouncing for rapid deselection to prevent UI issues
+        // CRITICAL FIX: Debounce and make async to prevent UI freezing
+        // Use requestAnimationFrame for non-blocking updates
         if (this.tagSelectionTimeout) {
             clearTimeout(this.tagSelectionTimeout);
         }
         
+        // Update checkbox state immediately for instant feedback (non-blocking)
+        requestAnimationFrame(() => {
+            this.updateSelectAllCheckboxes();
+        });
+        
+        // Debounce the heavy operations (updateSelectedTags) to prevent freezing
         this.tagSelectionTimeout = setTimeout(() => {
             // CRITICAL: Check flag again inside timeout to prevent filter clearing
             if (this.state.isProcessingDeselection) {
@@ -5045,78 +5076,62 @@ const TagManager = {
                 return;
             }
             
-            // Update select all checkbox states after tag selection changes
-            this.updateSelectAllCheckboxes();
-            
-            // Note: The persistent selected tags are already updated in the checkbox event handler
-            // This function now focuses on UI updates and backend synchronization
-            
-            verboseLog('Persistent selected tags after change:', this.state.persistentSelectedTags);
-            
-            // Only use backend data - never fall back to frontend persistent tags
-            // Get selected tags from backend
-            verboseLog('=== SELECTED TAGS DEBUG ===');
-            verboseLog('persistentSelectedTags:', this.state.persistentSelectedTags);
-            verboseLog('this.state.tags length:', this.state.tags.length);
-            verboseLog('this.state.originalTags length:', this.state.originalTags.length);
-            
-            // Debug: Show first few tags in state
-            if (this.state.tags.length > 0) {
-                verboseLog('First 3 tags in this.state.tags:');
-                this.state.tags.slice(0, 3).forEach(tag => {
-                    verboseLog(`  "${tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED'}"`);
-                });
-            }
-            
-            if (this.state.originalTags.length > 0) {
-                verboseLog('First 3 tags in this.state.originalTags:');
-                this.state.originalTags.slice(0, 3).forEach(tag => {
-                    verboseLog(`  "${tag && tag['Product Name*'] ? tag['Product Name*'] : 'UNDEFINED'}"`);
-                });
-            }
-            
-            const selectedTagObjects = this.state.persistentSelectedTags.map(name => {
-                // Safety check: ensure name is valid
-                if (!name || typeof name !== 'string') {
-                    console.warn('Invalid name in persistentSelectedTags:', name);
-                    return null;
-                }
+            // CRITICAL FIX: Use requestAnimationFrame to make updates non-blocking
+            requestAnimationFrame(() => {
+                // Update select all checkbox states after tag selection changes
+                this.updateSelectAllCheckboxes();
                 
-                // Only use tags that exist in the current backend data
-                let foundTag = this.state.tags.find(t => t && t['Product Name*'] && t['Product Name*'] === name) || 
-                              this.state.originalTags.find(t => t && t['Product Name*'] && t['Product Name*'] === name);
+                // Note: The persistent selected tags are already updated in the checkbox event handler
+                // This function now focuses on UI updates and backend synchronization
                 
-                // If not found, try case-insensitive search
-                if (!foundTag) {
-                    foundTag = this.state.tags.find(t => t && t['Product Name*'] && t['Product Name*'].toLowerCase() === name.toLowerCase()) || 
-                              this.state.originalTags.find(t => t && t['Product Name*'] && t['Product Name*'].toLowerCase() === name.toLowerCase());
-                }
+                verboseLog('Persistent selected tags after change:', this.state.persistentSelectedTags);
                 
-                // If still not found, create a minimal tag object for the selected tag
-                if (!foundTag) {
-                    verboseLog(`Tag "${name}" not found in state, creating minimal tag object`);
-                    foundTag = {
-                        'Product Name*': name,
-                        'Product Brand': 'Unknown',
-                        'Vendor': 'Unknown',
-                        'Product Type*': 'Unknown',
-                        'Lineage': 'MIXED',
-                        'Source': 'Frontend Selection'
-                    };
-                }
+                // CRITICAL FIX: Batch the expensive operations to prevent freezing
+                // Build selectedTagObjects efficiently
+                const selectedTagNames = this.state.persistentSelectedTags;
+                const tagsMap = new Map([...this.state.tags, ...this.state.originalTags].map(t => [t['Product Name*'], t]));
                 
-                verboseLog(`Looking for tag "${name}":`, foundTag ? 'FOUND' : 'NOT FOUND');
-                if (!foundTag) {
-                    verboseLog(`  Tag name length: ${name.length}`);
-                    verboseLog(`  Tag name characters: ${Array.from(name).map(c => c.charCodeAt(0)).join(', ')}`);
-                }
-                return foundTag;
-            }).filter(Boolean); // Filter out null values from invalid names
-            
-            verboseLog('selectedTagObjects:', selectedTagObjects);
-            verboseLog('selectedTagObjects length:', selectedTagObjects.length);
-            
-            this.updateSelectedTags(selectedTagObjects);
+                const selectedTagObjects = selectedTagNames.map(name => {
+                    // Safety check: ensure name is valid
+                    if (!name || typeof name !== 'string') {
+                        return null;
+                    }
+                    
+                    // Use Map lookup for O(1) performance instead of find() O(n)
+                    let foundTag = tagsMap.get(name);
+                    
+                    // If not found, try case-insensitive search (only if needed)
+                    if (!foundTag) {
+                        for (const [key, tag] of tagsMap.entries()) {
+                            if (key && key.toLowerCase() === name.toLowerCase()) {
+                                foundTag = tag;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // If still not found, create a minimal tag object for the selected tag
+                    if (!foundTag) {
+                        foundTag = {
+                            'Product Name*': name,
+                            'Product Brand': 'Unknown',
+                            'Vendor': 'Unknown',
+                            'Product Type*': 'Unknown',
+                            'Lineage': 'MIXED',
+                            'Source': 'Frontend Selection'
+                        };
+                    }
+                    
+                    return foundTag;
+                }).filter(Boolean); // Filter out null values from invalid names
+                
+                verboseLog('selectedTagObjects length:', selectedTagObjects.length);
+                
+                // CRITICAL FIX: Use setTimeout to defer expensive updateSelectedTags call
+                // This prevents blocking the UI thread
+                setTimeout(() => {
+                    this.updateSelectedTags(selectedTagObjects);
+                }, 0);
             
             // FIXED: Don't hide selected tags from available display - keep all items visible
             // This allows users to see all available options even after making selections
@@ -6085,6 +6100,16 @@ const TagManager = {
     },
 
     updateSelectedTags(tags) {
+        // CRITICAL FIX: Prevent concurrent calls to avoid freezing
+        if (this.state.isUpdatingSelectedTags) {
+            verboseLog('🚫 SKIPPING updateSelectedTags - already updating, queueing update');
+            // Queue the update for after current one completes
+            this._pendingSelectedTagsUpdate = tags;
+            return;
+        }
+        
+        this.state.isUpdatingSelectedTags = true;
+        
         // CRITICAL FIX: NEVER clear selected tags during lineage updates
         // Check if we're in the middle of a lineage update
         const isLineageUpdateActive = this._lineageUpdateInProgress || 
@@ -6095,6 +6120,7 @@ const TagManager = {
             // If called with empty array during lineage update, ignore it completely
             if (!tags || tags.length === 0) {
                 console.log('🚫 BLOCKED updateSelectedTags([]) during lineage update - preserving selected tags');
+                this.state.isUpdatingSelectedTags = false;
                 return;
             }
             // If called with tags but we have existing selections, merge instead of replace
@@ -6144,6 +6170,7 @@ const TagManager = {
         // Prevent updates during tag move operations to avoid race conditions
         if (this.isMovingTags) {
             verboseLog('Ignoring updateSelectedTags during tag move operation');
+            this.state.isUpdatingSelectedTags = false;
             return;
         }
         
@@ -6151,6 +6178,7 @@ const TagManager = {
         const container = document.getElementById('selectedTags');
         if (!container) {
             console.error('Selected tags container not found');
+            this.state.isUpdatingSelectedTags = false;
             return;
         }
         
@@ -6180,16 +6208,18 @@ const TagManager = {
             }
         }
         
-        // Dispatch event to notify drag and drop manager that tag updates are starting
-        document.dispatchEvent(new CustomEvent('updateSelectedTags'));
-        verboseLog('updateSelectedTags called with tags:', tags);
+        // CRITICAL FIX: Wrap DOM updates in requestAnimationFrame to prevent blocking
+        requestAnimationFrame(() => {
+            // Dispatch event to notify drag and drop manager that tag updates are starting
+            document.dispatchEvent(new CustomEvent('updateSelectedTags'));
+            verboseLog('updateSelectedTags called with tags:', tags);
 
-        // Clear existing content
-        container.innerHTML = '';
+            // Clear existing content
+            container.innerHTML = '';
 
-        // For JSON matched items, we want to keep them even if they don't exist in Excel data
-        // So we'll be more permissive with validation
-        const validTags = [];
+            // For JSON matched items, we want to keep them even if they don't exist in Excel data
+            // So we'll be more permissive with validation
+            const validTags = [];
         
         // Create a Set for O(1) lookup performance instead of O(n) .some() calls
         const originalTagNames = new Set(this.state.originalTags.map(tag => tag['Product Name*']));
@@ -7264,6 +7294,18 @@ const TagManager = {
                 window.dragAndDropManager.reinitializeTagDragAndDrop();
             }, 100);
         }
+        
+        // CRITICAL FIX: Clear the flag and process any queued updates
+        this.state.isUpdatingSelectedTags = false;
+        if (this._pendingSelectedTagsUpdate) {
+            const pending = this._pendingSelectedTagsUpdate;
+            this._pendingSelectedTagsUpdate = null;
+            // Use setTimeout to prevent recursion stack overflow
+            setTimeout(() => {
+                this.updateSelectedTags(pending);
+            }, 0);
+        }
+        });
     },
 
     updateTagCount(type, count) {
@@ -10642,43 +10684,66 @@ const TagManager = {
 
     // Efficient helper to update available tags display without DOM rebuilding
     efficientlyUpdateAvailableTagsDisplay() {
-        // FIXED: Don't hide selected tags from available display - keep all items visible
-        // This allows users to see all available options even after making selections
-        verboseLog('FIXED: Not hiding selected tags from available display - keeping all items visible');
-        
-        const availableTagElements = document.querySelectorAll('#availableTags .tag-item');
-        
-        // Show all tags regardless of selection status
-        availableTagElements.forEach(tagElement => {
-            tagElement.style.display = 'block';
+        // CRITICAL FIX: Make this non-blocking to prevent UI freeze
+        // Use requestAnimationFrame to batch DOM updates
+        requestAnimationFrame(() => {
+            // FIXED: Don't hide selected tags from available display - keep all items visible
+            // This allows users to see all available options even after making selections
+            verboseLog('FIXED: Not hiding selected tags from available display - keeping all items visible');
+            
+            const availableTagElements = document.querySelectorAll('#availableTags .tag-item');
+            
+            // Show all tags regardless of selection status (batch DOM updates)
+            // Use DocumentFragment for better performance
+            const fragment = document.createDocumentFragment();
+            availableTagElements.forEach(tagElement => {
+                tagElement.style.display = 'block';
+            });
+            
+            // Update select all checkboxes state (defer to avoid blocking)
+            setTimeout(() => {
+                this.updateSelectAllCheckboxes();
+            }, 0);
         });
-        
-        // Update select all checkboxes state
-        this.updateSelectAllCheckboxes();
     },
 
     // Update select all checkboxes state
     updateSelectAllCheckboxes() {
+        // CRITICAL FIX: Use Set for O(1) lookups instead of array includes() O(n)
+        // This dramatically improves performance when there are many selected tags
+        const selectedTagsSet = new Set(this.state.persistentSelectedTags);
+        
         // CRITICAL: First sync all available tag checkboxes with persistentSelectedTags state
+        // Batch DOM updates for better performance
         const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
+        const updates = [];
         availableCheckboxes.forEach(checkbox => {
             const tagName = checkbox.value;
-            const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
+            const shouldBeChecked = selectedTagsSet.has(tagName);
             if (checkbox.checked !== shouldBeChecked) {
-                checkbox.checked = shouldBeChecked;
+                updates.push({ checkbox, shouldBeChecked });
             }
+        });
+        // Batch apply all checkbox updates
+        updates.forEach(({ checkbox, shouldBeChecked }) => {
+            checkbox.checked = shouldBeChecked;
         });
         
         // CRITICAL FIX: Also sync selected tag checkboxes with persistentSelectedTags state
         // This prevents selected tags from being unchecked when available tags are re-rendered
         const selectedCheckboxes = document.querySelectorAll('#selectedTags .tag-checkbox');
+        const selectedUpdates = [];
         selectedCheckboxes.forEach(checkbox => {
             const tagName = checkbox.value;
-            const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
+            const shouldBeChecked = selectedTagsSet.has(tagName);
             if (checkbox.checked !== shouldBeChecked) {
-                checkbox.checked = shouldBeChecked;
-                verboseLog(`Synced selected tag checkbox for "${tagName}": ${shouldBeChecked}`);
+                selectedUpdates.push({ checkbox, shouldBeChecked, tagName });
             }
+        });
+        // Batch apply all selected checkbox updates
+        selectedUpdates.forEach(({ checkbox, shouldBeChecked, tagName }) => {
+            checkbox.checked = shouldBeChecked;
+            verboseLog(`Synced selected tag checkbox for "${tagName}": ${shouldBeChecked}`);
         });
         
         // FIXED: Don't filter out hidden elements since we're not hiding any elements anymore

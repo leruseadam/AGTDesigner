@@ -8452,8 +8452,9 @@ def get_available_tags():
                                 all_search_names = list(set(product_names + normalized_names))
 
                                 # PERFORMANCE: Use larger batch size for faster processing
-                                # SQLite handles up to 5000 items efficiently with proper indexing
-                                MAX_BATCH_SIZE = 5000  # Increased for better performance
+                                # SQLite handles up to 10000 items efficiently with proper indexing
+                                # For very large datasets, use even larger batches to reduce query overhead
+                                MAX_BATCH_SIZE = 10000  # Increased for better performance with large datasets
                                 if len(all_search_names) > MAX_BATCH_SIZE:
                                     # Process in chunks but use larger chunks for speed
                                     all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
