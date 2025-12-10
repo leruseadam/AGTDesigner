@@ -682,7 +682,7 @@
               setTimeout(() => mainContent.classList.add('loaded'), 100);
             }
             
-            // Clear blocking flag if it exists
+            // CRITICAL FIX: Clear blocking flag BEFORE calling callback to ensure TagManager can initialize
             if (window.STORE_MODAL_BLOCKING) {
               console.log('✅ Clearing STORE_MODAL_BLOCKING - TagManager can initialize');
               window.STORE_MODAL_BLOCKING = false;
@@ -699,6 +699,11 @@
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
             if (typeof onStoreConfirmed === 'function') {
               console.log('🔄 Store confirmed, calling initialization callback...');
+              console.log('🔍 STORE_MODAL_BLOCKING status:', window.STORE_MODAL_BLOCKING);
+              
+              // CRITICAL FIX: Ensure flag is cleared before initialization
+              window.STORE_MODAL_BLOCKING = false;
+              
               // CRITICAL FIX: Clear the store_just_selected flag after a delay to prevent re-showing splash
               setTimeout(() => {
                 sessionStorage.removeItem('store_just_selected');
@@ -707,9 +712,12 @@
               
               setTimeout(() => {
                 try {
+                  console.log('🚀 Calling onStoreConfirmed callback...');
                   onStoreConfirmed();
+                  console.log('✅ onStoreConfirmed callback completed');
                 } catch (initError) {
                   console.error('❌ Error in onStoreConfirmed callback:', initError);
+                  console.error('Error stack:', initError.stack);
                   // CRITICAL FIX: Hide splash even if initialization fails
                   if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
                     AppLoadingSplash.hide();
@@ -7476,12 +7484,35 @@
     
     function initializeTagManagerSafely() {
       console.log('🚀 initializeTagManagerSafely called');
+      console.log('🔍 STORE_MODAL_BLOCKING status:', window.STORE_MODAL_BLOCKING);
+      console.log('🔍 Store in sessionStorage:', sessionStorage.getItem('selected_store'));
       
       // CHECK: Is store modal blocking initialization?
-      if (window.STORE_MODAL_BLOCKING === true) {
-        console.log('🚫 TagManager initialization BLOCKED - store modal is active');
+      // CRITICAL FIX: Only block if modal is actually showing AND no store is selected
+      const hasStore = sessionStorage.getItem('selected_store') || 
+                      document.getElementById('mainContent')?.classList.contains('store-selected');
+      
+      if (window.STORE_MODAL_BLOCKING === true && !hasStore) {
+        console.log('🚫 TagManager initialization BLOCKED - store modal is active and no store selected');
         console.log('⏳ Waiting for store selection before initializing...');
         // Don't initialize - wait for store selection to call us
+        return;
+      }
+      
+      // CRITICAL FIX: If store is selected but flag is still true, clear it
+      if (window.STORE_MODAL_BLOCKING === true && hasStore) {
+        console.log('⚠️ STORE_MODAL_BLOCKING is true but store is selected - clearing flag');
+        window.STORE_MODAL_BLOCKING = false;
+      }
+      
+      // CRITICAL FIX: If store is already confirmed, initialize immediately without store check
+      if (hasStore && window.STORE_MODAL_BLOCKING !== true) {
+        console.log('✅ Store already confirmed - initializing TagManager immediately');
+        if (window.TagManager && typeof window.TagManager.init === 'function') {
+          TagManager.init();
+        } else {
+          console.error('❌ TagManager.init is not available');
+        }
         return;
       }
       
