@@ -815,7 +815,7 @@ canvas#lava-lamp-canvas {
 }
 
 .help-button-container {
-  margin: 0.25rem 0 1rem 0 !important; /* Reduced top margin for equal spacing */
+  margin: 0.25rem 0 1.5rem 0 !important; /* Increased bottom margin for equal spacing */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2884,7 +2884,7 @@ canvas#lava-lamp-canvas {
 
   /* Center column specific spacing reductions */
   .help-button-container {
-    margin: 0.25rem 0 1rem 0 !important; /* Reduced top margin for equal spacing */
+    margin: 0.25rem 0 1.5rem 0 !important; /* Increased bottom margin for equal spacing */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7718,7 +7718,7 @@ canvas#lava-lamp-canvas {
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    margin: 0.25rem 0 1rem 0 !important; /* Reduced top margin for equal spacing */
+    margin: 0.25rem 0 1.5rem 0 !important; /* Increased bottom margin for equal spacing */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
