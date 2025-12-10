@@ -2740,7 +2740,8 @@ def _enhance_json_with_excel_data(json_tag, excel_product):
     # Ensure we have a proper display name
     if 'displayName' not in enhanced_tag or not enhanced_tag['displayName']:
         product_name = enhanced_tag.get(get_canonical_field('Product Name*'), enhanced_tag.get(get_canonical_field('ProductName'), ''))
-        vendor = enhanced_tag.get(get_canonical_field('Vendor'), enhanced_tag.get(get_canonical_field('Product Brand'), ''))
+        # CRITICAL FIX: Use Vendor field strictly, don't fall back to Product Brand
+        vendor = enhanced_tag.get(get_canonical_field('Vendor/Supplier*'), enhanced_tag.get(get_canonical_field('Vendor'), ''))
         if product_name and vendor:
             enhanced_tag['displayName'] = f"{product_name} by {vendor}"
         elif product_name:
@@ -7161,7 +7162,7 @@ def generate_labels():
                                     'ProductName': product_name,  # Add ProductName for Excel processor compatibility
                                     'ProductType': processed_record.get('Product Type*', ''),
                                     'Lineage': db_lineage,
-                                    'ProductBrand': processed_record.get('Vendor/Supplier*', ''),  # FIXED: Use Vendor, not Product Brand
+                                    'ProductBrand': processed_record.get('Product Brand', ''),  # FIXED: Use Vendor, not Product Brand
                                     'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
                                     'Vendor': processed_record.get('Vendor/Supplier*', ''),
                                     'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
@@ -8989,8 +8990,21 @@ def get_available_tags():
                         prices = df[price_col].astype(str).str.strip() if price_col in df.columns else pd.Series([''] * len(df))
                         vendors = df[vendor_col].astype(str).str.strip() if vendor_col in df.columns else pd.Series([''] * len(df))
                         
+                        # Normalize weights to avoid 1.0 vs 1 duplicates
+                        def normalize_weight_series(weight_str):
+                            try:
+                                num = float(weight_str)
+                                if num == int(num):
+                                    return str(int(num))
+                                else:
+                                    return f"{num:.10f}".rstrip('0').rstrip('.')
+                            except:
+                                return str(weight_str).strip()
+                        
+                        weights_normalized = weights.apply(normalize_weight_series)
+                        
                         # Build dedup keys vectorized
-                        dedup_keys = (product_names_series + '|' + weights + '|' + prices + '|' + vendors).str.lower().str.strip()
+                        dedup_keys = (product_names_series + '|' + weights_normalized + '|' + prices + '|' + vendors).str.lower().str.strip()
                         
                         # Convert valid rows to dicts (only for valid products)
                         valid_indices = valid_mask[valid_mask].index
@@ -9042,6 +9056,28 @@ def get_available_tags():
                 merged_tags = []
                 merged_product_keys = set()  # Track merged products to avoid duplicates
                 
+                # Helper function to normalize weight for deduplication
+                def normalize_weight_for_dedup(weight_str):
+                    """Normalize weight strings to avoid duplicates like 1.0g vs 1g"""
+                    if not weight_str:
+                        return ''
+                    try:
+                        # Extract numeric value and units
+                        import re
+                        match = re.match(r'([0-9.]+)\s*([a-zA-Z]*)', str(weight_str).strip())
+                        if match:
+                            num_str, units = match.groups()
+                            num = float(num_str)
+                            # Convert to integer if it's a whole number
+                            if num == int(num):
+                                return f"{int(num)}{units}"
+                            else:
+                                # Remove trailing zeros from decimals
+                                return f"{num:.10f}".rstrip('0').rstrip('.') + units
+                    except:
+                        pass
+                    return str(weight_str).strip()
+                
                 # First, add all database tags (they have priority for lineage/data)
                 for db_tag in filtered_db_tags:
                     tag_name = db_tag.get('Product Name*') or db_tag.get('ProductName') or ''
@@ -9050,7 +9086,9 @@ def get_available_tags():
                         weight = str(db_tag.get('Weight*', '') or db_tag.get('CombinedWeight', '')).strip()
                         price = str(db_tag.get('Price*', '') or db_tag.get('Price', '')).strip()
                         vendor = str(db_tag.get('Vendor/Supplier*', '') or db_tag.get('Vendor', '')).strip()
-                        dedup_key = f"{tag_name}|{weight}|{price}|{vendor}".lower().strip()
+                        # Normalize weight to avoid 1.0g vs 1g duplicates
+                        weight_normalized = normalize_weight_for_dedup(weight)
+                        dedup_key = f"{tag_name}|{weight_normalized}|{price}|{vendor}".lower().strip()
                         
                         if dedup_key not in merged_product_keys:
                             merged_product_keys.add(dedup_key)

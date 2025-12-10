@@ -8193,14 +8193,38 @@ class ExcelProcessor:
                 seen_final_keys = set()
                 duplicate_count = 0
                 
+                def normalize_weight_for_dedup(weight_str):
+                    """Normalize weight strings to avoid duplicates like 1.0g vs 1g"""
+                    if not weight_str:
+                        return ''
+                    try:
+                        # Extract numeric value and units
+                        import re
+                        match = re.match(r'([0-9.]+)\s*([a-zA-Z]*)', str(weight_str).strip())
+                        if match:
+                            num_str, units = match.groups()
+                            num = float(num_str)
+                            # Convert to integer if it's a whole number
+                            if num == int(num):
+                                return f"{int(num)}{units}"
+                            else:
+                                # Remove trailing zeros from decimals
+                                return f"{num:.10f}".rstrip('0').rstrip('.') + units
+                    except:
+                        pass
+                    return str(weight_str).strip()
+                
                 for tag in tags:
                     product_name = tag.get('Product Name*', '')
                     weight = str(tag.get('Weight*', '') or tag.get('CombinedWeight', '')).strip()
                     price = str(tag.get('Price*', '') or tag.get('Price', '')).strip()
                     vendor = str(tag.get('Vendor/Supplier*', '') or tag.get('Vendor', '')).strip()
                     
+                    # Normalize weight to avoid 1.0g vs 1g duplicates
+                    weight_normalized = normalize_weight_for_dedup(weight)
+                    
                     # Create composite deduplication key
-                    dedup_key = f"{product_name}|{weight}|{price}|{vendor}".lower().strip()
+                    dedup_key = f"{product_name}|{weight_normalized}|{price}|{vendor}".lower().strip()
                     
                     if product_name and dedup_key not in seen_final_keys:
                         seen_final_keys.add(dedup_key)
@@ -8318,19 +8342,38 @@ class ExcelProcessor:
             product_name = safe_get_value(row.get(product_name_col, '')) or safe_get_value(row.get('Description', '')) or 'Unnamed Product'
             
             # Get vendor from multiple possible column names (needed for deduplication key)
+            # CRITICAL: Never fall back to Product Brand - use explicit vendor columns only
             vendor_value = (
                 safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
                 safe_get_value(row.get('Vendor', '')) or           # Alternative column name
-                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
+                safe_get_value(row.get('Vendor/Supplier', '')) or  # Fallback column name
+                'Unknown'  # Default if no vendor specified
             )
             
             # Get price value (needed for deduplication key)
             price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
             
+            # Normalize weight to prevent 1.0 vs 1 duplicates
+            def normalize_weight_for_dedup(weight_str):
+                """Normalize weight strings to avoid duplicates like 1.0 vs 1"""
+                if not weight_str:
+                    return ''
+                try:
+                    num = float(weight_str)
+                    # Convert to integer if it's a whole number
+                    if num == int(num):
+                        return str(int(num))
+                    else:
+                        # Remove trailing zeros from decimals
+                        return f"{num:.10f}".rstrip('0').rstrip('.')
+                except:
+                    return str(weight_str).strip()
+            
             # CRITICAL FIX: Create composite deduplication key based on name + weight + price + vendor
             # This allows same product with different weights/prices to appear as separate tags
             # Only true duplicates (same name + weight + price + vendor) will be removed
-            dedup_key = f"{product_name}|{raw_weight}|{price_value}|{vendor_value}".lower().strip()
+            normalized_weight = normalize_weight_for_dedup(raw_weight)
+            dedup_key = f"{product_name}|{normalized_weight}|{price_value}|{vendor_value}".lower().strip()
             
             # CRITICAL FIX: Allow JSON matched products to have duplicates
             # Check if this is a JSON matched product
@@ -8528,7 +8571,8 @@ class ExcelProcessor:
                 'productType': safe_get_value(row.get('Product Type*', '')),
                 'weight': safe_get_value(raw_weight),
                 'weightWithUnits': safe_get_value(weight_with_units),
-                'displayName': product_name
+                # CRITICAL FIX: Set displayName with vendor, not just product name
+                'displayName': f"{product_name} by {vendor_value}" if vendor_value and vendor_value != 'Unknown' else product_name
             }
             
             # GUARANTEED FIX: Set database lineage fields if we got lineage from database
