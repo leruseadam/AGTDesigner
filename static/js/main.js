@@ -932,7 +932,13 @@ const AppLoadingSplash = {
         
         if (mainContent) {
             mainContent.style.opacity = '1';
-            mainContent.style.display = 'block';
+            // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
+            if (mainContent) {
+                mainContent.style.display = 'block';
+                mainContent.style.visibility = 'visible';
+                mainContent.style.opacity = '1';
+                mainContent.classList.add('loaded');
+            }
             mainContent.classList.add('loaded');
         }
         
@@ -1139,6 +1145,15 @@ const TagManager = {
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
             
+            // CRITICAL FIX: Hide splash BEFORE rendering to prevent visual glitches
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            
             // CRITICAL FIX: Use requestAnimationFrame to ensure immediate render
             requestAnimationFrame(() => {
                 this._updateAvailableTags(cachedTags, null);
@@ -1146,20 +1161,12 @@ const TagManager = {
                 
                 // CRITICAL FIX: Always refresh lineage from database even when using cache
                 // This ensures lineage changes persist after page reload
+                // Do this in background to avoid blocking UI
                 this._refreshLineageFromDatabase(cachedTags).then(() => {
                     console.log('✅ Lineage refreshed from database after cache hydration');
                 }).catch(err => {
                     console.warn('⚠️ Failed to refresh lineage after cache hydration:', err);
                 });
-                
-                // Hide splash immediately when rendering from cache
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
             });
             return true;
         }
@@ -9198,7 +9205,13 @@ const TagManager = {
                     splash.style.display = 'none';
                     const mainContent = document.getElementById('mainContent');
                     if (mainContent) {
-                        mainContent.style.display = 'block';
+                        // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
+            if (mainContent) {
+                mainContent.style.display = 'block';
+                mainContent.style.visibility = 'visible';
+                mainContent.style.opacity = '1';
+                mainContent.classList.add('loaded');
+            }
                         mainContent.style.opacity = '1';
                     }
                     
@@ -11884,22 +11897,22 @@ const TagManager = {
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
             
             // Load tags instantly using fast_load=1 and bypass cache to get fresh data
-            // Try multiple times with increasing delays to handle backend processing
+            // Try multiple times with minimal delays for instant response
             let tagsLoaded = false;
-            const maxRetries = 5;  // Increased retries for more reliability
+            const maxRetries = 3;  // Reduced retries for faster response
 
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 let tagsTimeout = null;
                 let tagsController = null;
                 try {
-                    // PERFORMANCE: Progressive backoff for reliability
-                    // 500ms, 1000ms, 2000ms, 3000ms, 5000ms delays
-                    const delay = attempt === 0 ? 500 : attempt === 1 ? 1000 : attempt === 2 ? 2000 : attempt === 3 ? 3000 : 5000;
+                    // PERFORMANCE: Minimal delays for instant response
+                    // Try immediately, then 100ms, then 200ms
+                    const delay = attempt === 0 ? 0 : attempt === 1 ? 100 : 200;
                     if (delay > 0) {
                         await new Promise(resolve => setTimeout(resolve, delay));
-                        verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload (waiting ${delay}ms for backend processing)...`);
+                        verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload (waiting ${delay}ms)...`);
                     } else {
-                        verboseLog('🔄 Loading tags after upload (no initial delay – trying immediately)...');
+                        verboseLog('🔄 Loading tags after upload immediately...');
                     }
                     
                     tagsController = new AbortController();

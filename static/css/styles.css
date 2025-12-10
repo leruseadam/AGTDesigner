@@ -6404,6 +6404,16 @@ canvas#lava-lamp-canvas {
     font-size: 1.4em !important;
     font-weight: 700 !important;
   }
+  
+  /* Reduce vendor header font size in selected tags list */
+  #selectedTags .vendor-section > .vendor-header,
+  #selectedTags .vendor-section > .vendor-header h5,
+  #selectedTags .vendor-section > .vendor-header.d-flex,
+  #selectedTags .vendor-section > .vendor-header.mb-2,
+  #selectedTags .vendor-section > .vendor-header.cursor-pointer {
+    font-size: 1.1em !important;
+    font-weight: 700 !important;
+  }
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
@@ -9757,10 +9767,20 @@ canvas#lava-lamp-canvas {
   }
 
   /* Increase vendor title text size in tag lists */
-  .vendor-header .vendor-title,
-  #selectedTags .vendor-header .vendor-title,
-  #availableTags .vendor-header .vendor-title {
+  .vendor-header .vendor-title {
     font-size: 1.4em !important;
+    font-weight: 700 !important;
+  }
+  
+  /* Increase vendor font size in current inventory (available tags) */
+  #availableTags .vendor-header .vendor-title {
+    font-size: 1.6em !important;
+    font-weight: 700 !important;
+  }
+  
+  /* Reduce vendor font size in selected tags list */
+  #selectedTags .vendor-header .vendor-title {
+    font-size: 1.1em !important;
     font-weight: 700 !important;
   }
 

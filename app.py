@@ -3156,28 +3156,42 @@ def upload_file():
             return jsonify(response_data)
             
         else:
-            # Local development: FAST UPLOAD - save file only
-            # Let the first tag/filter request lazily load the Excel file instead of blocking the upload.
-            logging.info("[LOCAL] Fast upload mode - saving file only (lazy Excel load on first tag request)")
-            
-            # Ensure any existing in‑memory processor doesn't hold on to the old file
+            # Local development: INSTANT UPLOAD - load file immediately for instant tag access
+            logging.info("[LOCAL] Instant upload mode - loading file immediately for fast tag access")
+
+            # Clear old processor and load new file immediately
             try:
-                _excel_processor = None  # type: ignore[name-defined]
-                logging.info("✅ Cleared in‑memory Excel processor; new file will be loaded lazily")
+                _excel_processor = None
+                processor = get_excel_processor()
+                success = processor.load_file(file_path)
+
+                if success:
+                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                    logging.info(f"✅ File loaded immediately: {row_count} rows")
+
+                    # Pre-generate and cache tags for instant frontend access
+                    try:
+                        tags = processor.get_available_tags(filters=None)
+                        safe_tags = make_json_safe(tags)
+                        cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                        cache.set(cache_key, safe_tags, timeout=300)
+                        logging.info(f"✅ Cached {len(safe_tags)} tags for instant frontend access")
+                    except Exception as cache_error:
+                        logging.warning(f"⚠️ Could not pre-cache tags: {cache_error}")
+                else:
+                    logging.warning(f"⚠️ File load returned False: {file_path}")
             except Exception as load_error:
-                logging.warning(f"⚠️ Could not clear in‑memory Excel processor: {load_error}")
+                logging.warning(f"⚠️ Could not load file immediately: {load_error}")
             
-            # CRITICAL: Clear ALL caches to force complete refresh
+            # CRITICAL: Clear old caches but preserve the new file's tag cache
             try:
-                # Clear file-specific cache (uses file path in key)
-                session_file_path = session.get('file_path', '')
+                # Clear non-file-specific caches that need refresh
                 cache_keys_to_clear = [
-                    f'available_tags_{session_file_path}',
-                    'selected_tags', 
-                    'vendor_tags', 
+                    'selected_tags',
+                    'vendor_tags',
                     'initial_data'
                 ]
-                
+
                 # Also clear any old available_tags caches (from previous uploads)
                 # Try to delete with empty path (legacy cache key)
                 try:
@@ -3186,11 +3200,14 @@ def upload_file():
                     logging.info(f"✅ Cleared legacy cache: available_tags_")
                 except:
                     pass
-                
+
                 for key_base in cache_keys_to_clear:
                     cache_key = get_session_cache_key(key_base)
                     cache.delete(cache_key)
                     logging.info(f"✅ Cleared cache: {key_base}")
+
+                # NOTE: We do NOT clear f'available_tags_{file_path}' here because we just cached it above
+                logging.info(f"✅ Preserved new file tag cache: available_tags_{file_path}")
             except Exception as cache_err:
                 logging.warning(f"Failed to clear cache: {cache_err}")
             
