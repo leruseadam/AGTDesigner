@@ -722,6 +722,14 @@ canvas#lava-lamp-canvas {
 @supports (height: 100dvh) { .main-content { min-height: 100dvh; height: auto; } }
 
 /* CRITICAL FIX: Prevent visual glitches on reload */
+/* CRITICAL FIX: Hide main content when store modal is shown */
+body.modal-open #mainContent.store-selection-disabled,
+.store-selection-disabled {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 #mainContent {
     transition: opacity 0.2s ease, visibility 0.2s ease;
 }

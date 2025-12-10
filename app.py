@@ -1259,7 +1259,8 @@ def get_excel_processor():
                         session_file_path = session.get('file_path')
                         if session_file_path and os.path.exists(session_file_path):
                             logging.info(f"✅ Loading persisted file from session on processor creation: {session_file_path}")
-                            success = _excel_processor.load_file(session_file_path)
+                            # PERFORMANCE: Use fast_mode for instant loading
+                            success = _excel_processor.load_file(session_file_path, fast_mode=True)
                             if success:
                                 _excel_processor._last_loaded_file = session_file_path
                                 row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
@@ -1320,10 +1321,11 @@ def get_excel_processor():
                         else:
                             logging.info(f"📂 Reloading session file (processor has no data): {session_file_path}")
                         
-                        success = _excel_processor.load_file(session_file_path)
+                        # PERFORMANCE: Use fast_mode for instant loading on first tag request
+                        success = _excel_processor.load_file(session_file_path, fast_mode=True)
                         if success:
                             _excel_processor._last_loaded_file = session_file_path
-                            logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
+                            logging.info(f"✅ CRITICAL FIX: Successfully loaded session file with FAST MODE: {session_file_path}")
                             row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
                             logging.info(f"✅ Loaded {row_count} rows from session file")
                             
@@ -2403,7 +2405,8 @@ def get_session_excel_processor():
                     default_file = get_default_upload_file(selected_store)
                     if default_file and os.path.exists(default_file):
                         logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
-                        success = g.excel_processor.load_file(default_file)
+                        # PERFORMANCE: Use fast_mode for instant loading
+                        success = g.excel_processor.load_file(default_file, fast_mode=True)
                         if success:
                             logging.info(f"CRITICAL FIX: Successfully loaded default file")
                             # Populate dropdown cache
@@ -3080,12 +3083,26 @@ def upload_file():
                         logging.info(f"[BACKGROUND] Processing file: {file_path}")
 
                         processor = get_excel_processor()
-                        success = processor.load_file(file_path)
+                        # PERFORMANCE: Use fast_mode for instant tag availability
+                        success = processor.load_file(file_path, fast_mode=True)
 
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
-                            
+
+                            # PERFORMANCE: Pre-cache tags for instant frontend access
+                            try:
+                                tags = processor.get_available_tags(filters=None)
+                                safe_tags = make_json_safe(tags)
+                                cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                                cache.set(cache_key, safe_tags, timeout=300)
+                                logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access")
+
+                                # Update status to indicate tags are ready
+                                update_processing_status(original_filename, 'tags_ready')
+                            except Exception as cache_error:
+                                logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
+
                             # Update preroll items from newly loaded Excel data
                             if hasattr(processor, 'df') and processor.df is not None:
                                 # Pass session_id from outer scope since we're in background thread
@@ -3106,12 +3123,10 @@ def upload_file():
 
                             logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
 
-                            # CRITICAL: Clear ALL caches to force complete refresh
+                            # CRITICAL: Clear old caches but PRESERVE the new tag cache we just created
                             try:
-                                # Clear file-specific cache (uses file path in key)
-                                # Note: In background thread, we can't access session directly, use file_path from closure
+                                # Clear non-file-specific caches that need refresh
                                 cache_keys_to_clear = [
-                                    f'available_tags_{file_path}',
                                     'selected_tags',
                                     'vendor_tags',
                                     'initial_data'
@@ -3120,6 +3135,9 @@ def upload_file():
                                     cache_key = get_session_cache_key(key_base)
                                     cache.delete(cache_key)
                                     logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
+
+                                # NOTE: We do NOT clear f'available_tags_{file_path}' because we just cached it above
+                                logging.info(f"[BACKGROUND] ✅ Preserved new file tag cache: available_tags_{file_path}")
                             except Exception as cache_err:
                                 logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
@@ -3156,33 +3174,16 @@ def upload_file():
             return jsonify(response_data)
             
         else:
-            # Local development: INSTANT UPLOAD - load file immediately for instant tag access
-            logging.info("[LOCAL] Instant upload mode - loading file immediately for fast tag access")
+            # Local development: ULTRA-FAST UPLOAD - return immediately, load in background
+            logging.info("[LOCAL] Ultra-fast upload mode - saving file only (background processing)")
 
-            # Clear old processor and load new file immediately with fast mode for instant response
-            try:
-                _excel_processor = None
-                processor = get_excel_processor()
-                # Use fast_mode=True to skip expensive enrichment and get tags instantly
-                success = processor.load_file(file_path, fast_mode=True)
+            # Clear old processor immediately so it can be lazily loaded
+            _excel_processor = None
+            logging.info("✅ Cleared Excel processor - new file will be loaded on first tag request")
 
-                if success:
-                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                    logging.info(f"✅ File loaded immediately: {row_count} rows")
-
-                    # Pre-generate and cache tags for instant frontend access
-                    try:
-                        tags = processor.get_available_tags(filters=None)
-                        safe_tags = make_json_safe(tags)
-                        cache_key = get_session_cache_key(f'available_tags_{file_path}')
-                        cache.set(cache_key, safe_tags, timeout=300)
-                        logging.info(f"✅ Cached {len(safe_tags)} tags for instant frontend access")
-                    except Exception as cache_error:
-                        logging.warning(f"⚠️ Could not pre-cache tags: {cache_error}")
-                else:
-                    logging.warning(f"⚠️ File load returned False: {file_path}")
-            except Exception as load_error:
-                logging.warning(f"⚠️ Could not load file immediately: {load_error}")
+            # Mark file as ready immediately (background loading will happen on first tag request)
+            update_processing_status(file.filename, 'ready')
+            logging.info(f"✅ Marked {file.filename} as ready immediately")
             
             # CRITICAL: Clear old caches but preserve the new file's tag cache
             try:
@@ -3529,18 +3530,32 @@ def upload_file_simple_pythonanywhere():
                 processor.enable_product_db_integration(True)
                 logging.info("[UPLOAD] Product database integration enabled for new product storage")
             
-            # CRITICAL OPTIMIZATION: Check file size to choose best loading method
+            # CRITICAL OPTIMIZATION: Check file size and environment to choose best loading method
             import os
             file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
             logging.info(f"[UPLOAD] File size: {file_size_mb:.1f} MB")
+            
+            # Check if running on PythonAnywhere
+            is_pythonanywhere = IS_PYTHONANYWHERE or PYTHONANYWHERE_OPTIMIZATION
+            if is_pythonanywhere:
+                logging.info("[UPLOAD] PythonAnywhere detected - using optimized loading strategy")
             
             # OPTIMIZATION: Try multiple loading methods with optimized order
             import pandas as pd
             success = False
             
+            # CRITICAL: On PythonAnywhere, prioritize pythonanywhere_fast_load first (optimized for production)
+            if is_pythonanywhere and hasattr(processor, 'pythonanywhere_fast_load'):
+                try:
+                    success = processor.pythonanywhere_fast_load(temp_path)
+                    if success:
+                        logging.info(f"[UPLOAD] ✅ PythonAnywhere fast load complete: {len(processor.df)} rows (production optimized)")
+                except Exception as e:
+                    logging.warning(f"PythonAnywhere fast load failed: {e}")
+            
             # For large files (>10MB), prioritize minimal_load_file (fastest)
             # For smaller files, try ultra_fast_load first
-            if file_size_mb > 10:
+            if not success and file_size_mb > 10:
                 logging.info("[UPLOAD] Large file detected - using minimal_load_file for maximum speed")
                 # Method 1: Try minimal_load_file first for large files (fastest - no processing)
                 if hasattr(processor, 'minimal_load_file'):
@@ -3568,14 +3583,6 @@ def upload_file_simple_pythonanywhere():
                         logging.info(f"[UPLOAD] ✅ Used fast_load_file method: {len(processor.df)} rows (optimized)")
                 except Exception as e:
                     logging.warning(f"Fast load failed: {e}")
-            
-            # Method 3: Try PythonAnywhere fast load
-            if not success and hasattr(processor, 'pythonanywhere_fast_load'):
-                try:
-                    success = processor.pythonanywhere_fast_load(temp_path)
-                    logging.info("[UPLOAD] Used pythonanywhere_fast_load method")
-                except Exception as e:
-                    logging.warning(f"PythonAnywhere fast load failed: {e}")
             
             # Method 5: Try optimized pandas read (no row limit, optimized parameters)
             if not success:

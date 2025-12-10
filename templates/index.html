@@ -5919,11 +5919,11 @@
               }
             }
 
-            // Ensure main content remains visible but disabled behind modal
+            // CRITICAL FIX: Hide main content when modal is shown (don't show it behind modal)
             const mainContent = document.getElementById('mainContent');
             if (mainContent) {
-              mainContent.style.display = 'block';
-              mainContent.style.visibility = 'visible';
+              mainContent.style.display = 'none';
+              mainContent.style.visibility = 'hidden';
               mainContent.style.pointerEvents = 'none';
               mainContent.classList.add('store-selection-disabled');
             }
