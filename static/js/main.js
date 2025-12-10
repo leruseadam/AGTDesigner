@@ -8470,17 +8470,50 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
         
-        // Show application splash screen
-        AppLoadingSplash.show();
-        AppLoadingSplash.startAutoAdvance();
+        // CRITICAL FIX: Only show splash screen if store is not already confirmed
+        // Check multiple indicators to determine if store is already confirmed
+        const mainContent = document.getElementById('mainContent');
+        const storeAlreadyConfirmed = 
+            sessionStorage.getItem('store_just_selected') === 'true' || 
+            (window.STORE_MODAL_BLOCKING === false && mainContent?.classList.contains('store-selected')) ||
+            (mainContent && mainContent.style.display !== 'none' && !mainContent.classList.contains('store-selection-disabled'));
+        
+        if (!storeAlreadyConfirmed) {
+            // Show application splash screen only if store not confirmed yet
+            console.log('⏳ Store not confirmed - showing splash screen');
+            AppLoadingSplash.show();
+            AppLoadingSplash.startAutoAdvance();
+            AppLoadingSplash.nextStep(); // Templates loaded
+        } else {
+            // Store already confirmed - ensure splash is hidden immediately
+            console.log('✅ Store already confirmed - hiding splash screen');
+            if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
+                AppLoadingSplash.hide();
+            }
+            // Also ensure main content is visible
+            if (mainContent) {
+                mainContent.style.display = 'block';
+                mainContent.style.visibility = 'visible';
+                mainContent.style.opacity = '1';
+            }
+        }
         
         // Initialize empty state first
         this.clearInitialDataRetry();
         this.initializeEmptyState();
-        AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
         this.checkForExistingData();
+        
+        // CRITICAL FIX: Ensure splash is hidden after initialization completes
+        // Add fallback timeout to hide splash even if checkForExistingData doesn't complete
+        setTimeout(() => {
+            if (window.AppLoadingSplash && AppLoadingSplash.isVisible) {
+                console.log('⚠️ Force hiding splash screen after initialization timeout');
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+        }, 2000); // 2 second fallback timeout
         
         // GUARANTEED FIX: Restore filters from localStorage on page load
         const savedFilters = this.loadFiltersFromStorage();

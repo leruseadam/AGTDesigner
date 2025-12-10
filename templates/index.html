@@ -699,15 +699,29 @@
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
             if (typeof onStoreConfirmed === 'function') {
               console.log('🔄 Store confirmed, calling initialization callback...');
+              // CRITICAL FIX: Clear the store_just_selected flag after a delay to prevent re-showing splash
+              setTimeout(() => {
+                sessionStorage.removeItem('store_just_selected');
+                console.log('✅ Cleared store_just_selected flag');
+              }, 1000);
+              
               setTimeout(() => {
                 try {
                   onStoreConfirmed();
                 } catch (initError) {
                   console.error('❌ Error in onStoreConfirmed callback:', initError);
+                  // CRITICAL FIX: Hide splash even if initialization fails
+                  if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
+                    AppLoadingSplash.hide();
+                  }
                 }
               }, 100);
             } else {
               console.warn('⚠️ No onStoreConfirmed callback provided - TagManager may not initialize');
+              // CRITICAL FIX: Hide splash even if no callback
+              if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
+                AppLoadingSplash.hide();
+              }
             }
           } else {
             // NO STORE - Show modal
