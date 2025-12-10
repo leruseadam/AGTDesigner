@@ -8137,8 +8137,9 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // PERFORMANCE FIX: Increased timeout to 15s to reduce timeouts and restarts
-                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    // CRITICAL: Increased timeout to 180 seconds (3 minutes) for large files
+                    // Tags can take time to load, especially after upload with large Excel files
+                    const timeoutId = setTimeout(() => controller.abort(), 180000);
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads

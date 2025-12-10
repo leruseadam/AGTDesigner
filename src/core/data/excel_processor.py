@@ -8245,67 +8245,72 @@ class ExcelProcessor:
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
         
-        # GUARANTEED FIX: Query database for ALL product lineages BEFORE building tags
-        # This ensures database lineage is ALWAYS used, never Excel file lineage
+        # CRITICAL: Skip database queries when _skip_enrichment is set (for fast loading)
+        # Database queries are expensive and slow down tag loading significantly
         db_lineage_map = {}
         db_strain_map = {}
-        try:
-            import sys
-            if 'app' in sys.modules:
-                app_module = sys.modules['app']
-                if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
-                    store_name = app_module.get_current_store_name()
-                    product_db = app_module.get_product_database(store_name) if store_name else None
-                    if product_db and filtered_df is not None and not filtered_df.empty:
-                        # Get all product names from filtered DataFrame
-                        product_name_col = 'Product Name*' if 'Product Name*' in filtered_df.columns else 'ProductName'
-                        if product_name_col in filtered_df.columns:
-                            product_names = filtered_df[product_name_col].dropna().unique().tolist()
-                            if product_names:
-                                logger.info(f"🔍 GUARANTEED FIX: QUERYING DATABASE for {len(product_names)} products before building tags...")
-                                # GUARANTEED FIX: Ensure database is initialized before querying
-                                try:
-                                    product_db.init_database()
-                                except Exception as init_err:
-                                    logger.warning(f"Could not initialize database before query: {init_err}")
-                                # Query database for all lineages at once
-                                db_records = product_db.get_products_by_names(product_names)
-                                logger.info(f"🔍 GUARANTEED FIX: DATABASE RESPONSE: Got {len(db_records)} records from database")
-                                
-                                for db_record in db_records:
-                                    product_name = db_record.get('Product Name*', '')
-                                    if product_name:
-                                        # Get lineage from database (prioritize currentLineage/canonical_lineage)
-                                        db_lineage = (
-                                            db_record.get('currentLineage') or
-                                            db_record.get('canonical_lineage') or
-                                            db_record.get('Lineage')
-                                        )
-                                        if db_lineage:
-                                            db_lineage_clean = str(db_lineage).strip().upper()
-                                            db_lineage_map[product_name] = db_lineage_clean
-                                            logger.debug(f"✅ DB LINEAGE: '{product_name}' = '{db_lineage_clean}'")
-                                        
-                                        # Also store by normalized name for better matching
-                                        try:
-                                            normalized_name = product_db._normalize_product_name(product_name)
-                                            if normalized_name and normalized_name not in db_lineage_map:
-                                                db_lineage_map[normalized_name] = db_lineage_clean if db_lineage else None
-                                        except Exception as norm_err:
-                                            logger.debug(f"Could not normalize '{product_name}': {norm_err}")
-                                
-                                logger.info(f"✅ QUERIED DATABASE: Found lineage for {len([k for k in db_lineage_map.keys() if db_lineage_map[k]])} products from database")
+        if not getattr(self, '_skip_enrichment', False):
+            # GUARANTEED FIX: Query database for ALL product lineages BEFORE building tags
+            # This ensures database lineage is ALWAYS used, never Excel file lineage
+            try:
+                import sys
+                if 'app' in sys.modules:
+                    app_module = sys.modules['app']
+                    if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                        store_name = app_module.get_current_store_name()
+                        product_db = app_module.get_product_database(store_name) if store_name else None
+                        if product_db and filtered_df is not None and not filtered_df.empty:
+                            # Get all product names from filtered DataFrame
+                            product_name_col = 'Product Name*' if 'Product Name*' in filtered_df.columns else 'ProductName'
+                            if product_name_col in filtered_df.columns:
+                                product_names = filtered_df[product_name_col].dropna().unique().tolist()
+                                if product_names:
+                                    logger.info(f"🔍 GUARANTEED FIX: QUERYING DATABASE for {len(product_names)} products before building tags...")
+                                    # GUARANTEED FIX: Ensure database is initialized before querying
+                                    try:
+                                        product_db.init_database()
+                                    except Exception as init_err:
+                                        logger.warning(f"Could not initialize database before query: {init_err}")
+                                    # Query database for all lineages at once
+                                    db_records = product_db.get_products_by_names(product_names)
+                                    logger.info(f"🔍 GUARANTEED FIX: DATABASE RESPONSE: Got {len(db_records)} records from database")
+                                    
+                                    for db_record in db_records:
+                                        product_name = db_record.get('Product Name*', '')
+                                        if product_name:
+                                            # Get lineage from database (prioritize currentLineage/canonical_lineage)
+                                            db_lineage = (
+                                                db_record.get('currentLineage') or
+                                                db_record.get('canonical_lineage') or
+                                                db_record.get('Lineage')
+                                            )
+                                            if db_lineage:
+                                                db_lineage_clean = str(db_lineage).strip().upper()
+                                                db_lineage_map[product_name] = db_lineage_clean
+                                                logger.debug(f"✅ DB LINEAGE: '{product_name}' = '{db_lineage_clean}'")
+                                            
+                                            # Also store by normalized name for better matching
+                                            try:
+                                                normalized_name = product_db._normalize_product_name(product_name)
+                                                if normalized_name and normalized_name not in db_lineage_map:
+                                                    db_lineage_map[normalized_name] = db_lineage_clean if db_lineage else None
+                                            except Exception as norm_err:
+                                                logger.debug(f"Could not normalize '{product_name}': {norm_err}")
+                                    
+                                    logger.info(f"✅ QUERIED DATABASE: Found lineage for {len([k for k in db_lineage_map.keys() if db_lineage_map[k]])} products from database")
+                                else:
+                                    logger.warning("⚠️ No product names found in filtered DataFrame")
                             else:
-                                logger.warning("⚠️ No product names found in filtered DataFrame")
+                                logger.warning(f"⚠️ Product name column '{product_name_col}' not found in DataFrame")
                         else:
-                            logger.warning(f"⚠️ Product name column '{product_name_col}' not found in DataFrame")
-                    else:
-                        logger.warning(f"⚠️ Cannot query database: product_db={product_db is not None}, filtered_df_empty={filtered_df is None or filtered_df.empty}")
-        except Exception as db_query_err:
-            logger.error(f"❌ ERROR querying database for lineages: {db_query_err}")
-            import traceback
-            logger.error(traceback.format_exc())
-            # Continue - will use Excel lineage as fallback, but enrichment will fix it later
+                            logger.warning(f"⚠️ Cannot query database: product_db={product_db is not None}, filtered_df_empty={filtered_df is None or filtered_df.empty}")
+            except Exception as db_query_err:
+                logger.error(f"❌ ERROR querying database for lineages: {db_query_err}")
+                import traceback
+                logger.error(traceback.format_exc())
+                # Continue - will use Excel lineage as fallback, but enrichment will fix it later
+        else:
+            logger.info("⚡ Fast load: Skipping database batch query for lineages (enrichment disabled)")
         
         tags = []
         seen_product_keys = set()  # Track seen product keys (name + weight + price + vendor) to prevent true duplicates
@@ -8464,24 +8469,27 @@ class ExcelProcessor:
             # Get price value - use the actual column name from Excel file
             price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
             
-            # CRITICAL FIX: ALWAYS use get_product_lineage() for EXACT same method as output generation
-            # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+            # CRITICAL FIX: Skip database queries when _skip_enrichment is set (for fast loading)
+            # This dramatically speeds up tag loading - database queries are expensive
             db_lineage = None
-            try:
-                import sys
-                if 'app' in sys.modules:
-                    app_module = sys.modules['app']
-                    if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
-                        store_name = app_module.get_current_store_name()
-                        product_db = app_module.get_product_database(store_name) if store_name else None
-                        if product_db:
-                            # CRITICAL: Use get_product_lineage() - same method as output generation
-                            db_lineage_from_method = product_db.get_product_lineage(product_name)
-                            if db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
-                                db_lineage = str(db_lineage_from_method).strip().upper()
-                                logger.debug(f"✅ GUARANTEED FIX (get_product_lineage): '{product_name}' = '{db_lineage}'")
-            except Exception as lineage_method_err:
-                logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_err}")
+            if not getattr(self, '_skip_enrichment', False):
+                try:
+                    import sys
+                    if 'app' in sys.modules:
+                        app_module = sys.modules['app']
+                        if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                            store_name = app_module.get_current_store_name()
+                            product_db = app_module.get_product_database(store_name) if store_name else None
+                            if product_db:
+                                # CRITICAL: Use get_product_lineage() - same method as output generation
+                                db_lineage_from_method = product_db.get_product_lineage(product_name)
+                                if db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
+                                    db_lineage = str(db_lineage_from_method).strip().upper()
+                                    logger.debug(f"✅ GUARANTEED FIX (get_product_lineage): '{product_name}' = '{db_lineage}'")
+                except Exception as lineage_method_err:
+                    logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_err}")
+            else:
+                logger.debug(f"⚡ Fast load: Skipping get_product_lineage() for '{product_name}' (enrichment disabled)")
             
             # Fallback to batch query map if get_product_lineage didn't find it
             if not db_lineage and db_lineage_map:

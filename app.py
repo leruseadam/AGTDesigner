@@ -8337,17 +8337,26 @@ def get_available_tags():
             except Exception as cache_clear_err:
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
-        # ULTRA-FAST PATH: If this is the first fast_load request after upload and
-        # we don't have cached tags yet, return Excel-only tags without doing any
-        # database lineage alignment. This gets something on screen as quickly as
-        # possible; slower DB alignment can happen on later non-fast loads.
-        if (fast_load and not prefer_db and not force_full_refresh and not cached_tags):
+        # ULTRA-FAST PATH: If this is a fast_load request, return Excel-only tags immediately
+        # This gets something on screen as quickly as possible; slower DB alignment can happen later
+        if fast_load and not prefer_db and not force_full_refresh:
             try:
                 excel_processor = get_session_excel_processor()
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-                    logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for initial fast_load request (no DB lineage alignment).")
-                    excel_tags = excel_processor.get_available_tags()
+                    logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for fast_load request (no DB lineage alignment).")
+                    
+                    # CRITICAL: Skip enrichment for maximum speed
+                    if hasattr(excel_processor, '_skip_enrichment'):
+                        excel_processor._skip_enrichment = True
+                    
+                    excel_tags = excel_processor.get_available_tags(filters=None)
+                    
+                    # Reset enrichment flag
+                    if hasattr(excel_processor, '_skip_enrichment'):
+                        excel_processor._skip_enrichment = False
+                    
                     safe_all_tags = make_json_safe(excel_tags)
+                    
                     # Cache for this session/file so subsequent requests are instant
                     try:
                         if 'cache_key' not in locals():
@@ -8867,9 +8876,14 @@ def get_available_tags():
                     if fast_load:
                         # Fast load: skip enrichment to speed up tag loading
                         excel_processor._skip_enrichment = True
-                    excel_tags = excel_processor.get_available_tags()
+                        logging.info("⚡ Fast load: Skipping database enrichment for instant tag display")
+                    
+                    # CRITICAL: Get tags without filters for fastest loading
+                    excel_tags = excel_processor.get_available_tags(filters=None)
+                    
                     if fast_load:
                         excel_processor._skip_enrichment = False  # Reset flag
+                        logging.info(f"⚡ Fast load: Returned {len(excel_tags)} tags without database enrichment")
                     
                     tags_elapsed = (time.time() - tags_start_time) * 1000
                     logging.info(f"✅ Excel processor returned {len(excel_tags)} tags in {tags_elapsed:.0f}ms")
