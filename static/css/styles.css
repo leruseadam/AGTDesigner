@@ -721,6 +721,26 @@ canvas#lava-lamp-canvas {
 .main-content { min-height: 100vh; }
 @supports (height: 100dvh) { .main-content { min-height: 100dvh; height: auto; } }
 
+/* CRITICAL FIX: Prevent visual glitches on reload */
+#mainContent {
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+#mainContent.loaded {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+#appLoadingSplash {
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+#appLoadingSplash.fade-out {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
 /* Short-viewport optimizations (e.g., when console is open) */
 @media (max-height: 700px) {
   :root {
@@ -9766,19 +9786,23 @@ canvas#lava-lamp-canvas {
     line-height: 1.2 !important;
   }
 
+  /* OVERRIDE: Increase vendor title in current inventory - Must come immediately after wildcard */
+  #availableTags .vendor-section > .vendor-header > .vendor-title,
+  #availableTags .vendor-section > .vendor-header span.vendor-title,
+  #availableTags .vendor-section .vendor-header .vendor-title.flex-grow-1 {
+    font-size: 2em !important;
+    font-weight: 700 !important;
+    line-height: 1.3 !important;
+  }
+
   /* Increase vendor title text size in tag lists */
   .vendor-header .vendor-title {
     font-size: 1.4em !important;
     font-weight: 700 !important;
   }
   
-  /* Increase vendor font size in current inventory (available tags) */
-  #availableTags .vendor-header .vendor-title {
-    font-size: 1.6em !important;
-    font-weight: 700 !important;
-  }
-  
   /* Reduce vendor font size in selected tags list */
+  #selectedTags .vendor-section > .vendor-header .vendor-title,
   #selectedTags .vendor-header .vendor-title {
     font-size: 1.1em !important;
     font-weight: 700 !important;

@@ -1763,13 +1763,17 @@ class ExcelProcessor:
                 import gc
                 gc.collect()
             
-            # Minimal Excel reading - just get the data (no row limit for full file loading)
+            # CRITICAL: Optimized Excel reading for large files - maximum speed
+            # Use all performance optimizations for fastest possible loading
             df = pd.read_excel(
                 file_path, 
                 engine='openpyxl',
-                na_filter=False,
-                keep_default_na=False
-                # Removed nrows limit to allow full file loading
+                dtype=str,  # Read as strings (skips type inference - major speedup)
+                na_filter=False,  # Don't filter NA values (major speedup)
+                keep_default_na=False,  # Don't use default NA values
+                converters=None,  # No converters (faster)
+                header=0  # First row is header
+                # No nrows limit - read entire file for large files
             )
             
             if df is None or df.empty:
@@ -1839,18 +1843,25 @@ class ExcelProcessor:
             self.logger.error(f"Minimal load failed: {e}")
             return False
 
-    def load_file(self, file_path: str) -> bool:
-        """Load Excel file and prepare data exactly like MAIN.py. STANDARDIZED for both local and PythonAnywhere."""
+    def load_file(self, file_path: str, fast_mode: bool = False) -> bool:
+        """Load Excel file and prepare data exactly like MAIN.py. STANDARDIZED for both local and PythonAnywhere.
+
+        Args:
+            file_path: Path to the Excel file to load
+            fast_mode: If True, skip expensive enrichment operations for faster loading (default: False)
+        """
         try:
             # Check if we've already loaded this exact file
-            if (self._last_loaded_file == file_path and 
-                self.df is not None and 
+            if (self._last_loaded_file == file_path and
+                self.df is not None and
                 not self.df.empty):
                 self.logger.debug(f"File {file_path} already loaded, skipping reload")
                 return True
             
             self.logger.debug(f"Loading file: {file_path}")
-            
+            if fast_mode:
+                self.logger.info("⚡ FAST MODE: Skipping expensive enrichment operations for instant loading")
+
             # Validate file exists and is accessible
             import os
             if not os.path.exists(file_path):
@@ -2094,7 +2105,7 @@ class ExcelProcessor:
             # 7) Standardize Lineage
             # Reset index before lineage processing to prevent duplicate labels
             self.df.reset_index(drop=True, inplace=True)
-            if "Lineage" in self.df.columns:
+            if "Lineage" in self.df.columns and not fast_mode:
                 self.logger.info("Starting lineage standardization process...")
                 # First, standardize existing values
                 self.df["Lineage"] = (
@@ -2199,7 +2210,8 @@ class ExcelProcessor:
                             self.df.loc[non_cbd_non_edible_empty, "Lineage"] = "MIXED"
 
             # 8) Build Description & Ratio & Strain
-            if "ProductName" in self.df.columns:
+            # PERFORMANCE: Skip expensive description/ratio building in fast mode
+            if "ProductName" in self.df.columns and not fast_mode:
                 self.logger.debug("Building Description and Ratio columns")
 
                 def get_description(name):
@@ -2683,6 +2695,16 @@ class ExcelProcessor:
             if "Product Strain" in self.df.columns:
                 self.df["Product Strain"] = self.df["Product Strain"].astype("category")
 
+            elif fast_mode and "ProductName" in self.df.columns:
+                # FAST MODE: Create minimal Description and complexity columns for compatibility
+                self.logger.info("⚡ FAST MODE: Creating minimal Description and complexity columns")
+                self.df["Description"] = self.df["ProductName"].astype(str).str.strip()
+                self.df["Description_Complexity"] = 1  # Simple default value
+                if "Ratio" not in self.df.columns:
+                    self.df["Ratio"] = ""
+                if "Ratio_or_THC_CBD" not in self.df.columns:
+                    self.df["Ratio_or_THC_CBD"] = ""
+
             # 9) Convert key fields to categorical
             for col in ["Product Type*", "Lineage", "Product Brand", "Vendor"]:
                 if col in self.df.columns:
@@ -2982,8 +3004,8 @@ class ExcelProcessor:
                 cols = unique_cols
                 cols.remove("JointRatio")
                 cols.insert(ratio_col_idx + 1, "JointRatio")
-                # Ensure Description_Complexity is preserved
-                if "Description_Complexity" not in cols:
+                # Ensure Description_Complexity is preserved (if it exists in the DataFrame)
+                if "Description_Complexity" not in cols and "Description_Complexity" in self.df.columns:
                     cols.append("Description_Complexity")
                 self.df = self.df[cols]
 
@@ -8657,14 +8679,17 @@ class ExcelProcessor:
                 import gc
                 gc.collect()
             
-            # Read with minimal settings for maximum speed
+            # CRITICAL: Remove nrows limit for large files - read entire file
+            # Use optimized pandas parameters for maximum speed
             df = pd.read_excel(
                 file_path,
                 engine='openpyxl',
-                nrows=50000,  # High row limit
-                dtype=str,   # Read as strings for speed
-                na_filter=False,  # Don't filter NA values
-                keep_default_na=False  # Don't use default NA values
+                # No nrows limit - read entire file for large files
+                dtype=str,   # Read as strings for speed (skips type inference)
+                na_filter=False,  # Don't filter NA values (major speedup)
+                keep_default_na=False,  # Don't use default NA values
+                converters=None,  # No converters (faster)
+                header=0  # First row is header
             )
             
             if df is None or df.empty:

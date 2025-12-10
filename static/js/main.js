@@ -9206,13 +9206,10 @@ const TagManager = {
                     const mainContent = document.getElementById('mainContent');
                     if (mainContent) {
                         // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
-            if (mainContent) {
-                mainContent.style.display = 'block';
-                mainContent.style.visibility = 'visible';
-                mainContent.style.opacity = '1';
-                mainContent.classList.add('loaded');
-            }
+                        mainContent.style.display = 'block';
+                        mainContent.style.visibility = 'visible';
                         mainContent.style.opacity = '1';
+                        mainContent.classList.add('loaded');
                     }
                     
                     // Force initialize TagManager if still not initialized

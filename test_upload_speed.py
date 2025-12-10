@@ -22,16 +22,16 @@ def test_excel_load_speed():
     print(f"📦 File size: {os.path.getsize(test_file) / (1024*1024):.2f} MB")
     print()
 
-    # Test 1: Load Excel file
+    # Test 1: Load Excel file with FAST MODE
     print("=" * 60)
-    print("TEST 1: Load Excel file with ExcelProcessor")
+    print("TEST 1: Load Excel file with ExcelProcessor (FAST MODE)")
     print("=" * 60)
 
     start = time.time()
     try:
         from src.core.data.excel_processor import ExcelProcessor
         processor = ExcelProcessor()
-        success = processor.load_file(test_file)
+        success = processor.load_file(test_file, fast_mode=True)
         load_time = time.time() - start
 
         if success:
