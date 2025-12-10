@@ -8414,7 +8414,10 @@ def get_available_tags():
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
         if fast_load and not prefer_db and not force_full_refresh:
             try:
-                excel_processor = get_session_excel_processor()
+                # Check if processor is already loaded (don't trigger slow synchronous load)
+                from src.core.data.excel_processor import _excel_processor
+                excel_processor = _excel_processor if _excel_processor is not None else None
+
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                     logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for fast_load request (no DB lineage alignment).")
                     
@@ -8458,6 +8461,28 @@ def get_available_tags():
                     return resp
             except Exception as ultra_err:
                 logging.warning(f"Ultra-fast Excel-only tag path failed, falling back to full flow: {ultra_err}")
+
+        # CRITICAL: If fast_load is requested but file isn't loaded yet, return "processing" status
+        # This prevents the UI from freezing while waiting for slow file load
+        if fast_load and not cached_tags:
+            # Check if there's a file being processed
+            session_file_path = session.get('file_path', '')
+            if session_file_path:
+                # Check processing status
+                import os
+                filename = os.path.basename(session_file_path)
+                status = processing_status.get(filename, None)
+
+                # If file was just uploaded and is still processing, return processing status
+                if status in ('processing', 'ready', 'tags_ready'):
+                    logging.info(f"⏳ File still processing (status: {status}), returning processing response")
+                    return jsonify({
+                        'tags': [],
+                        'total_count': 0,
+                        'processing': True,
+                        'status': status,
+                        'message': 'File is being processed. Please wait...'
+                    }), 202  # 202 Accepted
 
         # PERFORMANCE: Even when nocache=1, allow fast_load requests to reuse
         # per-file cached tags. The cache key already includes the uploaded file

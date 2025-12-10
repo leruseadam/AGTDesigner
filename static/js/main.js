@@ -3771,6 +3771,31 @@ const TagManager = {
             // Organize tags by vendor, brand, product type, weight (SAME HIERARCHY AS SELECTED TAGS)
             // This ensures JSON matched tags and all tags use: Vendor > Brand > Product Type > Weight
             verboseLog('About to organize tags, tags length:', tags.length);
+            
+            // CRITICAL FIX: For large datasets, organize asynchronously to prevent UI freeze
+            const LARGE_DATASET_THRESHOLD = 500;
+            if (tags.length > LARGE_DATASET_THRESHOLD) {
+                verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
+                // Show loading indicator while organizing
+                availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
+                
+                // Organize in next event loop tick to prevent blocking
+                setTimeout(() => {
+                    try {
+                        organizedTags = this.organizeBrandCategories(tags);
+                        verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
+                        verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
+                        // Continue with normal rendering flow
+                        this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
+                    } catch (error) {
+                        console.error('Error organizing tags:', error);
+                        availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
+                    }
+                }, 0);
+                return; // Exit early, rendering will continue in callback
+            }
+            
+            // Small dataset - organize synchronously (fast enough)
             try {
                 organizedTags = this.organizeBrandCategories(tags);
                 verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
@@ -3829,10 +3854,76 @@ const TagManager = {
             return;
         }
         
+        // CRITICAL FIX: Render organized tags in chunks to prevent UI freeze
+        this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
+    },
+    
+    _renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags) {
         const sortedVendors = Array.from(organizedTags.entries())
             .sort(([a], [b]) => (a || '').localeCompare(b || ''));
 
-        sortedVendors.forEach(([vendor, brandGroups]) => {
+        // CRITICAL FIX: Render vendors in chunks to prevent UI freeze for large datasets
+        const VENDOR_BATCH_SIZE = 5; // Process 5 vendors at a time
+        let vendorIndex = 0;
+        
+        const renderVendorBatch = () => {
+            const endIndex = Math.min(vendorIndex + VENDOR_BATCH_SIZE, sortedVendors.length);
+            
+            for (let i = vendorIndex; i < endIndex; i++) {
+                const [vendor, brandGroups] = sortedVendors[i];
+                this._renderVendorSection(vendor, brandGroups, tagList);
+            }
+            
+            vendorIndex = endIndex;
+            
+            // Continue rendering if there are more vendors
+            if (vendorIndex < sortedVendors.length) {
+                // Use requestIdleCallback if available for better performance, otherwise setTimeout
+                if (window.requestIdleCallback) {
+                    requestIdleCallback(renderVendorBatch, { timeout: 50 });
+                } else {
+                    setTimeout(renderVendorBatch, 0);
+                }
+            } else {
+                // All vendors rendered - finalize
+                requestAnimationFrame(() => {
+                    availableTagsContainer.innerHTML = '';
+                    availableTagsContainer.appendChild(tagList);
+                    
+                    // CRITICAL FIX: Restore checkbox states after re-render
+                    if (savedPersistentTags.length > 0 && (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0)) {
+                        console.log(`🔄 Restoring ${savedPersistentTags.length} persistent selected tags`);
+                        this.state.persistentSelectedTags = [...savedPersistentTags];
+                        this.state.selectedTags = new Set(savedPersistentTags);
+                    }
+                    this._restoreCheckboxStates();
+                    
+                    // Update selected tags display
+                    if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+                        setTimeout(() => {
+                            const selectedTagObjects = this.getSelectedTagObjects();
+                            if (selectedTagObjects.length > 0) {
+                                this.updateSelectedTags(selectedTagObjects);
+                            }
+                        }, 100);
+                    }
+                    
+                    // Restore scroll and initialize
+                    this._restoreAvailableScrollPosition(savedScroll);
+                    this.updateSelectAllCheckboxes();
+                    this.initializeSelectAllCheckbox();
+                    
+                    // Hide loading splash
+                    this._waitForTagsToAppear();
+                });
+            }
+        };
+        
+        // Start rendering vendors
+        renderVendorBatch();
+    },
+    
+    _renderVendorSection(vendor, brandGroups, tagList) {
             const vendorSection = document.createElement('div');
             vendorSection.className = 'vendor-section mb-3';
             
@@ -4367,11 +4458,7 @@ const TagManager = {
                     });
                 });
             });
-        });
-
-        // Replace container content with built tags (this replaces any loading indicator)
-        availableTagsContainer.innerHTML = '';
-        availableTagsContainer.appendChild(tagList);
+    },
 
         // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
         // Use requestAnimationFrame to ensure DOM is fully updated before restoring
@@ -8447,6 +8534,20 @@ const TagManager = {
             this.updateTagCount('available', tags.length);
             this.updateTagCount('selected', this.state.persistentSelectedTags.length);
             
+            // CRITICAL FIX: Ensure filter row container is visible after tags are loaded
+            const filterRow = document.querySelector('.filter-row');
+            if (filterRow) {
+                filterRow.style.display = 'flex';
+                filterRow.style.visibility = 'visible';
+                verboseLog('✅ Filter row container made visible after tag update');
+            }
+            
+            // CRITICAL FIX: Ensure filters are rendered after tags are updated
+            if (this.renderActiveFilters) {
+                this.renderActiveFilters();
+                verboseLog('✅ Filters rendered after tag update');
+            }
+            
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
             // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
@@ -11845,7 +11946,15 @@ const TagManager = {
             // PERFORMANCE FIX: Load tags instantly instead of reloading page
             // Show loading splash for tag loading
             this.showActionSplash('Loading tags from uploaded file...');
-            
+
+            // Safety timeout: Auto-hide splash after 30s in case something goes wrong
+            const splashTimeout = setTimeout(() => {
+                verboseLog('⚠️ Safety timeout: Force hiding action splash after 30s');
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+            }, 30000);
+
             // Show loading indicator in Current Inventory
             const availableTagsContainer = document.getElementById('availableTags');
             if (availableTagsContainer) {
@@ -11942,6 +12051,20 @@ const TagManager = {
                                 const extractedFilters = this._extractFiltersFromTags(tagsData.tags);
                                 this.updateFilters(extractedFilters);
                                 verboseLog('✅ Filters extracted from tags immediately:', extractedFilters);
+                                
+                                // CRITICAL FIX: Ensure filter row container is visible
+                                const filterRow = document.querySelector('.filter-row');
+                                if (filterRow) {
+                                    filterRow.style.display = 'flex';
+                                    filterRow.style.visibility = 'visible';
+                                    verboseLog('✅ Filter row container made visible');
+                                }
+                                
+                                // CRITICAL FIX: Ensure filters are rendered after upload
+                                if (this.renderActiveFilters) {
+                                    this.renderActiveFilters();
+                                    verboseLog('✅ Filters rendered after upload');
+                                }
                             }
 
                             // Load filters and selected tags in parallel (non-blocking) to refresh with full options
@@ -11950,10 +12073,35 @@ const TagManager = {
                                 this.fetchAndUpdateSelectedTags()
                             ]).then(() => {
                                 verboseLog('✅ Filters and selected tags refreshed');
+                                
+                                // CRITICAL FIX: Ensure filters are rendered after they're populated
+                                if (this.renderActiveFilters) {
+                                    this.renderActiveFilters();
+                                    verboseLog('✅ Filters rendered after population');
+                                }
                             }).catch(err => {
                                 console.warn('Filter/selected tag loading failed (non-critical):', err);
+                                
+                                // CRITICAL FIX: Ensure filter row container is visible even on error
+                                const filterRow = document.querySelector('.filter-row');
+                                if (filterRow) {
+                                    filterRow.style.display = 'flex';
+                                    filterRow.style.visibility = 'visible';
+                                    verboseLog('✅ Filter row container made visible after error');
+                                }
+                                
+                                // CRITICAL FIX: Still render filters even if population failed
+                                if (this.renderActiveFilters) {
+                                    this.renderActiveFilters();
+                                    verboseLog('✅ Filters rendered after population error');
+                                }
                             });
                             
+                            // Clear safety timeout since we're about to hide splash
+                            if (splashTimeout) {
+                                clearTimeout(splashTimeout);
+                            }
+
                             // Wait for tags to appear, then hide splash
                             if (this._waitForTagsToAppear) {
                                 this._waitForTagsToAppear();
@@ -11963,7 +12111,7 @@ const TagManager = {
                                     this.hideActionSplash();
                                 }, 500);
                             }
-                            
+
                             tagsLoaded = true;
                             return; // Success - tags loaded instantly!
                         }
@@ -11988,6 +12136,17 @@ const TagManager = {
                     if (attempt === maxRetries - 1) {
                         // Last attempt failed - try using the standard tag loading method instead of reloading
                         console.warn('⚠️ Failed to load tags after all retries, trying standard method:', tagsError);
+
+                        // Clear safety timeout
+                        if (splashTimeout) {
+                            clearTimeout(splashTimeout);
+                        }
+
+                        // CRITICAL: Hide splash before trying fallback
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+
                         // CRITICAL FIX: Reset fetching flag to allow fallback to proceed
                         this._fetchingAvailableTags = false;
                         // Use the existing fetchAndUpdateAvailableTags which has better error handling
@@ -11996,11 +12155,19 @@ const TagManager = {
                             await this.fetchAndUpdateAvailableTags();
                             tagsLoaded = true;
                             verboseLog('✅ Tags loaded using standard method');
+                            
+                            // CRITICAL FIX: Ensure filters are rendered after fallback tag loading
+                            if (this.renderActiveFilters) {
+                                this.renderActiveFilters();
+                                verboseLog('✅ Filters rendered after fallback tag loading');
+                            }
                         } catch (fallbackError) {
                             console.error('⚠️ Standard tag loading also failed:', fallbackError);
-                            // Only reload as absolute last resort, and show user-friendly message first
-                            this.updateUploadUI('Tags are loading slowly. The page will refresh in a moment...', 'warning');
-                            safeReload(3000); // Give user time to see the message
+                            // Show error without reloading - let user manually retry
+                            this.updateUploadUI('Could not load tags automatically. Please refresh the page to try again.', 'error');
+                            if (typeof showToast === 'function') {
+                                showToast('error', 'Tag loading failed. Please refresh the page manually.');
+                            }
                         }
                         return;
                     }
@@ -12012,6 +12179,17 @@ const TagManager = {
             // If we get here, tags didn't load after all retries - try standard method instead of reloading
             if (!tagsLoaded) {
                 console.warn('⚠️ Tags not loaded after retries, trying standard method...');
+
+                // Clear safety timeout
+                if (splashTimeout) {
+                    clearTimeout(splashTimeout);
+                }
+
+                // CRITICAL: Hide splash before trying fallback
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+
                 // CRITICAL FIX: Reset fetching flag to allow fallback to proceed
                 this._fetchingAvailableTags = false;
                 try {
@@ -12020,9 +12198,11 @@ const TagManager = {
                     verboseLog('✅ Tags loaded using standard method');
                 } catch (fallbackError) {
                     console.error('⚠️ Standard tag loading failed:', fallbackError);
-                    // Only reload as absolute last resort
-                    this.updateUploadUI('Tags are loading slowly. The page will refresh in a moment...', 'warning');
-                    safeReload(3000); // Give user time to see the message
+                    // Show error without reloading - let user decide to manually refresh
+                    this.updateUploadUI('Could not load tags. Please refresh the page to try again.', 'error');
+                    if (typeof showToast === 'function') {
+                        showToast('error', 'Tag loading failed. Please refresh the page manually.');
+                    }
                 }
             }
             
@@ -12030,7 +12210,12 @@ const TagManager = {
         } catch (error) {
             console.error('⚡ Lightning upload error:', error);
             this.hideExcelLoadingSplash();
-            
+
+            // CRITICAL: Also hide action splash if it's showing
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+
             // Check for SSL/TLS errors
             let errorMessage = error.message;
             if (error.message && (
