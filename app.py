@@ -8464,6 +8464,7 @@ def get_available_tags():
 
         # CRITICAL: If fast_load is requested but file isn't loaded yet, return "processing" status
         # This prevents the UI from freezing while waiting for slow file load
+        # BUT: Only do this if file was recently uploaded (within last 30 seconds)
         if fast_load and not cached_tags:
             # Check if there's a file being processed
             session_file_path = session.get('file_path', '')
@@ -8473,9 +8474,17 @@ def get_available_tags():
                 filename = os.path.basename(session_file_path)
                 status = processing_status.get(filename, None)
 
+                # Only return processing status if file was uploaded recently
+                # Check if file is very fresh (< 30 seconds old)
+                try:
+                    file_age = time.time() - os.path.getmtime(session_file_path)
+                    is_fresh_upload = file_age < 30
+                except:
+                    is_fresh_upload = False
+
                 # If file was just uploaded and is still processing, return processing status
-                if status in ('processing', 'ready', 'tags_ready'):
-                    logging.info(f"⏳ File still processing (status: {status}), returning processing response")
+                if status in ('processing', 'ready') and is_fresh_upload:
+                    logging.info(f"⏳ File still processing (status: {status}, age: {file_age:.1f}s), returning processing response")
                     return jsonify({
                         'tags': [],
                         'total_count': 0,
