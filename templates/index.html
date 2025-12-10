@@ -625,11 +625,19 @@
       
       console.log('Fetching store status from backend...');
       const cacheBust = `ts=${Date.now()}`;
+      
+      // PERFORMANCE FIX: Add timeout to prevent hanging
+      const fetchTimeout = 10000; // 10 second timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), fetchTimeout);
+      
       fetch(`/api/check-store-required?${cacheBust}`, {
         credentials: 'same-origin',
-        cache: 'no-store'
+        cache: 'no-store',
+        signal: controller.signal
       })
         .then(response => {
+          clearTimeout(timeoutId); // Clear timeout on success
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
@@ -681,6 +689,12 @@
             }
             
             console.log('✅ Content shown, modal hidden');
+            
+            // CRITICAL FIX: Hide splash screen when store is confirmed
+            if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
+              console.log('✅ Hiding splash screen - store confirmed');
+              window.AppLoadingSplash.hide();
+            }
             
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
             if (typeof onStoreConfirmed === 'function') {
@@ -753,12 +767,32 @@
         })
         .catch(error => {
           console.error('❌ Error checking store requirement:', error);
+          
+          // CRITICAL FIX: Hide splash screen even if store check fails
+          if (window.AppLoadingSplash && typeof window.AppLoadingSplash.hide === 'function') {
+            console.log('⚠️ Hiding splash screen due to store check error');
+            window.AppLoadingSplash.hide();
+          }
+          
           // If there's an error, show modal as fallback to require store selection
           console.log('Showing modal as fallback due to error');
           if (typeof bootstrap === 'undefined') {
             setTimeout(() => showStoreSelectionModal(), 500);
           } else {
             showStoreSelectionModal();
+          }
+          
+          // CRITICAL FIX: Still allow initialization even if store check fails
+          // This prevents the app from being stuck forever
+          if (typeof onStoreConfirmed === 'function') {
+            console.log('⚠️ Store check failed, but allowing initialization to proceed');
+            setTimeout(() => {
+              try {
+                onStoreConfirmed();
+              } catch (initError) {
+                console.error('❌ Error in onStoreConfirmed callback after error:', initError);
+              }
+            }, 500);
           }
         })
         .finally(() => {
