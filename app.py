@@ -8507,53 +8507,33 @@ def get_available_tags():
             except Exception as cache_clear_err:
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
-        # CRITICAL FIX: Check if file is currently being processed BEFORE any processor calls
-        # This prevents timeouts when file upload just completed but processing hasn't finished
-        # Only check if we don't have cached tags (if we have cache, processing is likely done)
+        # INSTANT TAGS: Load file synchronously if needed instead of returning 202
+        # This ensures tags appear instantly even if file processing isn't complete
         if file_exists and not cached_tags:
             uploaded_filename = session.get('uploaded_filename', '')
             if uploaded_filename:
-                # Check processing status to see if file is still being processed
-                with processing_lock:
-                    file_status = processing_status.get(uploaded_filename, '')
-                    # If file is being processed and processor isn't loaded yet, start background load and return immediately
-                    if file_status in ('processing', 'ready') and (_excel_processor is None or _excel_processor.df is None or _excel_processor.df.empty):
-                        logging.info(f"⏳ File {uploaded_filename} is {file_status}, processor not loaded yet - starting background load and returning processing status")
-                        
-                        # Start background thread to load file and cache tags
-                        def load_and_cache_in_background_early():
-                            with app.app_context():
-                                try:
-                                    processor = get_excel_processor()
-                                    if processor and hasattr(processor, 'df') and processor.df is not None:
-                                        tags = processor.get_available_tags(filters=None)
-                                        safe_tags = make_json_safe(tags)
-                                        cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                                        cache.set(cache_key, safe_tags, timeout=300)
-                                        logging.info(f"✅ Early background load complete: cached {len(safe_tags)} tags")
-                                except Exception as e:
-                                    logging.error(f"❌ Early background load failed: {e}")
-
-                        import threading
-                        thread = threading.Thread(target=load_and_cache_in_background_early)
-                        thread.daemon = True
-                        thread.start()
-                        
-                        return jsonify({
-                            'tags': [],
-                            'total_count': 0,
-                            'processing': True,
-                            'status': 'loading',
-                            'message': 'File is being processed. Please wait...'
-                        }), 202  # 202 Accepted
+                # Check if processor needs to be loaded
+                if _excel_processor is None or _excel_processor.df is None or _excel_processor.df.empty:
+                    logging.info(f"⚡ INSTANT: Loading file synchronously for instant tags: {uploaded_filename}")
+                    try:
+                        # Load processor synchronously - this ensures tags are available immediately
+                        processor = get_excel_processor()
+                        if processor and hasattr(processor, 'df') and processor.df is not None and not processor.df.empty:
+                            logging.info(f"✅ INSTANT: File loaded synchronously, {len(processor.df)} rows ready")
+                            # Continue to fast_load path below to return tags immediately
+                        else:
+                            logging.warning(f"⚠️ INSTANT: File loaded but DataFrame is empty")
+                    except Exception as sync_load_err:
+                        logging.error(f"❌ INSTANT: Synchronous load failed: {sync_load_err}")
+                        # Fall through to try other paths
 
         # ULTRA-FAST PATH: If this is a fast_load request, return Excel-only tags immediately
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
         if fast_load and not prefer_db and not force_full_refresh:
             try:
-                # Check if processor is already loaded (don't trigger slow synchronous load)
-                # Use global _excel_processor directly (defined in app.py, not in excel_processor module)
-                excel_processor = _excel_processor if _excel_processor is not None else None
+                # Get processor (may have been loaded synchronously above)
+                # Use get_excel_processor() to get the most up-to-date processor
+                excel_processor = get_excel_processor() if file_exists else (_excel_processor if _excel_processor is not None else None)
 
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                     logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for fast_load request (no DB lineage alignment).")
@@ -8599,46 +8579,8 @@ def get_available_tags():
             except Exception as ultra_err:
                 logging.warning(f"Ultra-fast Excel-only tag path failed, falling back to full flow: {ultra_err}")
 
-        # CRITICAL: If fast_load is requested but file isn't loaded yet, return "processing" status
-        # This prevents the UI from freezing while waiting for slow file load
-        if fast_load and not cached_tags:
-            # Check if there's a file that needs loading
-            session_file_path = session.get('file_path', '')
-            if session_file_path and os.path.exists(session_file_path):
-                # Check if processor is already loaded
-                # Use global _excel_processor directly (defined in app.py, not in excel_processor module)
-
-                # If processor isn't loaded or doesn't have data, start background load
-                if _excel_processor is None or _excel_processor.df is None or _excel_processor.df.empty:
-                    logging.info(f"⏳ File not loaded yet, starting background load and returning processing response")
-
-                    # Start background thread to load file and cache tags
-                    def load_and_cache_in_background():
-                        with app.app_context():
-                            try:
-                                processor = get_excel_processor()
-                                if processor and hasattr(processor, 'df') and processor.df is not None:
-                                    tags = processor.get_available_tags(filters=None)
-                                    safe_tags = make_json_safe(tags)
-                                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                                    cache.set(cache_key, safe_tags, timeout=300)
-                                    logging.info(f"✅ Background load complete: cached {len(safe_tags)} tags")
-                            except Exception as e:
-                                logging.error(f"❌ Background load failed: {e}")
-
-                    import threading
-                    thread = threading.Thread(target=load_and_cache_in_background)
-                    thread.daemon = True
-                    thread.start()
-
-                    # Return processing status immediately
-                    return jsonify({
-                        'tags': [],
-                        'total_count': 0,
-                        'processing': True,
-                        'status': 'loading',
-                        'message': 'Loading file in background. Please wait...'
-                    }), 202  # 202 Accepted
+        # Note: Synchronous loading already handled above (line 8510-8528) for instant tags
+        # This ensures tags appear immediately without waiting for background processing
 
         # PERFORMANCE: Even when nocache=1, allow fast_load requests to reuse
         # per-file cached tags. The cache key already includes the uploaded file

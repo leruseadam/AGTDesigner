@@ -922,6 +922,12 @@ class ExcelProcessor:
         self._cache_token = 0
         self._last_loaded_mtime = None
         self._cache_prewarm_thread: Optional[threading.Thread] = None
+        
+        # PERFORMANCE: Skip expensive database enrichment on PythonAnywhere to avoid timeouts
+        # On PythonAnywhere, database queries during tag generation cause 30s+ timeouts
+        # Better to return tags fast and let users manually refresh lineage if needed
+        import os
+        self._skip_enrichment = bool(os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE'))
 
     def _invalidate_caches(self):
         """Invalidate cached filter/tag results when the underlying data changes."""
@@ -3288,7 +3294,8 @@ class ExcelProcessor:
             # PERFORMANCE FIX: Skip database lineage update during initial file load to prevent timeout
             # The lineage will be updated later when tags are requested via available-tags endpoint
             # This allows the upload to complete quickly without blocking
-            skip_db_update = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
+            # ALWAYS skip for performance - lineage will be fetched when tags are requested
+            skip_db_update = True  # Always skip for better performance
             
             if not skip_db_update:
                 # GUARANTEED FIX: Update DataFrame Lineage column from database immediately after loading

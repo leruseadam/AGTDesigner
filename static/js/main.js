@@ -8282,14 +8282,16 @@ const TagManager = {
             const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
-            // CRITICAL FIX: Reduced retries to prevent multiple restarts
+            // CRITICAL FIX: Handle 202 (processing) separately with more retries
             let response;
             let responseData;
-            const maxRetries = 1; // Reduced from 3 to 1 to prevent multiple restarts
+            const maxRetries = 1; // Reduced from 3 to 1 to prevent multiple restarts for errors
+            const maxProcessingRetries = 10; // Allow more retries for 202 (file processing)
             let retryCount = 0;
+            let processingRetryCount = 0;
             let lastError;
             
-            while (retryCount < maxRetries) {
+            while (retryCount < maxRetries && processingRetryCount < maxProcessingRetries) {
                 try {
                     const controller = new AbortController();
                     // CRITICAL: Set timeout to 12 seconds - if it takes longer, show error and use cache
@@ -8311,15 +8313,25 @@ const TagManager = {
                     });
                     clearTimeout(timeoutId);
 
-                    verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}):`, response.status);
+                    verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}, processing retries: ${processingRetryCount + 1}/${maxProcessingRetries}):`, response.status);
 
-                    // Handle 202 Accepted (file still processing)
+                    // Handle 202 Accepted (file still processing) - allow more retries for this
                     if (response.status === 202) {
-                        verboseLog('⏳ File still processing (202), will retry after delay...');
-                        retryCount++;
-                        const delay = Math.min(500 * retryCount, 2000); // Progressive delay, max 2s
+                        processingRetryCount++;
+                        if (processingRetryCount >= maxProcessingRetries) {
+                            // Too many processing retries - try to use cache or show helpful error
+                            verboseLog('⏳ File processing taking too long, trying cache fallback...');
+                            const cachedTags = this.hydrateAvailableTagsFromCache();
+                            if (cachedTags) {
+                                verboseLog('✅ Using cached tags as fallback for slow processing');
+                                return true;
+                            }
+                            throw new Error('File is still processing. Please wait a moment and refresh the page, or try uploading again.');
+                        }
+                        verboseLog(`⏳ File still processing (202), will retry after delay... (${processingRetryCount}/${maxProcessingRetries})`);
+                        const delay = Math.min(500 * processingRetryCount, 2000); // Progressive delay, max 2s
                         await new Promise(resolve => setTimeout(resolve, delay));
-                        continue; // Retry
+                        continue; // Retry without incrementing error retry count
                     }
 
                     if (!response.ok) {
@@ -8378,7 +8390,13 @@ const TagManager = {
             }
             
             if (!responseData) {
-                throw lastError || new Error('Failed to fetch tags after retries');
+                // Try cache as final fallback before throwing error
+                const cachedTags = this.hydrateAvailableTagsFromCache();
+                if (cachedTags) {
+                    verboseLog('✅ Using cached tags as final fallback after failed fetch');
+                    return true;
+                }
+                throw lastError || new Error('Failed to fetch tags after retries. Please try refreshing the page or uploading the file again.');
             }
             verboseLog('Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count } : null);
             
@@ -8393,6 +8411,12 @@ const TagManager = {
                 verboseLog(`Backend returned ${tags.length} tags from ${responseData.source || 'unknown source'}`);
             } else {
                 console.error('No tags loaded from backend or invalid response format:', responseData);
+                // Try cache before giving up
+                const cachedTags = this.hydrateAvailableTagsFromCache();
+                if (cachedTags) {
+                    verboseLog('✅ Using cached tags as fallback for invalid response format');
+                    return true;
+                }
                 // Clear existing tags if no new data
                 this.state.tags = [];
                 this.state.originalTags = [];
@@ -8406,7 +8430,18 @@ const TagManager = {
             }
             
             if (tags.length === 0) {
-                console.warn('Backend returned empty tags array - no Excel file loaded');
+                // Check if this is an error response with a message
+                if (responseData.error || responseData.message) {
+                    console.warn('Backend returned empty tags with error:', responseData.error || responseData.message);
+                    // Try cache as fallback
+                    const cachedTags = this.hydrateAvailableTagsFromCache();
+                    if (cachedTags) {
+                        verboseLog('✅ Using cached tags as fallback for error response');
+                        return true;
+                    }
+                } else {
+                    console.warn('Backend returned empty tags array - no Excel file loaded');
+                }
                 this.state.tags = [];
                 this.state.originalTags = [];
                 this._updateAvailableTags([]);
@@ -8658,6 +8693,13 @@ const TagManager = {
                 return true;
             }
 
+            // Try cache as fallback before showing error
+            const cachedTags = this.hydrateAvailableTagsFromCache();
+            if (cachedTags) {
+                verboseLog('✅ Using cached tags as fallback after error');
+                return true;
+            }
+
             // If lite tags already rendered successfully, don't invoke fallback again
             const fallbackLoaded = this._liteTagsRendered
                 ? false
@@ -8674,16 +8716,20 @@ const TagManager = {
             // CRITICAL FIX: Show user-friendly error message with retry button
             const availableTagsContainer = document.getElementById('availableTags');
             if (availableTagsContainer) {
+                const errorMessage = error.message || 'Unknown error';
+                const isProcessingError = errorMessage.includes('still processing') || errorMessage.includes('processing');
                 availableTagsContainer.innerHTML = `
                     <div class="text-center py-4">
                         <div class="alert alert-warning mx-3">
                             <h5 class="alert-heading">Unable to Load Tags</h5>
-                            <p class="mb-3">There was a problem loading the product tags. This can happen if the database is temporarily unavailable or the connection timed out.</p>
+                            <p class="mb-3">${isProcessingError 
+                                ? 'The file is still being processed. Please wait a moment and try again, or refresh the page.' 
+                                : 'There was a problem loading the product tags. This can happen if the database is temporarily unavailable or the connection timed out.'}</p>
                             <button class="btn btn-primary" onclick="TagManager.retryLoadTags()">
                                 <i class="fas fa-redo"></i> Retry Loading Tags
                             </button>
                         </div>
-                        <small class="text-muted d-block mt-2">Error: ${error.message || 'Unknown error'}</small>
+                        <small class="text-muted d-block mt-2">Error: ${errorMessage}</small>
                     </div>
                 `;
             }
