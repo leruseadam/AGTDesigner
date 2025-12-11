@@ -1358,7 +1358,7 @@ def get_excel_processor():
                                 # Use fast loading mode for better performance
                                 success = _excel_processor.load_file(default_file)
                                 if success:
-                                _excel_processor._last_loaded_file = default_file
+                                    _excel_processor._last_loaded_file = default_file
                                     # Optimize DataFrame
                                     if _excel_processor.df is not None:
                                         for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
