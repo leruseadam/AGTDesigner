@@ -11374,6 +11374,16 @@ const TagManager = {
             splash.style.width = '100%';
             splash.style.height = '100%';
             verboseLog('✅ Splash display set to:', splash.style.display);
+            
+            // CRITICAL FIX: Add safety timeout to auto-hide splash after 30 seconds
+            // This prevents the modal from getting stuck if something goes wrong
+            if (this._splashTimeout) {
+                clearTimeout(this._splashTimeout);
+            }
+            this._splashTimeout = setTimeout(() => {
+                console.warn('⚠️ Safety timeout: Auto-hiding splash after 30 seconds');
+                this.hideExcelLoadingSplash();
+            }, 30000); // 30 second safety timeout
         } else {
             console.error('❌ Could not find splash elements:', {
                 splash: !!splash,
@@ -11385,6 +11395,13 @@ const TagManager = {
 
     hideExcelLoadingSplash() {
         verboseLog('🎬 HIDING EXCEL SPLASH');
+        
+        // Clear safety timeout if it exists
+        if (this._splashTimeout) {
+            clearTimeout(this._splashTimeout);
+            this._splashTimeout = null;
+        }
+        
         const splash = document.getElementById('excelLoadingSplash');
         
         if (splash) {
@@ -12400,7 +12417,12 @@ const TagManager = {
             return; // Success!
         } catch (error) {
             console.error('⚡ Lightning upload error:', error);
+            // CRITICAL: Always hide splash on error
             this.hideExcelLoadingSplash();
+            // Also hide action splash if it's showing
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
 
             // CRITICAL: Also hide action splash if it's showing
             if (this.hideActionSplash) {
