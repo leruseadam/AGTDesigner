@@ -3570,11 +3570,9 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
-        // Use requestAnimationFrame for smoother rendering without debounce delay
-        // Immediate response is more important than batching for tag selection
-        requestAnimationFrame(() => {
-            this._performUpdateAvailableTags(originalTags, filteredTags);
-        });
+        // CRITICAL FIX: Render immediately instead of using requestAnimationFrame to prevent delays
+        // Tags need to appear immediately after upload, not on next frame
+        this._performUpdateAvailableTags(originalTags, filteredTags);
     },
     
     _performUpdateAvailableTags(originalTags, filteredTags = null) {
@@ -3848,7 +3846,18 @@ const TagManager = {
                         this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
                     } catch (error) {
                         console.error('Error organizing tags:', error);
-                        availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
+                        // CRITICAL FIX: Fallback to simple list rendering if organization fails
+                        console.log('🔄 Falling back to simple list rendering due to organization error');
+                        const sortedSimple = [...tags].sort((a, b) => {
+                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                            return aName.localeCompare(bName);
+                        });
+                        this._renderTagsInBatches(sortedSimple, tagList);
+                        availableTagsContainer.innerHTML = '';
+                        availableTagsContainer.appendChild(tagList);
+                        this._restoreCheckboxStates();
+                        this._restoreAvailableScrollPosition(savedScroll);
                     }
                 }, 0);
                 return; // Exit early, rendering will continue in callback
@@ -3878,10 +3887,9 @@ const TagManager = {
             });
             // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
             this._renderTagsInBatches(sortedSimple, tagList);
-                    // Atomically replace container content with built tags
-                    requestAnimationFrame(() => {
-                        availableTagsContainer.innerHTML = '';
-                        availableTagsContainer.appendChild(tagList);
+                    // CRITICAL FIX: Replace container content immediately - don't wait for next frame
+                    availableTagsContainer.innerHTML = '';
+                    availableTagsContainer.appendChild(tagList);
                         
                         // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
                         // Also restore persistentSelectedTags if it was accidentally cleared
@@ -3909,8 +3917,6 @@ const TagManager = {
                         
                         // Hide loading splash only after tags actually appear in DOM
                         this._waitForTagsToAppear();
-                    });
-            return;
         }
         
         // CRITICAL FIX: Render organized tags in chunks to prevent UI freeze
@@ -3945,9 +3951,9 @@ const TagManager = {
                 }
             } else {
                 // All vendors rendered - finalize
-                requestAnimationFrame(() => {
-                    availableTagsContainer.innerHTML = '';
-                    availableTagsContainer.appendChild(tagList);
+                // CRITICAL FIX: Append immediately instead of waiting for next frame
+                availableTagsContainer.innerHTML = '';
+                availableTagsContainer.appendChild(tagList);
                     
                     // CRITICAL FIX: Restore checkbox states after re-render
                     if (savedPersistentTags.length > 0 && (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0)) {
@@ -3974,7 +3980,6 @@ const TagManager = {
                     
                     // Hide loading splash
                     this._waitForTagsToAppear();
-                });
             }
         };
         
@@ -8176,22 +8181,23 @@ const TagManager = {
             const availableTagsContainer = document.getElementById('availableTags');
             const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
             
-            // CRITICAL: Add safety timeout to hide spinner after 35 seconds (5 seconds after API timeout)
+            // CRITICAL: Add safety timeout to hide spinner after 15 seconds (reduced from 35s for faster feedback)
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
                 safetyTimeout = setTimeout(() => {
-                    console.warn('⚠️ Safety timeout: Hiding loading spinner after 35 seconds');
+                    console.warn('⚠️ Safety timeout: Hiding loading spinner after 15 seconds');
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
                     if (availableTagsContainer) {
                         availableTagsContainer.innerHTML = `
                             <div class="text-center py-4">
-                                <p class="text-warning">Loading is taking longer than expected. Please refresh the page.</p>
+                                <p class="text-warning">Loading is taking longer than expected. Please refresh the page or try again.</p>
+                                <button class="btn btn-primary mt-2" onclick="window.TagManager.fetchAndUpdateAvailableTags()">Retry</button>
                             </div>
                         `;
                     }
-                }, 35000);
+                }, 15000); // Reduced from 35000ms to 15000ms for faster feedback
             }
             
             if (!hasExistingTags) {
@@ -8286,12 +8292,12 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // CRITICAL: Set timeout to 30 seconds - if it takes longer, show error and use cache
-                    // This prevents indefinite hangs while still allowing reasonable load times
+                    // CRITICAL: Set timeout to 12 seconds - if it takes longer, show error and use cache
+                    // This prevents indefinite hangs while still allowing reasonable load times for large datasets
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn('⚠️ Tag loading timeout after 30 seconds - will try cache or show error');
-                    }, 30000);
+                        console.warn('⚠️ Tag loading timeout after 12 seconds - will try cache or show error');
+                    }, 12000); // Reduced from 30s to 12s for faster feedback
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
@@ -8627,9 +8633,13 @@ const TagManager = {
             return true;
         } catch (error) {
             // CRITICAL: Clear safety timeout on error
-            if (safetyTimeout) {
-                clearTimeout(safetyTimeout);
-                safetyTimeout = null;
+            // Use try-catch to handle case where safetyTimeout might not be in scope
+            try {
+                if (typeof safetyTimeout !== 'undefined' && safetyTimeout) {
+                    clearTimeout(safetyTimeout);
+                }
+            } catch (e) {
+                // Ignore - variable might not be in scope
             }
             
             console.error('Error fetching available tags:', error);
@@ -12122,8 +12132,8 @@ const TagManager = {
                 let tagsController = null;
                 try {
                     // PERFORMANCE: Minimal delays for instant response
-                    // Try immediately, then 100ms, then 200ms
-                    const delay = attempt === 0 ? 0 : attempt === 1 ? 100 : 200;
+                    // Try immediately, then 50ms, then 100ms (faster than before)
+                    const delay = attempt === 0 ? 0 : attempt === 1 ? 50 : 100;
                     if (delay > 0) {
                         await new Promise(resolve => setTimeout(resolve, delay));
                         verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload (waiting ${delay}ms)...`);
@@ -12132,14 +12142,14 @@ const TagManager = {
                     }
                     
                     tagsController = new AbortController();
-                    // PERFORMANCE: Reduced timeout to keep UI responsive (15s max)
+                    // PERFORMANCE: Reduced timeout to keep UI responsive (10s max for faster feedback)
                     tagsTimeout = setTimeout(() => {
                         verboseLog('⏱️ Tag loading timeout - aborting request');
                         tagsController.abort();
-                    }, 15000); // 15s timeout to avoid long waits
+                    }, 10000); // 10s timeout - reduced from 15s for faster feedback
                     
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
-                    verboseLog(`🔄 Requesting tags from /api/available-tags (timeout: 15s)...`);
+                    verboseLog(`🔄 Requesting tags from /api/available-tags (timeout: 10s)...`);
                     const tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
                         signal: tagsController.signal
                     });

@@ -1550,12 +1550,32 @@ class ProductDatabase:
             error_count = 0
             errors = []
             
-            # CRITICAL FIX: Filter out rows with blank product names BEFORE processing
+            # CRITICAL FIX: Filter out rows with blank product names AND completely empty rows BEFORE processing
             # This prevents trying to add empty rows and avoids thousands of rejection log messages
+            original_filtered_count = len(filtered_df)
+            
+            # First, remove completely empty rows (where all columns are NaN/empty)
+            filtered_df = filtered_df.dropna(how='all')
+            empty_rows_removed = original_filtered_count - len(filtered_df)
+            if empty_rows_removed > 0:
+                logger.info(f"🔍 Removed {empty_rows_removed} completely empty rows")
+            
+            # Then, filter out rows with blank product names
             if 'Product Name*' in filtered_df.columns:
-                valid_mask = filtered_df['Product Name*'].notna() & (filtered_df['Product Name*'].astype(str).str.strip() != '')
+                # Check for both NaN and empty strings (including whitespace-only)
+                valid_mask = (
+                    filtered_df['Product Name*'].notna() & 
+                    (filtered_df['Product Name*'].astype(str).str.strip() != '') &
+                    (~filtered_df['Product Name*'].astype(str).str.strip().isin(['nan', 'none', 'null', 'NaN', 'None', 'NULL']))
+                )
+                blank_names_removed = len(filtered_df) - valid_mask.sum()
                 filtered_df = filtered_df[valid_mask]
-                print(f"🔍 DEBUG: Filtered out blank product names - Processing {len(filtered_df)} valid rows")
+                if blank_names_removed > 0:
+                    logger.info(f"🔍 Removed {blank_names_removed} rows with blank/invalid product names")
+                
+                logger.info(f"🔍 DEBUG: After filtering - Processing {len(filtered_df)} valid rows (removed {empty_rows_removed + blank_names_removed} total)")
+            else:
+                logger.warning("⚠️ 'Product Name*' column not found - cannot filter blank product names")
             
             # Process each row in the filtered DataFrame
             # OPTIMIZATION: Use itertuples() instead of iterrows() for 10-100x speedup

@@ -1549,6 +1549,15 @@ class ExcelProcessor:
             # Reset index after deduplication
             df.reset_index(drop=True, inplace=True)
             
+            # CRITICAL FIX: Remove completely empty rows (rows where all columns are NaN/empty)
+            # This prevents blank entries from being stored in the database
+            initial_row_count = len(df)
+            df = df.dropna(how='all')  # Remove rows where all values are NaN
+            df.reset_index(drop=True, inplace=True)
+            empty_rows_removed = initial_row_count - len(df)
+            if empty_rows_removed > 0:
+                self.logger.info(f"[ULTRA-FAST] Removed {empty_rows_removed} completely empty rows ({initial_row_count} -> {len(df)})")
+            
             # Skip complex column-based deduplication for ultra-fast loading
             # (Deferred to later processing if needed)
             
