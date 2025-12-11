@@ -4459,8 +4459,7 @@ const TagManager = {
                     });
                 });
             });
-    },
-
+        
         // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
         // Use requestAnimationFrame to ensure DOM is fully updated before restoring
         requestAnimationFrame(() => {
