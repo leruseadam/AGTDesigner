@@ -8154,6 +8154,27 @@ const TagManager = {
             // keep the existing inventory visible so it does not disappear while new tags load.
             const availableTagsContainer = document.getElementById('availableTags');
             const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
+            
+            // CRITICAL: Add safety timeout to hide spinner after 35 seconds (5 seconds after API timeout)
+            // This prevents indefinite hanging even if error handling fails
+            // Declare at function scope so it's accessible in catch block
+            let safetyTimeout = null;
+            if (!hasExistingTags) {
+                safetyTimeout = setTimeout(() => {
+                    console.warn('⚠️ Safety timeout: Hiding loading spinner after 35 seconds');
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                    if (availableTagsContainer) {
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-4">
+                                <p class="text-warning">Loading is taking longer than expected. Please refresh the page.</p>
+                            </div>
+                        `;
+                    }
+                }, 35000);
+            }
+            
             if (!hasExistingTags) {
                 this.showActionSplash('Loading tags...');
                 if (availableTagsContainer) {
@@ -8246,9 +8267,12 @@ const TagManager = {
             while (retryCount < maxRetries) {
                 try {
                     const controller = new AbortController();
-                    // CRITICAL: Increased timeout to 180 seconds (3 minutes) for large files
-                    // Tags can take time to load, especially after upload with large Excel files
-                    const timeoutId = setTimeout(() => controller.abort(), 180000);
+                    // CRITICAL: Set timeout to 30 seconds - if it takes longer, show error and use cache
+                    // This prevents indefinite hangs while still allowing reasonable load times
+                    const timeoutId = setTimeout(() => {
+                        controller.abort();
+                        console.warn('⚠️ Tag loading timeout after 30 seconds - will try cache or show error');
+                    }, 30000);
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
@@ -8263,6 +8287,15 @@ const TagManager = {
                     clearTimeout(timeoutId);
 
                     verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}):`, response.status);
+
+                    // Handle 202 Accepted (file still processing)
+                    if (response.status === 202) {
+                        verboseLog('⏳ File still processing (202), will retry after delay...');
+                        retryCount++;
+                        const delay = Math.min(500 * retryCount, 2000); // Progressive delay, max 2s
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue; // Retry
+                    }
 
                     if (!response.ok) {
                         // CRITICAL FIX: Handle 503 errors gracefully - try to use cache
@@ -8403,6 +8436,12 @@ const TagManager = {
                         console.warn('Auto-refresh filters after tag load failed (non-critical):', error);
                     });
                 }, 500);
+            }
+            
+            // CRITICAL: Clear safety timeout since we successfully loaded tags
+            if (safetyTimeout) {
+                clearTimeout(safetyTimeout);
+                safetyTimeout = null;
             }
             
             // CRITICAL FIX: Ensure ALL tags in state have database lineage fields set
@@ -8568,6 +8607,12 @@ const TagManager = {
             // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
             return true;
         } catch (error) {
+            // CRITICAL: Clear safety timeout on error
+            if (safetyTimeout) {
+                clearTimeout(safetyTimeout);
+                safetyTimeout = null;
+            }
+            
             console.error('Error fetching available tags:', error);
             verboseLog('=== fetchAndUpdateAvailableTags ERROR ===');
             // Note: Flag will be reset in finally block

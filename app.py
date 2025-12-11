@@ -8464,33 +8464,43 @@ def get_available_tags():
 
         # CRITICAL: If fast_load is requested but file isn't loaded yet, return "processing" status
         # This prevents the UI from freezing while waiting for slow file load
-        # BUT: Only do this if file was recently uploaded (within last 30 seconds)
         if fast_load and not cached_tags:
-            # Check if there's a file being processed
+            # Check if there's a file that needs loading
             session_file_path = session.get('file_path', '')
-            if session_file_path:
-                # Check processing status
-                import os
-                filename = os.path.basename(session_file_path)
-                status = processing_status.get(filename, None)
+            if session_file_path and os.path.exists(session_file_path):
+                # Check if processor is already loaded
+                from src.core.data.excel_processor import _excel_processor
 
-                # Only return processing status if file was uploaded recently
-                # Check if file is very fresh (< 30 seconds old)
-                try:
-                    file_age = time.time() - os.path.getmtime(session_file_path)
-                    is_fresh_upload = file_age < 30
-                except:
-                    is_fresh_upload = False
+                # If processor isn't loaded or doesn't have data, start background load
+                if _excel_processor is None or _excel_processor.df is None or _excel_processor.df.empty:
+                    logging.info(f"⏳ File not loaded yet, starting background load and returning processing response")
 
-                # If file was just uploaded and is still processing, return processing status
-                if status in ('processing', 'ready') and is_fresh_upload:
-                    logging.info(f"⏳ File still processing (status: {status}, age: {file_age:.1f}s), returning processing response")
+                    # Start background thread to load file and cache tags
+                    def load_and_cache_in_background():
+                        with app.app_context():
+                            try:
+                                processor = get_excel_processor()
+                                if processor and hasattr(processor, 'df') and processor.df is not None:
+                                    tags = processor.get_available_tags(filters=None)
+                                    safe_tags = make_json_safe(tags)
+                                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                                    cache.set(cache_key, safe_tags, timeout=300)
+                                    logging.info(f"✅ Background load complete: cached {len(safe_tags)} tags")
+                            except Exception as e:
+                                logging.error(f"❌ Background load failed: {e}")
+
+                    import threading
+                    thread = threading.Thread(target=load_and_cache_in_background)
+                    thread.daemon = True
+                    thread.start()
+
+                    # Return processing status immediately
                     return jsonify({
                         'tags': [],
                         'total_count': 0,
                         'processing': True,
-                        'status': status,
-                        'message': 'File is being processed. Please wait...'
+                        'status': 'loading',
+                        'message': 'Loading file in background. Please wait...'
                     }), 202  # 202 Accepted
 
         # PERFORMANCE: Even when nocache=1, allow fast_load requests to reuse
