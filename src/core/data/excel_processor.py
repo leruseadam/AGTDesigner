@@ -3285,29 +3285,35 @@ class ExcelProcessor:
 
             self._on_dataset_updated(file_path, file_mtime)
             
-            # GUARANTEED FIX: Update DataFrame Lineage column from database immediately after loading
-            # This ensures the DataFrame always has the latest database lineage, not Excel file lineage
-            # Use retry mechanism to handle database initialization timing issues on app restart
-            max_retries = 3
-            retry_delay = 0.5
-            for attempt in range(max_retries):
-                try:
-                    # Ensure database is initialized before updating
-                    import sys
-                    if 'app' in sys.modules:
-                        app_module = sys.modules['app']
-                        if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
-                            store_name = app_module.get_current_store_name()
-                            if store_name:
-                                product_db = app_module.get_product_database(store_name)
-                                if product_db:
-                                    # Initialize database if needed
-                                    if hasattr(product_db, 'init_database'):
-                                        product_db.init_database()
-                    
-                    self._update_dataframe_lineage_from_database()
-                    self.logger.info("✅ Updated DataFrame Lineage column from database after file load")
-                    break  # Success, exit retry loop
+            # PERFORMANCE FIX: Skip database lineage update during initial file load to prevent timeout
+            # The lineage will be updated later when tags are requested via available-tags endpoint
+            # This allows the upload to complete quickly without blocking
+            skip_db_update = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
+            
+            if not skip_db_update:
+                # GUARANTEED FIX: Update DataFrame Lineage column from database immediately after loading
+                # This ensures the DataFrame always has the latest database lineage, not Excel file lineage
+                # Use retry mechanism to handle database initialization timing issues on app restart
+                max_retries = 3
+                retry_delay = 0.5
+                for attempt in range(max_retries):
+                    try:
+                        # Ensure database is initialized before updating
+                        import sys
+                        if 'app' in sys.modules:
+                            app_module = sys.modules['app']
+                            if hasattr(app_module, 'get_product_database') and hasattr(app_module, 'get_current_store_name'):
+                                store_name = app_module.get_current_store_name()
+                                if store_name:
+                                    product_db = app_module.get_product_database(store_name)
+                                    if product_db:
+                                        # Initialize database if needed
+                                        if hasattr(product_db, 'init_database'):
+                                            product_db.init_database()
+                        
+                        self._update_dataframe_lineage_from_database()
+                        self.logger.info("✅ Updated DataFrame Lineage column from database after file load")
+                        break  # Success, exit retry loop
                 except Exception as lineage_update_err:
                     if attempt < max_retries - 1:
                         self.logger.warning(f"Could not update DataFrame lineage from database (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s: {lineage_update_err}")
