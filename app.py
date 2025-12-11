@@ -1269,7 +1269,7 @@ def get_excel_processor():
                                 logging.warning(f"⚠️ Failed to load persisted session file: {session_file_path}")
                         elif session_file_path:
                             logging.warning(f"⚠️ Session file_path exists but file not found: {session_file_path}")
-                except Exception as session_load_error:
+            except Exception as session_load_error:
                     logging.debug(f"Could not load session file on processor creation: {session_load_error}")
             else:
                 # If the active store changed, update the processor's store context
