@@ -164,13 +164,22 @@ async function handleFiles(files) {
       // Update splash status
       if (statusElement) statusElement.textContent = 'Uploading file...';
       
+      // CRITICAL FIX: Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.warn('⚠️ Upload timeout after 60 seconds');
+      }, 60000); // 60 second timeout
+      
       const response = await fetch('/upload', {
         method: 'POST',
         body: formData,
         headers: {
           'X-Post-Upload': '1'  // Flag for fast tag loading
-        }
+        },
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       console.log('📡 Upload response status:', response.status);
       
       // Update splash status
@@ -197,8 +206,9 @@ async function handleFiles(files) {
       console.log('📦 Upload response data:', data);
       
       if (response.ok && data.success) {
-        // For PythonAnywhere/web deployment the file continues processing in background.
-        if (data.processing) {
+        // CRITICAL FIX: Check if processing is explicitly true (not just truthy)
+        // Backend now returns processing: False, so we should proceed with normal flow
+        if (data.processing === true) {
           console.log(`Background processing required for ${data.filename || file.name}`);
           
           // Keep splash visible and update messaging while we wait for processing to finish.
@@ -233,6 +243,9 @@ async function handleFiles(files) {
           }
           return;
         }
+        
+        // CRITICAL FIX: If processing is false or undefined, proceed with normal success flow
+        console.log('✅ Upload complete - processing synchronously, loading tags...');
 
         // File uploaded successfully - data is already processed synchronously
         console.log(`File uploaded successfully: ${data.filename}, rows: ${data.rows}`);
@@ -389,9 +402,25 @@ async function handleFiles(files) {
       }
     } catch (error) {
       console.error('Upload error:', error);
+      
+      // Clear timeout if it exists
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      
       // Hide splash screen on error with minimum display time
       hideSplashWithDelay(splashStartTime, 800);
-      showToast("error", 'Upload failed');
+      
+      // Show specific error message
+      const errorMsg = error.name === 'AbortError' 
+        ? 'Upload timed out. Please try again with a smaller file or check your connection.'
+        : error.message || 'Upload failed. Please try again.';
+      
+      showToast("error", errorMsg);
+      
+      // Also hide splash directly in case hideSplashWithDelay doesn't work
+      const splash = document.getElementById('excelLoadingSplash');
+      if (splash) splash.style.display = 'none';
     } finally {
       TagManager.setLoading(false);
     }
