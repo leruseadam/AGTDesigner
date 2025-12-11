@@ -3472,7 +3472,7 @@ def process_large_file_streaming(temp_path: str, filename: str, start_time: floa
                 processor.df = processor.df.dropna(subset=['Product Name*'], how='all')
                 
                 # Update global processor
-                                with excel_processor_lock:
+                with excel_processor_lock:
                     _excel_processor = processor
                     _excel_processor._last_loaded_file = temp_path
                 
