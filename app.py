@@ -3083,6 +3083,7 @@ def upload_file():
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
         
         if is_pythonanywhere:
+            global _excel_processor
             # CRITICAL FIX: Load file synchronously FIRST for instant tag display
             # Then continue processing in background for enrichment/database storage
             logging.info("[PYTHONANYWHERE] Loading file synchronously for instant tags...")
@@ -3098,7 +3099,6 @@ def upload_file():
                 success = processor.load_file(file_path, fast_mode=True)
                 
                 if success:
-                    global _excel_processor
                     _excel_processor = processor
                     row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                     logging.info(f"[INSTANT] ✅ File loaded synchronously: {row_count} rows")
