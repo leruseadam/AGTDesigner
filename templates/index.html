@@ -7871,10 +7871,13 @@
             
             if (fileHandles && fileHandles.length > 0) {
               const file = await fileHandles[0].getFile();
-              if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+              // CRITICAL FIX: Always use handleFiles from enhanced-ui.js for consistent upload handling
+              if (typeof handleFiles === 'function') {
+                handleFiles([file]);
+              } else if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
                 window.TagManager.uploadFile(file);
               } else {
-                // Fallback to regular file input if TagManager not ready
+                // Fallback to regular file input if neither is available
                 const fileInput = document.getElementById('fileInput');
                 if (fileInput) {
                   const dataTransfer = new DataTransfer();
