@@ -1096,7 +1096,7 @@ def force_reload_excel_processor(new_file_path):
         logging.info("Product database integration enabled by default")
     
     # Clear the reset flag since we're loading a new file
-    _excel_processor_reset_flag = False
+        _excel_processor_reset_flag = False
     logging.info("Cleared reset flag - loading new file")
     
     # Load the new file with full processing rules
@@ -1112,7 +1112,7 @@ def force_reload_excel_processor(new_file_path):
                 logging.info(f"Successfully populated dropdown cache from session uploaded file")
                 # Log the strain count specifically
                 if 'strain' in _excel_processor.dropdown_cache:
-                    strain_count = len(_excel_processor.dropdown_cache['strain'])
+                strain_count = len(_excel_processor.dropdown_cache['strain'])
                     logging.info(f"Dropdown cache contains {strain_count} strains")
                 else:
                     logging.warning("No strain filter found in dropdown cache")
@@ -1132,7 +1132,7 @@ def force_reload_excel_processor(new_file_path):
             logging.info(f"Attempting to load default file as fallback: {default_file}")
             fallback_success = _excel_processor.load_file(default_file)
             if fallback_success:
-                _excel_processor._last_loaded_file = default_file
+            _excel_processor._last_loaded_file = default_file
                 logging.info(f"Successfully loaded default file as fallback: {default_file}")
                 # Populate dropdown cache for fallback file
                 if hasattr(_excel_processor, '_cache_dropdown_values'):
@@ -1155,7 +1155,7 @@ def force_reload_excel_processor(new_file_path):
             if hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
                 logging.warning("Preserving existing DataFrame despite missing fallback file")
             else:
-                _excel_processor.df = pd.DataFrame()
+            _excel_processor.df = pd.DataFrame()
                 _excel_processor.selected_tags = []
                 logging.warning("Created empty DataFrame as last resort - this may cause 'no strains' issues")
 
@@ -1210,7 +1210,7 @@ def get_excel_processor():
     
     try:
         if has_context:
-            g._in_get_excel_processor = True  # Set recursion guard
+         g._in_get_excel_processor = True  # Set recursion guard
         
         # Use thread lock to prevent race conditions
         with excel_processor_lock:
@@ -1234,7 +1234,7 @@ def get_excel_processor():
                         logging.info(f"🔄 FORCE RELOAD: Session has different file ({session_file_path}) than loaded ({current_file})")
                     else:
                         logging.info(f"🔄 FORCE RELOAD: Processor has no data, loading session file: {session_file_path}")
-                _excel_processor = None  # Force recreation with new file
+                    _excel_processor = None  # Force recreation with new file
             
             # Determine the active store for this request (if any)
             selected_store = None
@@ -1249,7 +1249,7 @@ def get_excel_processor():
             
             if _excel_processor is None:
                 # Create processor with store-aware configuration so lineage updates persist per store
-                    _excel_processor = ExcelProcessor(store_name=processor_store)
+                 _excel_processor = ExcelProcessor(store_name=processor_store)
                 
                 # CRITICAL FIX: Check for uploaded file in session when creating new processor
                 # This ensures file persists across page reloads
@@ -1260,9 +1260,9 @@ def get_excel_processor():
                         if session_file_path and os.path.exists(session_file_path):
                             logging.info(f"✅ Loading persisted file from session on processor creation: {session_file_path}")
                             # PERFORMANCE: Use fast_mode for instant loading
-                            success = _excel_processor.load_file(session_file_path, fast_mode=True)
+                        success = _excel_processor.load_file(session_file_path, fast_mode=True)
                             if success:
-                                _excel_processor._last_loaded_file = session_file_path
+                            _excel_processor._last_loaded_file = session_file_path
                                 row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
                                 logging.info(f"✅ Successfully loaded {row_count} rows from persisted session file")
                             else:
@@ -1273,10 +1273,10 @@ def get_excel_processor():
                     logging.debug(f"Could not load session file on processor creation: {session_load_error}")
             else:
                 # If the active store changed, update the processor's store context
-                current_processor_store = getattr(_excel_processor, '_store_name', None)
+                    current_processor_store = getattr(_excel_processor, '_store_name', None)
                 if current_processor_store != processor_store:
                     logging.info(f"🔄 ExcelProcessor store context update: '{current_processor_store}' → '{processor_store}'")
-                    _excel_processor._store_name = processor_store
+                _excel_processor._store_name = processor_store
                     # Clear caches tied to previous store to avoid mixing data
                     if hasattr(_excel_processor, '_invalidate_caches'):
                         _excel_processor._invalidate_caches()
@@ -1322,7 +1322,7 @@ def get_excel_processor():
                             logging.info(f"📂 Reloading session file (processor has no data): {session_file_path}")
                         
                         # PERFORMANCE: Use fast_mode for instant loading on first tag request
-                        success = _excel_processor.load_file(session_file_path, fast_mode=True)
+                            success = _excel_processor.load_file(session_file_path, fast_mode=True)
                         if success:
                             _excel_processor._last_loaded_file = session_file_path
                             logging.info(f"✅ CRITICAL FIX: Successfully loaded session file with FAST MODE: {session_file_path}")
@@ -1339,7 +1339,7 @@ def get_excel_processor():
                                     logging.warning(f"Could not update DataFrame lineage from database after session file load: {df_update_err}")
                         else:
                             logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
-                            _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
+                                    _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
                 elif session_file_path:
                     logging.error(f"❌ Session file_path exists but file not found: {session_file_path}")
                 else:
@@ -1358,13 +1358,13 @@ def get_excel_processor():
                                 # Use fast loading mode for better performance
                                 success = _excel_processor.load_file(default_file)
                                 if success:
-                                    _excel_processor._last_loaded_file = default_file
+                                _excel_processor._last_loaded_file = default_file
                                     # Optimize DataFrame
                                     if _excel_processor.df is not None:
                                         for col in ['Product Type*', 'Lineage', 'Product Brand', 'Vendor', 'Product Strain']:
                                             canonical_col = get_canonical_field(col)
                                             if canonical_col in _excel_processor.df.columns:
-                                                _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
+                                     _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
                                     
                                     # GUARANTEED FIX: Force DataFrame update from database after loading default file
                                     # This ensures database lineage is ALWAYS used, even on app restart
@@ -1383,7 +1383,7 @@ def get_excel_processor():
                                             logging.info(f"Successfully populated dropdown cache in get_excel_processor")
                                             # Log the strain count specifically
                                             if 'strain' in _excel_processor.dropdown_cache:
-                                                strain_count = len(_excel_processor.dropdown_cache['strain'])
+                                            strain_count = len(_excel_processor.dropdown_cache['strain'])
                                                 logging.info(f"Dropdown cache contains {strain_count} strains")
                                             else:
                                                 logging.warning("No strain filter found in dropdown cache")
@@ -1395,30 +1395,30 @@ def get_excel_processor():
                                     logging.error("Failed to load default file in get_excel_processor")
                                     # Ensure df attribute exists even if loading failed, but do not wipe existing data
                                     if not hasattr(_excel_processor, 'df') or _excel_processor.df is None:
-                                        _excel_processor.df = pd.DataFrame()
+                                    _excel_processor.df = pd.DataFrame()
                             else:
                                 logging.warning("No default file found in get_excel_processor")
                                 # Ensure df attribute exists even if no default file, but preserve existing data if present
                                 if not hasattr(_excel_processor, 'df') or _excel_processor.df is None:
-                                    _excel_processor.df = pd.DataFrame()
+                                _excel_processor.df = pd.DataFrame()
                         else:
                             if DISABLE_STARTUP_FILE_LOADING:
                                 logging.info("OPTIMIZATION: Skipping default file loading on startup for faster app loading")
                             else:
                                 logging.info("Excel processor was reset - not loading default file automatically")
                             # Always ensure df attribute exists for reset processor
-                            _excel_processor.df = pd.DataFrame()
+                                _excel_processor.df = pd.DataFrame()
                             # Clear the reset flag since we've handled it
-                            _excel_processor_reset_flag = False
+                                _excel_processor_reset_flag = False
             
             # Ensure df attribute exists
             if not hasattr(_excel_processor, 'df'):
                 logging.error("ExcelProcessor missing df attribute - creating empty DataFrame")
-                _excel_processor.df = pd.DataFrame()
+             _excel_processor.df = pd.DataFrame()
             
             # Ensure selected_tags attribute exists
             if not hasattr(_excel_processor, 'selected_tags'):
-                _excel_processor.selected_tags = []
+             _excel_processor.selected_tags = []
             
             # Clear recursion guard before returning
             if has_context and hasattr(g, '_in_get_excel_processor'):
@@ -2109,7 +2109,7 @@ def initialize_excel_processor():
         # Skip initialization if startup file loading is disabled for performance
         if DISABLE_STARTUP_FILE_LOADING:
             logging.info("Startup file loading disabled for faster application startup")
-            excel_processor = get_excel_processor()
+        excel_processor = get_excel_processor()
             excel_processor.logger.setLevel(logging.WARNING)
             return
         
@@ -2372,7 +2372,7 @@ def get_session_excel_processor():
             return None
     
     try:
-    g._getting_excel_processor = True  # Set recursion guard
+        g._getting_excel_processor = True  # Set recursion guard
         
         if 'excel_processor' not in g:
             # Use the global Excel processor instead of creating a new one
@@ -3098,7 +3098,7 @@ def upload_file():
                 success = processor.load_file(file_path, fast_mode=True)
                 
                 if success:
-            _excel_processor = processor
+                    _excel_processor = processor
                     row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                     logging.info(f"[INSTANT] ✅ File loaded synchronously: {row_count} rows")
                     
@@ -3126,7 +3126,7 @@ def upload_file():
             # CRITICAL: Don't clear processor if synchronous load succeeded
             # Only clear if synchronous load failed
             if not success:
-                _excel_processor = None
+             _excel_processor = None
             
             try:
                 cache_key = get_session_cache_key('available_tags')
@@ -3151,7 +3151,7 @@ def upload_file():
                         success = processor.load_file(file_path, fast_mode=True)
                         
                         if success:
-                _excel_processor = processor
+                            _excel_processor = processor
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] ✅ File loaded: {row_count} rows")
                             
@@ -3248,7 +3248,7 @@ def upload_file():
                                 logging.warning(f"[LOCAL-BACKGROUND] Database storage failed: {db_error}")
                             
                             # Update global processor
-                            _excel_processor = processor
+                                _excel_processor = processor
                             logging.info(f"[LOCAL-BACKGROUND] ✅ Updated global Excel processor with {row_count} rows")
                         else:
                             logging.error("[LOCAL-BACKGROUND] File load returned False")
@@ -3473,8 +3473,8 @@ def process_large_file_streaming(temp_path: str, filename: str, start_time: floa
                 
                 # Update global processor
                     with excel_processor_lock:
-                    _excel_processor = processor
-                    _excel_processor._last_loaded_file = temp_path
+                        _excel_processor = processor
+                        _excel_processor._last_loaded_file = temp_path
                 
                 processing_time = time.time() - start_time
                 
@@ -3534,7 +3534,7 @@ def process_small_file_optimized(temp_path: str, filename: str, start_time: floa
         # Update global processor
             with excel_processor_lock:
             _excel_processor = processor
-            _excel_processor._last_loaded_file = temp_path
+                _excel_processor._last_loaded_file = temp_path
         
         processing_time = time.time() - start_time
         
@@ -3956,8 +3956,8 @@ def process_excel_sync(filename, temp_path):
         
         # Update global processor
                 with excel_processor_lock:
-                _excel_processor = processor
-            _excel_processor._last_loaded_file = temp_path
+                    _excel_processor = processor
+                    _excel_processor._last_loaded_file = temp_path
             logging.info(f"[SYNC] Global processor updated with {len(processor.df)} rows")
         
         logging.info(f"[SYNC] ===== SYNCHRONOUS PROCESSING COMPLETE =====")
@@ -4014,8 +4014,8 @@ def ultra_fast_background_processing(filename, temp_path):
         # Step 5: Store in global processor (skip database storage for speed)
                 try:
             with excel_processor_lock:
-            _excel_processor = processor
-                _excel_processor._last_loaded_file = temp_path
+                    _excel_processor = processor
+                    _excel_processor._last_loaded_file = temp_path
                 logging.info(f"[ULTRA-FAST-BG] Global processor updated with {len(processor.df)} rows")
         except NameError:
             # Fallback if lock not available in this context (shouldn't happen)
@@ -4113,11 +4113,11 @@ def update_global_processor_fast(processor, temp_path):
                 if hasattr(_excel_processor, 'df'):
                     del _excel_processor.df
                 if hasattr(_excel_processor, 'selected_tags'):
-                    _excel_processor.selected_tags = []
+             _excel_processor.selected_tags = []
             
             # Set new processor
-        _excel_processor = processor
-            _excel_processor._last_loaded_file = temp_path
+                    _excel_processor = processor
+                    _excel_processor._last_loaded_file = temp_path
             
             logging.info(f"[ULTRA-FAST-BG] Global processor updated with {len(processor.df)} rows")
             
@@ -4240,7 +4240,7 @@ def process_excel_background(filename, temp_path):
         
         # ULTRA-FAST PROCESSING: Update global processor immediately
                         with excel_processor_lock:
-                    _excel_processor = new_processor
+                            _excel_processor = new_processor
             logging.info(f"[BG] ✅ Global processor updated with {len(new_processor.df)} rows")
         
         # CRITICAL: Defer ALL expensive operations to separate background thread
@@ -4751,7 +4751,7 @@ def upload_status():
                 status = 'processing'  # Still processing
         elif status == 'processing' and file_exists:
             # Check if processing is actually complete
-            local_processor = get_excel_processor()
+                local_processor = get_excel_processor()
             if local_processor and hasattr(local_processor, 'df') and local_processor.df is not None and not local_processor.df.empty:
                 status = 'ready'
                 logging.info(f"File {filename} processing completed (global processor has data)")
@@ -4853,7 +4853,7 @@ def get_current_file():
         row_count = 0
         if file_exists:
             try:
-                processor = get_excel_processor()
+            processor = get_excel_processor()
                 if processor and hasattr(processor, 'df') and processor.df is not None and not processor.df.empty:
                     has_data = True
                     row_count = len(processor.df)
@@ -5005,8 +5005,8 @@ def process_lightning():
         
         # Update global processor
                 with excel_processor_lock:
-                _excel_processor = processor
-            _excel_processor._last_loaded_file = file_path
+                    _excel_processor = processor
+                    _excel_processor._last_loaded_file = file_path
         
         # PC optimization: Skip cache clearing for better performance
         if not is_windows:
@@ -5483,7 +5483,7 @@ def update_selected_order():
         if not new_order:
             return jsonify({'error': 'No order provided'}), 400
         
-        excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
         
         # Get current selected tags as names
         current_selected = []
@@ -6708,7 +6708,7 @@ def generate_labels():
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
         
         # TRACE: Check store before getting excel_processor
-            logging.info(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
+         logging.info(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
         
         # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
@@ -7972,7 +7972,7 @@ def download_transformed_excel():
         if not selected_tags:
             return jsonify({'error': 'No records selected'}), 400
         
-        excel_processor = get_excel_processor()
+            excel_processor = get_excel_processor()
         # Try multiple possible column names for product names
         product_name_column = None
         possible_columns = ['Product Name*', 'ProductName', 'Product Name', 'product_name']
@@ -8587,12 +8587,12 @@ def get_available_tags():
                     # PYTHONANYWHERE FIX: Try cached processor first, but if None, attempt synchronous load
                     # This ensures tags can load even if background thread hasn't finished
                     if is_pythonanywhere:
-                        excel_processor = _excel_processor if _excel_processor is not None else None
+                    excel_processor = _excel_processor if _excel_processor is not None else None
                         if excel_processor is None and file_exists:
                             # Processor not loaded yet - try to load it synchronously
                             logging.info("⚡ PYTHONANYWHERE: Processor not loaded, attempting synchronous load...")
                             try:
-                                excel_processor = get_excel_processor()
+                            excel_processor = get_excel_processor()
                                 if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
                                     logging.info(f"✅ PYTHONANYWHERE: Synchronous load successful - {len(excel_processor.df)} rows")
                                 else:
@@ -8606,9 +8606,9 @@ def get_available_tags():
                         else:
                             logging.info(f"✅ PYTHONANYWHERE: Using processor with {len(excel_processor.df) if excel_processor.df is not None else 0} rows")
                     elif file_exists:
-                        excel_processor = get_excel_processor()
+                            excel_processor = get_excel_processor()
                     else:
-                        excel_processor = _excel_processor if _excel_processor is not None else None
+                            excel_processor = _excel_processor if _excel_processor is not None else None
                 except Exception as get_proc_err:
                     logging.warning(f"Could not get Excel processor for fast_load: {get_proc_err}")
                     excel_processor = None
@@ -8716,7 +8716,7 @@ def get_available_tags():
                 # CRITICAL FIX: Also update Excel processor DataFrame lineage if it exists
                 # This ensures the DataFrame is in sync with database before tags are loaded
                 try:
-                    excel_processor = get_session_excel_processor()
+                excel_processor = get_session_excel_processor()
                     if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                         if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
                             logging.info("🔄 CRITICAL: Updating DataFrame lineage from database for cached tags...")
@@ -9123,7 +9123,7 @@ def get_available_tags():
             # Try Excel processor first (lighter than database queries)
             # CRITICAL FIX: Use get_session_excel_processor() to get uploaded file, not default file
             try:
-                excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
             except Exception as excel_proc_err:
                 logging.warning(f"Error getting Excel processor: {excel_proc_err}")
                 excel_processor = None
@@ -10806,7 +10806,7 @@ def update_lineage():
                 delattr(g, 'excel_processor')
                 logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
             if _excel_processor is not None:
-                _excel_processor = None
+                            _excel_processor = None
                 logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
         except Exception as clear_err:
             logging.warning(f"Could not clear caches/processor: {clear_err}")
@@ -10897,7 +10897,7 @@ def batch_update_lineage():
         if not lineage_updates:
             return jsonify({'error': 'No lineage updates provided'}), 400
             
-        excel_processor = get_excel_processor()
+            excel_processor = get_excel_processor()
         if excel_processor.df is None:
             return jsonify({'error': 'No data loaded'}), 400
         
@@ -11191,7 +11191,7 @@ def update_doh():
             doh_storage_value = 'No'
         
         # Get the excel processor from session
-        excel_processor = get_excel_processor()
+            excel_processor = get_excel_processor()
         if not excel_processor or excel_processor.df is None:
             return jsonify({'error': 'No data loaded'}), 400
         
@@ -12535,7 +12535,7 @@ def search_products():
             return jsonify({'error': 'Vendor parameter is required'}), 400
         
         # Get the Excel processor to access the Excel data with 'Strain Names' column
-        excel_processor = get_excel_processor()
+            excel_processor = get_excel_processor()
         
         if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No Excel data available'}), 400
@@ -15064,7 +15064,7 @@ def json_match():
             
         logging.info(f"Processing URL: {url[:50]}...")
         
-        excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
         json_matcher = get_session_json_matcher()
         
         # Check if json_matcher was successfully created
@@ -15568,7 +15568,7 @@ def json_match_detailed():
             json_items = []
             
         # Get available tags
-        excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
         if not excel_processor or not hasattr(excel_processor, 'df') or excel_processor.df is None:
             return jsonify({'error': 'No Excel data available for matching'}), 400
             
@@ -15688,7 +15688,7 @@ def match_json_tags():
             return jsonify({'matched': [], 'unmatched': [], 'error': 'No valid product names or IDs found in JSON.'}), 400
             
         # Get Excel processor and available tags
-        excel_processor = get_excel_processor()
+            excel_processor = get_excel_processor()
         if excel_processor.df is None:
             return jsonify({'matched': [], 'unmatched': names, 'error': 'No Excel data loaded. Please upload an Excel file first.'}), 400
             
@@ -17136,7 +17136,7 @@ def get_lineage_suggestions():
             return jsonify({'success': False, 'message': 'Strain name is required'})
         
         # Get suggestions from excel processor
-        excel_processor = get_excel_processor()
+            excel_processor = get_excel_processor()
         if excel_processor and excel_processor.df is not None:
             suggestions = excel_processor.get_lineage_suggestions(strain_name)
             return jsonify({'success': True, 'suggestions': suggestions})
@@ -17434,7 +17434,7 @@ def debug_upload_processing():
             current_timestamps = dict(processing_timestamps)
         
         # Get Excel processor status
-        excel_processor = get_excel_processor()
+            excel_processor = get_excel_processor()
         processor_status = {
             'has_processor': excel_processor is not None,
             'has_dataframe': hasattr(excel_processor, 'df') and excel_processor.df is not None,
@@ -17996,7 +17996,7 @@ def bulk_update_lineage():
             if not isinstance(update, dict) or 'strain_name' not in update or 'lineage' not in update:
                 return jsonify({'error': 'Invalid update format. Each update must have strain_name and lineage'}), 400
         
-        excel_processor = get_excel_processor()
+            excel_processor = get_excel_processor()
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No data available'}), 404
         
@@ -19317,7 +19317,7 @@ def diagnose_json_matching():
             return jsonify({'error': 'URL is required'}), 400
             
         json_matcher = get_session_json_matcher()
-        excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
         
         if not json_matcher:
             return jsonify({'error': 'JSON matcher not available'}), 500
@@ -19489,7 +19489,7 @@ def json_match_mixed():
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
             
-        excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
         json_matcher = get_session_json_matcher()
         
         # Check if we have Excel data
@@ -19632,7 +19632,7 @@ def clear_json_match_cache():
                 logging.info(f"Cleared session key: {key}")
         
         # Clear Excel processor caches if available
-        excel_processor = get_session_excel_processor()
+                excel_processor = get_session_excel_processor()
         if excel_processor:
             if hasattr(excel_processor, '_file_cache'):
                 excel_processor._file_cache.clear()
@@ -20387,7 +20387,7 @@ def ai_enhanced_json_match():
             return jsonify({'error': 'Enhanced AI matcher not available'}), 500
             
         # Get excel processor for database products
-        excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No database products available for matching'}), 500
             
@@ -20633,7 +20633,7 @@ def debug_json_matching():
             products = []
         
         # Get database products
-        excel_processor = get_session_excel_processor()
+            excel_processor = get_session_excel_processor()
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No database products available'}), 500
             
