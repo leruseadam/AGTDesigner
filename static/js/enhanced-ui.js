@@ -251,6 +251,15 @@ async function handleFiles(files) {
         console.log(`File uploaded successfully: ${data.filename}, rows: ${data.rows}`);
         console.log('Upload response data:', data);
         
+        // CRITICAL FIX: Reset retry counter after successful upload to allow fresh tag loading
+        if (typeof TagManager !== 'undefined') {
+          if (TagManager.clearInitialDataRetry) {
+            TagManager.clearInitialDataRetry();
+            TagManager.state.initialDataAttempts = 0;
+            console.log('✅ Reset retry counter after upload');
+          }
+        }
+        
         // Update splash to show success
         if (statusElement) statusElement.textContent = `✅ Success! ${data.rows || 'File'} rows loaded`;
         
@@ -275,48 +284,54 @@ async function handleFiles(files) {
         if (typeof TagManager !== 'undefined') {
           try {
             TagManager.clearUIStateForNewFile(true); // keep filters
-            // Kick off refresh without awaiting to prevent UI stall
-            setTimeout(() => {
-              if (TagManager.refreshTagLists) {
-                console.time('post-upload-refresh-async');
-                TagManager.refreshTagLists({ preserveFilters: true, force: true })
-                  .finally(() => console.timeEnd('post-upload-refresh-async'))
-                  .catch(err => {
-                    console.error('Async refreshTagLists failed', err);
-                    // Try individual fetches as fallback instead of reloading
-                    console.warn('Trying individual tag fetches as fallback...');
-                    Promise.allSettled([
-                      TagManager.fetchAndUpdateAvailableTags?.() || Promise.resolve(),
-                      TagManager.fetchAndUpdateSelectedTags?.() || Promise.resolve(),
-                      TagManager.fetchAndPopulateFilters?.() || Promise.resolve()
-                    ]).then(() => {
-                      console.log('✅ Fallback tag loading completed');
-                    }).catch(fallbackErr => {
-                      console.error('All tag loading methods failed, reloading as last resort', fallbackErr);
-                      // Only reload as absolute last resort after all methods fail
-                      if (window.safeReload) {
-                        window.safeReload(2000);
-                      } else {
-                        // CRITICAL FIX: Debounce reloads to prevent flashing
-                        if (window._reloadTimeout) {
-                          clearTimeout(window._reloadTimeout);
-                        }
-                        window._reloadTimeout = setTimeout(() => {
-                          if (!window._reloadInProgress) {
-                            window._reloadInProgress = true;
-                            window.location.reload();
-                          }
-                        }, 2000);
+            
+            // CRITICAL FIX: Load tags immediately after upload - don't delay
+            console.log('🚀 Loading tags immediately after upload...');
+            
+            // Try refreshTagLists first (most reliable)
+            if (TagManager.refreshTagLists) {
+              console.time('post-upload-refresh-async');
+              TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                .then(() => {
+                  console.timeEnd('post-upload-refresh-async');
+                  console.log('✅ Tags loaded successfully via refreshTagLists');
+                })
+                .catch(err => {
+                  console.error('❌ refreshTagLists failed:', err);
+                  // Fallback to individual fetches
+                  console.warn('🔄 Trying individual tag fetches as fallback...');
+                  Promise.allSettled([
+                    TagManager.fetchAndUpdateAvailableTags?.() || Promise.resolve(),
+                    TagManager.fetchAndUpdateSelectedTags?.() || Promise.resolve(),
+                    TagManager.fetchAndPopulateFilters?.() || Promise.resolve()
+                  ]).then(() => {
+                    console.log('✅ Fallback tag loading completed');
+                  }).catch(fallbackErr => {
+                    console.error('❌ All tag loading methods failed:', fallbackErr);
+                    // Last resort: reload page after delay
+                    console.warn('🔄 Reloading page as last resort...');
+                    if (window.safeReload) {
+                      window.safeReload(2000);
+                    } else {
+                      if (window._reloadTimeout) {
+                        clearTimeout(window._reloadTimeout);
                       }
-                    });
+                      window._reloadTimeout = setTimeout(() => {
+                        if (!window._reloadInProgress) {
+                          window._reloadInProgress = true;
+                          window.location.reload();
+                        }
+                      }, 2000);
+                    }
                   });
-              } else {
-                // Fallback individual fetches without await
-                TagManager.fetchAndUpdateAvailableTags?.();
-                TagManager.fetchAndUpdateSelectedTags?.();
-                TagManager.fetchAndPopulateFilters?.();
-              }
-            }, 0);
+                });
+            } else {
+              // Fallback: individual fetches without await
+              console.warn('⚠️ refreshTagLists not available, using individual fetches');
+              TagManager.fetchAndUpdateAvailableTags?.();
+              TagManager.fetchAndUpdateSelectedTags?.();
+              TagManager.fetchAndPopulateFilters?.();
+            }
           } catch (e) {
             console.error('Post-upload async refresh setup failed', e);
             // Try to load tags individually instead of reloading immediately
