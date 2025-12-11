@@ -156,45 +156,12 @@
           if (window.STORE_MODAL_BLOCKING) {
             console.log('✅ Clearing STORE_MODAL_BLOCKING flag');
             window.STORE_MODAL_BLOCKING = false;
-            
-            // CRITICAL FIX: After store is selected, wait for full TagManager and initialize
-            console.log('🔄 Store selected - checking TagManager availability...');
-            
-            // Reset the wait counter and restart waiting if TagManager isn't fully loaded
-            if (!window.TagManager || typeof window.TagManager.createTagElement !== 'function') {
-              console.log('⏳ TagManager not fully loaded yet, restarting wait...');
-              if (typeof window.waitForTagManagerAndInit === 'function') {
-                // Reset counter and restart
-                window.tagManagerInitAttempts = 0;
-                window.waitForTagManagerAndInit();
-              } else {
-                // Fallback: try again after a delay
-                setTimeout(() => {
-                  if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
-                    console.log('✅ TagManager now available after store selection!');
-                    if (typeof window.initializeTagManagerSafely === 'function') {
-                      window.initializeTagManagerSafely();
-                    }
-                  } else {
-                    console.error('❌ TagManager still not available after store selection');
-                  }
-                }, 500);
-              }
-            } else {
-              // TagManager is fully loaded, initialize it
-              console.log('✅ TagManager fully loaded - initializing...');
-              setTimeout(() => {
-                try {
-                  if (typeof window.initializeTagManagerSafely === 'function') {
-                    window.initializeTagManagerSafely();
-                  }
-                } catch (initError) {
-                  console.error('❌ Error initializing TagManager after store selection:', initError);
-                }
-              }, 200);
-            }
           }
           window.checkingStoreRequired = false;
+          
+          // CRITICAL FIX: Don't wait for TagManager - reload immediately
+          // TagManager will initialize after page reloads with the new store
+          console.log('🔄 Store selected - reloading immediately (TagManager will init after reload)...');
 
           // Give the user quick visual feedback while we prep the reload
           if (window.Toast && typeof window.Toast.show === 'function') {
