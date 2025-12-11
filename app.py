@@ -1278,7 +1278,7 @@ def get_excel_processor():
                     logging.info(f"🔄 ExcelProcessor store context update: '{current_processor_store}' → '{processor_store}'")
                 _excel_processor._store_name = processor_store
                     # Clear caches tied to previous store to avoid mixing data
-                    if hasattr(_excel_processor, '_invalidate_caches'):
+                if hasattr(_excel_processor, '_invalidate_caches'):
                         _excel_processor._invalidate_caches()
                 
                 # Enable product database integration by default
@@ -1339,7 +1339,7 @@ def get_excel_processor():
                                     logging.warning(f"Could not update DataFrame lineage from database after session file load: {df_update_err}")
                         else:
                             logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
-                                    _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
+                            _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
                 elif session_file_path:
                     logging.error(f"❌ Session file_path exists but file not found: {session_file_path}")
                 else:
