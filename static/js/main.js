@@ -8285,13 +8285,15 @@ const TagManager = {
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
             let response;
             let responseData;
-            const maxRetries = 1; // Reduced from 3 to 1 to prevent multiple restarts for errors
+            const maxRetries = 3; // Allow retries for errors
             const maxProcessingRetries = 30; // Allow 30 retries for 202 (file processing) - enough for 60+ seconds of loading
             let retryCount = 0;
             let processingRetryCount = 0;
             let lastError;
             
-            while (retryCount < maxRetries && processingRetryCount < maxProcessingRetries) {
+            // CRITICAL: Continue retrying as long as EITHER condition is met (not both)
+            // This allows 202 retries to continue even after error retries are exhausted
+            while (retryCount < maxRetries || processingRetryCount < maxProcessingRetries) {
                 try {
                     const controller = new AbortController();
                     // CRITICAL: Set timeout to 180 seconds for PythonAnywhere large file loading

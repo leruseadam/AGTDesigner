@@ -3143,6 +3143,10 @@ def upload_file():
 
                             # PERFORMANCE: Pre-cache tags for instant frontend access
                             try:
+                                # CRITICAL: Ensure enrichment is skipped for maximum speed
+                                processor._skip_enrichment = True
+                                logging.info(f"[BACKGROUND] ⚡ Set _skip_enrichment=True for fast tag generation")
+                                
                                 tags = processor.get_available_tags(filters=None)
                                 safe_tags = make_json_safe(tags)
                                 cache_key = get_session_cache_key(f'available_tags_{file_path}')
