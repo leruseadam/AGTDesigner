@@ -8580,20 +8580,27 @@ def get_available_tags():
                 # Wrap in try-catch to handle loading failures gracefully
                 excel_processor = None
                 try:
-                    # PYTHONANYWHERE FIX: On PythonAnywhere, try cached processor first, but if None, try loading
+                    # PYTHONANYWHERE FIX: Try cached processor first, but if None, attempt synchronous load
                     # This ensures tags can load even if background thread hasn't finished
                     if is_pythonanywhere:
                         excel_processor = _excel_processor if _excel_processor is not None else None
                         if excel_processor is None and file_exists:
-                            # Processor not loaded yet - try to load it synchronously (with timeout protection)
+                            # Processor not loaded yet - try to load it synchronously
                             logging.info("⚡ PYTHONANYWHERE: Processor not loaded, attempting synchronous load...")
                             try:
                                 excel_processor = get_excel_processor()
-                                logging.info(f"✅ PYTHONANYWHERE: Synchronous load successful: {excel_processor is not None}")
+                                if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
+                                    logging.info(f"✅ PYTHONANYWHERE: Synchronous load successful - {len(excel_processor.df)} rows")
+                                else:
+                                    logging.warning("⚠️ PYTHONANYWHERE: Synchronous load returned empty processor")
+                                    excel_processor = None
                             except Exception as sync_err:
                                 logging.warning(f"⚠️ PYTHONANYWHERE: Synchronous load failed: {sync_err}")
                                 excel_processor = None
-                        logging.info(f"⚡ PYTHONANYWHERE: Using processor: {excel_processor is not None}")
+                        if excel_processor is None:
+                            logging.info("⏳ PYTHONANYWHERE: Processor not available - will return empty tags")
+                        else:
+                            logging.info(f"✅ PYTHONANYWHERE: Using processor with {len(excel_processor.df) if excel_processor.df is not None else 0} rows")
                     elif file_exists:
                         excel_processor = get_excel_processor()
                     else:
