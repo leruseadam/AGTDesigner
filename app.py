@@ -10676,22 +10676,40 @@ def update_lineage():
         
         # Step 1: Update product lineage using ProductDatabase method
         products_updated = 0
+        # Step 1: CRITICAL FIX - Update product lineage directly using the same connection
+        # This ensures transaction consistency and proper persistence
+        products_updated = 0
         try:
-            # Use the ProductDatabase method which handles normalization
-            success = product_db.update_product_lineage(tag_name, new_lineage)
-            if success:
-                # Get the actual count of updated rows
-                cursor.execute("""
-                    SELECT COUNT(*) FROM products 
-                    WHERE "Product Name*" = ? OR ProductName = ?
-                """, (tag_name, tag_name))
-                products_updated = cursor.fetchone()[0]
+            from datetime import datetime
+            normalized_name = product_db._normalize_product_name(tag_name)
+            
+            # Update by product name (try multiple matching strategies)
+            cursor.execute('''
+                UPDATE products
+                SET "Lineage" = ?, updated_at = ?
+                WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+            ''', (new_lineage, datetime.now().isoformat(), tag_name, tag_name, normalized_name))
+            products_updated = cursor.rowcount
+            
+            # If no exact match, try case-insensitive match
+            if products_updated == 0:
+                cursor.execute('''
+                    UPDATE products
+                    SET "Lineage" = ?, updated_at = ?
+                    WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
+                       OR TRIM(LOWER(ProductName)) = TRIM(LOWER(?))
+                       OR TRIM(LOWER(normalized_name)) = TRIM(LOWER(?))
+                ''', (new_lineage, datetime.now().isoformat(), tag_name, tag_name, normalized_name))
+                products_updated = cursor.rowcount
+            
+            if products_updated > 0:
                 logging.info(f"✅ Updated {products_updated} product(s) with lineage '{new_lineage}'")
             else:
-                logging.warning(f"⚠️ ProductDatabase.update_product_lineage returned False for '{tag_name}'")
+                logging.warning(f"⚠️ No products found to update for '{tag_name}'")
         except Exception as e:
             logging.error(f"Error updating product lineage: {e}")
-        
+            import traceback
+            logging.error(traceback.format_exc())
         # Step 2: CRITICAL - Also update strain lineage if product has a strain
         # This ensures the lineage persists because strain lineage is the source of truth
         cursor.execute("""
