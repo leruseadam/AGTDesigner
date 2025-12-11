@@ -10018,6 +10018,10 @@ const TagManager = {
                     // Use direct _updateAvailableTags for instant display (no debounce delay)
                     this._updateAvailableTags(data.available_tags, null);
                     
+                    // CRITICAL FIX: Store tags in state immediately
+                    this.state.tags = [...data.available_tags];
+                    this.state.originalTags = [...data.available_tags];
+                    
                     // Run selected tags and filters in parallel for faster loading
                     AppLoadingSplash.updateProgress(85, 'Restoring selections...');
                     verboseLog('About to fetch and update selected tags and filters in parallel...');
@@ -10070,6 +10074,32 @@ const TagManager = {
                     return;
                 } else {
                     verboseLog('No initial data available:', data.message || 'No data found');
+                    
+                    // CRITICAL FIX: If file exists but tags are empty, retry loading tags
+                    // This handles the case where file is still processing
+                    if (hasFile && (!data.available_tags || data.available_tags.length === 0)) {
+                        verboseLog('⚠️ File exists but tags are empty - file may still be processing, retrying...');
+                        const availableTagsContainer = document.getElementById('availableTags');
+                        if (availableTagsContainer) {
+                            availableTagsContainer.innerHTML = `
+                                <div class="text-center py-4">
+                                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <p class="mt-2 text-white">File processing, loading tags...</p>
+                                </div>
+                            `;
+                        }
+                        
+                        // Retry loading tags after a delay
+                        this._checkingExistingData = false;
+                        setTimeout(() => {
+                            console.log('🔄 Retrying tag load after empty response...');
+                            this.checkForExistingData();
+                        }, 2000); // Wait 2 seconds before retry
+                        return;
+                    }
+                    
                     // Complete splash loading even if no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
