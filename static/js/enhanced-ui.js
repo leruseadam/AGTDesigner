@@ -327,53 +327,85 @@ async function handleFiles(files) {
           try {
             TagManager.clearUIStateForNewFile(true); // keep filters
             
-            // CRITICAL FIX: Load tags immediately after upload - don't delay
-            console.log('🚀 Loading tags immediately after upload...');
+            // CRITICAL FIX: Wait a moment after upload for file to be processed, then load tags
+            // File needs time to be saved and processed before tags are available
+            console.log('🚀 Waiting 2 seconds for file processing, then loading tags...');
             
-            // Try refreshTagLists first (most reliable)
-            if (TagManager.refreshTagLists) {
-              console.time('post-upload-refresh-async');
-              TagManager.refreshTagLists({ preserveFilters: true, force: true })
-                .then(() => {
-                  console.timeEnd('post-upload-refresh-async');
-                  console.log('✅ Tags loaded successfully via refreshTagLists');
-                })
-                .catch(err => {
-                  console.error('❌ refreshTagLists failed:', err);
-                  // Fallback to individual fetches
-                  console.warn('🔄 Trying individual tag fetches as fallback...');
-                  Promise.allSettled([
-                    TagManager.fetchAndUpdateAvailableTags?.() || Promise.resolve(),
-                    TagManager.fetchAndUpdateSelectedTags?.() || Promise.resolve(),
-                    TagManager.fetchAndPopulateFilters?.() || Promise.resolve()
-                  ]).then(() => {
-                    console.log('✅ Fallback tag loading completed');
-                  }).catch(fallbackErr => {
-                    console.error('❌ All tag loading methods failed:', fallbackErr);
-                    // Last resort: reload page after delay
-                    console.warn('🔄 Reloading page as last resort...');
-                    if (window.safeReload) {
-                      window.safeReload(2000);
-                    } else {
-                      if (window._reloadTimeout) {
-                        clearTimeout(window._reloadTimeout);
-                      }
-                      window._reloadTimeout = setTimeout(() => {
-                        if (!window._reloadInProgress) {
-                          window._reloadInProgress = true;
-                          window.location.reload();
+            setTimeout(() => {
+              // CRITICAL FIX: Force database lineage after upload to ensure fresh data
+              TagManager._forceDatabaseLineage = true;
+              
+              // Try refreshTagLists first (most reliable)
+              if (TagManager.refreshTagLists) {
+                console.time('post-upload-refresh-async');
+                TagManager.refreshTagLists({ preserveFilters: true, force: true })
+                  .then(() => {
+                    console.timeEnd('post-upload-refresh-async');
+                    console.log('✅ Tags loaded successfully via refreshTagLists');
+                    // Clear force flag after successful load
+                    TagManager._forceDatabaseLineage = false;
+                  })
+                  .catch(err => {
+                    console.error('❌ refreshTagLists failed:', err);
+                    // Clear force flag on error
+                    TagManager._forceDatabaseLineage = false;
+                    
+                    // Fallback: Try fetchAndUpdateAvailableTags with retry logic
+                    console.warn('🔄 Trying fetchAndUpdateAvailableTags with retry...');
+                    let retryAttempt = 0;
+                    const maxRetries = 5;
+                    
+                    const tryFetchTags = () => {
+                      if (retryAttempt >= maxRetries) {
+                        console.error('❌ All tag loading attempts failed');
+                        // Last resort: reload page
+                        if (window.safeReload) {
+                          window.safeReload(2000);
+                        } else {
+                          if (window._reloadTimeout) {
+                            clearTimeout(window._reloadTimeout);
+                          }
+                          window._reloadTimeout = setTimeout(() => {
+                            if (!window._reloadInProgress) {
+                              window._reloadInProgress = true;
+                              window.location.reload();
+                            }
+                          }, 2000);
                         }
-                      }, 2000);
-                    }
+                        return;
+                      }
+                      
+                      retryAttempt++;
+                      console.log(`🔄 Attempt ${retryAttempt}/${maxRetries} to load tags...`);
+                      
+                      TagManager.fetchAndUpdateAvailableTags?.()
+                        .then(() => {
+                          console.log('✅ Tags loaded successfully via fetchAndUpdateAvailableTags');
+                        })
+                        .catch(fetchErr => {
+                          console.error(`❌ Attempt ${retryAttempt} failed:`, fetchErr);
+                          // Retry after delay
+                          setTimeout(tryFetchTags, 2000 * retryAttempt); // Progressive delay
+                        });
+                    };
+                    
+                    tryFetchTags();
                   });
-                });
-            } else {
-              // Fallback: individual fetches without await
-              console.warn('⚠️ refreshTagLists not available, using individual fetches');
-              TagManager.fetchAndUpdateAvailableTags?.();
-              TagManager.fetchAndUpdateSelectedTags?.();
-              TagManager.fetchAndPopulateFilters?.();
-            }
+              } else {
+                // Fallback: individual fetches without await
+                console.warn('⚠️ refreshTagLists not available, using individual fetches');
+                TagManager._forceDatabaseLineage = true;
+                TagManager.fetchAndUpdateAvailableTags?.()
+                  .then(() => {
+                    TagManager._forceDatabaseLineage = false;
+                  })
+                  .catch(() => {
+                    TagManager._forceDatabaseLineage = false;
+                  });
+                TagManager.fetchAndUpdateSelectedTags?.();
+                TagManager.fetchAndPopulateFilters?.();
+              }
+            }, 2000); // Wait 2 seconds for file to be processed
           } catch (e) {
             console.error('Post-upload async refresh setup failed', e);
             // Try to load tags individually instead of reloading immediately
