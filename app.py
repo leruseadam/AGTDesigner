@@ -3151,7 +3151,7 @@ def upload_file():
                         success = processor.load_file(file_path, fast_mode=True)
                         
                         if success:
-                        _excel_processor = processor
+                            _excel_processor = processor
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] ✅ File loaded: {row_count} rows")
                             
