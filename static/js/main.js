@@ -1320,20 +1320,43 @@ const TagManager = {
     },
 
     scheduleInitialDataRetry(reason = 'unknown') {
+        // CRITICAL FIX: Prevent infinite retry loops that freeze the browser
         const delays = Array.isArray(this.initialDataRetryDelays) && this.initialDataRetryDelays.length > 0
             ? this.initialDataRetryDelays
             : [2000];
         const maxAttempts = delays.length + 1;
         const attemptsSoFar = this.state.initialDataAttempts || 0;
 
+        // CRITICAL FIX: Hard limit to prevent infinite loops - never retry more than 5 times total
+        const ABSOLUTE_MAX_ATTEMPTS = 5;
+        if (attemptsSoFar >= ABSOLUTE_MAX_ATTEMPTS) {
+            console.error(`[InitialData] ABSOLUTE MAX ATTEMPTS (${ABSOLUTE_MAX_ATTEMPTS}) reached - STOPPING ALL RETRIES to prevent browser freeze. Last reason: ${reason}`);
+            // Clear any pending timers
+            if (this.state.initialDataRetryTimer) {
+                clearTimeout(this.state.initialDataRetryTimer);
+                this.state.initialDataRetryTimer = null;
+            }
+            // Reset attempts counter to prevent further retries
+            this.state.initialDataAttempts = ABSOLUTE_MAX_ATTEMPTS;
+            return;
+        }
+
         if (attemptsSoFar >= maxAttempts) {
             console.warn(`[InitialData] Max attempts (${maxAttempts}) reached; not scheduling retry. Last reason: ${reason}`);
             return;
         }
 
+        // CRITICAL FIX: Prevent multiple retry timers from running simultaneously
         if (this.state.initialDataRetryTimer) {
+            console.warn(`[InitialData] Retry timer already exists - clearing previous timer to prevent duplicate retries`);
             clearTimeout(this.state.initialDataRetryTimer);
             this.state.initialDataRetryTimer = null;
+        }
+
+        // CRITICAL FIX: Prevent retry if checkForExistingData is already running
+        if (this._checkingExistingData) {
+            console.warn(`[InitialData] checkForExistingData already in progress - skipping retry to prevent concurrent calls`);
+            return;
         }
 
         const delayIndex = Math.max(0, Math.min(attemptsSoFar - 1, delays.length - 1));
@@ -1344,6 +1367,12 @@ const TagManager = {
 
         const self = this;
         this.state.initialDataRetryTimer = setTimeout(function() {
+            // CRITICAL FIX: Check if still needed before retrying
+            if (self.state.initialized || self._checkingExistingData) {
+                console.log(`[InitialData] Skipping retry - already initialized or check in progress`);
+                self.state.initialDataRetryTimer = null;
+                return;
+            }
             self.state.initialDataRetryTimer = null;
             verboseLog(`[InitialData] Retrying initial data load (attempt ${(self.state.initialDataAttempts || 0) + 1}/${maxAttempts})`);
             self.checkForExistingData();
@@ -9713,9 +9742,17 @@ const TagManager = {
 
     // Check if there's existing data and load it
     async checkForExistingData() {
-        // Prevent multiple simultaneous calls
+        // CRITICAL FIX: Prevent multiple simultaneous calls that could freeze the browser
         if (this._checkingExistingData) {
-            verboseLog('checkForExistingData already in progress, skipping...');
+            console.warn('⚠️ checkForExistingData already in progress, skipping to prevent browser freeze...');
+            return;
+        }
+        
+        // CRITICAL FIX: Prevent infinite retry loops - if we've exceeded max attempts, stop
+        const ABSOLUTE_MAX_ATTEMPTS = 5;
+        if ((this.state.initialDataAttempts || 0) >= ABSOLUTE_MAX_ATTEMPTS) {
+            console.error(`❌ STOPPING checkForExistingData - max attempts (${ABSOLUTE_MAX_ATTEMPTS}) exceeded to prevent browser freeze`);
+            this._checkingExistingData = false;
             return;
         }
         
