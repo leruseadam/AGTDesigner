@@ -1210,7 +1210,7 @@ def get_excel_processor():
     
     try:
         if has_context:
-    g._in_get_excel_processor = True  # Set recursion guard
+            g._in_get_excel_processor = True  # Set recursion guard
         
         # Use thread lock to prevent race conditions
     with excel_processor_lock:
