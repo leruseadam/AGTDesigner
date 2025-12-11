@@ -3083,8 +3083,7 @@ def upload_file():
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
         
         if is_pythonanywhere:
-            global _excel_processor
-            # CRITICAL FIX: Load file synchronously FIRST for instant tag display
+                        # CRITICAL FIX: Load file synchronously FIRST for instant tag display
             # Then continue processing in background for enrichment/database storage
             logging.info("[PYTHONANYWHERE] Loading file synchronously for instant tags...")
             
@@ -3127,8 +3126,7 @@ def upload_file():
             # CRITICAL: Don't clear processor if synchronous load succeeded
             # Only clear if synchronous load failed
             if not success:
-                global _excel_processor
-                _excel_processor = None
+                                _excel_processor = None
             
             try:
                 cache_key = get_session_cache_key('available_tags')
@@ -3153,8 +3151,7 @@ def upload_file():
                         success = processor.load_file(file_path, fast_mode=True)
                         
                         if success:
-                            global _excel_processor
-                            _excel_processor = processor
+                                                        _excel_processor = processor
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] ✅ File loaded: {row_count} rows")
                             
@@ -3251,8 +3248,7 @@ def upload_file():
                                 logging.warning(f"[LOCAL-BACKGROUND] Database storage failed: {db_error}")
                             
                             # Update global processor
-                            global _excel_processor
-                            _excel_processor = processor
+                                                        _excel_processor = processor
                             logging.info(f"[LOCAL-BACKGROUND] ✅ Updated global Excel processor with {row_count} rows")
                         else:
                             logging.error("[LOCAL-BACKGROUND] File load returned False")
@@ -3476,8 +3472,7 @@ def process_large_file_streaming(temp_path: str, filename: str, start_time: floa
                 processor.df = processor.df.dropna(subset=['Product Name*'], how='all')
                 
                 # Update global processor
-                global _excel_processor
-                with excel_processor_lock:
+                                with excel_processor_lock:
                     _excel_processor = processor
                     _excel_processor._last_loaded_file = temp_path
                 
@@ -3537,8 +3532,7 @@ def process_small_file_optimized(temp_path: str, filename: str, start_time: floa
             return jsonify({'error': 'Failed to process file or file is empty'}), 400
         
         # Update global processor
-        global _excel_processor
-        with excel_processor_lock:
+                with excel_processor_lock:
             _excel_processor = processor
             _excel_processor._last_loaded_file = temp_path
         
@@ -3961,8 +3955,7 @@ def process_excel_sync(filename, temp_path):
                 return False
         
         # Update global processor
-        global _excel_processor
-        with excel_processor_lock:
+                with excel_processor_lock:
             _excel_processor = processor
             _excel_processor._last_loaded_file = temp_path
             logging.info(f"[SYNC] Global processor updated with {len(processor.df)} rows")
@@ -4019,8 +4012,7 @@ def ultra_fast_background_processing(filename, temp_path):
         logging.info("[ULTRA-FAST-BG] Ultra-minimal processing completed - raw data ready")
         
         # Step 5: Store in global processor (skip database storage for speed)
-        global _excel_processor
-        try:
+                try:
             with excel_processor_lock:
                 _excel_processor = processor
                 _excel_processor._last_loaded_file = temp_path
@@ -4247,8 +4239,7 @@ def process_excel_background(filename, temp_path):
             return
         
         # ULTRA-FAST PROCESSING: Update global processor immediately
-        global _excel_processor
-        with excel_processor_lock:
+                with excel_processor_lock:
             _excel_processor = new_processor
             logging.info(f"[BG] ✅ Global processor updated with {len(new_processor.df)} rows")
         
@@ -5013,8 +5004,7 @@ def process_lightning():
                     return jsonify({'error': 'Failed to process file'}), 500
         
         # Update global processor
-        global _excel_processor
-        with excel_processor_lock:
+                with excel_processor_lock:
             _excel_processor = processor
             _excel_processor._last_loaded_file = file_path
         
@@ -8060,8 +8050,7 @@ def get_session_cache_key(base_key):
         sid = 'background'  # Fallback for any session access issues
 
     # OPTIMIZATION: Get file path from global _excel_processor if it exists, without loading
-    global _excel_processor
-    file_path = ''
+        file_path = ''
     if _excel_processor is not None:
         file_path = getattr(_excel_processor, '_last_loaded_file', '')
 
@@ -10813,8 +10802,7 @@ def update_lineage():
                 pass
             logging.info("✅ Set lineage_update_timestamp to force fresh lineage alignment (session marked modified)")
             # CRITICAL FIX: Clear Excel processor from both global and request context to force reload with fresh database lineage
-            global _excel_processor
-            if hasattr(g, 'excel_processor'):
+                        if hasattr(g, 'excel_processor'):
                 delattr(g, 'excel_processor')
                 logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
             if _excel_processor is not None:
@@ -19179,8 +19167,7 @@ def diagnose_uploads():
             files.sort(key=lambda x: x['modified'], reverse=True)
         
         # Check global processor
-        global _excel_processor
-        processor_status = {
+                processor_status = {
             'exists': _excel_processor is not None,
             'has_df': _excel_processor.df is not None if _excel_processor else False,
             'df_shape': _excel_processor.df.shape if _excel_processor and _excel_processor.df is not None else None,
