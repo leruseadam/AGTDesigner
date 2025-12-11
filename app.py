@@ -5860,7 +5860,8 @@ def clear_store():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/check-store-required', methods=['GET'])
-@cached_route(ttl=15, vary_by=['session_id'])
+# CRITICAL FIX: Disable caching to ensure fresh store check on every reload
+# @cached_route(ttl=15, vary_by=['session_id'])
 def check_store_required():
     """Check if store selection is required for the current IP address."""
     try:
