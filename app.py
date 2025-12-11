@@ -8515,10 +8515,10 @@ def get_available_tags():
         # INSTANT TAGS: Load file synchronously if needed instead of returning 202
         # This ensures tags appear instantly even if file processing isn't complete
         # CRITICAL: For fast_load requests, if loading fails, return empty tags immediately instead of timing out
-        # PYTHONANYWHERE FIX: Skip synchronous loading on PythonAnywhere to avoid timeouts
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
         
-        if file_exists and not cached_tags and not is_pythonanywhere:
+        # Try synchronous loading on all platforms - get_excel_processor has timeout protection
+        if file_exists and not cached_tags:
             uploaded_filename = session.get('uploaded_filename', '')
             if uploaded_filename:
                 # Check if processor needs to be loaded
@@ -8556,19 +8556,20 @@ def get_available_tags():
                             }), 200
                         # Fall through to try other paths for non-fast_load requests
         
-        # PYTHONANYWHERE FIX: If on PythonAnywhere and file not loaded, return empty tags with message
+        # PYTHONANYWHERE FIX: If on PythonAnywhere and file not loaded, return processing status
         # This prevents timeouts from trying to load large files synchronously
-        # CRITICAL: Return 200 (not 202) to prevent frontend "File is still processing" errors
+        # Return 202 so frontend keeps retrying (frontend has 30 retries with progressive delays)
         if is_pythonanywhere and file_exists and not cached_tags:
             # Check if processor is loaded
             if _excel_processor is None or _excel_processor.df is None or getattr(_excel_processor.df, 'empty', True):
-                logging.info("⏳ PYTHONANYWHERE: File not loaded yet, returning empty tags with message")
+                logging.info("⏳ PYTHONANYWHERE: File not loaded yet, returning processing status (202)")
                 return jsonify({
                     'tags': [],
                     'total_count': 0,
-                    'source': 'pythonanywhere-loading',
-                    'message': 'File is still loading in the background. Please wait a moment and refresh, or try uploading again.'
-                }), 200  # Return 200 to prevent frontend errors
+                    'processing': True,
+                    'status': 'loading',
+                    'message': 'Loading file in background. Please wait...'
+                }), 202  # 202 Accepted - frontend will retry
 
         # ULTRA-FAST PATH: If this is a fast_load request, return Excel-only tags immediately
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
@@ -8579,11 +8580,20 @@ def get_available_tags():
                 # Wrap in try-catch to handle loading failures gracefully
                 excel_processor = None
                 try:
-                    # PYTHONANYWHERE FIX: On PythonAnywhere, use cached processor from background thread
-                    # Don't call get_excel_processor() as it will try to load synchronously and timeout
+                    # PYTHONANYWHERE FIX: On PythonAnywhere, try cached processor first, but if None, try loading
+                    # This ensures tags can load even if background thread hasn't finished
                     if is_pythonanywhere:
                         excel_processor = _excel_processor if _excel_processor is not None else None
-                        logging.info(f"⚡ PYTHONANYWHERE: Using cached processor: {excel_processor is not None}")
+                        if excel_processor is None and file_exists:
+                            # Processor not loaded yet - try to load it synchronously (with timeout protection)
+                            logging.info("⚡ PYTHONANYWHERE: Processor not loaded, attempting synchronous load...")
+                            try:
+                                excel_processor = get_excel_processor()
+                                logging.info(f"✅ PYTHONANYWHERE: Synchronous load successful: {excel_processor is not None}")
+                            except Exception as sync_err:
+                                logging.warning(f"⚠️ PYTHONANYWHERE: Synchronous load failed: {sync_err}")
+                                excel_processor = None
+                        logging.info(f"⚡ PYTHONANYWHERE: Using processor: {excel_processor is not None}")
                     elif file_exists:
                         excel_processor = get_excel_processor()
                     else:
