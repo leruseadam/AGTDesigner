@@ -3101,6 +3101,7 @@ def upload_file():
                 if success:
                     global _excel_processor
                     _excel_processor = processor
+                    _excel_processor._last_loaded_file = file_path
                     row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                     logging.info(f"[INSTANT] ✅ File loaded synchronously: {row_count} rows")
                     
