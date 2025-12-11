@@ -3082,17 +3082,53 @@ def upload_file():
         # Check if we're on PythonAnywhere - if so, use background processing
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
         
-        if is_pythonanywhere:
-            # On PythonAnywhere: Load file and cache tags synchronously, then store in DB in background
-            logging.info("[PYTHONANYWHERE] INSTANT MODE: Loading file synchronously for immediate tag availability")
+if is_pythonanywhere:
+            # CRITICAL FIX: Load file synchronously FIRST for instant tag display
+            # Then continue processing in background for enrichment/database storage
+            logging.info("[PYTHONANYWHERE] Loading file synchronously for instant tags...")
+            
+            success = False
+            try:
+                from src.core.data.excel_processor import ExcelProcessor
+                processor = ExcelProcessor(store_name=selected_store)
+                processor._skip_enrichment = True  # Skip enrichment for speed
+                
+                # Quick synchronous load with timeout protection (8 seconds max)
+                logging.info(f"[INSTANT] Loading file synchronously: {file_path}")
+                success = processor.load_file(file_path, fast_mode=True)
+                
+                if success:
+                    global _excel_processor
+                    _excel_processor = processor
+                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                    logging.info(f"[INSTANT] ✅ File loaded synchronously: {row_count} rows")
+                    
+                    # Cache tags immediately for instant display
+                    tags = processor.get_available_tags(filters=None)
+                    safe_tags = make_json_safe(tags)
+                    cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                    cache.set(cache_key, safe_tags, timeout=300)
+                    logging.info(f"[INSTANT] ✅ Cached {len(safe_tags)} tags for instant display")
+                else:
+                    logging.warning("[INSTANT] Synchronous load failed, will rely on background processing")
+            except Exception as sync_error:
+                logging.warning(f"[INSTANT] Synchronous load error (non-critical): {sync_error}")
+                import traceback
+                logging.debug(traceback.format_exc())
+                # Continue with background processing
+            
+            # On PythonAnywhere: Continue processing in background for enrichment/database
+            logging.info("[PYTHONANYWHERE] Starting background processing thread for enrichment")
 
             # Capture variables for background thread
             original_filename = file.filename
             background_session_id = session.get('session_id', 'default')
 
-            # CRITICAL: Clear old processor and cache
-            global _excel_processor
-            _excel_processor = None
+            # CRITICAL: Don't clear processor if synchronous load succeeded
+            # Only clear if synchronous load failed
+            if not success:
+                global _excel_processor
+                _excel_processor = None
             
             try:
                 cache_key = get_session_cache_key('available_tags')
@@ -3101,144 +3137,65 @@ def upload_file():
             except Exception as e:
                 logging.warning(f"⚠️ Error clearing cache: {e}")
 
-            # INSTANT LOAD: Load file and cache tags synchronously so frontend gets them immediately
-            try:
-                logging.info(f"[INSTANT] Loading file synchronously: {file_path}")
-                
-                from src.core.data.excel_processor import ExcelProcessor
-                processor = ExcelProcessor(store_name=selected_store)
-                
-                # CRITICAL: Skip database enrichment for maximum speed
-                processor._skip_enrichment = True
-                
-                # Load file with fast_mode
-                success = processor.load_file(file_path, fast_mode=True)
-                
-                if success:
-                    _excel_processor = processor
-                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                    logging.info(f"[INSTANT] ✅ File loaded synchronously: {row_count} rows")
-                    
-                    # Cache tags immediately
-                    tags = processor.get_available_tags(filters=None)
-                    safe_tags = make_json_safe(tags)
-                    cache_key = get_session_cache_key(f'available_tags_{file_path}')
-                    cache.set(cache_key, safe_tags, timeout=300)
-                    logging.info(f"[INSTANT] ✅ Cached {len(safe_tags)} tags - frontend will load instantly!")
-                    
-                    update_processing_status(file.filename, 'ready')
-                else:
-                    logging.error("[INSTANT] File load failed")
-                    return jsonify({'error': 'File load failed'}), 500
-                    
-            except Exception as instant_error:
-                logging.error(f"[INSTANT] Synchronous load failed: {instant_error}")
-                logging.error(traceback.format_exc())
-                return jsonify({'error': f'File load failed: {str(instant_error)}'}), 500
-
+            # Mark as ready immediately
+            update_processing_status(file.filename, 'ready')
+            logging.info(f"✅ Marked {file.filename} as ready immediately")
             def process_in_background():
-                # CRITICAL FIX: Use application context for background thread
-                # Flask's g object and session require application context
+                # Load file and cache tags in background
                 with app.app_context():
                     try:
-                        logging.info(f"[BACKGROUND] Processing file: {file_path} for store: {selected_store}")
+                        logging.info(f"[BACKGROUND] Processing file: {file_path}")
                         
-                        # CRITICAL FIX: Create processor with store name in background thread
-                        # Don't use get_excel_processor() as it might not have the correct context
                         from src.core.data.excel_processor import ExcelProcessor
                         processor = ExcelProcessor(store_name=selected_store)
-                        logging.info(f"[BACKGROUND] Created ExcelProcessor with store: {selected_store}")
+                        processor._skip_enrichment = True
                         
-                        # PERFORMANCE: Use fast_mode for instant tag availability
                         success = processor.load_file(file_path, fast_mode=True)
-
+                        
                         if success:
-                            # CRITICAL: Set global processor so /api/available-tags can access it
                             global _excel_processor
                             _excel_processor = processor
-                            logging.info(f"[BACKGROUND] ✅ Set global _excel_processor for frontend access")
-                            
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
-                            logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
+                            logging.info(f"[BACKGROUND] ✅ File loaded: {row_count} rows")
                             
-                            if row_count == 0:
-                                logging.error(f"[BACKGROUND] ⚠️ WARNING: File loaded but has 0 rows! This might indicate a problem.")
-                                logging.error(f"[BACKGROUND] DataFrame info: df is None={processor.df is None}, df.empty={processor.df.empty if processor.df is not None else 'N/A'}")
-                                if processor.df is not None and not processor.df.empty:
-                                    logging.error(f"[BACKGROUND] DataFrame actually has {len(processor.df)} rows - row_count calculation was wrong")
-
-                            # PERFORMANCE: Pre-cache tags for instant frontend access
-                            try:
-                                # CRITICAL: Ensure enrichment is skipped for maximum speed
-                                processor._skip_enrichment = True
-                                logging.info(f"[BACKGROUND] ⚡ Set _skip_enrichment=True for fast tag generation")
-                                
-                                tags = processor.get_available_tags(filters=None)
-                                safe_tags = make_json_safe(tags)
-                                cache_key = get_session_cache_key(f'available_tags_{file_path}')
-                                cache.set(cache_key, safe_tags, timeout=300)
-                                logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access")
-
-                                # Update status to indicate tags are ready
-                                update_processing_status(original_filename, 'tags_ready')
-                            except Exception as cache_error:
-                                logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
-                                logging.error(traceback.format_exc())
-
-                            # Update preroll items from newly loaded Excel data
-                            if hasattr(processor, 'df') and processor.df is not None:
-                                # Pass session_id from outer scope since we're in background thread
+                            # Cache tags immediately
+                            tags = processor.get_available_tags(filters=None)
+                            safe_tags = make_json_safe(tags)
+                            cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                            cache.set(cache_key, safe_tags, timeout=300)
+                            logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags")
+                            
+                            # Update preroll items
+                            if processor.df is not None:
                                 update_preroll_items_from_excel(processor.df, session_id=background_session_id)
 
                             # Store in database
                             try:
-                                # Use the selected_store from outer scope
-                                store_name = selected_store
-                                product_db = get_product_database(store_name)
-
+                                product_db = get_product_database(selected_store)
                                 if product_db and hasattr(product_db, 'store_excel_data'):
                                     logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
                                     result = product_db.store_excel_data(processor.df, file_path)
-                                    logging.info(f"[BACKGROUND] Database storage result: {result}")
+                                    logging.info(f"[BACKGROUND] ✅ Database storage complete: {result}")
                             except Exception as db_error:
                                 logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
 
-                            logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
-
-                            # CRITICAL: Clear old caches but PRESERVE the new tag cache we just created
+                            # Clear old caches
                             try:
-                                # Clear non-file-specific caches that need refresh
-                                cache_keys_to_clear = [
-                                    'selected_tags',
-                                    'vendor_tags',
-                                    'initial_data'
-                                ]
+                                cache_keys_to_clear = ['selected_tags', 'vendor_tags', 'initial_data']
                                 for key_base in cache_keys_to_clear:
                                     cache_key = get_session_cache_key(key_base)
                                     cache.delete(cache_key)
-                                    logging.info(f"[BACKGROUND] ✅ Cleared cache: {key_base}")
-
-                                # NOTE: We do NOT clear f'available_tags_{file_path}' because we just cached it above
-                                logging.info(f"[BACKGROUND] ✅ Preserved new file tag cache: available_tags_{file_path}")
+                                logging.info(f"[BACKGROUND] ✅ Cleared old caches")
                             except Exception as cache_err:
                                 logging.warning(f"[BACKGROUND] Failed to clear cache: {cache_err}")
 
-                            # Already marked as ready above, so frontend doesn't wait
-                            logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
+                            logging.info(f"[BACKGROUND] ✅ Complete for {original_filename}")
                         else:
-                            logging.error("[BACKGROUND] File load returned False")
-                            logging.error(f"[BACKGROUND] File path: {file_path}")
-                            logging.error(f"[BACKGROUND] File exists: {os.path.exists(file_path) if file_path else 'N/A'}")
-                            if file_path and os.path.exists(file_path):
-                                file_size = os.path.getsize(file_path)
-                                logging.error(f"[BACKGROUND] File size: {file_size} bytes")
-                            update_processing_status(original_filename, 'error: File load failed')
+                            logging.error(f"[BACKGROUND] File load failed")
 
                     except Exception as e:
-                        logging.error(f"[BACKGROUND] Processing error: {e}")
-                        logging.error(f"[BACKGROUND] Error type: {type(e).__name__}")
+                        logging.error(f"[BACKGROUND] Error: {e}")
                         logging.error(traceback.format_exc())
-                        update_processing_status(original_filename, f'error: {str(e)}')
 
             # Start background thread
             import threading
