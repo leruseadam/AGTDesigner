@@ -3314,15 +3314,15 @@ class ExcelProcessor:
                         self._update_dataframe_lineage_from_database()
                         self.logger.info("✅ Updated DataFrame Lineage column from database after file load")
                         break  # Success, exit retry loop
-                except Exception as lineage_update_err:
-                    if attempt < max_retries - 1:
-                        self.logger.warning(f"Could not update DataFrame lineage from database (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s: {lineage_update_err}")
-                        import time
-                        time.sleep(retry_delay)
-                        retry_delay *= 2  # Exponential backoff
-                    else:
-                        self.logger.error(f"❌ GUARANTEED FIX FAILED: Could not update DataFrame lineage from database after {max_retries} attempts: {lineage_update_err}")
-                        # Continue - enrichment will handle it later, but log the error
+                    except Exception as lineage_update_err:
+                        if attempt < max_retries - 1:
+                            self.logger.warning(f"Could not update DataFrame lineage from database (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s: {lineage_update_err}")
+                            import time
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            self.logger.error(f"❌ GUARANTEED FIX FAILED: Could not update DataFrame lineage from database after {max_retries} attempts: {lineage_update_err}")
+                            # Continue - enrichment will handle it later, but log the error
             
             self.logger.info(f"File loaded successfully: {len(self.df)} rows, {len(self.df.columns)} columns")
             return True
