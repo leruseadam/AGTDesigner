@@ -1132,7 +1132,7 @@ def force_reload_excel_processor(new_file_path):
             logging.info(f"Attempting to load default file as fallback: {default_file}")
             fallback_success = _excel_processor.load_file(default_file)
             if fallback_success:
-            _excel_processor._last_loaded_file = default_file
+                _excel_processor._last_loaded_file = default_file
                 logging.info(f"Successfully loaded default file as fallback: {default_file}")
                 # Populate dropdown cache for fallback file
                 if hasattr(_excel_processor, '_cache_dropdown_values'):
