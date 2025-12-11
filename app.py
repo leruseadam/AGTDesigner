@@ -1023,7 +1023,7 @@ def reset_excel_processor():
         logging.info("Forced garbage collection")
     
     # Set to None to force recreation
-    _excel_processor = None
+        _excel_processor = None
     
     # Set reset flag to prevent automatic default file loading
     _excel_processor_reset_flag = True
@@ -1088,7 +1088,7 @@ def force_reload_excel_processor(new_file_path):
         logging.info("Forced garbage collection to free memory")
     
     # Create a completely new instance
-    _excel_processor = ExcelProcessor()
+        _excel_processor = ExcelProcessor()
     
     # Enable product database integration by default
     if hasattr(_excel_processor, 'enable_product_db_integration'):
@@ -1210,10 +1210,10 @@ def get_excel_processor():
     
     try:
         if has_context:
-            g._in_get_excel_processor = True  # Set recursion guard
+    g._in_get_excel_processor = True  # Set recursion guard
         
         # Use thread lock to prevent race conditions
-        with excel_processor_lock:
+    with excel_processor_lock:
             # CRITICAL: Always check if session has a newer file than what's loaded
             session_file_path = None
             try:
@@ -1234,7 +1234,7 @@ def get_excel_processor():
                         logging.info(f"🔄 FORCE RELOAD: Session has different file ({session_file_path}) than loaded ({current_file})")
                     else:
                         logging.info(f"🔄 FORCE RELOAD: Processor has no data, loading session file: {session_file_path}")
-                    _excel_processor = None  # Force recreation with new file
+                _excel_processor = None  # Force recreation with new file
             
             # Determine the active store for this request (if any)
             selected_store = None
@@ -1249,7 +1249,7 @@ def get_excel_processor():
             
             if _excel_processor is None:
                 # Create processor with store-aware configuration so lineage updates persist per store
-                _excel_processor = ExcelProcessor(store_name=processor_store)
+                    _excel_processor = ExcelProcessor(store_name=processor_store)
                 
                 # CRITICAL FIX: Check for uploaded file in session when creating new processor
                 # This ensures file persists across page reloads
@@ -2372,7 +2372,7 @@ def get_session_excel_processor():
             return None
     
     try:
-        g._getting_excel_processor = True  # Set recursion guard
+    g._getting_excel_processor = True  # Set recursion guard
         
         if 'excel_processor' not in g:
             # Use the global Excel processor instead of creating a new one
@@ -3098,7 +3098,7 @@ def upload_file():
                 success = processor.load_file(file_path, fast_mode=True)
                 
                 if success:
-                    _excel_processor = processor
+            _excel_processor = processor
                     row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                     logging.info(f"[INSTANT] ✅ File loaded synchronously: {row_count} rows")
                     
@@ -3126,7 +3126,7 @@ def upload_file():
             # CRITICAL: Don't clear processor if synchronous load succeeded
             # Only clear if synchronous load failed
             if not success:
-                                _excel_processor = None
+                _excel_processor = None
             
             try:
                 cache_key = get_session_cache_key('available_tags')
@@ -3151,7 +3151,7 @@ def upload_file():
                         success = processor.load_file(file_path, fast_mode=True)
                         
                         if success:
-                            _excel_processor = processor
+                _excel_processor = processor
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] ✅ File loaded: {row_count} rows")
                             
@@ -3263,7 +3263,7 @@ def upload_file():
             thread.start()
 
             # Clear old processor immediately so it can be lazily loaded
-            _excel_processor = None
+                                _excel_processor = None
             logging.info("✅ Cleared Excel processor - new file will be loaded in background")
 
             # Mark file as ready immediately (background loading will happen on first tag request)
@@ -3472,7 +3472,7 @@ def process_large_file_streaming(temp_path: str, filename: str, start_time: floa
                 processor.df = processor.df.dropna(subset=['Product Name*'], how='all')
                 
                 # Update global processor
-                with excel_processor_lock:
+                    with excel_processor_lock:
                     _excel_processor = processor
                     _excel_processor._last_loaded_file = temp_path
                 
@@ -3532,7 +3532,7 @@ def process_small_file_optimized(temp_path: str, filename: str, start_time: floa
             return jsonify({'error': 'Failed to process file or file is empty'}), 400
         
         # Update global processor
-                with excel_processor_lock:
+            with excel_processor_lock:
             _excel_processor = processor
             _excel_processor._last_loaded_file = temp_path
         
@@ -3956,7 +3956,7 @@ def process_excel_sync(filename, temp_path):
         
         # Update global processor
                 with excel_processor_lock:
-            _excel_processor = processor
+                _excel_processor = processor
             _excel_processor._last_loaded_file = temp_path
             logging.info(f"[SYNC] Global processor updated with {len(processor.df)} rows")
         
@@ -4014,7 +4014,7 @@ def ultra_fast_background_processing(filename, temp_path):
         # Step 5: Store in global processor (skip database storage for speed)
                 try:
             with excel_processor_lock:
-                _excel_processor = processor
+            _excel_processor = processor
                 _excel_processor._last_loaded_file = temp_path
                 logging.info(f"[ULTRA-FAST-BG] Global processor updated with {len(processor.df)} rows")
         except NameError:
@@ -4107,7 +4107,7 @@ def update_global_processor_fast(processor, temp_path):
     try:
         global _excel_processor, excel_processor_lock
         
-        with excel_processor_lock:
+            with excel_processor_lock:
             # Clear old processor efficiently
             if _excel_processor is not None:
                 if hasattr(_excel_processor, 'df'):
@@ -4116,7 +4116,7 @@ def update_global_processor_fast(processor, temp_path):
                     _excel_processor.selected_tags = []
             
             # Set new processor
-            _excel_processor = processor
+        _excel_processor = processor
             _excel_processor._last_loaded_file = temp_path
             
             logging.info(f"[ULTRA-FAST-BG] Global processor updated with {len(processor.df)} rows")
@@ -4239,8 +4239,8 @@ def process_excel_background(filename, temp_path):
             return
         
         # ULTRA-FAST PROCESSING: Update global processor immediately
-                with excel_processor_lock:
-            _excel_processor = new_processor
+                        with excel_processor_lock:
+                    _excel_processor = new_processor
             logging.info(f"[BG] ✅ Global processor updated with {len(new_processor.df)} rows")
         
         # CRITICAL: Defer ALL expensive operations to separate background thread
@@ -4514,7 +4514,7 @@ def process_excel_background(filename, temp_path):
             logging.warning(f"[BG] Failed to mark ready: {mark_ready_error}")
 
         # Step 2: Update the global processor safely with minimal clearing
-        with excel_processor_lock:
+                    with excel_processor_lock:
             # Clear the old processor completely
             if _excel_processor is not None:
                 # Explicitly clear all data from old processor
@@ -4543,7 +4543,7 @@ def process_excel_background(filename, temp_path):
                 logging.info("[BG] Forced garbage collection to free memory")
             
             # Replace with the new processor
-            _excel_processor = new_processor
+                    _excel_processor = new_processor
             _excel_processor._last_loaded_file = temp_path
             
             # Store store context in the processor for validation (without Flask session)
@@ -5005,7 +5005,7 @@ def process_lightning():
         
         # Update global processor
                 with excel_processor_lock:
-            _excel_processor = processor
+                _excel_processor = processor
             _excel_processor._last_loaded_file = file_path
         
         # PC optimization: Skip cache clearing for better performance
@@ -5733,7 +5733,7 @@ def set_store():
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
         _product_database = None
-        _excel_processor = None
+                    _excel_processor = None
 
         # OPTIMIZATION: File loading deferred to page reload for instant response
         logging.debug(f"Store set to {store_value} - cleared session, globals & caches")
@@ -6708,13 +6708,13 @@ def generate_labels():
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
         
         # TRACE: Check store before getting excel_processor
-        logging.info(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
+            logging.info(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
         
         # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
         
         # TRACE: Check store after getting excel_processor
-        logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
+            logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
         excel_processor.enable_product_db_integration(True)
 
@@ -17400,7 +17400,7 @@ def refresh_lineage_data():
             logging.info("Successfully refreshed lineage data from database")
             
             # Also update session excel processor if it exists
-            session_excel_processor = get_session_excel_processor()
+        session_excel_processor = get_session_excel_processor()
             if session_excel_processor and session_excel_processor.df is not None:
                 session_excel_processor.df = optimized_lineage_persistence(session_excel_processor, session_excel_processor.df)
                 logging.info("Successfully refreshed lineage data in session excel processor")
