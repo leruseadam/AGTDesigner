@@ -3083,6 +3083,7 @@ def upload_file():
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
         
         if is_pythonanywhere:
+            global _excel_processor
             # CRITICAL FIX: Load file synchronously FIRST for instant tag display
             # Then continue processing in background for enrichment/database storage
             logging.info("[PYTHONANYWHERE] Loading file synchronously for instant tags...")
