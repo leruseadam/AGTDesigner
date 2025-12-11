@@ -3126,6 +3126,22 @@ def upload_file():
                         'tags_cached': True,
                         'instant_display': True
                     }
+                    # Start background enrichment (file already loaded synchronously)
+                    import threading
+                    def process_enrichment_only():
+                        with app.app_context():
+                            try:
+                                if _excel_processor and _excel_processor.df is not None:
+                                    logging.info(f"[BACKGROUND] Enrichment for {file.filename}")
+                                    update_preroll_items_from_excel(_excel_processor.df, session_id=session.get('session_id', 'default'))
+                                    product_db = get_product_database(selected_store)
+                                    if product_db and hasattr(product_db, 'store_excel_data'):
+                                        result = product_db.store_excel_data(_excel_processor.df, file_path)
+                                        logging.info(f"[BACKGROUND] ✅ Database storage: {result}")
+                            except Exception as e:
+                                logging.error(f"[BACKGROUND] Error: {e}")
+                    threading.Thread(target=process_enrichment_only, daemon=True).start()
+                    
                     return jsonify(response_data)
                 else:
                     logging.warning("[INSTANT] Synchronous load failed, will rely on background processing")
