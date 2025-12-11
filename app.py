@@ -1213,7 +1213,7 @@ def get_excel_processor():
             g._in_get_excel_processor = True  # Set recursion guard
         
         # Use thread lock to prevent race conditions
-    with excel_processor_lock:
+        with excel_processor_lock:
             # CRITICAL: Always check if session has a newer file than what's loaded
             session_file_path = None
             try:
