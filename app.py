@@ -3107,7 +3107,7 @@ def upload_file():
                     # Cache tags immediately for instant display
                     tags = processor.get_available_tags(filters=None)
                     safe_tags = make_json_safe(tags)
-                    cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                    cache_key = get_session_cache_key('available_tags')
                     cache.set(cache_key, safe_tags, timeout=300)
                     logging.info(f"[INSTANT] ✅ Cached {len(safe_tags)} tags for instant display")
                 else:
@@ -3161,7 +3161,7 @@ def upload_file():
                             # Cache tags immediately
                             tags = processor.get_available_tags(filters=None)
                             safe_tags = make_json_safe(tags)
-                            cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                    cache_key = get_session_cache_key('available_tags')
                             cache.set(cache_key, safe_tags, timeout=300)
                             logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags")
                             
