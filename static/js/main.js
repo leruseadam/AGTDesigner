@@ -23,19 +23,15 @@ const verboseWarn = (...args) => {
 
 // Windows-specific performance optimizations
 if (isWindows) {
-    // Request continuous repainting for smoother animations
-    requestAnimationFrame(function continuousRepaint() {
-        requestAnimationFrame(continuousRepaint);
-    });
-    
-    // Optimize DOM operations for Windows
+    // CRITICAL FIX: Remove continuous repaint loop - it causes flashing/glitching
+    // Instead, only enable hardware acceleration for smoother rendering
     if (typeof document.documentElement.style.transition !== 'undefined') {
-        // Reduce repaints
+        // Enable hardware acceleration to reduce repaints without continuous loop
         document.body.style.transform = 'translateZ(0)';
-        document.body.style.willChange = 'contents';
+        document.body.style.willChange = 'auto'; // Changed from 'contents' to 'auto' to reduce repaints
     }
     
-    verboseLog('Windows performance optimizations enabled');
+    verboseLog('Windows performance optimizations enabled (hardware acceleration only)');
 }
 
 // CRITICAL: Prevent multiple simultaneous page reloads
@@ -5769,8 +5765,9 @@ const TagManager = {
             
             // Continue rendering if there are more tags
             if (index < tags.length) {
-                // Use setTimeout with 0ms for faster rendering (less overhead than requestAnimationFrame)
-                setTimeout(renderBatch, 0);
+                // CRITICAL FIX: Use requestAnimationFrame for smoother rendering without flickering
+                // This ensures rendering happens at the optimal time for the browser
+                requestAnimationFrame(renderBatch);
             }
         };
         

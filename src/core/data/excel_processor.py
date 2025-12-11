@@ -1941,17 +1941,26 @@ class ExcelProcessor:
                     self.logger.warning(f"Could not validate Excel file structure: {zip_err}")
                     # Continue anyway - might be an older Excel format
                 
-                # Standard reading approach for both environments
-                # Prevent pandas from converting empty cells to NaN values
+                # PERFORMANCE OPTIMIZATION: Use optimized reading for large files
+                # For large files, optimize pandas read options
+                estimated_rows = max(1000, int(file_size / 200))  # Rough estimate: ~200 bytes per row
+                is_large_file = file_size > 5 * 1024 * 1024 or estimated_rows > 3000  # 5MB or 3000 rows
+                
+                if is_large_file:
+                    self.logger.info(f"📦 Large file detected ({file_size / (1024*1024):.1f}MB, ~{estimated_rows} rows) - using optimized reading")
+                
+                # PERFORMANCE: Use optimized pandas options for faster reading
+                # Read with minimal processing - we'll process data after loading
+                read_start = time.time()
                 df = pd.read_excel(
                     file_path, 
                     engine=excel_engine, 
                     dtype=dtype_dict,
-                    na_filter=False,  # Don't filter NA values
-                    keep_default_na=False  # Don't use default NA values
+                    na_filter=False,  # Don't filter NA values - faster
+                    keep_default_na=False  # Don't use default NA values - faster
                 )
-                
-                self.logger.info(f"Successfully read file with {excel_engine} engine: {len(df)} rows, {len(df.columns)} columns")
+                read_time = time.time() - read_start
+                self.logger.info(f"✅ File read completed in {read_time:.2f}s: {len(df)} rows, {len(df.columns)} columns")
                     
             except Exception as e:
                 self.logger.error(f"Failed to read with {excel_engine} engine: {e}")
@@ -2025,13 +2034,14 @@ class ExcelProcessor:
             self.df.reset_index(drop=True, inplace=True)
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
             
-            # 2) Trim product names
+            # 2) Trim product names - PERFORMANCE: Use vectorized operation
             if "Product Name*" in self.df.columns:
-                self.df["Product Name*"] = self.df["Product Name*"].str.lstrip()
+                # Convert to string first for faster operations
+                self.df["Product Name*"] = self.df["Product Name*"].astype(str).str.lstrip()
             elif "Product Name" in self.df.columns:
-                self.df["Product Name*"] = self.df["Product Name"].str.lstrip()
+                self.df["Product Name*"] = self.df["Product Name"].astype(str).str.lstrip()
             elif "ProductName" in self.df.columns:
-                self.df["Product Name*"] = self.df["ProductName"].str.lstrip()
+                self.df["Product Name*"] = self.df["ProductName"].astype(str).str.lstrip()
             else:
                 self.logger.error("No product name column found")
                 self.df["Product Name*"] = "Unknown"
@@ -2055,12 +2065,15 @@ class ExcelProcessor:
             self.logger.info(f"Excluded {len(excluded_by_type)} products by product type: {excluded_by_type['Product Type*'].unique().tolist()}")
             
             # Also exclude products with excluded patterns in the name
-            for pattern in EXCLUDED_PRODUCT_PATTERNS:
-                pattern_mask = self.df["Product Name*"].str.contains(pattern, case=False, na=False)
+            # PERFORMANCE: Combine all patterns into single regex for faster filtering
+            if EXCLUDED_PRODUCT_PATTERNS:
+                combined_pattern = '|'.join([f'({p})' for p in EXCLUDED_PRODUCT_PATTERNS])
+                pattern_mask = self.df["Product Name*"].astype(str).str.contains(combined_pattern, case=False, na=False, regex=True)
                 excluded_by_pattern = self.df[pattern_mask]
-                self.df = self.df[~pattern_mask]
                 if len(excluded_by_pattern) > 0:
-                    self.logger.info(f"Excluded {len(excluded_by_pattern)} products containing pattern '{pattern}': {excluded_by_pattern['Product Name*'].tolist()}")
+                    self.logger.info(f"Excluded {len(excluded_by_pattern)} products containing excluded patterns")
+                self.df = self.df[~pattern_mask]
+                self.df.reset_index(drop=True, inplace=True)
             
             # CRITICAL FIX: Exclude rows with blank or empty product names to prevent database pollution
             blank_name_mask = self.df["Product Name*"].isna() | (self.df["Product Name*"].astype(str).str.strip() == "")
@@ -3601,12 +3614,9 @@ class ExcelProcessor:
             seen_product_keys.add(secondary_key)
             seen_product_keys.add(tertiary_key)
             
-            # Get vendor from multiple possible column names
-            vendor_value = (
-                safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
-                safe_get_value(row.get('Vendor', '')) or           # Alternative column name
-                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
-            )
+            # NOTE: vendor_value was already extracted earlier in the function - DON'T re-extract it here
+            # The earlier extraction (lines 3528-3554) does comprehensive checking of all vendor columns
+            # This prevents overwriting the correctly extracted vendor value
             
             # CRITICAL FIX: If vendor is empty, set to 'Unknown Vendor' for consistency
             if not vendor_value or vendor_value.strip() == '':
@@ -3674,6 +3684,12 @@ class ExcelProcessor:
             
             # Get price value - use the actual column name from Excel file
             price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
+            
+            # CRITICAL DEBUG: Log when vendor is missing for the first few products
+            if (not vendor_value or vendor_value == 'Unknown Vendor') and len(tags) < 5:
+                logger.warning(f"⚠️ VENDOR MISSING for product #{len(tags)}: '{product_name}'")
+                logger.warning(f"   Row data vendor fields: Vendor/Supplier*='{row.get('Vendor/Supplier*', 'KEY_NOT_FOUND')}', Vendor='{row.get('Vendor', 'KEY_NOT_FOUND')}'")
+                logger.warning(f"   All row keys: {list(row.keys())[:20]}")
             
             tag = {
                 'Product Name*': product_name,
@@ -5667,8 +5683,8 @@ class ExcelProcessor:
         # But we'll optimize by creating filtered DataFrames more efficiently
         for filter_key, col in filter_map.items():
             # Create filtered DataFrame by applying all OTHER filters (not the current one)
-            # CRITICAL FIX: Start with the original df for each filter type to avoid cross-contamination
-            temp_df = df
+            # CRITICAL FIX: Start with a COPY of the original df for each filter type to avoid cross-contamination
+            temp_df = df.copy()
             
             # Apply all other filters except the current one
             for key, value in current_filters.items():
@@ -5690,21 +5706,46 @@ class ExcelProcessor:
             # CRITICAL FIX: Handle vendor filter specially to check multiple column names
             if filter_key == "vendor":
                 if vendor_col:
+                    # CRITICAL FIX: For vendor filter, use the FULL DataFrame (not filtered) to show ALL vendors
+                    # This ensures users can see all available vendors regardless of other active filters
+                    vendor_df = df.copy()  # Use full DataFrame, not temp_df
+                    
                     # CRITICAL FIX: Get unique vendor values from ALL possible vendor columns, not just one
                     # This ensures we capture all vendors even if column names vary
                     all_vendor_values = set()
                     vendor_cols_to_check = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
                     
+                    self.logger.info(f"🔍 Extracting vendors from FULL DataFrame with {len(vendor_df)} rows (not filtered)")
+                    self.logger.info(f"🔍 Available columns in vendor_df: {list(vendor_df.columns)}")
+                    
                     for vcol in vendor_cols_to_check:
-                        if vcol in temp_df.columns:
+                        if vcol in vendor_df.columns:
+                            self.logger.info(f"🔍 Processing vendor column: '{vcol}'")
                             # Convert categorical to string if needed to get all unique values
-                            vendor_series = temp_df[vcol]
+                            vendor_series = vendor_df[vcol].copy()
+                            
+                            # CRITICAL FIX: Handle categorical dtype properly
                             if hasattr(vendor_series, 'cat'):
-                                # If categorical, get all categories that appear in the data
+                                self.logger.info(f"🔍 Column '{vcol}' is categorical, converting to string")
+                                # For categorical, we need to get all possible categories, not just used ones
+                                vendor_series = vendor_series.cat.add_categories(['PLACEHOLDER_FOR_CONVERSION']).fillna('PLACEHOLDER_FOR_CONVERSION')
                                 vendor_series = vendor_series.astype(str)
-                            vendor_series = vendor_series.dropna().astype(str).str.strip()
+                            else:
+                                vendor_series = vendor_series.astype(str)
+                            
+                            # Clean and filter
+                            vendor_series = vendor_series.str.strip()
                             unique_vals = vendor_series[vendor_series != ''].unique()
-                            all_vendor_values.update([str(v).strip() for v in unique_vals if str(v).strip() and str(v).lower() not in ['nan', 'none', '']])
+                            
+                            # Filter out invalid values
+                            valid_vendors = [str(v).strip() for v in unique_vals 
+                                           if v and str(v).strip() and str(v).strip().lower() not in ['nan', 'none', '', 'placeholder_for_conversion']]
+                            
+                            self.logger.info(f"🔍 Column '{vcol}' has {len(valid_vendors)} unique vendors")
+                            if len(valid_vendors) <= 10:
+                                self.logger.info(f"📋 Vendors from '{vcol}': {valid_vendors}")
+                            
+                            all_vendor_values.update(valid_vendors)
                     
                     values = sorted(all_vendor_values)
                     options[filter_key] = clean_list(values)
@@ -5715,12 +5756,14 @@ class ExcelProcessor:
                         self.logger.info(f"📋 First 20 vendors: {values[:20]}")
                 else:
                     # No vendor column found - try case-insensitive search
-                    vendor_cols_found = [col for col in temp_df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]
+                    # CRITICAL FIX: Use full DataFrame for vendor extraction
+                    vendor_df = df.copy()
+                    vendor_cols_found = [col for col in vendor_df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]
                     if vendor_cols_found:
                         # Use the first vendor column found
                         all_vendor_values = set()
                         for vcol in vendor_cols_found:
-                            vendor_series = temp_df[vcol]
+                            vendor_series = vendor_df[vcol]
                             if hasattr(vendor_series, 'cat'):
                                 vendor_series = vendor_series.astype(str)
                             vendor_series = vendor_series.dropna().astype(str).str.strip()

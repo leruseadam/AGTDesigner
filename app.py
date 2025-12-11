@@ -2990,6 +2990,16 @@ def upload_file():
             cache.delete(cache_key)
             logging.info(f"✅ Cleared available_tags cache: {cache_key}")
             
+            # CRITICAL FIX: Clear filter options cache to ensure fresh vendor data
+            filter_options_cache_key = get_session_cache_key('filter_options')
+            cache.delete(filter_options_cache_key)
+            logging.info(f"✅ Cleared filter_options cache: {filter_options_cache_key}")
+            
+            # Clear web filter options cache as well
+            web_filter_options_cache_key = get_session_cache_key('web_filter_options')
+            cache.delete(web_filter_options_cache_key)
+            logging.info(f"✅ Cleared web_filter_options cache: {web_filter_options_cache_key}")
+            
             # Clear Excel processor cache
             reset_excel_processor()
             logging.info("✅ Reset Excel processor")

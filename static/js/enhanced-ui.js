@@ -219,7 +219,11 @@ async function handleFiles(files) {
             if (window.safeReload) {
               window.safeReload(2000);
             } else {
-              setTimeout(() => {
+              // CRITICAL FIX: Debounce reloads to prevent flashing
+              if (window._reloadTimeout) {
+                clearTimeout(window._reloadTimeout);
+              }
+              window._reloadTimeout = setTimeout(() => {
                 if (!window._reloadInProgress) {
                   window._reloadInProgress = true;
                   window.location.reload();
@@ -280,7 +284,11 @@ async function handleFiles(files) {
                       if (window.safeReload) {
                         window.safeReload(2000);
                       } else {
-                        setTimeout(() => {
+                        // CRITICAL FIX: Debounce reloads to prevent flashing
+                        if (window._reloadTimeout) {
+                          clearTimeout(window._reloadTimeout);
+                        }
+                        window._reloadTimeout = setTimeout(() => {
                           if (!window._reloadInProgress) {
                             window._reloadInProgress = true;
                             window.location.reload();
@@ -311,7 +319,11 @@ async function handleFiles(files) {
               if (window.safeReload) {
                 window.safeReload(2000);
               } else {
-                setTimeout(() => {
+                // CRITICAL FIX: Debounce reloads to prevent flashing
+                if (window._reloadTimeout) {
+                  clearTimeout(window._reloadTimeout);
+                }
+                window._reloadTimeout = setTimeout(() => {
                   if (!window._reloadInProgress) {
                     window._reloadInProgress = true;
                     window.location.reload();
@@ -334,10 +346,16 @@ async function handleFiles(files) {
               if (window.safeReload) {
                 window.safeReload(1000);
               } else {
-                if (!window._reloadInProgress) {
-                  window._reloadInProgress = true;
-                  window.location.reload();
+                // CRITICAL FIX: Debounce reloads to prevent flashing
+                if (window._reloadTimeout) {
+                  clearTimeout(window._reloadTimeout);
                 }
+                window._reloadTimeout = setTimeout(() => {
+                  if (!window._reloadInProgress) {
+                    window._reloadInProgress = true;
+                    window.location.reload();
+                  }
+                }, 2000);
               }
             }
           }, 2000);
@@ -599,10 +617,16 @@ window.pollUploadStatus = function pollUploadStatus(filename) {
                     if (window.safeReload) {
                       window.safeReload(1000);
                     } else {
-                      if (!window._reloadInProgress) {
-                        window._reloadInProgress = true;
-                        window.location.reload();
+                      // CRITICAL FIX: Debounce reloads to prevent flashing
+                      if (window._reloadTimeout) {
+                        clearTimeout(window._reloadTimeout);
                       }
+                      window._reloadTimeout = setTimeout(() => {
+                        if (!window._reloadInProgress) {
+                          window._reloadInProgress = true;
+                          window.location.reload();
+                        }
+                      }, 2000);
                     }
                   });
               } else {
@@ -616,20 +640,32 @@ window.pollUploadStatus = function pollUploadStatus(filename) {
             if (window.safeReload) {
               window.safeReload(1000);
             } else {
-              if (!window._reloadInProgress) {
-                window._reloadInProgress = true;
-                window.location.reload();
+              // CRITICAL FIX: Debounce reloads to prevent flashing
+              if (window._reloadTimeout) {
+                clearTimeout(window._reloadTimeout);
               }
+              window._reloadTimeout = setTimeout(() => {
+                if (!window._reloadInProgress) {
+                  window._reloadInProgress = true;
+                  window.location.reload();
+                }
+              }, 2000);
             }
           }
         } else {
           if (window.safeReload) {
             window.safeReload(500);
           } else {
-            if (!window._reloadInProgress) {
-              window._reloadInProgress = true;
-              window.location.reload();
+            // CRITICAL FIX: Debounce reloads to prevent flashing
+            if (window._reloadTimeout) {
+              clearTimeout(window._reloadTimeout);
             }
+            window._reloadTimeout = setTimeout(() => {
+              if (!window._reloadInProgress) {
+                window._reloadInProgress = true;
+                window.location.reload();
+              }
+            }, 2000);
           }
         }
         
