@@ -1915,6 +1915,23 @@ class ExcelProcessor:
             try:
                 self.logger.debug(f"Reading with engine: {excel_engine}")
                 
+                # Add basic file validation before attempting to read
+                import zipfile
+                try:
+                    # Excel files are actually zip files, so we can validate them
+                    with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                        # Try to list files - if this fails, the file is corrupted
+                        file_list = zip_ref.namelist()
+                        if not file_list:
+                            raise ValueError("Excel file appears to be empty or corrupted")
+                        self.logger.debug(f"Excel file validation passed: {len(file_list)} internal files")
+                except zipfile.BadZipFile:
+                    self.logger.error(f"File is not a valid Excel file or is corrupted: {file_path}")
+                    raise ValueError(f"Corrupted or invalid Excel file: {os.path.basename(file_path)}")
+                except Exception as zip_err:
+                    self.logger.warning(f"Could not validate Excel file structure: {zip_err}")
+                    # Continue anyway - might be an older Excel format
+                
                 # Standard reading approach for both environments
                 # Prevent pandas from converting empty cells to NaN values
                 df = pd.read_excel(
@@ -3392,8 +3409,24 @@ class ExcelProcessor:
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
         
+        # CRITICAL DEBUG: Log unique vendors in the DataFrame before processing
+        vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
+        available_vendor_cols = [col for col in vendor_cols if col in filtered_df.columns]
+        if available_vendor_cols:
+            vendor_series = filtered_df[available_vendor_cols[0]].fillna('').astype(str).str.strip()
+            unique_vendors = vendor_series[vendor_series != ''].unique()
+            logger.info(f"📊 Backend vendor extraction: Found {len(unique_vendors)} unique vendors in Excel file")
+            if len(unique_vendors) <= 20:
+                logger.info(f"📋 All vendors in Excel: {sorted(unique_vendors.tolist())}")
+            else:
+                logger.info(f"📋 First 20 vendors in Excel: {sorted(unique_vendors.tolist())[:20]}")
+            empty_vendor_count = (vendor_series == '').sum()
+            if empty_vendor_count > 0:
+                logger.warning(f"⚠️ WARNING: {empty_vendor_count} out of {len(filtered_df)} products ({round(empty_vendor_count/len(filtered_df)*100, 1)}%) have empty vendor fields in Excel file!")
+        
         tags = []
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
+        self._vendor_debug_count = 0  # Reset debug counter
         
         # Track filtering statistics for debugging
         filter_stats = {
@@ -3440,12 +3473,32 @@ class ExcelProcessor:
             # Get the product name
             product_name = safe_get_value(row.get(product_name_col, '')) or safe_get_value(row.get('Description', '')) or 'Unnamed Product'
             
-            # Get vendor and brand for deduplication
-            vendor_value = (
-                safe_get_value(row.get('Vendor/Supplier*', '')) or  # Primary column name
-                safe_get_value(row.get('Vendor', '')) or           # Alternative column name
-                safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
-            )
+            # CRITICAL FIX: Get vendor from ALL possible column names (case-insensitive search)
+            vendor_value = ''
+            vendor_cols_to_check = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier', 'Vendor/Supplier *']
+            # Also check case-insensitive matches
+            row_keys_lower = {str(k).lower(): k for k in row.keys()}
+            for vendor_col in vendor_cols_to_check:
+                if vendor_col in row:
+                    vendor_value = safe_get_value(row.get(vendor_col, ''))
+                    if vendor_value:
+                        break
+                # Check case-insensitive match
+                vendor_col_lower = vendor_col.lower()
+                if vendor_col_lower in row_keys_lower:
+                    actual_col = row_keys_lower[vendor_col_lower]
+                    vendor_value = safe_get_value(row.get(actual_col, ''))
+                    if vendor_value:
+                        break
+            # Also check for any column containing 'vendor' or 'supplier'
+            if not vendor_value:
+                for col_name in row.keys():
+                    col_lower = str(col_name).lower()
+                    if ('vendor' in col_lower or 'supplier' in col_lower) and col_name not in vendor_cols_to_check:
+                        vendor_value = safe_get_value(row.get(col_name, ''))
+                        if vendor_value:
+                            logger.debug(f"Found vendor in non-standard column: '{col_name}' = '{vendor_value}'")
+                            break
             brand_value = safe_get_value(row.get('Product Brand', ''))
             weight_value = safe_get_value(raw_weight)
             
@@ -3511,10 +3564,18 @@ class ExcelProcessor:
                 safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
             )
             
-            # Debug logging for vendor field detection
-            if not vendor_value and product_name:
-                logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
-                logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
+            # CRITICAL FIX: If vendor is empty, set to 'Unknown Vendor' for consistency
+            if not vendor_value or vendor_value.strip() == '':
+                vendor_value = 'Unknown Vendor'
+            
+            # Debug logging for vendor field detection (only log first 10 to avoid spam)
+            if not hasattr(self, '_vendor_debug_count'):
+                self._vendor_debug_count = 0
+            if not vendor_value or vendor_value == 'Unknown Vendor':
+                if self._vendor_debug_count < 10 and product_name:
+                    logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
+                    logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
+                    self._vendor_debug_count += 1
             
             # Extract THC/CBD values from the appropriate columns
             # Use the actual column names from the Excel file
@@ -3697,6 +3758,20 @@ class ExcelProcessor:
         
         # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
         sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
+        
+        # CRITICAL DEBUG: Log vendor statistics in returned tags
+        if sorted_tags:
+            vendor_counts = {}
+            for tag in sorted_tags:
+                vendor = tag.get('Vendor', '') or tag.get('vendor', '') or 'Unknown Vendor'
+                vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
+            logger.info(f"📊 Backend tag return: {len(sorted_tags)} tags with {len(vendor_counts)} unique vendors")
+            if len(vendor_counts) <= 20:
+                logger.info(f"📋 Vendors in returned tags: {sorted(vendor_counts.keys())}")
+                logger.info(f"📊 Vendor counts: {dict(sorted(vendor_counts.items(), key=lambda x: x[1], reverse=True))}")
+            else:
+                top_vendors = sorted(vendor_counts.items(), key=lambda x: x[1], reverse=True)[:20]
+                logger.info(f"📋 Top 20 vendors in returned tags: {dict(top_vendors)}")
         
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)

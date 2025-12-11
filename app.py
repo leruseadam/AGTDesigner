@@ -2157,12 +2157,37 @@ def initialize_excel_processor():
         if default_file and os.path.exists(default_file):
             logging.info(f"Loading default file on startup: {default_file}")
             try:
-                success = excel_processor.load_file(default_file)
-                if success:
-                    excel_processor._last_loaded_file = default_file
-                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
-                else:
-                    logging.warning("Failed to load default file")
+                # Add timeout protection for corrupted files
+                import signal
+                
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("Excel file loading timed out - file may be corrupted")
+                
+                # Set 30 second timeout for file loading
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(30)
+                
+                try:
+                    success = excel_processor.load_file(default_file)
+                    signal.alarm(0)  # Cancel the alarm
+                    
+                    if success:
+                        excel_processor._last_loaded_file = default_file
+                        logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
+                    else:
+                        logging.warning("Failed to load default file")
+                except TimeoutError as timeout_err:
+                    signal.alarm(0)  # Cancel the alarm
+                    logging.error(f"Excel file loading timed out: {timeout_err}")
+                    logging.error(f"File may be corrupted: {default_file}")
+                    # Try to move corrupted file
+                    try:
+                        corrupted_path = default_file + '.corrupted'
+                        os.rename(default_file, corrupted_path)
+                        logging.info(f"Moved corrupted file to: {corrupted_path}")
+                    except Exception as move_err:
+                        logging.error(f"Could not move corrupted file: {move_err}")
+                        
             except Exception as load_error:
                 logging.error(f"Error loading default file: {load_error}")
                 logging.error(f"Traceback: {traceback.format_exc()}")
