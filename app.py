@@ -3111,6 +3111,22 @@ def upload_file():
                     cache_key = get_session_cache_key(f'available_tags_{file_path}')
                     cache.set(cache_key, safe_tags, timeout=300)
                     logging.info(f"[INSTANT] ✅ Cached {len(safe_tags)} tags for instant display")
+                    
+                    # CRITICAL: Return immediately after caching tags for instant display
+                    # Background processing will continue but user sees tags right away
+                    update_processing_status(file.filename, 'ready')
+                    upload_time = time.time() - start_time
+                    logging.info(f"=== UPLOAD COMPLETE (instant tags cached): {upload_time:.3f}s ===")
+                    
+                    response_data = {
+                        'success': True,
+                        'message': 'File uploaded successfully - tags available immediately',
+                        'filename': file.filename,
+                        'rows': row_count,
+                        'tags_cached': True,
+                        'instant_display': True
+                    }
+                    return jsonify(response_data)
                 else:
                     logging.warning("[INSTANT] Synchronous load failed, will rely on background processing")
             except Exception as sync_error:
