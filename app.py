@@ -1253,7 +1253,7 @@ def get_excel_processor():
                 
                 # CRITICAL FIX: Check for uploaded file in session when creating new processor
                 # This ensures file persists across page reloads
-                try:
+            try:
                     from flask import session, has_request_context
                     if has_request_context():
                         session_file_path = session.get('file_path')
