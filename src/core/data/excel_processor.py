@@ -1951,7 +1951,9 @@ class ExcelProcessor:
                 
                 # PERFORMANCE: Use optimized pandas options for faster reading
                 # Read with minimal processing - we'll process data after loading
-                read_start = time.time()
+                # Ensure time module is available (imported at module level)
+                import time as time_module
+                read_start = time_module.time()
                 df = pd.read_excel(
                     file_path, 
                     engine=excel_engine, 
@@ -1959,7 +1961,7 @@ class ExcelProcessor:
                     na_filter=False,  # Don't filter NA values - faster
                     keep_default_na=False  # Don't use default NA values - faster
                 )
-                read_time = time.time() - read_start
+                read_time = time_module.time() - read_start
                 self.logger.info(f"✅ File read completed in {read_time:.2f}s: {len(df)} rows, {len(df.columns)} columns")
                     
             except Exception as e:

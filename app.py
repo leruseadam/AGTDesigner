@@ -8450,7 +8450,7 @@ def get_available_tags():
         if fast_load and not prefer_db and not force_full_refresh:
             try:
                 # Check if processor is already loaded (don't trigger slow synchronous load)
-                from src.core.data.excel_processor import _excel_processor
+                # Use global _excel_processor directly (defined in app.py, not in excel_processor module)
                 excel_processor = _excel_processor if _excel_processor is not None else None
 
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
@@ -8504,7 +8504,7 @@ def get_available_tags():
             session_file_path = session.get('file_path', '')
             if session_file_path and os.path.exists(session_file_path):
                 # Check if processor is already loaded
-                from src.core.data.excel_processor import _excel_processor
+                # Use global _excel_processor directly (defined in app.py, not in excel_processor module)
 
                 # If processor isn't loaded or doesn't have data, start background load
                 if _excel_processor is None or _excel_processor.df is None or _excel_processor.df.empty:
@@ -10119,6 +10119,11 @@ def get_selected_tags():
             return jsonify([])
         
         # Get the selected tags - return full dictionary objects
+        # CRITICAL FIX: Ensure DataFrame is loaded before accessing selected_tags
+        if excel_processor.df is None or excel_processor.df.empty:
+            logging.warning("DataFrame is empty when trying to get selected tags, returning empty array")
+            return jsonify([])
+        
         selected_tags = excel_processor.selected_tags
         selected_tag_objects = []
         
@@ -10151,7 +10156,11 @@ def get_selected_tags():
                         logging.debug(f"✅ UI LINEAGE: Using database lineage '{db_lineage}' for '{tag_name}'")
                     else:
                         # Fallback to Excel lineage
-                        excel_lineage = excel_processor.get_current_lineage_for_product(tag_name)
+                        try:
+                            excel_lineage = excel_processor.get_current_lineage_for_product(tag_name)
+                        except Exception as lineage_err:
+                            logging.warning(f"Error getting Excel lineage for '{tag_name}': {lineage_err}")
+                            excel_lineage = None
                         if excel_lineage:
                             tag['canonical_lineage'] = excel_lineage
                             tag['currentLineage'] = excel_lineage
@@ -10160,7 +10169,13 @@ def get_selected_tags():
                 selected_tag_objects.append(tag)
             elif isinstance(tag, str):
                 # If it's a string, try to find the corresponding dictionary in available tags
-                available_tags = excel_processor.get_available_tags()
+                try:
+                    available_tags = excel_processor.get_available_tags()
+                except Exception as avail_err:
+                    logging.error(f"Error getting available tags for selected tag '{tag}': {avail_err}")
+                    logging.error(traceback.format_exc())
+                    # Continue with empty list to avoid breaking the entire endpoint
+                    available_tags = []
                 for available_tag in available_tags:
                     if isinstance(available_tag, dict) and available_tag.get('Product Name*', '') == tag:
                         # CRITICAL FIX: Query database for current lineage (NOT Excel)
@@ -10178,7 +10193,11 @@ def get_selected_tags():
                             logging.debug(f"✅ UI LINEAGE: Using database lineage '{db_lineage}' for '{tag}'")
                         else:
                             # Fallback to Excel lineage
-                            excel_lineage = excel_processor.get_current_lineage_for_product(tag)
+                            try:
+                                excel_lineage = excel_processor.get_current_lineage_for_product(tag)
+                            except Exception as lineage_err:
+                                logging.warning(f"Error getting Excel lineage for '{tag}': {lineage_err}")
+                                excel_lineage = None
                             if excel_lineage:
                                 available_tag['canonical_lineage'] = excel_lineage
                                 available_tag['currentLineage'] = excel_lineage
@@ -10200,7 +10219,11 @@ def get_selected_tags():
                         tag_dict['currentLineage'] = str(db_lineage).strip().upper()
                         logging.debug(f"✅ UI LINEAGE: Using database lineage '{db_lineage}' for '{tag}'")
                     else:
-                        excel_lineage = excel_processor.get_current_lineage_for_product(tag)
+                        try:
+                            excel_lineage = excel_processor.get_current_lineage_for_product(tag)
+                        except Exception as lineage_err:
+                            logging.warning(f"Error getting Excel lineage for '{tag}': {lineage_err}")
+                            excel_lineage = None
                         if excel_lineage:
                             tag_dict['canonical_lineage'] = excel_lineage
                             tag_dict['currentLineage'] = excel_lineage
@@ -10222,7 +10245,11 @@ def get_selected_tags():
                     tag_dict['currentLineage'] = str(db_lineage).strip().upper()
                     logging.debug(f"✅ UI LINEAGE: Using database lineage '{db_lineage}' for '{tag_name}'")
                 else:
-                    excel_lineage = excel_processor.get_current_lineage_for_product(tag_name)
+                    try:
+                        excel_lineage = excel_processor.get_current_lineage_for_product(tag_name)
+                    except Exception as lineage_err:
+                        logging.warning(f"Error getting Excel lineage for '{tag_name}': {lineage_err}")
+                        excel_lineage = None
                     if excel_lineage:
                         tag_dict['canonical_lineage'] = excel_lineage
                         tag_dict['currentLineage'] = excel_lineage
@@ -10236,7 +10263,10 @@ def get_selected_tags():
         return jsonify(selected_tag_objects)
     except Exception as e:
         logging.error(f"Error getting selected tags: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logging.error(traceback.format_exc())
+        # Return empty array instead of error to prevent frontend from breaking
+        # The frontend can handle empty arrays gracefully
+        return jsonify([])
 @app.route('/api/selected-tags', methods=['POST'])
 def set_selected_tags():
     """Set selected tags in the backend."""
