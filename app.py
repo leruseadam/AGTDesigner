@@ -3127,6 +3127,11 @@ def upload_file():
                         success = processor.load_file(file_path, fast_mode=True)
 
                         if success:
+                            # CRITICAL: Set global processor so /api/available-tags can access it
+                            global _excel_processor
+                            _excel_processor = processor
+                            logging.info(f"[BACKGROUND] ✅ Set global _excel_processor for frontend access")
+                            
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
                             
@@ -8509,7 +8514,11 @@ def get_available_tags():
         
         # INSTANT TAGS: Load file synchronously if needed instead of returning 202
         # This ensures tags appear instantly even if file processing isn't complete
-        if file_exists and not cached_tags:
+        # CRITICAL: For fast_load requests, if loading fails, return empty tags immediately instead of timing out
+        # PYTHONANYWHERE FIX: Skip synchronous loading on PythonAnywhere to avoid timeouts
+        is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
+        
+        if file_exists and not cached_tags and not is_pythonanywhere:
             uploaded_filename = session.get('uploaded_filename', '')
             if uploaded_filename:
                 # Check if processor needs to be loaded
@@ -8523,9 +8532,43 @@ def get_available_tags():
                             # Continue to fast_load path below to return tags immediately
                         else:
                             logging.warning(f"⚠️ INSTANT: File loaded but DataFrame is empty")
+                            # For fast_load, return empty tags immediately instead of waiting
+                            if fast_load:
+                                logging.warning("⚡ INSTANT: fast_load requested but DataFrame empty - returning empty tags immediately")
+                                return jsonify({
+                                    'tags': [],
+                                    'total_count': 0,
+                                    'source': 'empty-fast',
+                                    'message': 'File loaded but no data found. Please check your file and try again.'
+                                }), 200
                     except Exception as sync_load_err:
                         logging.error(f"❌ INSTANT: Synchronous load failed: {sync_load_err}")
-                        # Fall through to try other paths
+                        import traceback
+                        logging.error(traceback.format_exc())
+                        # For fast_load, return empty tags immediately instead of waiting
+                        if fast_load:
+                            logging.warning("⚡ INSTANT: fast_load requested but loading failed - returning empty tags immediately")
+                            return jsonify({
+                                'tags': [],
+                                'total_count': 0,
+                                'source': 'error-fast',
+                                'message': 'File is still loading. Please wait a moment and refresh, or try uploading again.'
+                            }), 200
+                        # Fall through to try other paths for non-fast_load requests
+        
+        # PYTHONANYWHERE FIX: If on PythonAnywhere and file not loaded, return processing status
+        # This prevents timeouts from trying to load large files synchronously
+        if is_pythonanywhere and file_exists and not cached_tags:
+            # Check if processor is loaded
+            if _excel_processor is None or _excel_processor.df is None or getattr(_excel_processor.df, 'empty', True):
+                logging.info("⏳ PYTHONANYWHERE: File not loaded yet, returning processing status")
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'processing': True,
+                    'status': 'loading',
+                    'message': 'Loading file in background. Please wait...'
+                }), 202  # 202 Accepted
 
         # ULTRA-FAST PATH: If this is a fast_load request, return Excel-only tags immediately
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
@@ -8533,7 +8576,21 @@ def get_available_tags():
             try:
                 # Get processor (may have been loaded synchronously above)
                 # Use get_excel_processor() to get the most up-to-date processor
-                excel_processor = get_excel_processor() if file_exists else (_excel_processor if _excel_processor is not None else None)
+                # Wrap in try-catch to handle loading failures gracefully
+                excel_processor = None
+                try:
+                    # PYTHONANYWHERE FIX: On PythonAnywhere, use cached processor from background thread
+                    # Don't call get_excel_processor() as it will try to load synchronously and timeout
+                    if is_pythonanywhere:
+                        excel_processor = _excel_processor if _excel_processor is not None else None
+                        logging.info(f"⚡ PYTHONANYWHERE: Using cached processor: {excel_processor is not None}")
+                    elif file_exists:
+                        excel_processor = get_excel_processor()
+                    else:
+                        excel_processor = _excel_processor if _excel_processor is not None else None
+                except Exception as get_proc_err:
+                    logging.warning(f"Could not get Excel processor for fast_load: {get_proc_err}")
+                    excel_processor = None
 
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                     logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for fast_load request (no DB lineage alignment).")
@@ -8542,13 +8599,17 @@ def get_available_tags():
                     if hasattr(excel_processor, '_skip_enrichment'):
                         excel_processor._skip_enrichment = True
                     
-                    excel_tags = excel_processor.get_available_tags(filters=None)
+                    try:
+                        excel_tags = excel_processor.get_available_tags(filters=None)
+                    except Exception as get_tags_err:
+                        logging.error(f"Error getting tags from processor: {get_tags_err}")
+                        excel_tags = []
                     
                     # Reset enrichment flag
                     if hasattr(excel_processor, '_skip_enrichment'):
                         excel_processor._skip_enrichment = False
                     
-                    safe_all_tags = make_json_safe(excel_tags)
+                    safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
                     
                     # Cache for this session/file so subsequent requests are instant
                     try:
@@ -8558,8 +8619,9 @@ def get_available_tags():
                                 cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
                             else:
                                 cache_key = get_session_cache_key('available_tags')
-                        cache.set(cache_key, safe_all_tags, timeout=300)
-                        logging.info(f"✅ Cached {len(safe_all_tags)} ultra-fast Excel tags.")
+                        if safe_all_tags:
+                            cache.set(cache_key, safe_all_tags, timeout=300)
+                            logging.info(f"✅ Cached {len(safe_all_tags)} ultra-fast Excel tags.")
                     except Exception as cache_err:
                         logging.warning(f"Could not cache ultra-fast Excel tags: {cache_err}")
                     
@@ -8576,8 +8638,12 @@ def get_available_tags():
                     except Exception:
                         pass
                     return resp
+                else:
+                    logging.warning(f"⚠️ ULTRA-FAST: Processor not available or empty (processor={excel_processor is not None}, df={excel_processor.df is not None if excel_processor else False}, empty={excel_processor.df.empty if excel_processor and excel_processor.df is not None else True})")
             except Exception as ultra_err:
-                logging.warning(f"Ultra-fast Excel-only tag path failed, falling back to full flow: {ultra_err}")
+                logging.error(f"❌ Ultra-fast Excel-only tag path failed: {ultra_err}")
+                import traceback
+                logging.error(traceback.format_exc())
 
         # Note: Synchronous loading already handled above (line 8510-8528) for instant tags
         # This ensures tags appear immediately without waiting for background processing

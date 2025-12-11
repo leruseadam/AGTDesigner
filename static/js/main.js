@@ -8432,12 +8432,27 @@ const TagManager = {
             if (tags.length === 0) {
                 // Check if this is an error response with a message
                 if (responseData.error || responseData.message) {
-                    console.warn('Backend returned empty tags with error:', responseData.error || responseData.message);
+                    const errorMsg = responseData.error || responseData.message;
+                    console.warn('Backend returned empty tags with message:', errorMsg);
                     // Try cache as fallback
                     const cachedTags = this.hydrateAvailableTagsFromCache();
                     if (cachedTags) {
                         verboseLog('✅ Using cached tags as fallback for error response');
                         return true;
+                    }
+                    // Show message to user if no cache available
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    if (availableTagsContainer && errorMsg) {
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-4">
+                                <div class="alert alert-info mx-3">
+                                    <p class="mb-2">${errorMsg}</p>
+                                    <button class="btn btn-primary btn-sm" onclick="TagManager.fetchAndUpdateAvailableTags()">
+                                        <i class="fas fa-redo"></i> Retry
+                                    </button>
+                                </div>
+                            </div>
+                        `;
                     }
                 } else {
                     console.warn('Backend returned empty tags array - no Excel file loaded');
