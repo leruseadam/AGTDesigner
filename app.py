@@ -1261,7 +1261,7 @@ def get_excel_processor():
                             logging.info(f"✅ Loading persisted file from session on processor creation: {session_file_path}")
                             # PERFORMANCE: Use fast_mode for instant loading
                         success = _excel_processor.load_file(session_file_path, fast_mode=True)
-                            if success:
+                        if success:
                             _excel_processor._last_loaded_file = session_file_path
                                 row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
                                 logging.info(f"✅ Successfully loaded {row_count} rows from persisted session file")
