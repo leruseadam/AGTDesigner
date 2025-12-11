@@ -4459,48 +4459,6 @@ const TagManager = {
                     });
                 });
             });
-        
-        // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
-        // Use requestAnimationFrame to ensure DOM is fully updated before restoring
-        requestAnimationFrame(() => {
-            // Double-check that persistentSelectedTags haven't been cleared
-            if (savedPersistentTags.length > 0 && this.state.persistentSelectedTags.length === 0) {
-                console.warn('⚠️ persistentSelectedTags was cleared during re-render, restoring from saved copy');
-                this.state.persistentSelectedTags = [...savedPersistentTags];
-                this.state.selectedTags = new Set(savedPersistentTags);
-            }
-            this._restoreCheckboxStates();
-            
-            // CRITICAL FIX: Also restore after a small delay to catch any async updates
-            setTimeout(() => {
-                if (savedPersistentTags.length > 0) {
-                    const currentCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
-                    let restoredCount = 0;
-                    currentCheckboxes.forEach(checkbox => {
-                        const tagName = checkbox.value;
-                        // PERFORMANCE: Use Set for O(1) lookup instead of array.includes() - O(n)
-                        const savedSet = new Set(savedPersistentTags);
-                        if (tagName && savedSet.has(tagName) && !checkbox.checked) {
-                            checkbox.checked = true;
-                            restoredCount++;
-                        }
-                    });
-                    if (restoredCount > 0) {
-                        verboseLog(`✅ Late restoration: ${restoredCount} checkboxes restored`);
-                    }
-                }
-            }, 50);
-        });
-
-        // Restore previous scroll position after full rebuild
-        this._restoreAvailableScrollPosition(savedScroll);
-
-        // Add event listeners
-        this.updateSelectAllCheckboxes();
-        this.initializeSelectAllCheckbox();
-        
-        // Hide loading splash only after tags actually appear in DOM
-        this._waitForTagsToAppear();
     },
 
     renderSimplifiedAvailableTags(tags, savedScroll) {
