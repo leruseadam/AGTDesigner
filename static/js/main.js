@@ -8151,6 +8151,10 @@ const TagManager = {
                 this._liteTagsRendered = false;
             }
 
+            // CRITICAL: Declare safetyTimeout at the very start of function so it's always available in catch block
+            // This prevents "safetyTimeout is not defined" errors if an exception occurs early
+            let safetyTimeout = null;
+            
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
                 console.log('✅ Tags rendered instantly from cache - fetching fresh lineage from database');
@@ -8174,8 +8178,6 @@ const TagManager = {
             
             // CRITICAL: Add safety timeout to hide spinner after 35 seconds (5 seconds after API timeout)
             // This prevents indefinite hanging even if error handling fails
-            // Declare at function scope so it's accessible in catch block
-            let safetyTimeout = null;
             if (!hasExistingTags) {
                 safetyTimeout = setTimeout(() => {
                     console.warn('⚠️ Safety timeout: Hiding loading spinner after 35 seconds');
@@ -11952,6 +11954,27 @@ const TagManager = {
         try {
             verboseLog(`🚀 Starting LIGHTNING upload:`, file.name, 'Size:', file.size, 'bytes');
             
+            // CRITICAL: Check store selection before attempting upload
+            try {
+                const storeCheckResponse = await fetch('/api/check-store-required');
+                const storeCheckData = await storeCheckResponse.json();
+                if (storeCheckData.required && !storeCheckData.has_store) {
+                    const errorMsg = 'Please select a store before uploading files. Click on the store name in the header to select a store.';
+                    console.error('Upload blocked:', errorMsg);
+                    this.updateUploadUI(errorMsg, 'error');
+                    if (typeof showToast === 'function') {
+                        showToast('error', errorMsg);
+                    } else {
+                        alert(errorMsg);
+                    }
+                    this.hideExcelLoadingSplash();
+                    return;
+                }
+            } catch (storeCheckError) {
+                console.warn('Could not verify store selection, proceeding with upload:', storeCheckError);
+                // Continue with upload - backend will handle validation
+            }
+            
             // CRITICAL: Clear cache but PRESERVE selected tags during upload
             this._lastUploadTime = Date.now();
             this.state.hydratedFromCache = false; // Force fresh data load
@@ -12003,11 +12026,21 @@ const TagManager = {
                 body: formData
             });
             
-            const uploadData = await uploadResponse.json();
+            // Parse response - handle both success and error responses
+            let uploadData;
+            try {
+                uploadData = await uploadResponse.json();
+            } catch (parseError) {
+                console.error('Failed to parse upload response:', parseError);
+                throw new Error(`Upload failed: Server returned invalid response (${uploadResponse.status})`);
+            }
+            
             verboseLog('⚡ Lightning upload response:', uploadData);
             
             if (!uploadResponse.ok) {
-                throw new Error(uploadData.error || 'Lightning upload failed');
+                const errorMsg = uploadData.error || uploadData.message || `Upload failed (${uploadResponse.status})`;
+                console.error('Upload failed:', errorMsg);
+                throw new Error(errorMsg);
             }
             
             // Upload complete, no need for separate processing step
@@ -12304,7 +12337,17 @@ const TagManager = {
                 errorMessage = 'SSL connection error. Please check your internet connection and try again. If the problem persists, contact support.';
             }
             
-            this.updateUploadUI('Upload failed: ' + errorMessage, 'error');
+            const fullErrorMessage = 'Upload failed: ' + errorMessage;
+            console.error('Upload error:', fullErrorMessage);
+            this.updateUploadUI(fullErrorMessage, 'error');
+            
+            // Also show toast notification for better visibility
+            if (typeof showToast === 'function') {
+                showToast('error', fullErrorMessage);
+            } else {
+                // Fallback to alert if toast is not available
+                alert(fullErrorMessage);
+            }
             return;
         }
     },
