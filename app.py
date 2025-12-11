@@ -2201,8 +2201,8 @@ def initialize_excel_processor():
         logging.error(f"Traceback: {traceback.format_exc()}")
 
 # Initialize on startup
-# DISABLED: Skip initialization to prevent PythonAnywhere hangs
-# Excel processor will be lazily initialized on first request
+# Load Excel file on startup for immediate availability
+# Excel processor will be ready when user first visits the site
 if not os.environ.get('PYTHONANYWHERE_DOMAIN') and not os.environ.get('PYTHONANYWHERE_SITE'):
     # Only initialize on local development
     try:

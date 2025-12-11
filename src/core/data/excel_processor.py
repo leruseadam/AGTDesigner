@@ -1688,6 +1688,7 @@ class ExcelProcessor:
                     self.logger.debug("Added default test result unit column")
                 
                 # 8. Convert key fields to categorical for memory efficiency
+                # CRITICAL FIX: Ensure vendor column preserves all unique values when converting to categorical
                 for col in ["Product Type*", "Lineage", "Product Brand", "Vendor", "Product Strain"]:
                     if col in df.columns:
                         df[col] = df[col].fillna("Unknown")
@@ -1696,6 +1697,14 @@ class ExcelProcessor:
                             # Ensure all valid lineage values are included in categories
                             all_lineage_values = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA", "Unknown"]
                             df[col] = pd.Categorical(df[col], categories=all_lineage_values)
+                        elif col == "Vendor":
+                            # CRITICAL FIX: For Vendor column, ensure all unique values are preserved
+                            # Get all unique values before converting to categorical
+                            unique_vendors = df[col].dropna().unique().tolist()
+                            unique_vendors = [str(v).strip() for v in unique_vendors if str(v).strip() and str(v).lower() not in ['nan', 'none', '']]
+                            # Convert to categorical with all unique values as categories
+                            df[col] = pd.Categorical(df[col], categories=sorted(set(unique_vendors + ["Unknown"])))
+                            self.logger.info(f"✅ Converted Vendor column to categorical with {len(unique_vendors)} unique vendors")
                         else:
                             df[col] = df[col].astype("category")
                 
@@ -2736,6 +2745,14 @@ class ExcelProcessor:
                         # Ensure all valid lineage values are included in categories
                         all_lineage_values = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA", "Unknown"]
                         self.df[col] = pd.Categorical(self.df[col], categories=all_lineage_values)
+                    elif col == "Vendor":
+                        # CRITICAL FIX: For Vendor column, ensure all unique values are preserved
+                        # Get all unique values before converting to categorical
+                        unique_vendors = self.df[col].dropna().unique().tolist()
+                        unique_vendors = [str(v).strip() for v in unique_vendors if str(v).strip() and str(v).lower() not in ['nan', 'none', '']]
+                        # Convert to categorical with all unique values as categories
+                        self.df[col] = pd.Categorical(self.df[col], categories=sorted(set(unique_vendors + ["Unknown"])))
+                        self.logger.info(f"✅ Converted Vendor column to categorical with {len(unique_vendors)} unique vendors")
                     else:
                         self.df[col] = self.df[col].astype("category")
 
@@ -3410,19 +3427,46 @@ class ExcelProcessor:
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
         
         # CRITICAL DEBUG: Log unique vendors in the DataFrame before processing
+        # Check ALL vendor columns, not just the first one
         vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
         available_vendor_cols = [col for col in vendor_cols if col in filtered_df.columns]
+        
+        # Also check case-insensitive matches
+        if not available_vendor_cols:
+            available_vendor_cols = [col for col in filtered_df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]
+            if available_vendor_cols:
+                logger.info(f"📊 Found vendor columns via case-insensitive search: {available_vendor_cols}")
+        
         if available_vendor_cols:
-            vendor_series = filtered_df[available_vendor_cols[0]].fillna('').astype(str).str.strip()
-            unique_vendors = vendor_series[vendor_series != ''].unique()
-            logger.info(f"📊 Backend vendor extraction: Found {len(unique_vendors)} unique vendors in Excel file")
-            if len(unique_vendors) <= 20:
-                logger.info(f"📋 All vendors in Excel: {sorted(unique_vendors.tolist())}")
+            # Get unique vendors from ALL vendor columns
+            all_unique_vendors = set()
+            for vcol in available_vendor_cols:
+                vendor_series = filtered_df[vcol]
+                # Convert categorical to string if needed
+                if hasattr(vendor_series, 'cat'):
+                    vendor_series = vendor_series.astype(str)
+                vendor_series = vendor_series.fillna('').astype(str).str.strip()
+                unique_vendors = vendor_series[vendor_series != ''].unique()
+                all_unique_vendors.update(unique_vendors)
+                logger.info(f"📊 Column '{vcol}': Found {len(unique_vendors)} unique vendors")
+            
+            logger.info(f"📊 Backend vendor extraction: Found {len(all_unique_vendors)} total unique vendors across all vendor columns")
+            if len(all_unique_vendors) <= 20:
+                logger.info(f"📋 All vendors in Excel: {sorted(all_unique_vendors)}")
             else:
-                logger.info(f"📋 First 20 vendors in Excel: {sorted(unique_vendors.tolist())[:20]}")
+                logger.info(f"📋 First 20 vendors in Excel: {sorted(all_unique_vendors)[:20]}")
+            
+            # Check for empty vendor values
+            primary_vendor_col = available_vendor_cols[0]
+            vendor_series = filtered_df[primary_vendor_col]
+            if hasattr(vendor_series, 'cat'):
+                vendor_series = vendor_series.astype(str)
+            vendor_series = vendor_series.fillna('').astype(str).str.strip()
             empty_vendor_count = (vendor_series == '').sum()
             if empty_vendor_count > 0:
                 logger.warning(f"⚠️ WARNING: {empty_vendor_count} out of {len(filtered_df)} products ({round(empty_vendor_count/len(filtered_df)*100, 1)}%) have empty vendor fields in Excel file!")
+        else:
+            logger.warning(f"⚠️ No vendor columns found! Available columns: {list(filtered_df.columns)}")
         
         tags = []
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
@@ -5583,12 +5627,34 @@ class ExcelProcessor:
         }
         
         # Find vendor column once (used multiple times)
+        # CRITICAL FIX: Check all vendor columns and use the one with the most data
         vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
         vendor_col = None
+        vendor_col_data_count = 0
+        
         for vcol in vendor_cols:
             if vcol in df.columns:
-                vendor_col = vcol
-                break
+                # Count non-empty values in this column
+                non_empty_count = df[vcol].dropna().astype(str).str.strip()
+                non_empty_count = non_empty_count[non_empty_count != ''].count()
+                # Use the column with the most data
+                if non_empty_count > vendor_col_data_count:
+                    vendor_col = vcol
+                    vendor_col_data_count = non_empty_count
+        
+        # If no standard vendor column found, try case-insensitive search
+        if vendor_col is None:
+            for col in df.columns:
+                if 'vendor' in col.lower() or 'supplier' in col.lower():
+                    non_empty_count = df[col].dropna().astype(str).str.strip()
+                    non_empty_count = non_empty_count[non_empty_count != ''].count()
+                    if non_empty_count > vendor_col_data_count:
+                        vendor_col = col
+                        vendor_col_data_count = non_empty_count
+                        self.logger.info(f"✅ Found vendor column via case-insensitive search: '{vendor_col}' with {non_empty_count} non-empty values")
+        
+        if vendor_col:
+            self.logger.info(f"✅ Using vendor column: '{vendor_col}' with {vendor_col_data_count} non-empty values")
         
         options = {}
         import math
@@ -5624,17 +5690,48 @@ class ExcelProcessor:
             # CRITICAL FIX: Handle vendor filter specially to check multiple column names
             if filter_key == "vendor":
                 if vendor_col:
-                    # Get unique vendor values from the vendor column ONLY
-                    values = temp_df[vendor_col].dropna().unique().tolist()
-                    values = [str(v).strip() for v in values if str(v).strip() and str(v).lower() not in ['nan', 'none', '']]
-                    # Remove duplicates and sort
-                    values = sorted(set(values))
+                    # CRITICAL FIX: Get unique vendor values from ALL possible vendor columns, not just one
+                    # This ensures we capture all vendors even if column names vary
+                    all_vendor_values = set()
+                    vendor_cols_to_check = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
+                    
+                    for vcol in vendor_cols_to_check:
+                        if vcol in temp_df.columns:
+                            # Convert categorical to string if needed to get all unique values
+                            vendor_series = temp_df[vcol]
+                            if hasattr(vendor_series, 'cat'):
+                                # If categorical, get all categories that appear in the data
+                                vendor_series = vendor_series.astype(str)
+                            vendor_series = vendor_series.dropna().astype(str).str.strip()
+                            unique_vals = vendor_series[vendor_series != ''].unique()
+                            all_vendor_values.update([str(v).strip() for v in unique_vals if str(v).strip() and str(v).lower() not in ['nan', 'none', '']])
+                    
+                    values = sorted(all_vendor_values)
                     options[filter_key] = clean_list(values)
-                    self.logger.info(f"✅ Vendor filter options: Found {len(values)} unique vendors from column '{vendor_col}'")
+                    self.logger.info(f"✅ Vendor filter options: Found {len(values)} unique vendors from all vendor columns")
+                    if len(values) <= 20:
+                        self.logger.info(f"📋 All vendors found: {values}")
+                    else:
+                        self.logger.info(f"📋 First 20 vendors: {values[:20]}")
                 else:
-                    # No vendor column found
-                    options[filter_key] = []
-                    self.logger.warning("⚠️ No vendor column found in DataFrame. Available columns: " + str(list(temp_df.columns)))
+                    # No vendor column found - try case-insensitive search
+                    vendor_cols_found = [col for col in temp_df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]
+                    if vendor_cols_found:
+                        # Use the first vendor column found
+                        all_vendor_values = set()
+                        for vcol in vendor_cols_found:
+                            vendor_series = temp_df[vcol]
+                            if hasattr(vendor_series, 'cat'):
+                                vendor_series = vendor_series.astype(str)
+                            vendor_series = vendor_series.dropna().astype(str).str.strip()
+                            unique_vals = vendor_series[vendor_series != ''].unique()
+                            all_vendor_values.update([str(v).strip() for v in unique_vals if str(v).strip() and str(v).lower() not in ['nan', 'none', '']])
+                        values = sorted(all_vendor_values)
+                        options[filter_key] = clean_list(values)
+                        self.logger.info(f"✅ Vendor filter options: Found {len(values)} unique vendors from case-insensitive search (columns: {vendor_cols_found})")
+                    else:
+                        options[filter_key] = []
+                        self.logger.warning("⚠️ No vendor column found in DataFrame. Available columns: " + str(list(temp_df.columns)))
             # Get unique values for this filter type
             elif col in temp_df.columns:
                 # CRITICAL FIX: Fetch lineage values from database for filtered products

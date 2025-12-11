@@ -6553,7 +6553,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important; /* Ensure left-to-right for proper centering */
-    padding: 12px 45px 12px 30px !important; /* Asymmetric padding: more right padding for arrow, more left to balance text */
+    padding: 12px 45px 12px 45px !important; /* Symmetric padding to center text - arrow space accounted for on right */
     font-size: 0.95em !important; /* Reduced from 1.1em for better PC UI */
     font-weight: 700 !important;
     color: #e0d6f6 !important;
@@ -6592,8 +6592,8 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     margin-left: auto !important;
     margin-right: auto !important;
-    padding-left: 50px !important; /* Match right padding to center text accounting for arrow */
-    padding-right: 50px !important;
+    padding-left: 45px !important; /* Symmetric padding to center text accounting for arrow */
+    padding-right: 45px !important;
   }
   
   /* CRITICAL: Force text centering by adjusting padding to account for arrow */
@@ -6611,13 +6611,17 @@ body.modal-open #mainContent.store-selection-disabled,
   #templateSelectModal {
     text-align: center !important;
     text-align-last: center !important;
-    /* Adjust padding to visually center text - arrow takes ~32px on right (14px position + 18px size) */
-    /* So we add more left padding to balance it out visually */
-    padding-left: 30px !important;
+    /* Adjust padding to visually center text - symmetric padding with arrow accounted for */
+    padding-left: 45px !important;
     padding-right: 45px !important;
     direction: ltr !important;
     /* Ensure text appears centered visually */
     text-indent: 0 !important;
+    /* Force center alignment - override any browser defaults */
+    text-align: center !important;
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
   
   /* FORCE CENTERING - Override any conflicting rules - UNIVERSAL RULE */

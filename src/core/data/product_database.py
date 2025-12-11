@@ -30,12 +30,41 @@ def get_database_path(store_name):
     current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     uploads_dir = os.path.join(current_dir, 'uploads')
     
-    # Create uploads directory if it doesn't exist
-    os.makedirs(uploads_dir, exist_ok=True)
+    # Create uploads directory if it doesn't exist with proper error handling
+    try:
+        os.makedirs(uploads_dir, exist_ok=True, mode=0o755)
+        # Verify directory is writable
+        if not os.access(uploads_dir, os.W_OK):
+            raise PermissionError(f"Uploads directory is not writable: {uploads_dir}")
+    except (OSError, PermissionError) as e:
+        logger.error(f"Failed to create or access uploads directory {uploads_dir}: {e}")
+        raise
     
     # Create store-specific database file
     db_filename = f'product_database_{store_name}.db'
-    return os.path.join(uploads_dir, db_filename)
+    db_path = os.path.join(uploads_dir, db_filename)
+    
+    # Verify parent directory is writable before returning path
+    try:
+        if os.path.exists(db_path):
+            # Check if existing file is writable
+            if not os.access(db_path, os.W_OK):
+                logger.warning(f"Database file exists but is not writable: {db_path}")
+        else:
+            # Check if we can create the file
+            test_path = db_path + '.test'
+            try:
+                with open(test_path, 'w') as f:
+                    f.write('test')
+                os.remove(test_path)
+            except (OSError, PermissionError) as e:
+                logger.error(f"Cannot write to database location {uploads_dir}: {e}")
+                raise
+    except Exception as e:
+        logger.error(f"Error checking database path {db_path}: {e}")
+        raise
+    
+    return db_path
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +179,19 @@ class ProductDatabase:
 
             for attempt in range(max_retries):
                 try:
+                    # CRITICAL FIX: Verify database path is accessible before connecting
+                    db_dir = os.path.dirname(self.db_path)
+                    if not os.path.exists(db_dir):
+                        try:
+                            os.makedirs(db_dir, exist_ok=True, mode=0o755)
+                        except (OSError, PermissionError) as dir_error:
+                            logging.error(f"❌ Cannot create database directory {db_dir}: {dir_error}")
+                            raise
+                    
+                    if not os.access(db_dir, os.W_OK):
+                        logging.error(f"❌ Database directory is not writable: {db_dir}")
+                        raise PermissionError(f"Database directory is not writable: {db_dir}")
+                    
                     conn = sqlite3.connect(
                         self.db_path,
                         timeout=self._pool_timeout,
@@ -190,8 +232,24 @@ class ProductDatabase:
 
                     return conn
 
-                except (sqlite3.Error, sqlite3.OperationalError) as e:
-                    if attempt < max_retries - 1:
+                except (sqlite3.Error, sqlite3.OperationalError, OSError) as e:
+                    error_str = str(e).lower()
+                    # Handle write errors specifically - don't retry, fail immediately
+                    if "write error" in error_str or ("disk" in error_str and "full" in error_str):
+                        logging.error(f"❌ Database write error during connection creation: {e}")
+                        logging.error(f"   Database path: {self.db_path}")
+                        logging.error(f"   Directory exists: {os.path.exists(os.path.dirname(self.db_path))}")
+                        if os.path.exists(os.path.dirname(self.db_path)):
+                            logging.error(f"   Directory writable: {os.access(os.path.dirname(self.db_path), os.W_OK)}")
+                        if os.path.exists(self.db_path):
+                            logging.error(f"   File writable: {os.access(self.db_path, os.W_OK)}")
+                        raise
+                    elif "database is locked" in error_str and attempt < max_retries - 1:
+                        logging.warning(f"Database locked during connection creation (attempt {attempt + 1}/{max_retries}), retrying...")
+                        import time
+                        time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                        continue
+                    elif attempt < max_retries - 1:
                         logging.warning(f"Connection attempt {attempt + 1} failed: {e}, retrying...")
                         import time
                         time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
@@ -243,8 +301,25 @@ class ProductDatabase:
             start_time = time.time()
             logger.info(f"Initializing product database at {self.db_path}...")
             
+            # CRITICAL FIX: Verify database path is accessible before attempting connection
+            db_dir = os.path.dirname(self.db_path)
+            if not os.path.exists(db_dir):
+                try:
+                    os.makedirs(db_dir, exist_ok=True, mode=0o755)
+                    logger.info(f"Created database directory: {db_dir}")
+                except (OSError, PermissionError) as dir_error:
+                    logger.error(f"❌ Cannot create database directory {db_dir}: {dir_error}")
+                    raise
+            
+            if not os.access(db_dir, os.W_OK):
+                logger.error(f"❌ Database directory is not writable: {db_dir}")
+                raise PermissionError(f"Database directory is not writable: {db_dir}")
+            
             try:
                 conn = self._get_connection()
+                if conn is None:
+                    logger.error("❌ Failed to get database connection")
+                    raise RuntimeError("Failed to get database connection")
                 cursor = conn.cursor()
                 
                 # Check if products table exists and has data
@@ -398,7 +473,21 @@ class ProductDatabase:
                     
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
                 
-                conn.commit()
+                # CRITICAL FIX: Add error handling for write errors during commit
+                try:
+                    conn.commit()
+                except (OSError, sqlite3.OperationalError) as commit_error:
+                    error_msg = str(commit_error).lower()
+                    logger.error(f"❌ Database write error during init_database commit: {commit_error}")
+                    logger.error(f"   Database path: {self.db_path}")
+                    logger.error(f"   Directory exists: {os.path.exists(os.path.dirname(self.db_path))}")
+                    logger.error(f"   Directory writable: {os.access(os.path.dirname(self.db_path), os.W_OK) if os.path.exists(os.path.dirname(self.db_path)) else 'N/A'}")
+                    # Try to rollback
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
+                    raise
                 
                 # Check if we need to add missing columns (migration)
                 # Only migrate if tables are empty or missing critical columns
@@ -1038,8 +1127,30 @@ class ProductDatabase:
                             notify_sovereign_lineage_set(strain_name, lineage)
                         except Exception as notify_error:
                             logger.warning(f"Failed to notify sovereign lineage update: {notify_error}")
-                        
-                    conn.commit()
+                    
+                    # CRITICAL FIX: Add error handling for write errors during commit
+                    try:
+                        conn.commit()
+                    except (OSError, sqlite3.OperationalError) as commit_error:
+                        error_msg = str(commit_error).lower()
+                        if "write error" in error_msg or "disk" in error_msg:
+                            logger.error(f"❌ Database write error during commit: {commit_error}")
+                            logger.error(f"   Database path: {self.db_path}")
+                            logger.error(f"   Directory exists: {os.path.exists(os.path.dirname(self.db_path))}")
+                            logger.error(f"   Directory writable: {os.access(os.path.dirname(self.db_path), os.W_OK) if os.path.exists(os.path.dirname(self.db_path)) else 'N/A'}")
+                            logger.error(f"   File exists: {os.path.exists(self.db_path)}")
+                            if os.path.exists(self.db_path):
+                                logger.error(f"   File writable: {os.access(self.db_path, os.W_OK)}")
+                            # Try to rollback
+                            try:
+                                conn.rollback()
+                            except:
+                                pass
+                            raise
+                        else:
+                            # Re-raise other operational errors
+                            raise
+                    
                     cache_key = self._get_cache_key("strain_info", normalized_name)
                     with self._cache_lock:
                         if cache_key in self._cache:
