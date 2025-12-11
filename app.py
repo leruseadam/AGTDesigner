@@ -1112,7 +1112,7 @@ def force_reload_excel_processor(new_file_path):
                 logging.info(f"Successfully populated dropdown cache from session uploaded file")
                 # Log the strain count specifically
                 if 'strain' in _excel_processor.dropdown_cache:
-                strain_count = len(_excel_processor.dropdown_cache['strain'])
+                    strain_count = len(_excel_processor.dropdown_cache['strain'])
                     logging.info(f"Dropdown cache contains {strain_count} strains")
                 else:
                     logging.warning("No strain filter found in dropdown cache")
