@@ -3083,32 +3083,58 @@ def upload_file():
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
         
         if is_pythonanywhere:
-            # On PythonAnywhere: Start background thread to avoid timeout
-            logging.info("[PYTHONANYWHERE] Starting background processing thread")
+            # On PythonAnywhere: Load file and cache tags synchronously, then store in DB in background
+            logging.info("[PYTHONANYWHERE] INSTANT MODE: Loading file synchronously for immediate tag availability")
 
-            # Capture variables from request context for background thread
+            # Capture variables for background thread
             original_filename = file.filename
-            # Store context removed - using single database
-            # Capture session_id for preroll items update
             background_session_id = session.get('session_id', 'default')
 
-            # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
-            # CRITICAL: Also clear cache to ensure old Excel data doesn't persist
+            # CRITICAL: Clear old processor and cache
+            global _excel_processor
             _excel_processor = None
-            logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
             
-            # CRITICAL: Clear cache again after marking as ready to ensure old data is gone
             try:
                 cache_key = get_session_cache_key('available_tags')
                 cache.delete(cache_key)
-                logging.info(f"✅ Cleared available_tags cache after marking ready: {cache_key}")
+                logging.info(f"✅ Cleared old cache")
             except Exception as e:
-                logging.warning(f"⚠️ Error clearing cache after marking ready: {e}")
+                logging.warning(f"⚠️ Error clearing cache: {e}")
 
-            # PERFORMANCE FIX: Mark as ready immediately so frontend can start loading
-            # Background processing will handle database storage and cache clearing
-            update_processing_status(file.filename, 'ready')
-            logging.info(f"✅ Marked {file.filename} as ready immediately for fast frontend response")
+            # INSTANT LOAD: Load file and cache tags synchronously so frontend gets them immediately
+            try:
+                logging.info(f"[INSTANT] Loading file synchronously: {file_path}")
+                
+                from src.core.data.excel_processor import ExcelProcessor
+                processor = ExcelProcessor(store_name=selected_store)
+                
+                # CRITICAL: Skip database enrichment for maximum speed
+                processor._skip_enrichment = True
+                
+                # Load file with fast_mode
+                success = processor.load_file(file_path, fast_mode=True)
+                
+                if success:
+                    _excel_processor = processor
+                    row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                    logging.info(f"[INSTANT] ✅ File loaded synchronously: {row_count} rows")
+                    
+                    # Cache tags immediately
+                    tags = processor.get_available_tags(filters=None)
+                    safe_tags = make_json_safe(tags)
+                    cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                    cache.set(cache_key, safe_tags, timeout=300)
+                    logging.info(f"[INSTANT] ✅ Cached {len(safe_tags)} tags - frontend will load instantly!")
+                    
+                    update_processing_status(file.filename, 'ready')
+                else:
+                    logging.error("[INSTANT] File load failed")
+                    return jsonify({'error': 'File load failed'}), 500
+                    
+            except Exception as instant_error:
+                logging.error(f"[INSTANT] Synchronous load failed: {instant_error}")
+                logging.error(traceback.format_exc())
+                return jsonify({'error': f'File load failed: {str(instant_error)}'}), 500
 
             def process_in_background():
                 # CRITICAL FIX: Use application context for background thread
@@ -8529,22 +8555,49 @@ def get_available_tags():
                 if _excel_processor is None or _excel_processor.df is None or _excel_processor.df.empty:
                     logging.info(f"⚡ INSTANT: Loading file synchronously for instant tags: {uploaded_filename}")
                     try:
-                        # Load processor synchronously - this ensures tags are available immediately
-                        processor = get_excel_processor()
-                        if processor and hasattr(processor, 'df') and processor.df is not None and not processor.df.empty:
-                            logging.info(f"✅ INSTANT: File loaded synchronously, {len(processor.df)} rows ready")
-                            # Continue to fast_load path below to return tags immediately
-                        else:
-                            logging.warning(f"⚠️ INSTANT: File loaded but DataFrame is empty")
-                            # For fast_load, return empty tags immediately instead of waiting
+                        # CRITICAL: Add timeout protection for synchronous loading
+                        # Use threading to enforce timeout so we don't hang forever
+                        import threading
+                        processor_result = [None]
+                        load_exception = [None]
+                        
+                        def load_processor():
+                            try:
+                                processor_result[0] = get_excel_processor()
+                            except Exception as e:
+                                load_exception[0] = e
+                        
+                        load_thread = threading.Thread(target=load_processor, daemon=True)
+                        load_thread.start()
+                        load_thread.join(timeout=8.0)  # 8 second timeout for fast_load requests
+                        
+                        if load_thread.is_alive():
+                            logging.warning("⚠️ INSTANT: Synchronous load timed out after 8s - returning empty tags")
                             if fast_load:
-                                logging.warning("⚡ INSTANT: fast_load requested but DataFrame empty - returning empty tags immediately")
                                 return jsonify({
                                     'tags': [],
                                     'total_count': 0,
-                                    'source': 'empty-fast',
-                                    'message': 'File loaded but no data found. Please check your file and try again.'
+                                    'source': 'timeout-fast',
+                                    'message': 'File is still loading. Please wait a moment and refresh, or try uploading again.'
                                 }), 200
+                        elif load_exception[0]:
+                            raise load_exception[0]
+                        else:
+                            processor = processor_result[0]
+                            if processor and hasattr(processor, 'df') and processor.df is not None and not processor.df.empty:
+                                logging.info(f"✅ INSTANT: File loaded synchronously, {len(processor.df)} rows ready")
+                                # Continue to fast_load path below to return tags immediately
+                            else:
+                                logging.warning(f"⚠️ INSTANT: File loaded but DataFrame is empty")
+                                # For fast_load, return empty tags immediately instead of waiting
+                                if fast_load:
+                                    logging.warning("⚡ INSTANT: fast_load requested but DataFrame empty - returning empty tags immediately")
+                                    return jsonify({
+                                        'tags': [],
+                                        'total_count': 0,
+                                        'source': 'empty-fast',
+                                        'message': 'File loaded but no data found. Please check your file and try again.'
+                                    }), 200
                     except Exception as sync_load_err:
                         logging.error(f"❌ INSTANT: Synchronous load failed: {sync_load_err}")
                         import traceback
