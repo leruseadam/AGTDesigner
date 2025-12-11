@@ -8286,7 +8286,7 @@ const TagManager = {
             let response;
             let responseData;
             const maxRetries = 1; // Reduced from 3 to 1 to prevent multiple restarts for errors
-            const maxProcessingRetries = 10; // Allow more retries for 202 (file processing)
+            const maxProcessingRetries = 30; // Allow 30 retries for 202 (file processing) - enough for 60+ seconds of loading
             let retryCount = 0;
             let processingRetryCount = 0;
             let lastError;
@@ -8294,12 +8294,12 @@ const TagManager = {
             while (retryCount < maxRetries && processingRetryCount < maxProcessingRetries) {
                 try {
                     const controller = new AbortController();
-                    // CRITICAL: Set timeout to 12 seconds - if it takes longer, show error and use cache
-                    // This prevents indefinite hangs while still allowing reasonable load times for large datasets
+                    // CRITICAL: Set timeout to 180 seconds for PythonAnywhere large file loading
+                    // Background thread needs time to load 2000+ rows and cache tags
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn('⚠️ Tag loading timeout after 12 seconds - will try cache or show error');
-                    }, 12000); // Reduced from 30s to 12s for faster feedback
+                        console.warn('⚠️ Tag loading timeout after 180 seconds - will try cache or show error');
+                    }, 180000); // 3 minutes for large files on PythonAnywhere
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
@@ -8328,8 +8328,16 @@ const TagManager = {
                             }
                             throw new Error('File is still processing. Please wait a moment and refresh the page, or try uploading again.');
                         }
+                        
+                        // Show user-friendly loading message
+                        const progressPercent = Math.round((processingRetryCount / maxProcessingRetries) * 100);
+                        const loadingMsg = `⏳ Loading file (${progressPercent}%)... Please wait, this may take a minute for large files.`;
+                        if (typeof this.updateUploadUI === 'function') {
+                            this.updateUploadUI(loadingMsg);
+                        }
+                        
                         verboseLog(`⏳ File still processing (202), will retry after delay... (${processingRetryCount}/${maxProcessingRetries})`);
-                        const delay = Math.min(500 * processingRetryCount, 2000); // Progressive delay, max 2s
+                        const delay = Math.min(1000 + (500 * processingRetryCount), 5000); // Progressive delay, 1-5 seconds
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue; // Retry without incrementing error retry count
                     }
