@@ -3248,7 +3248,7 @@ def upload_file():
                                 logging.warning(f"[LOCAL-BACKGROUND] Database storage failed: {db_error}")
                             
                             # Update global processor
-                                                        _excel_processor = processor
+                            _excel_processor = processor
                             logging.info(f"[LOCAL-BACKGROUND] ✅ Updated global Excel processor with {row_count} rows")
                         else:
                             logging.error("[LOCAL-BACKGROUND] File load returned False")
