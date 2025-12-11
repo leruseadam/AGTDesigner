@@ -164,22 +164,59 @@ async function handleFiles(files) {
       // Update splash status
       if (statusElement) statusElement.textContent = 'Uploading file...';
       
-      // CRITICAL FIX: Add timeout to prevent hanging
+      // CRITICAL FIX: Increase timeout for large files - 504 errors mean server timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
-        console.warn('⚠️ Upload timeout after 60 seconds');
-      }, 60000); // 60 second timeout
+        console.warn('⚠️ Upload timeout after 180 seconds');
+      }, 180000); // 180 second timeout (3 minutes) for large files
       
-      const response = await fetch('/upload', {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'X-Post-Upload': '1'  // Flag for fast tag loading
-        },
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+      let response;
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      // CRITICAL FIX: Retry logic for 504 Gateway Timeout errors
+      while (retryCount <= maxRetries) {
+        try {
+          response = await fetch('/upload', {
+            method: 'POST',
+            body: formData,
+            headers: {
+              'X-Post-Upload': '1'  // Flag for fast tag loading
+            },
+            signal: controller.signal
+          });
+          
+          // Clear timeout if request succeeded
+          clearTimeout(timeoutId);
+          
+          // If we got a 504, retry
+          if (response.status === 504 && retryCount < maxRetries) {
+            retryCount++;
+            console.warn(`⚠️ Got 504 Gateway Timeout, retrying (${retryCount}/${maxRetries})...`);
+            if (statusElement) statusElement.textContent = `Retrying upload (${retryCount}/${maxRetries})...`;
+            // Wait 2 seconds before retry
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            continue;
+          }
+          
+          // Break out of retry loop if successful or non-retryable error
+          break;
+        } catch (error) {
+          // If abort error and we haven't exceeded retries, retry
+          if (error.name === 'AbortError' && retryCount < maxRetries) {
+            retryCount++;
+            console.warn(`⚠️ Upload aborted, retrying (${retryCount}/${maxRetries})...`);
+            if (statusElement) statusElement.textContent = `Retrying upload (${retryCount}/${maxRetries})...`;
+            // Wait 2 seconds before retry
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            continue;
+          }
+          // Re-throw if we've exhausted retries or it's a different error
+          throw error;
+        }
+      }
+      
       console.log('📡 Upload response status:', response.status);
       
       // Update splash status
@@ -188,12 +225,17 @@ async function handleFiles(files) {
       // Check if response is ok before parsing JSON
       if (!response.ok) {
         let errorMessage = `Upload failed with status ${response.status}`;
+        if (response.status === 504) {
+          errorMessage = 'Upload timed out on server. The file may be too large or the server is busy. Please try again or use a smaller file.';
+        }
         try {
           const errorData = await response.json();
           errorMessage = errorData.error || errorData.message || errorMessage;
         } catch (e) {
           const errorText = await response.text();
-          errorMessage = errorText || errorMessage;
+          if (errorText) {
+            errorMessage = errorText;
+          }
         }
         console.error('❌ Upload failed:', errorMessage);
         if (statusElement) statusElement.textContent = `❌ Error: ${errorMessage}`;
