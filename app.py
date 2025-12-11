@@ -1273,8 +1273,8 @@ def get_excel_processor():
                     logging.debug(f"Could not load session file on processor creation: {session_load_error}")
             else:
                 # If the active store changed, update the processor's store context
-                    current_processor_store = getattr(_excel_processor, '_store_name', None)
-            if current_processor_store != processor_store:
+                current_processor_store = getattr(_excel_processor, '_store_name', None)
+                if current_processor_store != processor_store:
                     logging.info(f"🔄 ExcelProcessor store context update: '{current_processor_store}' → '{processor_store}'")
                 _excel_processor._store_name = processor_store
                     # Clear caches tied to previous store to avoid mixing data
