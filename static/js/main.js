@@ -3630,6 +3630,13 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
+            // CRITICAL FIX: Clear filename display when no tags are available
+            // This prevents confusion when file path shows but tags don't load
+            const fileInfoText = document.getElementById('fileInfoText');
+            if (fileInfoText) {
+                fileInfoText.textContent = 'No file uploaded';
+                verboseLog('✅ Cleared filename display - no tags available');
+            }
             return;
         }
         
