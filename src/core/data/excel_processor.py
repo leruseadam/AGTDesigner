@@ -4726,9 +4726,37 @@ class ExcelProcessor:
                                     if excel_lineage != db_lineage_clean:
                                         logger.info(f"🔄 LINEAGE OVERRIDE (get_selected_records): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
                                     record['Lineage'] = db_lineage_clean
+                                    # CRITICAL FIX: Also update all lineage-related fields to ensure consistency
+                                    record['lineage'] = db_lineage_clean
+                                    record['currentLineage'] = db_lineage_clean
+                                    record['canonical_lineage'] = db_lineage_clean
                                     logger.debug(f"✅ Found lineage via get_product_lineage for '{product_name}': {db_lineage_clean}")
+                                else:
+                                    # CRITICAL FIX: If get_product_lineage returns None, try get_products_by_names as fallback
+                                    logger.debug(f"get_product_lineage returned None for '{product_name}', trying get_products_by_names fallback...")
+                                    db_products_fallback = product_db.get_products_by_names([product_name])
+                                    if db_products_fallback and len(db_products_fallback) > 0:
+                                        db_product_fallback = db_products_fallback[0]
+                                        fallback_lineage = (
+                                            db_product_fallback.get('currentLineage') or
+                                            db_product_fallback.get('canonical_lineage') or
+                                            db_product_fallback.get('Lineage') or
+                                            ''
+                                        )
+                                        if fallback_lineage:
+                                            db_lineage_clean = str(fallback_lineage).strip().upper()
+                                            excel_lineage = str(record.get('Lineage', '')).strip().upper()
+                                            if excel_lineage != db_lineage_clean:
+                                                logger.info(f"🔄 LINEAGE OVERRIDE (fallback): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_clean}'")
+                                            record['Lineage'] = db_lineage_clean
+                                            record['lineage'] = db_lineage_clean
+                                            record['currentLineage'] = db_lineage_clean
+                                            record['canonical_lineage'] = db_lineage_clean
+                                            logger.debug(f"✅ Found lineage via fallback for '{product_name}': {db_lineage_clean}")
                             except Exception as lineage_method_error:
-                                logger.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
+                                logger.warning(f"❌ Could not get lineage via get_product_lineage for '{product_name}': {lineage_method_error}")
+                                import traceback
+                                logger.debug(traceback.format_exc())
                             
                             # Get weight and units from get_products_by_names (lineage already handled above)
                             # Try exact match first
