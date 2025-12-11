@@ -3115,15 +3115,26 @@ def upload_file():
                 # Flask's g object and session require application context
                 with app.app_context():
                     try:
-                        logging.info(f"[BACKGROUND] Processing file: {file_path}")
-
-                        processor = get_excel_processor()
+                        logging.info(f"[BACKGROUND] Processing file: {file_path} for store: {selected_store}")
+                        
+                        # CRITICAL FIX: Create processor with store name in background thread
+                        # Don't use get_excel_processor() as it might not have the correct context
+                        from src.core.data.excel_processor import ExcelProcessor
+                        processor = ExcelProcessor(store_name=selected_store)
+                        logging.info(f"[BACKGROUND] Created ExcelProcessor with store: {selected_store}")
+                        
                         # PERFORMANCE: Use fast_mode for instant tag availability
                         success = processor.load_file(file_path, fast_mode=True)
 
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
+                            
+                            if row_count == 0:
+                                logging.error(f"[BACKGROUND] ⚠️ WARNING: File loaded but has 0 rows! This might indicate a problem.")
+                                logging.error(f"[BACKGROUND] DataFrame info: df is None={processor.df is None}, df.empty={processor.df.empty if processor.df is not None else 'N/A'}")
+                                if processor.df is not None and not processor.df.empty:
+                                    logging.error(f"[BACKGROUND] DataFrame actually has {len(processor.df)} rows - row_count calculation was wrong")
 
                             # PERFORMANCE: Pre-cache tags for instant frontend access
                             try:
@@ -3137,6 +3148,7 @@ def upload_file():
                                 update_processing_status(original_filename, 'tags_ready')
                             except Exception as cache_error:
                                 logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
+                                logging.error(traceback.format_exc())
 
                             # Update preroll items from newly loaded Excel data
                             if hasattr(processor, 'df') and processor.df is not None:
@@ -3180,10 +3192,16 @@ def upload_file():
                             logging.info(f"[BACKGROUND] Processing complete for {original_filename}")
                         else:
                             logging.error("[BACKGROUND] File load returned False")
+                            logging.error(f"[BACKGROUND] File path: {file_path}")
+                            logging.error(f"[BACKGROUND] File exists: {os.path.exists(file_path) if file_path else 'N/A'}")
+                            if file_path and os.path.exists(file_path):
+                                file_size = os.path.getsize(file_path)
+                                logging.error(f"[BACKGROUND] File size: {file_size} bytes")
                             update_processing_status(original_filename, 'error: File load failed')
 
                     except Exception as e:
                         logging.error(f"[BACKGROUND] Processing error: {e}")
+                        logging.error(f"[BACKGROUND] Error type: {type(e).__name__}")
                         logging.error(traceback.format_exc())
                         update_processing_status(original_filename, f'error: {str(e)}')
 
@@ -3212,9 +3230,53 @@ def upload_file():
             # Local development: ULTRA-FAST UPLOAD - return immediately, load in background
             logging.info("[LOCAL] Ultra-fast upload mode - saving file only (background processing)")
 
+            # CRITICAL FIX: Process file in background thread for local development too
+            def process_in_background_local():
+                with app.app_context():
+                    try:
+                        logging.info(f"[LOCAL-BACKGROUND] Processing file: {file_path} for store: {selected_store}")
+                        
+                        # Create processor with store name
+                        from src.core.data.excel_processor import ExcelProcessor
+                        processor = ExcelProcessor(store_name=selected_store)
+                        logging.info(f"[LOCAL-BACKGROUND] Created ExcelProcessor with store: {selected_store}")
+                        
+                        # Load file
+                        success = processor.load_file(file_path, fast_mode=True)
+                        
+                        if success:
+                            row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
+                            logging.info(f"[LOCAL-BACKGROUND] File loaded: {row_count} rows")
+                            
+                            # Store in database
+                            try:
+                                product_db = get_product_database(selected_store)
+                                if product_db and hasattr(product_db, 'store_excel_data'):
+                                    logging.info(f"[LOCAL-BACKGROUND] Storing {row_count} products in database...")
+                                    result = product_db.store_excel_data(processor.df, file_path)
+                                    logging.info(f"[LOCAL-BACKGROUND] Database storage result: {result}")
+                            except Exception as db_error:
+                                logging.warning(f"[LOCAL-BACKGROUND] Database storage failed: {db_error}")
+                            
+                            # Update global processor
+                            global _excel_processor
+                            _excel_processor = processor
+                            logging.info(f"[LOCAL-BACKGROUND] ✅ Updated global Excel processor with {row_count} rows")
+                        else:
+                            logging.error("[LOCAL-BACKGROUND] File load returned False")
+                    except Exception as e:
+                        logging.error(f"[LOCAL-BACKGROUND] Processing error: {e}")
+                        logging.error(traceback.format_exc())
+            
+            # Start background thread for local development
+            import threading
+            thread = threading.Thread(target=process_in_background_local)
+            thread.daemon = True
+            thread.start()
+
             # Clear old processor immediately so it can be lazily loaded
             _excel_processor = None
-            logging.info("✅ Cleared Excel processor - new file will be loaded on first tag request")
+            logging.info("✅ Cleared Excel processor - new file will be loaded in background")
 
             # Mark file as ready immediately (background loading will happen on first tag request)
             update_processing_status(file.filename, 'ready')
@@ -8445,6 +8507,46 @@ def get_available_tags():
             except Exception as cache_clear_err:
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
+        # CRITICAL FIX: Check if file is currently being processed BEFORE any processor calls
+        # This prevents timeouts when file upload just completed but processing hasn't finished
+        # Only check if we don't have cached tags (if we have cache, processing is likely done)
+        if file_exists and not cached_tags:
+            uploaded_filename = session.get('uploaded_filename', '')
+            if uploaded_filename:
+                # Check processing status to see if file is still being processed
+                with processing_lock:
+                    file_status = processing_status.get(uploaded_filename, '')
+                    # If file is being processed and processor isn't loaded yet, start background load and return immediately
+                    if file_status in ('processing', 'ready') and (_excel_processor is None or _excel_processor.df is None or _excel_processor.df.empty):
+                        logging.info(f"⏳ File {uploaded_filename} is {file_status}, processor not loaded yet - starting background load and returning processing status")
+                        
+                        # Start background thread to load file and cache tags
+                        def load_and_cache_in_background_early():
+                            with app.app_context():
+                                try:
+                                    processor = get_excel_processor()
+                                    if processor and hasattr(processor, 'df') and processor.df is not None:
+                                        tags = processor.get_available_tags(filters=None)
+                                        safe_tags = make_json_safe(tags)
+                                        cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                                        cache.set(cache_key, safe_tags, timeout=300)
+                                        logging.info(f"✅ Early background load complete: cached {len(safe_tags)} tags")
+                                except Exception as e:
+                                    logging.error(f"❌ Early background load failed: {e}")
+
+                        import threading
+                        thread = threading.Thread(target=load_and_cache_in_background_early)
+                        thread.daemon = True
+                        thread.start()
+                        
+                        return jsonify({
+                            'tags': [],
+                            'total_count': 0,
+                            'processing': True,
+                            'status': 'loading',
+                            'message': 'File is being processed. Please wait...'
+                        }), 202  # 202 Accepted
+
         # ULTRA-FAST PATH: If this is a fast_load request, return Excel-only tags immediately
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
         if fast_load and not prefer_db and not force_full_refresh:
