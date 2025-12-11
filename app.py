@@ -8556,19 +8556,19 @@ def get_available_tags():
                             }), 200
                         # Fall through to try other paths for non-fast_load requests
         
-        # PYTHONANYWHERE FIX: If on PythonAnywhere and file not loaded, return processing status
+        # PYTHONANYWHERE FIX: If on PythonAnywhere and file not loaded, return empty tags with message
         # This prevents timeouts from trying to load large files synchronously
+        # CRITICAL: Return 200 (not 202) to prevent frontend "File is still processing" errors
         if is_pythonanywhere and file_exists and not cached_tags:
             # Check if processor is loaded
             if _excel_processor is None or _excel_processor.df is None or getattr(_excel_processor.df, 'empty', True):
-                logging.info("⏳ PYTHONANYWHERE: File not loaded yet, returning processing status")
+                logging.info("⏳ PYTHONANYWHERE: File not loaded yet, returning empty tags with message")
                 return jsonify({
                     'tags': [],
                     'total_count': 0,
-                    'processing': True,
-                    'status': 'loading',
-                    'message': 'Loading file in background. Please wait...'
-                }), 202  # 202 Accepted
+                    'source': 'pythonanywhere-loading',
+                    'message': 'File is still loading in the background. Please wait a moment and refresh, or try uploading again.'
+                }), 200  # Return 200 to prevent frontend errors
 
         # ULTRA-FAST PATH: If this is a fast_load request, return Excel-only tags immediately
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
