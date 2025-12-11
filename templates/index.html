@@ -7559,7 +7559,15 @@
       if (window.STORE_MODAL_BLOCKING === true) {
         console.log('🚫 TagManager initialization BLOCKED - store modal is active');
         console.log('⏳ Waiting for store selection before initializing...');
-        // Don't initialize - wait for store selection to call us
+        
+        // CRITICAL FIX: Add timeout to force initialization if store check hangs
+        if (!window._storeCheckTimeout) {
+          window._storeCheckTimeout = setTimeout(() => {
+            console.log('⚡ Store check timeout - forcing initialization anyway');
+            window.STORE_MODAL_BLOCKING = false; // Clear blocking flag
+            proceedWithInitialization(); // Force initialization
+          }, 10000); // 10 second timeout
+        }
         return;
       }
       
@@ -7574,23 +7582,33 @@
             // This callback only runs when store is confirmed
             console.log('✅ Store confirmed! Initializing TagManager...');
             
-            if (window.TagManager && typeof window.TagManager.init === 'function') {
-              TagManager.init();
-              
-              // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
-              // Give it a moment for init to complete
-              setTimeout(() => {
-                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
-                  window.fileUploadInitAttempts = 0; // Reset counter
-                  setTimeout(window.initializeFileUpload, 200);
-                }
-              }, 500);
-            } else {
-              console.error('❌ TagManager.init is not available');
+            // Clear timeout if store check completed
+            if (window._storeCheckTimeout) {
+              clearTimeout(window._storeCheckTimeout);
+              window._storeCheckTimeout = null;
             }
+            
+            proceedWithInitialization();
           });
         }, 100);
+      }
+      
+      function proceedWithInitialization() {
+        if (window.TagManager && typeof window.TagManager.init === 'function') {
+          TagManager.init();
+          
+          // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
+          // Give it a moment for init to complete
+          setTimeout(() => {
+            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+              console.log('🔄 TagManager initialized - retrying file upload initialization...');
+              window.fileUploadInitAttempts = 0; // Reset counter
+              setTimeout(window.initializeFileUpload, 200);
+            }
+          }, 500);
+        } else {
+          console.error('❌ TagManager.init is not available');
+        }
       }
     }
     
