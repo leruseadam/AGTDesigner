@@ -1155,7 +1155,7 @@ def force_reload_excel_processor(new_file_path):
             if hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
                 logging.warning("Preserving existing DataFrame despite missing fallback file")
             else:
-            _excel_processor.df = pd.DataFrame()
+                _excel_processor.df = pd.DataFrame()
                 _excel_processor.selected_tags = []
                 logging.warning("Created empty DataFrame as last resort - this may cause 'no strains' issues")
 
