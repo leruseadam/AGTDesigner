@@ -2460,12 +2460,16 @@ const TagManager = {
 
     // Helper function to capitalize vendor names properly
     capitalizeVendorName(vendor) {
-        if (!vendor) return '';
+        // CRITICAL FIX: Don't return empty string - preserve vendor or return 'Unknown Vendor'
+        if (!vendor || (typeof vendor === 'string' && vendor.trim() === '')) {
+            return 'Unknown Vendor';
+        }
         
         // Handle common vendor name patterns
-        const vendorLower = vendor.toLowerCase();
+        const vendorTrimmed = String(vendor).trim();
+        const vendorLower = vendorTrimmed.toLowerCase();
         
-        // Known vendor name mappings
+        // Known vendor name mappings (only for capitalization, not merging)
         const vendorMappings = {
             '1555 industrial llc': '1555 Industrial LLC',
             'dcz holdings inc': 'DCZ Holdings Inc.',
@@ -2480,10 +2484,29 @@ const TagManager = {
             return vendorMappings[vendorLower];
         }
         
-        // General capitalization for unknown vendors
-        return vendor.split(' ')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        // CRITICAL FIX: Preserve original vendor name structure - only capitalize words
+        // Don't merge or normalize - each unique vendor should remain separate
+        const capitalized = vendorTrimmed.split(' ')
+            .map(word => {
+                // Preserve special characters and abbreviations
+                if (word.includes('.') || word.includes(',') || word.includes('-')) {
+                    // Handle abbreviations like "LLC", "Inc.", etc.
+                    const upperCaseAbbrevs = ['llc', 'inc', 'ltd', 'corp', 'co'];
+                    const wordClean = word.toLowerCase().replace(/[.,]/g, '');
+                    if (upperCaseAbbrevs.includes(wordClean)) {
+                        return word.toUpperCase();
+                    }
+                    // Handle hyphenated names
+                    if (word.includes('-')) {
+                        return word.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('-');
+                    }
+                }
+                return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+            })
             .join(' ');
+        
+        // CRITICAL FIX: Never return empty string - if capitalization fails, return original
+        return capitalized || vendorTrimmed || 'Unknown Vendor';
     },
 
     // Helper function to capitalize brand names properly
@@ -2528,6 +2551,10 @@ const TagManager = {
         if (uniqueTags.length > 0) {
             verboseLog('First tag structure:', uniqueTags[0]);
         }
+        
+        // CRITICAL DEBUG: Track all unique vendors to see what's being extracted
+        const vendorSet = new Set();
+        const vendorCounts = new Map();
         
         uniqueTags.forEach(tag => {
             // Use the correct field names from the tag object - check multiple possible field names
@@ -2625,10 +2652,22 @@ const TagManager = {
             // Never use brand as vendor - this causes brands to appear in vendor list
             if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
                 // Vendor should always be present in Excel data - if missing, log it but use fallback
-                console.warn(`⚠️ Missing vendor for product '${tag['Product Name*'] || tag.ProductName || 'Unknown'}'. Vendor should always be in Excel data.`);
+                // Only log first 10 missing vendors to avoid console spam
+                if (!this._missingVendorLogCount) this._missingVendorLogCount = 0;
+                if (this._missingVendorLogCount < 10) {
+                    console.warn(`⚠️ Missing vendor for product '${tag['Product Name*'] || tag.ProductName || 'Unknown'}'. Vendor should always be in Excel data.`);
+                    this._missingVendorLogCount++;
+                } else if (this._missingVendorLogCount === 10) {
+                    console.warn(`⚠️ ... (suppressing further missing vendor warnings)`);
+                    this._missingVendorLogCount++;
+                }
                 vendor = 'Unknown Vendor';
             } else {
                 vendor = vendor.trim();
+                // CRITICAL FIX: Don't normalize vendor to empty string - preserve original value
+                if (vendor === '') {
+                    vendor = 'Unknown Vendor';
+                }
             }
 
             // Determine subcategory for vape products
@@ -2665,9 +2704,15 @@ const TagManager = {
                 finalLineage = 'HYBRID';
             }
             
+            const normalizedVendor = this.capitalizeVendorName((vendor || '').toString().trim());
+            
+            // CRITICAL DEBUG: Track vendor extraction
+            vendorSet.add(normalizedVendor);
+            vendorCounts.set(normalizedVendor, (vendorCounts.get(normalizedVendor) || 0) + 1);
+            
             const normalizedTag = {
                 ...tag,  // Spread all original fields first (preserves canonical_lineage, currentLineage, etc.)
-                vendor: this.capitalizeVendorName((vendor || '').toString().trim()),
+                vendor: normalizedVendor,
                 brand: this.capitalizeBrandName((brand || '').toString().trim()),
                 productType: productType,
                 subcategory: subcategory,
@@ -2734,6 +2779,23 @@ const TagManager = {
 
         if (skippedTags > 0) {
             console.info(`Skipped ${skippedTags} tags due to missing vendor information`);
+        }
+        
+        // CRITICAL DEBUG: Log vendor statistics
+        console.log(`📊 Vendor extraction stats: ${vendorSet.size} unique vendors found from ${uniqueTags.length} tags`);
+        if (vendorSet.size < 10) {
+            console.log('📋 All vendors:', Array.from(vendorSet).sort());
+            console.log('📊 Vendor counts:', Array.from(vendorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20));
+        } else {
+            console.log('📋 First 20 vendors:', Array.from(vendorSet).sort().slice(0, 20));
+            console.log('📊 Top 20 vendor counts:', Array.from(vendorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20));
+        }
+        
+        // CRITICAL DEBUG: Check if most products are going to Unknown Vendor
+        const unknownVendorCount = vendorCounts.get('Unknown Vendor') || 0;
+        if (unknownVendorCount > uniqueTags.length * 0.5) {
+            console.warn(`⚠️ WARNING: ${unknownVendorCount} out of ${uniqueTags.length} products (${Math.round(unknownVendorCount/uniqueTags.length*100)}%) have no vendor data!`);
+            console.warn('⚠️ This suggests the Excel file is missing vendor information for most products.');
         }
 
         return vendorGroups;
