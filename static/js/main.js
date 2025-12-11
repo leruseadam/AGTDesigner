@@ -36,6 +36,40 @@ if (isWindows) {
 
 // CRITICAL: Prevent multiple simultaneous page reloads
 let _reloadInProgress = false;
+
+// CRITICAL FIX: Emergency kill switch to stop all operations if browser freezes
+window.EMERGENCY_KILL_SWITCH = false;
+window.enableEmergencyKillSwitch = function() {
+    console.error('🚨 EMERGENCY KILL SWITCH ACTIVATED - Stopping all operations');
+    window.EMERGENCY_KILL_SWITCH = true;
+    
+    // Clear all timers
+    const highestTimeoutId = setTimeout(() => {}, 0);
+    for (let i = 0; i < highestTimeoutId; i++) {
+        clearTimeout(i);
+    }
+    
+    // Clear all intervals
+    const highestIntervalId = setInterval(() => {}, 99999);
+    for (let i = 0; i < highestIntervalId; i++) {
+        clearInterval(i);
+    }
+    
+    // Stop all TagManager operations
+    if (window.TagManager) {
+        window.TagManager._checkingExistingData = false;
+        window.TagManager._initializing = false;
+        window.TagManager.state.loading = false;
+        if (window.TagManager.state.initialDataRetryTimer) {
+            clearTimeout(window.TagManager.state.initialDataRetryTimer);
+            window.TagManager.state.initialDataRetryTimer = null;
+        }
+    }
+    
+    console.log('✅ Emergency kill switch activated - all operations stopped');
+};
+
+// Make kill switch accessible via console: enableEmergencyKillSwitch()
 let _reloadTimeout = null;
 
 const safeReload = (delay = 0) => {
@@ -1320,6 +1354,12 @@ const TagManager = {
     },
 
     scheduleInitialDataRetry(reason = 'unknown') {
+        // CRITICAL FIX: Check emergency kill switch first
+        if (window.EMERGENCY_KILL_SWITCH) {
+            console.error('🚨 EMERGENCY KILL SWITCH ACTIVE - Stopping retry scheduling');
+            return;
+        }
+        
         // CRITICAL FIX: Prevent infinite retry loops that freeze the browser
         const delays = Array.isArray(this.initialDataRetryDelays) && this.initialDataRetryDelays.length > 0
             ? this.initialDataRetryDelays
@@ -9742,6 +9782,13 @@ const TagManager = {
 
     // Check if there's existing data and load it
     async checkForExistingData() {
+        // CRITICAL FIX: Check emergency kill switch first
+        if (window.EMERGENCY_KILL_SWITCH) {
+            console.error('🚨 EMERGENCY KILL SWITCH ACTIVE - Stopping checkForExistingData');
+            this._checkingExistingData = false;
+            return;
+        }
+        
         // CRITICAL FIX: Prevent multiple simultaneous calls that could freeze the browser
         if (this._checkingExistingData) {
             console.warn('⚠️ checkForExistingData already in progress, skipping to prevent browser freeze...');
