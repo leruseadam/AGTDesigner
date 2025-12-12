@@ -8693,8 +8693,8 @@ def get_available_tags():
         # CRITICAL FIX: Include file path in cache key to prevent stale data from previous uploads
         session_file_path = session.get('file_path', '')
         
-        # CRITICAL FIX: If no file uploaded, don't use cache - force fresh fetch
-        # This prevents showing old cached data when user hasn't uploaded anything
+        # CRITICAL FIX: Cache key should use session file path even if the temp file was cleaned up.
+        # Rely on cache/_excel_processor instead of file existence to avoid losing tags after reload.
         file_exists = False
         if session_file_path:
             try:
@@ -8703,24 +8703,18 @@ def get_available_tags():
                 logging.warning(f"Error checking file path: {path_err}")
                 file_exists = False
         
-        if not session_file_path or not file_exists:
-            logging.info("⚠️ No uploaded file in session - checking for cached data")
-            cache_key = get_session_cache_key('available_tags')
-            cached_tags = cache.get(cache_key)
-
-            # CRITICAL PERFORMANCE FIX: If no file and no cache, return empty immediately
-            # Don't try to load default files on production - it's too slow
-            if not cached_tags and (PYTHONANYWHERE_OPTIMIZATION or os.environ.get('PYTHONANYWHERE_DOMAIN')):
-                logging.info("⚡ FAST: No file uploaded and no cache on production - returning empty tags immediately")
-                return jsonify({
-                    'tags': [],
-                    'total_count': 0,
-                    'source': 'empty-no-file',
-                    'message': 'No file uploaded. Please upload an Excel file to get started.'
-                }), 200
-        else:
-            cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-            cached_tags = cache.get(cache_key) if not prefer_db else None
+        cache_key = get_session_cache_key(f'available_tags_{session_file_path}') if session_file_path else get_session_cache_key('available_tags')
+        cached_tags = cache.get(cache_key) if not prefer_db else None
+        
+        # Only return empty immediately when there is truly no session file AND no cache
+        if (not session_file_path) and not cached_tags and (PYTHONANYWHERE_OPTIMIZATION or os.environ.get('PYTHONANYWHERE_DOMAIN')):
+            logging.info("⚡ FAST: No file uploaded and no cache on production - returning empty tags immediately")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'empty-no-file',
+                'message': 'No file uploaded. Please upload an Excel file to get started.'
+            }), 200
         
         # Initialize flags
         all_tags = []  # Initialize all_tags before checking cache
