@@ -3226,10 +3226,11 @@ def upload_file():
             thread.daemon = True
             thread.start()
             
-            # PERFORMANCE FIX: Wait briefly for processing to complete (max 5 seconds)
-            # This ensures tags are available when frontend tries to load them
-            logging.info("⏳ Waiting for background processing to complete (max 5s)...")
-            completed = completion_event.wait(timeout=5.0)
+            # CRITICAL PERFORMANCE FIX: Don't wait for processing - return immediately
+            # Frontend will poll /api/upload-status and request tags when ready
+            # This prevents upload endpoint from timing out on large files
+            logging.info("✅ Background processing started - returning immediately")
+            completed = False  # Mark as not completed to return "processing" status
             
             if completed:
                 upload_time = time.time() - start_time
