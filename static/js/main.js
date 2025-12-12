@@ -12255,10 +12255,10 @@ const TagManager = {
                     // Retries happen instantly without waiting
                     
                     tagsController = new AbortController();
-                    // PERFORMANCE: Reduced timeout to keep UI responsive (10s max for faster feedback)
+                    // PERFORMANCE: Longer timeout for PythonAnywhere (network latency + processing time)
                     tagsTimeout = setTimeout(() => {
                         tagsController.abort();
-                    }, 10000); // 10s timeout - reduced from 15s for faster feedback
+                    }, 30000); // 30s timeout for PythonAnywhere - backend is fast but network can be slow
 
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
                     const tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
