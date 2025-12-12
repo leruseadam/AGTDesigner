@@ -260,7 +260,9 @@ const PRODUCT_TYPE_OVERRIDES = {
 
     // Detect if running on PythonAnywhere
     function isPythonAnywhere() {
-        return window.location.hostname.includes('pythonanywhere.com');
+        // Check if we're on PythonAnywhere (including custom domains like agtpricetags.com)
+        return window.location.hostname.includes('pythonanywhere.com') ||
+               window.location.hostname.includes('agtpricetags.com');
     }
     
     // Choose upload endpoint based on environment
