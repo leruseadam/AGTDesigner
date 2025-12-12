@@ -10177,10 +10177,9 @@ const TagManager = {
                             `;
                         }
                         
-                        // Retry loading tags after a delay
+                        // Retry loading tags after a delay (silently)
                         this._checkingExistingData = false;
                         setTimeout(() => {
-                            console.log('🔄 Retrying tag load after empty response...');
                             this.checkForExistingData();
                         }, 2000); // Wait 2 seconds before retry
                         return;
@@ -12347,20 +12346,16 @@ const TagManager = {
                     const delay = attempt === 0 ? 0 : attempt === 1 ? 50 : 100;
                     if (delay > 0) {
                         await new Promise(resolve => setTimeout(resolve, delay));
-                        verboseLog(`🔄 Retry ${attempt + 1}/${maxRetries} loading tags after upload (waiting ${delay}ms)...`);
-                    } else {
-                        verboseLog('🔄 Loading tags after upload immediately...');
+                        // Silently retry - no notification needed, splash screen is already showing
                     }
                     
                     tagsController = new AbortController();
                     // PERFORMANCE: Reduced timeout to keep UI responsive (10s max for faster feedback)
                     tagsTimeout = setTimeout(() => {
-                        verboseLog('⏱️ Tag loading timeout - aborting request');
                         tagsController.abort();
                     }, 10000); // 10s timeout - reduced from 15s for faster feedback
-                    
+
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
-                    verboseLog(`🔄 Requesting tags from /api/available-tags (timeout: 10s)...`);
                     const tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
                         signal: tagsController.signal
                     });
@@ -12456,14 +12451,10 @@ const TagManager = {
                     if (tagsController) {
                         tagsController = null;
                     }
-                    
+
+                    // Silently handle errors - retry without showing notifications (splash is still visible)
                     const isTimeout = tagsError.name === 'AbortError' || tagsError.message?.includes('aborted');
-                    if (isTimeout) {
-                        verboseLog(`⏱️ Tag loading timeout (attempt ${attempt + 1}/${maxRetries}) - file may still be processing`);
-                    } else {
-                        verboseLog(`⚠️ Tag loading error (attempt ${attempt + 1}/${maxRetries}):`, tagsError);
-                    }
-                    
+
                     if (attempt === maxRetries - 1) {
                         // Last attempt failed - try using the standard tag loading method instead of reloading
                         console.warn('⚠️ Failed to load tags after all retries, trying standard method:', tagsError);
