@@ -8622,9 +8622,10 @@ def get_available_tags():
                             }), 200
                         # Fall through to try other paths for non-fast_load requests
 
-        # ULTRA-FAST PATH: If this is a fast_load request, return Excel-only tags immediately
+        # ULTRA-FAST PATH: Always use fast mode after Excel upload for instant response
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
-        if fast_load and not prefer_db and not force_full_refresh:
+        # CRITICAL: Always enable fast mode - database queries take 2+ minutes
+        if (fast_load or True) and not prefer_db and not force_full_refresh:
             try:
                 # Get processor (may have been loaded synchronously above)
                 # Use get_excel_processor() to get the most up-to-date processor
