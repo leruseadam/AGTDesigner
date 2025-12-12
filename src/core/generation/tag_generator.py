@@ -178,51 +178,14 @@ def get_template_path(template_type):
 
     return str(template_path)
 
-def chunk_records(records, chunk_size=9):
-    """Split the list of records into chunks of a given size."""
-    # CRITICAL FIX: Only deduplicate if there are significantly more duplicates than expected
-    # This prevents removing legitimate products that happen to have similar names
-    if len(records) > 0:
-        # Check if we have excessive duplicates (more than 50% duplicates)
-        seen_products = set()
-        unique_records = []
-        duplicate_count = 0
-        
-        for record in records:
-            product_name = record.get('ProductName', 'Unknown')
-            if product_name not in seen_products:
-                seen_products.add(product_name)
-                unique_records.append(record)
-            else:
-                duplicate_count += 1
-                # CRITICAL FIX: Keep duplicates but log them for transparency
-                unique_records.append(record)
-                logger.info(f"Keeping duplicate product in chunking: {product_name} (duplicate #{duplicate_count})")
-        
-        # Only deduplicate if we have excessive duplicates (more than 50% of records)
-        duplicate_percentage = (duplicate_count / len(records)) * 100
-        if duplicate_percentage > 50:
-            logger.warning(f"Excessive duplicates detected ({duplicate_percentage:.1f}%), deduplicating")
-            # Remove duplicates in this case
-            seen_products = set()
-            unique_records = []
-            for record in records:
-                product_name = record.get('ProductName', 'Unknown')
-                if product_name not in seen_products:
-                    seen_products.add(product_name)
-                    unique_records.append(record)
-                else:
-                    logger.warning(f"Skipping duplicate product in chunking: {product_name}")
-            records = unique_records
-        else:
-            logger.info(f"Keeping all {len(records)} records (duplicate rate: {duplicate_percentage:.1f}%)")
-    
-    # Split records into chunks
+def chunk_records(records, chunk_size=60):
+    """Split the list of records into larger chunks to reduce docx processing overhead."""
+    if chunk_size < 1:
+        chunk_size = 60
+    # No deduplication here for maximum speed
     chunks = []
     for i in range(0, len(records), chunk_size):
-        chunk = records[i:i + chunk_size]
-        chunks.append(chunk)
-    
+        chunks.append(records[i:i + chunk_size])
     logger.info(f"Split {len(records)} records into {len(chunks)} chunks of size {chunk_size}")
     return chunks
 
@@ -882,9 +845,7 @@ def process_chunk(args):
     chunk, base_template, font_scheme, orientation, scale_factor = args
     logger = logging.getLogger(__name__)
     
-    # Debug lineage data
-    from .docx_formatting import debug_lineage_data
-    debug_lineage_data(chunk)
+    # Skip verbose lineage debugging to improve performance
     # CRITICAL FIX: Disable ALL dynamic templates to prevent XML corruption
     # Use standard template expansion with post-processing cleanup instead
     if orientation == "mini":

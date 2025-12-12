@@ -1259,49 +1259,77 @@ class ProductDatabase:
                     else:
                         raise e
                 
-                # Enhanced duplicate detection: Check multiple combinations
+                # ENHANCED DUPLICATE PREVENTION: Check multiple combinations
                 # Normalize vendor and brand for better matching
-                vendor_value = product_data.get(get_canonical_field('Vendor/Supplier*'), '')
-                brand_value = product_data.get(get_canonical_field('Product Brand'), '')
+                vendor_value = product_data.get(get_canonical_field('Vendor/Supplier*'), '').strip()
+                brand_value = product_data.get(get_canonical_field('Product Brand'), '').strip()
                 
-                # First check exact match (name + vendor + brand)
+                # Strategy 1: Exact match (normalized_name + vendor + brand)
                 cursor.execute('''
-                    SELECT id, total_occurrences, "Product Name*"
+                    SELECT id, total_occurrences, "Product Name*", updated_at
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+                    WHERE normalized_name = ? AND TRIM("Vendor/Supplier*") = ? AND TRIM("Product Brand") = ?
                 ''', (normalized_name, vendor_value, brand_value))
                 
                 existing = cursor.fetchone()
                 
                 if existing:
-                    product_id, occurrences, existing_name = existing
+                    product_id, occurrences, existing_name, existing_date = existing
                     
-                    # Log duplicate detection and update at DEBUG level to avoid blocking I/O during bulk operations
-                    logger.debug(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
+                    # Log duplicate detection and update at DEBUG level
+                    logger.debug(f"Duplicate detected (name+vendor+brand): '{existing_name}' (ID: {product_id}) - UPDATING")
                     
-                    # Update existing product with new data (new data always replaces old values)
+                    # Update existing product with new data
                     self._update_existing_product(cursor, product_id, product_data)
                     conn.commit()
-                    logger.debug(f"Successfully replaced existing product '{existing_name}' with new Excel data")
+                    logger.debug(f"Successfully updated existing product '{existing_name}'")
                     return product_id
                 
-                # If no exact match, check by name and vendor only (ignore brand differences)
+                # Strategy 2: Match by name + vendor (most common duplicate scenario)
                 cursor.execute('''
-                    SELECT id, total_occurrences, "Product Name*", "Product Brand"
+                    SELECT id, total_occurrences, "Product Name*", "Product Brand", updated_at
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ?
+                    WHERE normalized_name = ? AND TRIM("Vendor/Supplier*") = ?
                     ORDER BY updated_at DESC
                     LIMIT 1
                 ''', (normalized_name, vendor_value))
                 
                 vendor_match = cursor.fetchone()
                 if vendor_match:
-                    product_id, occurrences, existing_name, existing_brand = vendor_match
-                    logger.debug(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
-                    self._update_existing_product(cursor, product_id, product_data)
-                    conn.commit()
-                    logger.debug(f"Successfully updated product '{existing_name}' with new Excel data")
-                    return product_id
+                    product_id, occurrences, existing_name, existing_brand, existing_date = vendor_match
+                    
+                    # Only treat as duplicate if brands are similar or one is empty
+                    brands_similar = (
+                        not brand_value or 
+                        not existing_brand or 
+                        brand_value.lower() == existing_brand.lower()
+                    )
+                    
+                    if brands_similar:
+                        logger.debug(f"Duplicate detected (name+vendor): '{existing_name}' - UPDATING")
+                        self._update_existing_product(cursor, product_id, product_data)
+                        conn.commit()
+                        logger.debug(f"Successfully updated product '{existing_name}'")
+                        return product_id
+                    else:
+                        # Different brand - treat as separate product
+                        logger.debug(f"Similar name but different brand: '{existing_name}' (Brand: {existing_brand} vs {brand_value}) - creating new")
+                
+                # Strategy 3: Fuzzy match by normalized name only (catches typos/variations)
+                cursor.execute('''
+                    SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand", updated_at
+                    FROM products 
+                    WHERE normalized_name = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 5
+                ''', (normalized_name,))
+                
+                potential_duplicates = cursor.fetchall()
+                if potential_duplicates and len(potential_duplicates) > 1:
+                    # Log potential duplicates for review
+                    logger.info(f"⚠️  Multiple products found with normalized name '{normalized_name}':")
+                    for dup_id, dup_name, dup_vendor, dup_brand, dup_date in potential_duplicates:
+                        logger.info(f"   - ID {dup_id}: '{dup_name}' (Vendor: {dup_vendor}, Brand: {dup_brand})")
                 
                 # Check for similar products (same name + vendor, different brand)
                 cursor.execute('''
