@@ -3226,10 +3226,10 @@ def upload_file():
             thread.daemon = True
             thread.start()
             
-            # PERFORMANCE FIX: Wait briefly for processing to complete (max 15 seconds)
+            # PERFORMANCE FIX: Wait briefly for processing to complete (max 5 seconds)
             # This ensures tags are available when frontend tries to load them
-            logging.info("⏳ Waiting for background processing to complete (max 15s)...")
-            completed = completion_event.wait(timeout=15.0)
+            logging.info("⏳ Waiting for background processing to complete (max 5s)...")
+            completed = completion_event.wait(timeout=5.0)
             
             if completed:
                 upload_time = time.time() - start_time
@@ -3325,10 +3325,10 @@ def upload_file():
             thread.daemon = True
             thread.start()
             
-            # PERFORMANCE FIX: Wait briefly for processing to complete (max 15 seconds)
+            # PERFORMANCE FIX: Wait briefly for processing to complete (max 5 seconds)
             # This ensures tags are available when frontend tries to load them
-            logging.info("⏳ Waiting for local background processing to complete (max 15s)...")
-            completed_local = completion_event_local.wait(timeout=15.0)
+            logging.info("⏳ Waiting for local background processing to complete (max 5s)...")
+            completed_local = completion_event_local.wait(timeout=5.0)
             
             if completed_local:
                 upload_time_local = time.time() - start_time
@@ -8572,6 +8572,15 @@ def get_available_tags():
             except Exception as cache_clear_err:
                 logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
+        # ULTRA-FAST RETURN FROM CACHE: if fast_load and we already have cached tags, return immediately
+        if fast_load and cached_tags:
+            logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags)")
+            return jsonify({
+                'tags': cached_tags,
+                'total_count': len(cached_tags),
+                'source': 'cache-fast'
+            })
+        
         # INSTANT TAGS: Load file synchronously if needed instead of returning 202
         # This ensures tags appear instantly even if file processing isn't complete
         # CRITICAL: For fast_load requests, if loading fails, return empty tags immediately instead of timing out
@@ -8814,9 +8823,9 @@ def get_available_tags():
                                 all_search_names = list(set(product_names + normalized_names))
 
                                 # PERFORMANCE: Use larger batch size for faster processing
-                                # SQLite handles up to 10000 items efficiently with proper indexing
+                                # SQLite handles up to 50000 items efficiently with proper indexing
                                 # For very large datasets, use even larger batches to reduce query overhead
-                                MAX_BATCH_SIZE = 10000  # Increased for better performance with large datasets
+                                MAX_BATCH_SIZE = 50000  # Increased for better performance with large datasets
                                 if len(all_search_names) > MAX_BATCH_SIZE:
                                     # Process in chunks but use larger chunks for speed
                                     all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
@@ -8858,8 +8867,8 @@ def get_available_tags():
                                     # Add query timing to detect slow queries
                                     query_start = time.time()
                                     # PERFORMANCE: Add timeout to prevent slow queries from blocking response
-                                    # Target: <200ms for fast loading, abort if >500ms
-                                    MAX_QUERY_TIME = 0.5  # 500ms max query time
+                                    # Target: <200ms for fast loading, abort if >200ms
+                                    MAX_QUERY_TIME = 0.2  # 200ms max query time
                                     try:
                                         cur.execute(batch_query, all_search_names + all_search_names)
                                         batch_results = cur.fetchall()
@@ -8970,8 +8979,8 @@ def get_available_tags():
                                     logging.info(f"🔄 Performing {len(tags_needing_individual_query)} individual database queries for tags not in batch...")
                                     individual_updated_count = 0
                                     try:
-                                        # Limit individual queries to prevent timeout (max 100 queries)
-                                        max_individual_queries = 100
+                                        # Limit individual queries to prevent timeout (max 20 queries)
+                                        max_individual_queries = 20
                                         for tag, name in tags_needing_individual_query[:max_individual_queries]:
                                             try:
                                                 # Use get_product_lineage which handles normalization and case-insensitive matching
