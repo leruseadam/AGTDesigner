@@ -1,0 +1,49 @@
+================================================================================
+PYTHONANYWHERE - COPY/PASTE THESE COMMANDS IN ORDER
+================================================================================
+
+# 1. Pull latest code
+cd ~/AGTDesigner && git pull origin main
+
+# 2. Stop web app (IMPORTANT!)
+# Go to Web tab and click "Reload" or run:
+touch /var/www/$(whoami)_pythonanywhere_com_wsgi.py
+
+# 3. Preview (dry-run)
+python3 pythonanywhere_cleanup_duplicates.py --dry-run
+
+# 4. Run cleanup (removes duplicates)
+python3 pythonanywhere_cleanup_duplicates.py
+
+# 5. Add prevention
+python3 prevent_future_duplicates.py
+
+# 6. Verify clean
+python3 pythonanywhere_cleanup_duplicates.py --dry-run
+
+# 7. Restart web app
+# Go to Web tab and click "Reload"
+
+================================================================================
+EXPECTED RESULTS
+================================================================================
+Step 3: Should show "Duplicates removed: ~22,000" (NOT 0!)
+Step 4: Should reduce from 40,536 to ~18,500 products
+Step 5: Should show "Found 0 duplicate groups"
+Step 6: Should show "Database is clean"
+
+================================================================================
+IF SOMETHING GOES WRONG
+================================================================================
+# Database locked?
+pkill -9 python
+
+# Wrong code version?
+cd ~/AGTDesigner && git reset --hard origin/main && git pull
+
+# Need to restore backup?
+cd ~/AGTDesigner/uploads
+ls -lh *.backup_*
+cp product_database_AGT_Bothell.db.backup_XXXXXX product_database_AGT_Bothell.db
+
+================================================================================
