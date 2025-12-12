@@ -8945,12 +8945,20 @@ def get_available_tags():
                         cached_tags_from_bg = cache.get(cache_key)
 
                         if cached_tags_from_bg:
-                            logging.info(f"✅ CACHE FALLBACK: Found {len(cached_tags_from_bg)} cached tags from background processing")
-                            return jsonify({
+                            logging.info(f"✅ CACHE HIT: Found {len(cached_tags_from_bg)} cached tags from background (key={cache_key[:16]}...)")
+                            resp = jsonify({
                                 'tags': cached_tags_from_bg,
                                 'total_count': len(cached_tags_from_bg),
                                 'source': 'cache-bg'
                             })
+                            try:
+                                resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                                resp.headers['Pragma'] = 'no-cache'
+                            except Exception:
+                                pass
+                            return resp
+                        else:
+                            logging.warning(f"⚠️ CACHE MISS: No tags found with key={cache_key[:16]}... (file_path={file_path[:50] if file_path else 'None'}...)")
                     
                     # No cache available - return processing status
                     logging.warning(f"⚠️ ULTRA-FAST: No processor and no cache - returning processing status")
