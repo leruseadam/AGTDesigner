@@ -8379,29 +8379,6 @@ const TagManager = {
                         console.warn('⚠️ Tag loading timeout after 180 seconds - will try cache or show error');
                     }, 180000); // 3 minutes for large files on PythonAnywhere
 
-                    // HARD FAILSAFE: If still fetching after 25s, abort and fallback to cache/UI
-                    const hardFailSafe = setTimeout(() => {
-                        console.warn('⚠️ Hard failsafe: aborting tag fetch after 25s and falling back to cache');
-                        try { controller.abort(); } catch (_) {}
-                        const cached = this.hydrateAvailableTagsFromCache();
-                        if (cached) {
-                            console.warn('⚠️ Using cached tags after hard failsafe abort');
-                            // Render cached immediately
-                            this.state.tags = cached;
-                            this.state.originalTags = cached;
-                            this._rebuildTagLookupMap();
-                            this.updateAvailableTags(cached);
-                            this.updateSelectedTags(this.getSelectedTagObjects());
-                        }
-                        // Ensure splash is hidden
-                        if (this.hideExcelLoadingSplash) {
-                            this.hideExcelLoadingSplash();
-                        }
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                    }, 25000); // 25 seconds
-
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
                     const forceDbLineage = this._forceDatabaseLineage || false;
