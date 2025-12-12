@@ -2043,43 +2043,22 @@ class EnhancedJSONMatcher:
     
     def _clean_product_name(self, name: str) -> str:
         """
-        Remove duplicate weight values from product names.
-        Example: "Gelato 47 - 1g - 1g" -> "Gelato 47 - 1g"
+        Remove everything after the first weight value (including duplicates and extra text).
+        Examples:
+        - "Gelato 47 - 1g - 1g" -> "Gelato 47 - 1g"
+        - "Product Name - 2.5g - Extra" -> "Product Name - 2.5g"
+        - "Honey Stix - 1g - Conscious Cannabis" -> "Honey Stix - 1g"
         """
         import re
         if not name:
             return name
         
         # Pattern to match weight values like "1g", "2.5g", "3.5g", "1oz", etc.
-        weight_pattern = r'\s*-\s*(\d+(?:\.\d+)?(?:g|oz|mg|ml))\s*'
+        # Captures everything after " - <weight>"
+        weight_pattern = r'(\s*-\s*\d+(?:\.\d+)?(?:g|oz|mg|ml)).*$'
         
-        # Find all weight matches with their positions
-        matches = list(re.finditer(weight_pattern, name, re.IGNORECASE))
-        
-        if len(matches) <= 1:
-            return name  # No duplicates
-        
-        # Check for duplicate weights
-        weights = [m.group(1).lower() for m in matches]
-        seen = set()
-        indices_to_remove = []
-        
-        for i, (weight, match) in enumerate(zip(weights, matches)):
-            if weight in seen:
-                # This is a duplicate - mark for removal
-                indices_to_remove.append(i)
-            else:
-                seen.add(weight)
-        
-        # Remove duplicates from right to left to preserve indices
-        result = name
-        for i in reversed(indices_to_remove):
-            match = matches[i]
-            result = result[:match.start()] + result[match.end():]
-        
-        # Clean up multiple consecutive dashes or trailing dashes
-        result = re.sub(r'\s*-\s*-\s*', ' - ', result)
-        result = re.sub(r'\s*-\s*$', '', result)
+        # Replace: keep everything up to and including the first weight, remove everything after
+        result = re.sub(weight_pattern, r'\1', name, count=1, flags=re.IGNORECASE)
         
         return result.strip()
     
