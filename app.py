@@ -3231,7 +3231,7 @@ def upload_file():
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[BACKGROUND] File loaded: {row_count} rows")
-                            
+
                             if row_count == 0:
                                 logging.error(f"[BACKGROUND] ⚠️ WARNING: File loaded but has 0 rows! This might indicate a problem.")
                                 logging.error(f"[BACKGROUND] DataFrame info: df is None={processor.df is None}, df.empty={processor.df.empty if processor.df is not None else 'N/A'}")
@@ -3243,35 +3243,40 @@ def upload_file():
                             _excel_processor = processor
                             logging.info("[BACKGROUND] ✅ Updated global Excel processor IMMEDIATELY - DataFrame now accessible")
 
-                            # ULTRA-FAST: Pre-cache tags with skip_enrichment for instant frontend response
-                            # Do this in a separate try-except to not block if it fails
-                            def cache_tags_async():
-                                try:
-                                    # Skip enrichment for maximum speed
-                                    if hasattr(processor, '_skip_enrichment'):
-                                        processor._skip_enrichment = True
-                                    
-                                    # Get tags without filters for maximum speed
-                                    tags = processor.get_available_tags(filters=None)
-                                    
-                                    # Reset enrichment flag
-                                    if hasattr(processor, '_skip_enrichment'):
-                                        processor._skip_enrichment = False
-                                    
-                                    # Make JSON safe and cache
-                                    safe_tags = make_json_safe(tags)
-                                    cache_key = get_session_cache_key(f'available_tags_{file_path}')
-                                    cache.set(cache_key, safe_tags, timeout=300)
-                                    logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access")
+                            # ⚡ CRITICAL FIX: Cache tags IMMEDIATELY before expensive database operations
+                            # This allows frontend to show tags in 1-2 seconds instead of waiting 18+ seconds
+                            try:
+                                cache_start = time.time()
+                                logging.info("[BACKGROUND] ⚡ PRIORITY: Caching tags BEFORE database operations...")
 
-                                    # Update status to indicate tags are ready
-                                    update_processing_status(original_filename, 'tags_ready')
-                                except Exception as cache_error:
-                                    logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
-                                    logging.error(traceback.format_exc())
-                            
-                            # Execute caching immediately (not async - need it done ASAP)
-                            cache_tags_async()
+                                # Skip enrichment for maximum speed
+                                if hasattr(processor, '_skip_enrichment'):
+                                    processor._skip_enrichment = True
+
+                                # Get tags without filters for maximum speed
+                                tags = processor.get_available_tags(filters=None)
+
+                                # Reset enrichment flag
+                                if hasattr(processor, '_skip_enrichment'):
+                                    processor._skip_enrichment = False
+
+                                # Make JSON safe and cache
+                                safe_tags = make_json_safe(tags)
+                                cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                                cache.set(cache_key, safe_tags, timeout=300)
+
+                                cache_elapsed = (time.time() - cache_start) * 1000
+                                logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access ({cache_elapsed:.0f}ms)")
+
+                                # Update status to indicate tags are ready
+                                update_processing_status(original_filename, 'tags_ready')
+                            except Exception as cache_error:
+                                logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
+                                logging.error(traceback.format_exc())
+
+                            # NOW do expensive database operations AFTER tags are cached
+                            # Frontend doesn't need to wait for these
+                            logging.info("[BACKGROUND] 🔄 Starting database operations (frontend already has tags)...")
 
                             # Update preroll items from newly loaded Excel data
                             if hasattr(processor, 'df') and processor.df is not None:
@@ -3280,6 +3285,7 @@ def upload_file():
 
                             # Store in database (this is slow but frontend doesn't need to wait for it)
                             try:
+                                db_start = time.time()
                                 # Use the selected_store from outer scope
                                 store_name = selected_store
                                 product_db = get_product_database(store_name)
@@ -3287,7 +3293,8 @@ def upload_file():
                                 if product_db and hasattr(product_db, 'store_excel_data'):
                                     logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
                                     result = product_db.store_excel_data(processor.df, file_path)
-                                    logging.info(f"[BACKGROUND] Database storage result: {result}")
+                                    db_elapsed = (time.time() - db_start) * 1000
+                                    logging.info(f"[BACKGROUND] Database storage result: {result} ({db_elapsed:.0f}ms)")
                             except Exception as db_error:
                                 logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
 
@@ -3397,34 +3404,51 @@ def upload_file():
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
                             logging.info(f"[LOCAL-BACKGROUND] File loaded: {row_count} rows")
-                            
-                            # Store in database
+
+                            # Update global processor FIRST
+                            global _excel_processor
+                            _excel_processor = processor
+                            logging.info(f"[LOCAL-BACKGROUND] ✅ Updated global Excel processor with {row_count} rows")
+
+                            # ⚡ CRITICAL FIX: Cache tags IMMEDIATELY before expensive database operations
                             try:
+                                cache_start = time.time()
+                                logging.info("[LOCAL-BACKGROUND] ⚡ PRIORITY: Caching tags BEFORE database operations...")
+
+                                # Skip enrichment for maximum speed
+                                if hasattr(processor, '_skip_enrichment'):
+                                    processor._skip_enrichment = True
+
+                                tags = processor.get_available_tags(filters=None)
+
+                                # Reset enrichment flag
+                                if hasattr(processor, '_skip_enrichment'):
+                                    processor._skip_enrichment = False
+
+                                safe_tags = make_json_safe(tags)
+                                cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                                cache.set(cache_key, safe_tags, timeout=300)
+
+                                cache_elapsed = (time.time() - cache_start) * 1000
+                                logging.info(f"[LOCAL-BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access ({cache_elapsed:.0f}ms)")
+                            except Exception as cache_error:
+                                logging.warning(f"[LOCAL-BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
+
+                            # Signal completion early so frontend can proceed
+                            completion_event_local.set()
+
+                            # NOW do expensive database operations AFTER tags are cached and completion signaled
+                            logging.info("[LOCAL-BACKGROUND] 🔄 Starting database operations (frontend already has tags)...")
+                            try:
+                                db_start = time.time()
                                 product_db = get_product_database(selected_store)
                                 if product_db and hasattr(product_db, 'store_excel_data'):
                                     logging.info(f"[LOCAL-BACKGROUND] Storing {row_count} products in database...")
                                     result = product_db.store_excel_data(processor.df, file_path)
-                                    logging.info(f"[LOCAL-BACKGROUND] Database storage result: {result}")
+                                    db_elapsed = (time.time() - db_start) * 1000
+                                    logging.info(f"[LOCAL-BACKGROUND] Database storage result: {result} ({db_elapsed:.0f}ms)")
                             except Exception as db_error:
                                 logging.warning(f"[LOCAL-BACKGROUND] Database storage failed: {db_error}")
-                            
-                            # Update global processor
-                            global _excel_processor
-                            _excel_processor = processor
-                            logging.info(f"[LOCAL-BACKGROUND] ✅ Updated global Excel processor with {row_count} rows")
-                            
-                            # Pre-cache tags for instant frontend access
-                            try:
-                                tags = processor.get_available_tags(filters=None)
-                                safe_tags = make_json_safe(tags)
-                                cache_key = get_session_cache_key(f'available_tags_{file_path}')
-                                cache.set(cache_key, safe_tags, timeout=300)
-                                logging.info(f"[LOCAL-BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access")
-                            except Exception as cache_error:
-                                logging.warning(f"[LOCAL-BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
-                            
-                            # Signal completion (use closure variable)
-                            completion_event_local.set()
                         else:
                             logging.error("[LOCAL-BACKGROUND] File load returned False")
                             # Signal completion even on error so we don't wait forever
