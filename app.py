@@ -118,6 +118,7 @@ else:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
+VALID_STORES = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT_Seattle', 'AGT_Shoreline', 'AGT_Walla_Walla']
 CACHE_DIR = os.path.join(UPLOADS_DIR, 'cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -762,6 +763,80 @@ def load_and_cleanup_on_startup():
 
 # OR keep 12-hour persistence across restarts:
 load_and_cleanup_on_startup()
+
+# ------------------------------------------------------------------------------
+# Storage cleanup (uploads + stray DB files)
+# ------------------------------------------------------------------------------
+def cleanup_old_uploads(max_age_hours: int = 12):
+    """Remove Excel uploads older than max_age_hours to keep PythonAnywhere tidy."""
+    try:
+        upload_folder = app.config.get('UPLOAD_FOLDER', UPLOADS_DIR)
+        if not os.path.exists(upload_folder):
+            return
+        now = time.time()
+        removed = 0
+        for fname in os.listdir(upload_folder):
+            path = os.path.join(upload_folder, fname)
+            if not os.path.isfile(path):
+                continue
+            lower = fname.lower()
+            if lower.endswith(('.xlsx', '.xls', '.xlsm', '.csv')):
+                age_hours = (now - os.path.getmtime(path)) / 3600.0
+                if age_hours > max_age_hours:
+                    try:
+                        os.remove(path)
+                        removed += 1
+                    except Exception as file_err:
+                        logging.warning(f"Cleanup: failed to remove {path}: {file_err}")
+        if removed:
+            logging.info(f"Cleanup: removed {removed} old upload file(s) (> {max_age_hours}h)")
+    except Exception as e:
+        logging.warning(f"Cleanup: error pruning old uploads: {e}")
+
+
+def cleanup_non_store_databases():
+    """Delete product_database_*.db files that are not tied to known stores."""
+    try:
+        upload_folder = app.config.get('UPLOAD_FOLDER', UPLOADS_DIR)
+        if not os.path.exists(upload_folder):
+            return
+        allowed_filenames = {f"product_database_{store}.db" for store in VALID_STORES}
+        allowed_filenames.update({'product_database.db', 'product_database_backup.db'})
+        removed = 0
+        for fname in os.listdir(upload_folder):
+            path = os.path.join(upload_folder, fname)
+            if not os.path.isfile(path):
+                continue
+            if fname.startswith('product_database_') and fname.endswith('.db') and fname not in allowed_filenames:
+                try:
+                    os.remove(path)
+                    removed += 1
+                    logging.info(f"Cleanup: removed stray DB {fname}")
+                except Exception as db_err:
+                    logging.warning(f"Cleanup: failed to remove {path}: {db_err}")
+        if removed:
+            logging.info(f"Cleanup: removed {removed} non-store database file(s)")
+    except Exception as e:
+        logging.warning(f"Cleanup: error pruning non-store databases: {e}")
+
+
+def start_storage_cleanup_scheduler():
+    """Run periodic cleanup (hourly) to prune old uploads and stray DBs."""
+    def _worker():
+        while True:
+            try:
+                cleanup_old_uploads()
+                cleanup_non_store_databases()
+            except Exception as e:
+                logging.warning(f"Cleanup scheduler error: {e}")
+            # Run hourly
+            time.sleep(3600)
+    try:
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        logging.info("Cleanup scheduler started (uploads + non-store DBs)")
+    except Exception as e:
+        logging.warning(f"Failed to start cleanup scheduler: {e}")
 
 def get_client_ip():
     """Get the client's IP address."""
@@ -1921,6 +1996,9 @@ def add_performance_headers(response):
         elapsed = (time.time() - request._start_time) * 1000
         response.headers['X-Response-Time'] = f"{elapsed:.1f}ms"
     return response
+
+# Start periodic storage cleanup (uploads + stray DBs)
+start_storage_cleanup_scheduler()
 
 @app.before_request
 def start_request_timer():
