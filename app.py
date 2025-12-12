@@ -3225,8 +3225,8 @@ def upload_file():
                         processor = ExcelProcessor(store_name=selected_store)
                         logging.info(f"[BACKGROUND] Created ExcelProcessor with store: {selected_store}")
                         
-                        # PERFORMANCE: Use fast_mode for instant tag availability
-                        success = processor.load_file(file_path, fast_mode=True)
+                        # Load the file
+                        success = processor.load_file(file_path)
 
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
@@ -3403,7 +3403,7 @@ def upload_file():
                         logging.info(f"[LOCAL-BACKGROUND] Created ExcelProcessor with store: {selected_store}")
                         
                         # Load file
-                        success = processor.load_file(file_path, fast_mode=True)
+                        success = processor.load_file(file_path)
                         
                         if success:
                             row_count = len(processor.df) if hasattr(processor, 'df') and processor.df is not None else 0
