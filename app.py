@@ -1937,7 +1937,15 @@ def create_app():
     app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB max file size
     app.config['TESTING'] = False
     app.config['SESSION_REFRESH_EACH_REQUEST'] = False  # Don't refresh session on every request
-    app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour session lifetime
+    # Ensure store/session persistence lasts long enough on PythonAnywhere
+    default_session_seconds = 21600 if PYTHONANYWHERE_OPTIMIZATION else 7200  # 6h PA, 2h local
+    current_lifetime = app.config.get('PERMANENT_SESSION_LIFETIME', default_session_seconds)
+    if isinstance(current_lifetime, timedelta):
+        current_seconds = current_lifetime.total_seconds()
+    else:
+        current_seconds = int(current_lifetime) if current_lifetime else 0
+    session_seconds = max(current_seconds, default_session_seconds)
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=session_seconds)
     
     # Session configuration to prevent cookie size issues
     app.config['SESSION_COOKIE_SECURE'] = False  # Allow HTTP in development
@@ -8926,11 +8934,20 @@ def get_available_tags():
             # 2. Recent lineage updates detected (force_full_refresh)
             # 3. prefer_db is True (explicitly requested database priority)
             lineage_alignment_needed = not fast_load or force_full_refresh or prefer_db
-            
+
             if lineage_alignment_needed:
                 logging.info(f"🔄 Lineage alignment enabled: fast_load={fast_load}, force_full_refresh={force_full_refresh}, prefer_db={prefer_db}")
             else:
-                logging.info(f"⚡ PERFORMANCE: Skipping lineage alignment for fast loading (fast_load={fast_load}) - tags will load instantly")
+                logging.info(f"⚡ PERFORMANCE: Skipping lineage alignment for fast loading (fast_load={fast_load}) - returning cached tags INSTANTLY")
+                # PERFORMANCE FIX: Return cached tags immediately without any database queries
+                safe_all_tags = make_json_safe(cached_tags)
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"⚡ INSTANT: Returning {len(safe_all_tags)} cached tags ({elapsed:.1f}ms)")
+                return jsonify({
+                    'tags': safe_all_tags,
+                    'total_count': len(safe_all_tags),
+                    'source': 'cache-instant'
+                })
             
             # PERFORMANCE OPTIMIZATION: Only update DataFrame lineage when lineage alignment is needed
             # Skip this expensive operation when fast_load is enabled
