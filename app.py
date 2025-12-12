@@ -3224,25 +3224,33 @@ def upload_file():
                                 if processor.df is not None and not processor.df.empty:
                                     logging.error(f"[BACKGROUND] DataFrame actually has {len(processor.df)} rows - row_count calculation was wrong")
 
-                            # PERFORMANCE: Pre-cache tags for instant frontend access
+                            # CRITICAL PERFORMANCE: Update global processor FIRST so frontend can access DataFrame immediately
+                            global _excel_processor
+                            _excel_processor = processor
+                            logging.info("[BACKGROUND] ✅ Updated global Excel processor IMMEDIATELY - DataFrame now accessible")
+
+                            # ULTRA-FAST: Pre-cache tags with skip_enrichment for instant frontend response
                             try:
+                                # Skip enrichment for maximum speed
+                                if hasattr(processor, '_skip_enrichment'):
+                                    processor._skip_enrichment = True
+                                
                                 tags = processor.get_available_tags(filters=None)
+                                
+                                # Reset enrichment flag
+                                if hasattr(processor, '_skip_enrichment'):
+                                    processor._skip_enrichment = False
+                                
                                 safe_tags = make_json_safe(tags)
                                 cache_key = get_session_cache_key(f'available_tags_{file_path}')
                                 cache.set(cache_key, safe_tags, timeout=300)
-                                logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access")
+                                logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access (skip_enrichment enabled)")
 
                                 # Update status to indicate tags are ready
                                 update_processing_status(original_filename, 'tags_ready')
                             except Exception as cache_error:
                                 logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
                                 logging.error(traceback.format_exc())
-
-                            # CRITICAL PERFORMANCE: Update global processor IMMEDIATELY so frontend can access tags
-                            # Do this BEFORE slow database operations
-                            global _excel_processor
-                            _excel_processor = processor
-                            logging.info("[BACKGROUND] ✅ Updated global Excel processor - tags now available for frontend")
 
                             # Update preroll items from newly loaded Excel data
                             if hasattr(processor, 'df') and processor.df is not None:
@@ -8749,46 +8757,23 @@ def get_available_tags():
                 'source': 'cache-fast'
             })
         
-        # INSTANT TAGS: Load file synchronously if needed instead of returning 202
-        # This ensures tags appear instantly even if file processing isn't complete
-        # CRITICAL: For fast_load requests, if loading fails, return empty tags immediately instead of timing out
+        # INSTANT TAGS: Return immediately if file is still loading - don't wait
+        # Background thread will cache tags when ready, frontend will poll and get them
         if file_exists and not cached_tags:
             uploaded_filename = session.get('uploaded_filename', '')
             if uploaded_filename:
                 # Check if processor needs to be loaded
                 if _excel_processor is None or _excel_processor.df is None or _excel_processor.df.empty:
-                    logging.info(f"⚡ INSTANT: Loading file synchronously for instant tags: {uploaded_filename}")
-                    try:
-                        # Load processor synchronously - this ensures tags are available immediately
-                        processor = get_excel_processor()
-                        if processor and hasattr(processor, 'df') and processor.df is not None and not processor.df.empty:
-                            logging.info(f"✅ INSTANT: File loaded synchronously, {len(processor.df)} rows ready")
-                            # Continue to fast_load path below to return tags immediately
-                        else:
-                            logging.warning(f"⚠️ INSTANT: File loaded but DataFrame is empty")
-                            # For fast_load, return empty tags immediately instead of waiting
-                            if fast_load:
-                                logging.warning("⚡ INSTANT: fast_load requested but DataFrame empty - returning empty tags immediately")
-                                return jsonify({
-                                    'tags': [],
-                                    'total_count': 0,
-                                    'source': 'empty-fast',
-                                    'message': 'File loaded but no data found. Please check your file and try again.'
-                                }), 200
-                    except Exception as sync_load_err:
-                        logging.error(f"❌ INSTANT: Synchronous load failed: {sync_load_err}")
-                        import traceback
-                        logging.error(traceback.format_exc())
-                        # For fast_load, return empty tags immediately instead of waiting
-                        if fast_load:
-                            logging.warning("⚡ INSTANT: fast_load requested but loading failed - returning empty tags immediately")
-                            return jsonify({
-                                'tags': [],
-                                'total_count': 0,
-                                'source': 'error-fast',
-                                'message': 'File is still loading. Please wait a moment and refresh, or try uploading again.'
-                            }), 200
-                        # Fall through to try other paths for non-fast_load requests
+                    # CRITICAL FIX: Don't load synchronously - return empty and let background thread finish
+                    # This prevents 4-minute waits on upload
+                    logging.info(f"⚡ INSTANT: File still loading in background - returning empty, frontend will poll")
+                    return jsonify({
+                        'tags': [],
+                        'total_count': 0,
+                        'source': 'loading',
+                        'message': 'File is loading in background. Tags will appear shortly.',
+                        'loading': True
+                    }), 200
 
         # ULTRA-FAST PATH: Always use fast mode after Excel upload for instant response
         # This gets something on screen as quickly as possible; slower DB alignment can happen later

@@ -5644,8 +5644,8 @@
               <!-- Controls Section -->
               <div class="control-section mb-2">
                 <label class="filter-label">Controls</label>
-                <div class="d-grid gap-3 w-100">
-                  <!-- Match JSON Button - Moved to top for easy access -->
+                <div class="d-grid gap-2 w-100">
+                  <!-- Match JSON Button -->
                   <button class="btn btn-glass btn-control btn-color-blue" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL">
                     <span class="icon-btn">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -5656,33 +5656,39 @@
                       Match JSON
                     </span>
                   </button>
-                  <button id="undo-move-btn" class="btn btn-glass btn-control btn-color-orange" title="Undo last selection">
-                  <span class="icon-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="1 4 1 10 7 10"></polyline>
-                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-                    </svg>
-                    Undo
-                  </span>
-                </button>
-                  <button id="redo-move-btn" class="btn btn-glass btn-control btn-color-green" title="Redo last undo">
-                  <span class="icon-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="23 4 23 10 17 10"></polyline>
-                      <path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"></path>
-                    </svg>
-                    Redo
-                  </span>
-                </button>
-                    <button id="clear-filters-btn" class="btn btn-glass btn-control btn-color-red" title="Clear selected tags and reset app" onclick="if(window.TagManager && TagManager.clearSelected) { TagManager.clearSelected(); } return false;">
+
+                  <!-- Undo/Redo buttons side by side -->
+                  <div class="d-flex gap-2 w-100">
+                    <button id="undo-move-btn" class="btn btn-glass btn-control btn-color-orange flex-fill" title="Undo last selection">
                       <span class="icon-btn">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="1 4 1 10 7 10"></polyline>
+                          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
                         </svg>
-                        Clear & Reset
+                        Undo
                       </span>
                     </button>
+                    <button id="redo-move-btn" class="btn btn-glass btn-control btn-color-green flex-fill" title="Redo last undo">
+                      <span class="icon-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="23 4 23 10 17 10"></polyline>
+                          <path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"></path>
+                        </svg>
+                        Redo
+                      </span>
+                    </button>
+                  </div>
+
+                  <!-- Clear button -->
+                  <button id="clear-filters-btn" class="btn btn-glass btn-control btn-color-red" title="Clear selected tags and reset app" onclick="if(window.TagManager && TagManager.clearSelected) { TagManager.clearSelected(); } return false;">
+                    <span class="icon-btn">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                      Clear & Reset
+                    </span>
+                  </button>
                 </div>
               </div>
 

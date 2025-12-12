@@ -8261,23 +8261,17 @@ const TagManager = {
             const availableTagsContainer = document.getElementById('availableTags');
             const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
             
-            // CRITICAL: Add safety timeout to hide spinner after 15 seconds (reduced from 35s for faster feedback)
+            // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
                 safetyTimeout = setTimeout(() => {
-                    console.warn('⚠️ Safety timeout: Hiding loading spinner after 15 seconds');
+                    console.warn('⚠️ Safety timeout: Hiding loading spinner');
+                    // Just hide the splash, don't show error message
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
-                    if (availableTagsContainer) {
-                        availableTagsContainer.innerHTML = `
-                            <div class="text-center py-4">
-                                <p class="text-warning">Loading is taking longer than expected. Please refresh the page or try again.</p>
-                                <button class="btn btn-primary mt-2" onclick="window.TagManager.fetchAndUpdateAvailableTags()">Retry</button>
-                            </div>
-                        `;
-                    }
-                }, 30000); // 30 seconds - enough time for slow operations but not indefinite
+                    // Don't show error message - let the app continue working
+                }, 60000); // 60 seconds - very generous timeout
             }
             
             if (!hasExistingTags) {
@@ -8418,9 +8412,8 @@ const TagManager = {
                             this.updateUploadUI(loadingMsg);
                         }
                         
-                        verboseLog(`⏳ File still processing (202), will retry after delay... (${processingRetryCount}/${maxProcessingRetries})`);
-                        const delay = Math.min(1000 + (500 * processingRetryCount), 5000); // Progressive delay, 1-5 seconds
-                        await new Promise(resolve => setTimeout(resolve, delay));
+                        verboseLog(`⏳ File still processing (202), retrying immediately... (${processingRetryCount}/${maxProcessingRetries})`);
+                        // PERFORMANCE: No delay - retry immediately for faster response
                         continue; // Retry without incrementing error retry count
                     }
 
@@ -8438,11 +8431,10 @@ const TagManager = {
                             throw new Error(`HTTP 503: Service Unavailable - Server is temporarily overloaded. Please try again in a moment.`);
                         }
                         if (response.status >= 500 && retryCount < maxRetries - 1) {
-                            // Server error - retry
+                            // Server error - retry immediately
                             retryCount++;
-                            const delay = Math.min(1000 * retryCount, 3000); // Exponential backoff, max 3s
-                            verboseLog(`Server error ${response.status}, retrying in ${delay}ms...`);
-                            await new Promise(resolve => setTimeout(resolve, delay));
+                            verboseLog(`Server error ${response.status}, retrying immediately...`);
+                            // PERFORMANCE: No delay - retry immediately
                             continue;
                         }
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -9236,10 +9228,8 @@ const TagManager = {
             // CRITICAL FIX: Fetch filters AFTER tags are loaded to ensure data is ready
             await this.fetchAndUpdateAvailableTags();
             await this.fetchAndUpdateSelectedTags();
-            
-            // Small delay to ensure Excel processor is ready
-            await new Promise(resolve => setTimeout(resolve, 200));
-            
+
+            // PERFORMANCE: No delay needed - fetch filters immediately
             // Now fetch filters with retry mechanism
             await this.fetchAndPopulateFilters();
             
@@ -12267,13 +12257,8 @@ const TagManager = {
                 let tagsTimeout = null;
                 let tagsController = null;
                 try {
-                    // PERFORMANCE: Minimal delays for instant response
-                    // Try immediately, then 50ms, then 100ms (faster than before)
-                    const delay = attempt === 0 ? 0 : attempt === 1 ? 50 : 100;
-                    if (delay > 0) {
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                        // Silently retry - no notification needed, splash screen is already showing
-                    }
+                    // PERFORMANCE: No delays - try immediately for maximum speed
+                    // Retries happen instantly without waiting
                     
                     tagsController = new AbortController();
                     // PERFORMANCE: Reduced timeout to keep UI responsive (10s max for faster feedback)
