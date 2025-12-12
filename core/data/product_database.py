@@ -42,6 +42,88 @@ logger = logging.getLogger(__name__)
 # Performance optimization: disable debug logging in production
 DEBUG_ENABLED = False
 
+# PERFORMANCE: TTL Cache for lineage queries (5 minute cache)
+_lineage_cache = {}
+_lineage_cache_timestamps = {}
+_lineage_cache_lock = threading.Lock()
+LINEAGE_CACHE_TTL = 300  # 5 minutes in seconds
+
+# PERFORMANCE: TTL Cache for fuzzy match results (10 minute cache)
+_fuzzy_match_cache = {}
+_fuzzy_match_cache_timestamps = {}
+_fuzzy_match_cache_lock = threading.Lock()
+FUZZY_MATCH_CACHE_TTL = 600  # 10 minutes in seconds
+
+def _get_cached_lineage(product_name: str) -> Optional[str]:
+    """Get cached lineage if available and not expired."""
+    if not product_name:
+        return None
+
+    with _lineage_cache_lock:
+        cache_key = product_name.strip().lower()
+        if cache_key in _lineage_cache:
+            timestamp = _lineage_cache_timestamps.get(cache_key, 0)
+            if time.time() - timestamp < LINEAGE_CACHE_TTL:
+                return _lineage_cache[cache_key]
+            else:
+                # Expired, remove from cache
+                del _lineage_cache[cache_key]
+                del _lineage_cache_timestamps[cache_key]
+    return None
+
+def _set_cached_lineage(product_name: str, lineage: Optional[str]):
+    """Cache lineage result."""
+    if not product_name:
+        return
+
+    with _lineage_cache_lock:
+        cache_key = product_name.strip().lower()
+        _lineage_cache[cache_key] = lineage
+        _lineage_cache_timestamps[cache_key] = time.time()
+
+        # Prevent unbounded cache growth - limit to 10000 entries
+        if len(_lineage_cache) > 10000:
+            # Remove oldest 1000 entries
+            sorted_keys = sorted(_lineage_cache_timestamps.items(), key=lambda x: x[1])
+            for key, _ in sorted_keys[:1000]:
+                del _lineage_cache[key]
+                del _lineage_cache_timestamps[key]
+
+def _get_cached_fuzzy_match(product_name: str) -> Optional[Dict[str, Any]]:
+    """Get cached fuzzy match result if available and not expired."""
+    if not product_name:
+        return None
+
+    with _fuzzy_match_cache_lock:
+        cache_key = product_name.strip().lower()
+        if cache_key in _fuzzy_match_cache:
+            timestamp = _fuzzy_match_cache_timestamps.get(cache_key, 0)
+            if time.time() - timestamp < FUZZY_MATCH_CACHE_TTL:
+                return _fuzzy_match_cache[cache_key]
+            else:
+                # Expired, remove from cache
+                del _fuzzy_match_cache[cache_key]
+                del _fuzzy_match_cache_timestamps[cache_key]
+    return None
+
+def _set_cached_fuzzy_match(product_name: str, result: Optional[Dict[str, Any]]):
+    """Cache fuzzy match result."""
+    if not product_name:
+        return
+
+    with _fuzzy_match_cache_lock:
+        cache_key = product_name.strip().lower()
+        _fuzzy_match_cache[cache_key] = result
+        _fuzzy_match_cache_timestamps[cache_key] = time.time()
+
+        # Prevent unbounded cache growth - limit to 5000 entries
+        if len(_fuzzy_match_cache) > 5000:
+            # Remove oldest 500 entries
+            sorted_keys = sorted(_fuzzy_match_cache_timestamps.items(), key=lambda x: x[1])
+            for key, _ in sorted_keys[:500]:
+                del _fuzzy_match_cache[key]
+                del _fuzzy_match_cache_timestamps[key]
+
 def timed_operation(operation_name):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
@@ -4283,16 +4365,21 @@ class ProductDatabase:
 
     def get_product_lineage(self, product_name: str) -> Optional[str]:
         """Get the lineage for a specific product by name.
-        
+
         Uses case-insensitive and whitespace-insensitive matching to ensure
         updates are found even if there are minor differences in formatting.
         Also applies sativa hybrid override for known sativa hybrid strains.
         """
+        # PERFORMANCE: Check cache first
+        cached_result = _get_cached_lineage(product_name)
+        if cached_result is not None:
+            return cached_result
+
         try:
             self.init_database()
             conn = self._get_connection()
             cursor = conn.cursor()
-            
+
             # Known sativa hybrid strains - override database lineage if it's just "HYBRID"
             KNOWN_SATIVA_HYBRIDS = {
                 'blue dream', 'blue dream haze', 'blueberry dream', 'dream', 'dream star',
@@ -4344,9 +4431,11 @@ class ProductDatabase:
                 if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
                     strain_display = product_strain or 'N/A'
                     logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{strain_display}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                    _set_cached_lineage(product_name, 'HYBRID/SATIVA')
                     return 'HYBRID/SATIVA'
-                
+
                 logger.debug(f"✅ Found product lineage (exact match) for '{product_name}': '{lineage}'")
+                _set_cached_lineage(product_name, lineage)
                 return lineage
             
             # Fallback: Case-insensitive and whitespace-insensitive match
@@ -4371,9 +4460,11 @@ class ProductDatabase:
                     )
                     if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
                         logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{product_strain}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                        _set_cached_lineage(product_name, 'HYBRID/SATIVA')
                         return 'HYBRID/SATIVA'
-                
+
                 logger.debug(f"✅ Found product lineage (case-insensitive match) for '{product_name}': '{lineage}'")
+                _set_cached_lineage(product_name, lineage)
                 return lineage
             
             # Last resort: Partial match (in case product name has extra characters)
@@ -4397,12 +4488,15 @@ class ProductDatabase:
                     )
                     if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
                         logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{product_strain}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                        _set_cached_lineage(product_name, 'HYBRID/SATIVA')
                         return 'HYBRID/SATIVA'
-                
+
                 logger.debug(f"✅ Found product lineage (partial match) for '{product_name}': '{lineage}'")
+                _set_cached_lineage(product_name, lineage)
                 return lineage
-            
+
             logger.debug(f"⚠️  No lineage found for product '{product_name}' (tried exact, case-insensitive, and partial match)")
+            _set_cached_lineage(product_name, None)  # Cache negative results too
             return None
             
         except Exception as e:
@@ -5132,19 +5226,27 @@ class ProductDatabase:
             found_names = set()
             
             for search_name in product_names:
+                # PERFORMANCE: Check cache first
+                cached_result = _get_cached_fuzzy_match(search_name)
+                if cached_result is not None:
+                    if cached_result:  # Non-empty result
+                        found_products.append(cached_result)
+                        found_names.add(search_name)
+                    continue
+
                 # Try fuzzy matching for this search name
                 best_match = None
                 best_score = 0
                 candidates = []
-                
+
                 for product in all_products:
                     product_name = product.get('Product Name*', '')
                     if not product_name:
                         continue
-                    
+
                     # Calculate similarity score
                     score = self._calculate_name_similarity(search_name, product_name)
-                    
+
                     if score > 0.3:  # 30% similarity threshold
                         candidates.append((product, score))
                 
@@ -5165,6 +5267,8 @@ class ProductDatabase:
                     converted_match = self._convert_product_to_standard_format(best_match)
                     found_products.append(converted_match)
                     found_names.add(search_name)
+                    # PERFORMANCE: Cache the result
+                    _set_cached_fuzzy_match(search_name, converted_match)
                 else:
                     logger.warning(f"No fuzzy match found for: '{search_name}'")
                     # If no fuzzy match found, use exact match if available
@@ -5172,6 +5276,11 @@ class ProductDatabase:
                     if exact_match:
                         found_products.append(exact_match)
                         found_names.add(search_name)
+                        # PERFORMANCE: Cache the exact match result
+                        _set_cached_fuzzy_match(search_name, exact_match)
+                    else:
+                        # PERFORMANCE: Cache negative result
+                        _set_cached_fuzzy_match(search_name, {})
             
             logger.info(f"Found {len(found_products)} total products (exact + fuzzy) for: {product_names}")
             return found_products

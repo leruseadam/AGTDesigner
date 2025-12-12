@@ -1188,14 +1188,13 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._updateAvailableTags(cachedTags, null);
                 console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
-                
-                // CRITICAL FIX: Always refresh lineage from database even when using cache
-                // This ensures lineage changes persist after page reload
-                // Do this in background to avoid blocking UI
+
+                // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
+                // This makes page reloads instant while still updating in background
                 this._refreshLineageFromDatabase(cachedTags).then(() => {
-                    console.log('✅ Lineage refreshed from database after cache hydration');
+                    console.log('✅ Background lineage check complete (fast mode)');
                 }).catch(err => {
-                    console.warn('⚠️ Failed to refresh lineage after cache hydration:', err);
+                    console.warn('⚠️ Background lineage check failed (non-critical):', err);
                 });
             });
             return true;
@@ -1207,9 +1206,11 @@ const TagManager = {
     async _refreshLineageFromDatabase(tags) {
         const timestamp = Date.now();
         try {
-            // Force fresh lineage fetch by bypassing cache and requesting database lineage
-            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&nocache=1&fast_load=0`, {
-                signal: AbortSignal.timeout(30000) // 30 second timeout
+            // PERFORMANCE FIX: Use fast_load=1 to avoid expensive database queries on page reload
+            // The cached lineage is already fresh enough for display purposes
+            // Only use fast_load=0 if user explicitly requested lineage update
+            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=1`, {
+                signal: AbortSignal.timeout(5000) // 5 second timeout (reduced from 30s)
             });
             if (lineageResponse.ok) {
                 const lineageData = await lineageResponse.json();
@@ -8242,15 +8243,9 @@ const TagManager = {
             
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
-                console.log('✅ Tags rendered instantly from cache - fetching fresh lineage from database');
-                // CRITICAL FIX: Even when using cache, fetch fresh lineage from database to ensure persistence
-                // This ensures lineage changes persist after page reload
-                try {
-                    await this._refreshLineageFromDatabase(this.state.tags);
-                } catch (lineageError) {
-                    console.warn('⚠️ Failed to refresh lineage from database (using cached values):', lineageError);
-                    // Continue with cached tags even if lineage refresh fails
-                }
+                console.log('✅ Tags rendered instantly from cache');
+                // PERFORMANCE FIX: Background refresh uses fast_load now (set in _refreshLineageFromDatabase)
+                console.log('⚡ PERFORMANCE: Cache loaded, background refresh will use fast mode');
                 return true;
             }
             

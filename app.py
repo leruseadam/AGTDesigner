@@ -8821,17 +8821,22 @@ def get_available_tags():
 
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
                     logging.info("⚡ ULTRA-FAST: Serving Excel-only tags for fast_load request (no DB lineage alignment).")
-                    
+
                     # CRITICAL: Skip enrichment for maximum speed
                     if hasattr(excel_processor, '_skip_enrichment'):
                         excel_processor._skip_enrichment = True
-                    
+
+                    # PERFORMANCE LOGGING: Track exactly how long get_available_tags takes
+                    tags_start_time = time.time()
                     try:
                         excel_tags = excel_processor.get_available_tags(filters=None)
+                        tags_elapsed = (time.time() - tags_start_time) * 1000
+                        logging.info(f"⏱️ TIMING: get_available_tags() took {tags_elapsed:.1f}ms for {len(excel_tags) if excel_tags else 0} tags")
                     except Exception as get_tags_err:
-                        logging.error(f"Error getting tags from processor: {get_tags_err}")
+                        tags_elapsed = (time.time() - tags_start_time) * 1000
+                        logging.error(f"Error getting tags from processor (after {tags_elapsed:.1f}ms): {get_tags_err}")
                         excel_tags = []
-                    
+
                     # Reset enrichment flag
                     if hasattr(excel_processor, '_skip_enrichment'):
                         excel_processor._skip_enrichment = False
