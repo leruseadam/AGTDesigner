@@ -3795,97 +3795,97 @@ def upload_file_simple_pythonanywhere():
                 if hasattr(processor, 'enable_product_db_integration'):
                     processor.enable_product_db_integration(True)
                     logging.info("[BG] Product database integration enabled")
+                
+                # CRITICAL OPTIMIZATION: Check file size and environment to choose best loading method
+                import os
+                file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+                logging.info(f"[UPLOAD] File size: {file_size_mb:.1f} MB")
+                
+                # Check if running on PythonAnywhere
+                is_pythonanywhere = IS_PYTHONANYWHERE or PYTHONANYWHERE_OPTIMIZATION
+                if is_pythonanywhere:
+                    logging.info("[UPLOAD] PythonAnywhere detected - using optimized loading strategy")
+                
+                # OPTIMIZATION: Try multiple loading methods with optimized order
+                import pandas as pd
+                success = False
+                load_start = time.time()
             
-            # CRITICAL OPTIMIZATION: Check file size and environment to choose best loading method
-            import os
-            file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
-            logging.info(f"[UPLOAD] File size: {file_size_mb:.1f} MB")
-            
-            # Check if running on PythonAnywhere
-            is_pythonanywhere = IS_PYTHONANYWHERE or PYTHONANYWHERE_OPTIMIZATION
-            if is_pythonanywhere:
-                logging.info("[UPLOAD] PythonAnywhere detected - using optimized loading strategy")
-            
-            # OPTIMIZATION: Try multiple loading methods with optimized order
-            import pandas as pd
-            success = False
-            load_start = time.time()
-            
-            # CRITICAL: On PythonAnywhere, prioritize pythonanywhere_fast_load first (optimized for production)
-            if is_pythonanywhere and hasattr(processor, 'pythonanywhere_fast_load'):
-                try:
-                    success = processor.pythonanywhere_fast_load(temp_path)
-                    if success:
-                        logging.info(f"[UPLOAD] ✅ PythonAnywhere fast load complete: {len(processor.df)} rows (production optimized)")
-                except Exception as e:
-                    logging.warning(f"PythonAnywhere fast load failed: {e}")
-            
-            # For large files (>10MB), prioritize minimal_load_file (fastest)
-            # For smaller files, try ultra_fast_load first
-            if not success and file_size_mb > 10:
-                logging.info("[UPLOAD] Large file detected - using minimal_load_file for maximum speed")
-                # Method 1: Try minimal_load_file first for large files (fastest - no processing)
-                if hasattr(processor, 'minimal_load_file'):
+                # CRITICAL: On PythonAnywhere, prioritize pythonanywhere_fast_load first (optimized for production)
+                if is_pythonanywhere and hasattr(processor, 'pythonanywhere_fast_load'):
                     try:
-                        success = processor.minimal_load_file(temp_path)
+                        success = processor.pythonanywhere_fast_load(temp_path)
                         if success:
-                            logging.info(f"[UPLOAD] ✅ Minimal load complete: {len(processor.df)} rows (fastest method)")
+                            logging.info(f"[UPLOAD] ✅ PythonAnywhere fast load complete: {len(processor.df)} rows (production optimized)")
                     except Exception as e:
-                        logging.warning(f"Minimal load failed: {e}")
-            
-            # Method 2: Try ultra-fast load (now optimized for large files - no row limit)
-            if not success and hasattr(processor, 'ultra_fast_load'):
-                try:
-                    success = processor.ultra_fast_load(temp_path)
-                    if success:
-                        logging.info(f"[UPLOAD] ✅ Used ultra_fast_load method: {len(processor.df)} rows (optimized, no limit)")
-                except Exception as e:
-                    logging.warning(f"Ultra-fast load failed: {e}")
-            
-            # Method 3: Try fast_load_file (optimized with chunking for large files)
-            if not success and hasattr(processor, 'fast_load_file'):
-                try:
-                    success = processor.fast_load_file(temp_path)
-                    if success:
-                        logging.info(f"[UPLOAD] ✅ Used fast_load_file method: {len(processor.df)} rows (optimized)")
-                except Exception as e:
-                    logging.warning(f"Fast load failed: {e}")
-            
-            # Method 5: Try optimized pandas read (no row limit, optimized parameters)
-            if not success:
-                try:
-                    # CRITICAL OPTIMIZATION: Maximum speed parameters for large files
-                    # - dtype=str: Skip type inference (major speedup)
-                    # - na_filter=False: Skip NA detection (major speedup)
-                    # - keep_default_na=False: Skip default NA handling
-                    # - converters=None: No converters (faster)
-                    # - header=0: First row is header
-                    df = pd.read_excel(
-                        temp_path, 
-                        engine='openpyxl', 
-                        dtype=str,  # Read as strings (skips type inference - 2-3x faster)
-                        na_filter=False,  # Don't filter NA values (major speedup)
-                        keep_default_na=False,  # Don't use default NA values
-                        converters=None,  # No converters (faster)
-                        header=0  # First row is header
-                        # No nrows limit - read entire file for large files
-                    )
-                    if not df.empty:
-                        processor.df = df
-                        success = True
-                        logging.info(f"[UPLOAD] Loaded {len(df)} rows (optimized pandas, no limit)")
-                    else:
-                        success = False
-                except Exception as e:
-                    logging.warning(f"Optimized pandas load failed: {e}")
-            
-            # Method 6: Fallback to standard load
-            if not success:
-                try:
-                    success = processor.load_file(temp_path)
-                    logging.info("[UPLOAD] Used standard load_file method")
-                except Exception as e:
-                    logging.warning(f"Standard load failed: {e}")
+                        logging.warning(f"PythonAnywhere fast load failed: {e}")
+                
+                # For large files (>10MB), prioritize minimal_load_file (fastest)
+                # For smaller files, try ultra_fast_load first
+                if not success and file_size_mb > 10:
+                    logging.info("[UPLOAD] Large file detected - using minimal_load_file for maximum speed")
+                    # Method 1: Try minimal_load_file first for large files (fastest - no processing)
+                    if hasattr(processor, 'minimal_load_file'):
+                        try:
+                            success = processor.minimal_load_file(temp_path)
+                            if success:
+                                logging.info(f"[UPLOAD] ✅ Minimal load complete: {len(processor.df)} rows (fastest method)")
+                        except Exception as e:
+                            logging.warning(f"Minimal load failed: {e}")
+                
+                # Method 2: Try ultra-fast load (now optimized for large files - no row limit)
+                if not success and hasattr(processor, 'ultra_fast_load'):
+                    try:
+                        success = processor.ultra_fast_load(temp_path)
+                        if success:
+                            logging.info(f"[UPLOAD] ✅ Used ultra_fast_load method: {len(processor.df)} rows (optimized, no limit)")
+                    except Exception as e:
+                        logging.warning(f"Ultra-fast load failed: {e}")
+                
+                # Method 3: Try fast_load_file (optimized with chunking for large files)
+                if not success and hasattr(processor, 'fast_load_file'):
+                    try:
+                        success = processor.fast_load_file(temp_path)
+                        if success:
+                            logging.info(f"[UPLOAD] ✅ Used fast_load_file method: {len(processor.df)} rows (optimized)")
+                    except Exception as e:
+                        logging.warning(f"Fast load failed: {e}")
+                
+                # Method 5: Try optimized pandas read (no row limit, optimized parameters)
+                if not success:
+                    try:
+                        # CRITICAL OPTIMIZATION: Maximum speed parameters for large files
+                        # - dtype=str: Skip type inference (major speedup)
+                        # - na_filter=False: Skip NA detection (major speedup)
+                        # - keep_default_na=False: Skip default NA handling
+                        # - converters=None: No converters (faster)
+                        # - header=0: First row is header
+                        df = pd.read_excel(
+                            temp_path, 
+                            engine='openpyxl', 
+                            dtype=str,  # Read as strings (skips type inference - 2-3x faster)
+                            na_filter=False,  # Don't filter NA values (major speedup)
+                            keep_default_na=False,  # Don't use default NA values
+                            converters=None,  # No converters (faster)
+                            header=0  # First row is header
+                            # No nrows limit - read entire file for large files
+                        )
+                        if not df.empty:
+                            processor.df = df
+                            success = True
+                            logging.info(f"[UPLOAD] Loaded {len(df)} rows (optimized pandas, no limit)")
+                        else:
+                            success = False
+                    except Exception as e:
+                        logging.warning(f"Optimized pandas load failed: {e}")
+                
+                # Method 6: Fallback to standard load
+                if not success:
+                    try:
+                        success = processor.load_file(temp_path)
+                        logging.info("[UPLOAD] Used standard load_file method")
+                    except Exception as e:
+                        logging.warning(f"Standard load failed: {e}")
             
             load_duration = time.time() - load_start
             logging.info(f"[UPLOAD] Load pipeline duration: {load_duration:.2f}s")

@@ -1245,8 +1245,9 @@ class EnhancedJSONMatcher:
         if fallback_mode and json_item:
             # Map JSON fields to expected template columns using comprehensive field mapping
             merged_product = {}
-            # Name
-            merged_product['Product Name*'] = json_item.get('product_name') or json_item.get('inventory_name') or json_item.get('name') or ''
+            # Name - CLEAN: Remove duplicate weight values from product name
+            raw_name = json_item.get('product_name') or json_item.get('inventory_name') or json_item.get('name') or ''
+            merged_product['Product Name*'] = self._clean_product_name(raw_name)
             
             # Price - CRITICAL FIX: Use comprehensive field extraction to find price in all possible field variations
             price_value = self._extract_field_from_json_item(json_item, "Price* (Tier Name for Bulk)")
@@ -1322,6 +1323,12 @@ class EnhancedJSONMatcher:
         
         # Continue with database priority mode - use database product with JSON matching info
         db_priority_product = product_dict.copy()
+        
+        # CLEAN: Remove duplicate weight values from product name if present
+        if 'Product Name*' in db_priority_product:
+            db_priority_product['Product Name*'] = self._clean_product_name(
+                str(db_priority_product['Product Name*'])
+            )
         
         # CRITICAL: Add metadata about the database priority approach
         db_priority_product['Source'] = 'Database Priority (100% DB)'
@@ -2033,6 +2040,48 @@ class EnhancedJSONMatcher:
             return 'tincture'
         else:
             return 'unknown'
+    
+    def _clean_product_name(self, name: str) -> str:
+        """
+        Remove duplicate weight values from product names.
+        Example: "Gelato 47 - 1g - 1g" -> "Gelato 47 - 1g"
+        """
+        import re
+        if not name:
+            return name
+        
+        # Pattern to match weight values like "1g", "2.5g", "3.5g", "1oz", etc.
+        weight_pattern = r'\s*-\s*(\d+(?:\.\d+)?(?:g|oz|mg|ml))\s*'
+        
+        # Find all weight matches with their positions
+        matches = list(re.finditer(weight_pattern, name, re.IGNORECASE))
+        
+        if len(matches) <= 1:
+            return name  # No duplicates
+        
+        # Check for duplicate weights
+        weights = [m.group(1).lower() for m in matches]
+        seen = set()
+        indices_to_remove = []
+        
+        for i, (weight, match) in enumerate(zip(weights, matches)):
+            if weight in seen:
+                # This is a duplicate - mark for removal
+                indices_to_remove.append(i)
+            else:
+                seen.add(weight)
+        
+        # Remove duplicates from right to left to preserve indices
+        result = name
+        for i in reversed(indices_to_remove):
+            match = matches[i]
+            result = result[:match.start()] + result[match.end():]
+        
+        # Clean up multiple consecutive dashes or trailing dashes
+        result = re.sub(r'\s*-\s*-\s*', ' - ', result)
+        result = re.sub(r'\s*-\s*$', '', result)
+        
+        return result.strip()
     
     def _infer_lineage_type(self, product: Dict) -> str:
         """
