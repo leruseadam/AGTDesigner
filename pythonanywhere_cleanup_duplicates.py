@@ -170,10 +170,6 @@ def cleanup_duplicates(db_path, dry_run=False):
             
             entries = cursor.fetchall()
             
-            # Debug: log if we found entries but not duplicates
-            if idx <= 3:  # Log first 3 groups for debugging
-                print(f"  DEBUG [{idx}]: Found {len(entries)} entries for group")
-            
             if len(entries) > 1:
                 # Keep the first (most recent), delete the rest
                 keep_id = entries[0][0]
@@ -196,8 +192,6 @@ def cleanup_duplicates(db_path, dry_run=False):
                 
                 deleted_count += len(ids_to_delete)
                 kept_count += 1
-            elif idx <= 3:  # Debug first 3 non-duplicate groups
-                print(f"  DEBUG [{idx}]: Skipping - only {len(entries)} entry found (expected >1)")
         
         if not dry_run:
             conn.commit()
