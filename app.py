@@ -3262,11 +3262,15 @@ def upload_file():
 
                                 # Make JSON safe and cache
                                 safe_tags = make_json_safe(tags)
-                                cache_key = get_session_cache_key(f'available_tags_{file_path}')
+
+                                # CRITICAL FIX: Use file-path-only cache key so frontend can access it
+                                # Background thread doesn't have same session context as frontend request
+                                import hashlib
+                                cache_key = f"tags_file_{hashlib.sha256(file_path.encode()).hexdigest()}"
                                 cache.set(cache_key, safe_tags, timeout=300)
 
                                 cache_elapsed = (time.time() - cache_start) * 1000
-                                logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access ({cache_elapsed:.0f}ms)")
+                                logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags with key={cache_key[:16]}... ({cache_elapsed:.0f}ms)")
 
                                 # Update status to indicate tags are ready
                                 update_processing_status(original_filename, 'tags_ready')
@@ -3426,11 +3430,15 @@ def upload_file():
                                     processor._skip_enrichment = False
 
                                 safe_tags = make_json_safe(tags)
-                                cache_key = get_session_cache_key(f'available_tags_{file_path}')
+
+                                # CRITICAL FIX: Use file-path-only cache key so frontend can access it
+                                # Background thread doesn't have same session context as frontend request
+                                import hashlib
+                                cache_key = f"tags_file_{hashlib.sha256(file_path.encode()).hexdigest()}"
                                 cache.set(cache_key, safe_tags, timeout=300)
 
                                 cache_elapsed = (time.time() - cache_start) * 1000
-                                logging.info(f"[LOCAL-BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access ({cache_elapsed:.0f}ms)")
+                                logging.info(f"[LOCAL-BACKGROUND] ✅ Cached {len(safe_tags)} tags with key={cache_key[:16]}... ({cache_elapsed:.0f}ms)")
                             except Exception as cache_error:
                                 logging.warning(f"[LOCAL-BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
 
@@ -8813,10 +8821,23 @@ def get_available_tags():
                 'source': 'cache-fast'
             })
 
-        # CRITICAL FIX: If file exists but no cached tags yet (background still processing), return empty with processing status
-        # This prevents hanging - frontend will retry and get tags when background caching completes
+        # CRITICAL FIX: If file exists but no cached tags yet, try in-memory processor before returning processing
         if fast_load and session_file_path and file_exists and not cached_tags:
-            logging.info(f"⚡ FAST: File uploaded but tags not cached yet - returning empty (background processing)")
+            if _excel_processor is not None and getattr(_excel_processor, 'df', None) is not None and not _excel_processor.df.empty:
+                try:
+                    logging.info("⚡ FAST: Serving tags from in-memory processor while cache builds (fast_load, file exists)")
+                    excel_tags = _excel_processor.get_available_tags(filters=None)
+                    safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
+                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                    cache.set(cache_key, safe_excel_tags, timeout=300)
+                    return jsonify({
+                        'tags': safe_excel_tags,
+                        'total_count': len(safe_excel_tags),
+                        'source': 'excel-memory'
+                    })
+                except Exception as mem_err:
+                    logging.warning(f"Failed to serve in-memory tags fallback (fast_load): {mem_err}")
+            logging.info(f"⚡ FAST: File uploaded but tags not cached yet - returning processing status")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
@@ -8914,12 +8935,15 @@ def get_available_tags():
                 else:
                     # CRITICAL: If Excel processor not ready, try to use cached tags from background thread
                     logging.warning(f"⚠️ ULTRA-FAST: Processor not available or empty - checking for cached tags")
-                    
+
                     # Try to find cached tags from background processing
                     file_path = session.get('file_path')
                     if file_path:
-                        cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                        # Use file-path-only cache key (matches background thread)
+                        import hashlib
+                        cache_key = f"tags_file_{hashlib.sha256(file_path.encode()).hexdigest()}"
                         cached_tags_from_bg = cache.get(cache_key)
+
                         if cached_tags_from_bg:
                             logging.info(f"✅ CACHE FALLBACK: Found {len(cached_tags_from_bg)} cached tags from background processing")
                             return jsonify({
