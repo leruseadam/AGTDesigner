@@ -99,20 +99,33 @@ def repair_database(db_path):
         print(f"\n🔄 Step 1: Dumping database to SQL file...")
         print(f"   This may take a few minutes for large databases...")
         
-        # Dump the corrupted database to SQL
-        dump_cmd = f'sqlite3 "{db_path}" .dump > "{dump_file}"'
-        result = os.system(dump_cmd)
-        
-        if result != 0:
-            print(f"❌ Failed to dump database")
-            return False
-        
-        if not os.path.exists(dump_file):
-            print(f"❌ Dump file not created")
-            return False
-        
-        dump_size_mb = os.path.getsize(dump_file) / 1024 / 1024
-        print(f"✅ Database dumped to SQL ({dump_size_mb:.2f} MB)")
+        # Try Python iterdump first (more reliable for corrupted DBs)
+        try:
+            print(f"   Using Python iterdump method...")
+            with open(dump_file, 'w', encoding='utf-8') as f:
+                for line in conn.iterdump():
+                    f.write(f'{line}\n')
+            
+            if os.path.exists(dump_file):
+                dump_size_mb = os.path.getsize(dump_file) / 1024 / 1024
+                print(f"✅ Database dumped to SQL ({dump_size_mb:.2f} MB)")
+            else:
+                raise Exception("Dump file not created")
+                
+        except Exception as e:
+            print(f"⚠️  Python iterdump failed: {e}")
+            print(f"   Trying sqlite3 command line method...")
+            
+            # Fallback to sqlite3 command
+            dump_cmd = f'sqlite3 "{db_path}" .dump > "{dump_file}"'
+            result = os.system(dump_cmd)
+            
+            if result != 0 or not os.path.exists(dump_file):
+                print(f"❌ Failed to dump database with both methods")
+                return False
+            
+            dump_size_mb = os.path.getsize(dump_file) / 1024 / 1024
+            print(f"✅ Database dumped to SQL ({dump_size_mb:.2f} MB)")
         
         # Fix duplicate IDs in the dump file
         print(f"\n🔄 Step 2: Fixing duplicate IDs in dump file...")
@@ -245,10 +258,22 @@ def repair_database(db_path):
         
         print(f"✅ Repaired database integrity: OK")
         
-        # Get product count in repaired database
-        cursor_new.execute("SELECT COUNT(*) FROM products")
-        final_count = cursor_new.fetchone()[0]
-        print(f"📦 Products in repaired database: {final_count:,}")
+        # Get product count in repaired database (if table exists)
+        try:
+            cursor_new.execute("SELECT COUNT(*) FROM products")
+            final_count = cursor_new.fetchone()[0]
+            print(f"📦 Products in repaired database: {final_count:,}")
+        except sqlite3.OperationalError as e:
+            print(f"⚠️  Could not verify product count: {e}")
+            print(f"   Checking available tables...")
+            cursor_new.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = cursor_new.fetchall()
+            if tables:
+                print(f"   Available tables: {', '.join([t[0] for t in tables])}")
+            else:
+                print(f"   ❌ No tables found in repaired database!")
+                conn_new.close()
+                return False
         
         conn_new.close()
         
