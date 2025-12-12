@@ -3640,8 +3640,9 @@ def process_small_file_optimized(temp_path: str, filename: str, start_time: floa
         return jsonify({'error': str(e)}), 500
 @app.route('/upload-pythonanywhere', methods=['POST'])
 def upload_file_simple_pythonanywhere():
-    """OPTIMIZED upload endpoint with increased row limits and better performance"""
+    """OPTIMIZED upload endpoint tuned for PythonAnywhere latency."""
     try:
+        request_start = time.time()
         logging.info("=== OPTIMIZED PYTHONANYWHERE UPLOAD START ===")
         
         # CRITICAL: Require store selection before upload
@@ -3679,8 +3680,11 @@ def upload_file_simple_pythonanywhere():
         
         # Save file temporarily
         import tempfile
+        save_start = time.time()
         temp_path = os.path.join(tempfile.gettempdir(), f"upload_{sanitized_filename}")
         file.save(temp_path)
+        save_duration = time.time() - save_start
+        logging.info(f"[UPLOAD] Temp save complete in {save_duration:.2f}s -> {temp_path}")
         
         # Process with optimizations
         try:
@@ -3705,6 +3709,7 @@ def upload_file_simple_pythonanywhere():
             # OPTIMIZATION: Try multiple loading methods with optimized order
             import pandas as pd
             success = False
+            load_start = time.time()
             
             # CRITICAL: On PythonAnywhere, prioritize pythonanywhere_fast_load first (optimized for production)
             if is_pythonanywhere and hasattr(processor, 'pythonanywhere_fast_load'):
@@ -3782,51 +3787,73 @@ def upload_file_simple_pythonanywhere():
                 except Exception as e:
                     logging.warning(f"Standard load failed: {e}")
             
+            load_duration = time.time() - load_start
+            logging.info(f"[UPLOAD] Load pipeline duration: {load_duration:.2f}s")
+            
             if not success or processor.df is None or processor.df.empty:
                 return jsonify({'error': 'Failed to process file'}), 400
             
-            # Store in global processor
-            global excel_processor
-            excel_processor = processor
+            # Store in global processor (thread-safe)
+            global _excel_processor
+            with excel_processor_lock:
+                _excel_processor = processor
+                try:
+                    _excel_processor._last_loaded_file = temp_path
+                except Exception:
+                    pass
             
-            # Store Excel data in database (non-blocking)
+            # Kick off database storage in the background to avoid blocking response
+            db_thread_started = False
+            def store_upload_async(df_snapshot, source_path):
+                bg_start = time.time()
+                try:
+                    if hasattr(processor, '_store_upload_in_database'):
+                        logging.info(f"[UPLOAD][BG-DB] Starting async database storage for {len(df_snapshot)} rows")
+                        storage_result = processor._store_upload_in_database(df_snapshot, source_path)
+                        logging.info(f"[UPLOAD][BG-DB] ✅ Completed in {time.time() - bg_start:.2f}s: {storage_result}")
+                    else:
+                        logging.warning("[UPLOAD][BG-DB] ExcelProcessor missing _store_upload_in_database; skipping DB write")
+                except Exception as db_err:
+                    logging.error(f"[UPLOAD][BG-DB] Database storage failed: {db_err}")
+            
             try:
-                if hasattr(processor, '_store_upload_in_database'):
-                    logging.info("[UPLOAD] Storing Excel data in database...")
-                    storage_result = processor._store_upload_in_database(processor.df, temp_path)
-                    logging.info(f"[UPLOAD] ✅ Database storage completed: {storage_result}")
-                else:
-                    logging.warning("[UPLOAD] ExcelProcessor does not have _store_upload_in_database method")
-                    # Try alternative database storage method
-                    try:
-                        # CRITICAL: Get the correct store-specific database
-                        store_name = get_current_store_name()
-                        product_db = get_product_database(store_name)
-                        if hasattr(product_db, 'store_excel_data'):
-                            logging.info(f"[UPLOAD] Using ProductDatabase.store_excel_data method for store {store_name}...")
-                            storage_result = product_db.store_excel_data(processor.df, temp_path)
-                            logging.info(f"[UPLOAD] ✅ Alternative database storage completed: {storage_result}")
-                    except Exception as db_error:
-                        logging.error(f"[UPLOAD] Database storage failed: {db_error}")
-            except Exception as storage_error:
-                logging.error(f"[UPLOAD] Error storing data in database: {storage_error}")
+                import threading
+                threading.Thread(
+                    target=store_upload_async,
+                    args=(processor.df, temp_path),
+                    daemon=True
+                ).start()
+                db_thread_started = True
+                logging.info("[UPLOAD] DB storage deferred to background thread")
+            except Exception as thread_error:
+                logging.error(f"[UPLOAD] Failed to start DB storage thread: {thread_error}")
             
             # Update session
             session['file_path'] = temp_path
             session['selected_tags'] = []
             
-            # Clean up temp file
+            # Mark processing status immediately ready for UI
+            update_processing_status(file.filename, 'ready')
+            
+            # Clean up temp file (keep if background thread needs it only for metadata)
             try:
                 os.remove(temp_path)
-            except:
-                pass
+            except Exception as cleanup_error:
+                logging.warning(f"[UPLOAD] Temp cleanup skipped: {cleanup_error}")
             
+            total_duration = time.time() - request_start
             return jsonify({
                 'message': 'File uploaded and processed successfully',
                 'filename': sanitized_filename,
                 'rows': len(processor.df),
                 'status': 'ready',
-                'optimization': 'enhanced'
+                'optimization': 'enhanced',
+                'timings': {
+                    'save_seconds': save_duration,
+                    'load_seconds': load_duration,
+                    'total_seconds': total_duration
+                },
+                'db_storage_deferred': db_thread_started
             })
             
         except Exception as process_error:
