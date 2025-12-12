@@ -9,28 +9,32 @@ cd ~/AGTDesigner && git pull origin main
 # Go to Web tab and click "Reload" or run:
 touch /var/www/$(whoami)_pythonanywhere_com_wsgi.py
 
-# 3. Preview (dry-run)
+# 3. Check and repair database if corrupted
+python3 pythonanywhere_repair_database.py
+
+# 4. Preview (dry-run)
 python3 pythonanywhere_cleanup_duplicates.py --dry-run
 
-# 4. Run cleanup (removes duplicates)
+# 5. Run cleanup (removes duplicates)
 python3 pythonanywhere_cleanup_duplicates.py
 
-# 5. Add prevention
+# 6. Add prevention
 python3 prevent_future_duplicates.py
 
-# 6. Verify clean
+# 7. Verify clean
 python3 pythonanywhere_cleanup_duplicates.py --dry-run
 
-# 7. Restart web app
+# 8. Restart web app
 # Go to Web tab and click "Reload"
 
 ================================================================================
 EXPECTED RESULTS
 ================================================================================
-Step 3: Should show "Duplicates removed: ~22,000" (NOT 0!)
-Step 4: Should reduce from 40,536 to ~18,500 products
-Step 5: Should show "Found 0 duplicate groups"
-Step 6: Should show "Database is clean"
+Step 3: Should show "Database is already healthy" OR repair corruption
+Step 4: Should show "Duplicates removed: ~22,000" (NOT 0!)
+Step 5: Should reduce from 40,536 to ~18,500 products
+Step 6: Should show "Found 0 duplicate groups"
+Step 7: Should show "Database is clean"
 
 ================================================================================
 IF SOMETHING GOES WRONG
