@@ -1712,6 +1712,16 @@ class EnhancedJSONMatcher:
             if fuzzy_matches:
                 # Blend the top fuzzy match with existing matches
                 combined_matches = self._blend_match_results(combined_matches, fuzzy_matches[:3])
+        
+        # CRITICAL FIX: If still no matches or low confidence, try attribute-based matching
+        # This catches products with identical price/weight/vendor/brand but different descriptions
+        if not combined_matches or (combined_matches and combined_matches[0].score < 0.6):
+            logging.info(f"🔍 ATTRIBUTE MATCH: Attempting attribute-based matching for low-confidence result")
+            attribute_matches = self._attribute_based_match(json_product, database_products)
+            if attribute_matches:
+                # If we have attribute matches, blend them with existing matches
+                combined_matches = self._blend_match_results(combined_matches, attribute_matches[:5])
+                logging.info(f"✅ ATTRIBUTE MATCH: Found {len(attribute_matches)} matches based on identical attributes")
                 
         return combined_matches
         
@@ -1835,6 +1845,129 @@ class EnhancedJSONMatcher:
         )
         
         return combined_matches
+    
+    def _attribute_based_match(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
+        """
+        Match products based on identical attributes (price, weight, vendor, brand).
+        This catches products with missing type/lineage but identical core attributes.
+        """
+        matches = []
+        
+        # Extract JSON product attributes
+        json_price = self._normalize_price(json_product.get('price', json_product.get('cost', '')))
+        json_weight = self._normalize_weight(json_product.get('weight', ''))
+        json_vendor = self._normalize_vendor(json_product.get('vendor', ''))
+        json_brand = self._normalize_text(json_product.get('brand', ''))
+        json_name = self._normalize_text(self._get_product_name(json_product))
+        
+        # If we don't have enough attributes to match, skip
+        if not json_price and not json_weight:
+            return matches
+        
+        logging.debug(f"🔍 ATTRIBUTE MATCH: Searching for price={json_price}, weight={json_weight}, vendor={json_vendor}, brand={json_brand}")
+        
+        for db_product in database_products:
+            # Extract database product attributes
+            db_price = self._normalize_price(
+                db_product.get('Price') or 
+                db_product.get('Unit Price') or 
+                db_product.get('Wholesale Cost')
+            )
+            db_weight = self._normalize_weight(
+                str(db_product.get('Weight*', '') or '') + str(db_product.get('Units', '') or '')
+            )
+            db_vendor = self._normalize_vendor(
+                db_product.get('Vendor/Supplier*', '') or 
+                db_product.get('Vendor', '') or 
+                db_product.get('Product Brand', '')
+            )
+            db_brand = self._normalize_text(db_product.get('Product Brand', ''))
+            db_name = self._normalize_text(str(db_product.get('Product Name*', '')))
+            
+            # Calculate attribute match score
+            score = 0.0
+            match_factors = {}
+            
+            # Price match (most important - 40%)
+            if json_price and db_price:
+                if abs(json_price - db_price) < 0.01:  # Exact price match
+                    score += 0.4
+                    match_factors['price_match'] = 1.0
+                elif abs(json_price - db_price) / max(json_price, db_price) < 0.05:  # Within 5%
+                    price_similarity = 1.0 - (abs(json_price - db_price) / max(json_price, db_price))
+                    score += 0.4 * price_similarity
+                    match_factors['price_match'] = price_similarity
+            
+            # Weight match (important - 30%)
+            if json_weight and db_weight:
+                if json_weight == db_weight:
+                    score += 0.3
+                    match_factors['weight_match'] = 1.0
+                elif json_weight in db_weight or db_weight in json_weight:
+                    score += 0.25
+                    match_factors['weight_match'] = 0.85
+            
+            # Vendor match (important - 20%)
+            if json_vendor and db_vendor:
+                if json_vendor == db_vendor:
+                    score += 0.2
+                    match_factors['vendor_match'] = 1.0
+                elif json_vendor in db_vendor or db_vendor in json_vendor:
+                    score += 0.15
+                    match_factors['vendor_match'] = 0.75
+            
+            # Brand match (less important - 10%)
+            if json_brand and db_brand:
+                if json_brand == db_brand:
+                    score += 0.1
+                    match_factors['brand_match'] = 1.0
+                elif json_brand in db_brand or db_brand in json_brand:
+                    score += 0.05
+                    match_factors['brand_match'] = 0.5
+            
+            # Name similarity bonus (helps distinguish between similar products)
+            if json_name and db_name:
+                name_similarity = fuzz.token_sort_ratio(json_name, db_name) / 100.0
+                if name_similarity > 0.3:
+                    score += name_similarity * 0.1  # Up to 10% bonus
+                    match_factors['name_similarity'] = name_similarity
+            
+            # Only include if we have a reasonable match (at least price+weight or price+vendor)
+            if score >= 0.5:
+                matches.append(MatchResult(
+                    score=score,
+                    match_data=db_product,
+                    strategy_used=MatchStrategy.FUZZY,  # Use FUZZY as it's closest
+                    confidence=score,
+                    processing_time=0.0,
+                    match_factors=match_factors
+                ))
+                logging.debug(f"✅ ATTRIBUTE MATCH: {db_name[:50]} - score={score:.2f}, factors={match_factors}")
+        
+        return sorted(matches, key=lambda x: x.score, reverse=True)
+    
+    def _normalize_price(self, price_value) -> float:
+        """Normalize price to a float for comparison"""
+        if not price_value:
+            return 0.0
+        
+        try:
+            # Remove currency symbols and convert to float
+            price_str = str(price_value).replace('$', '').replace(',', '').strip()
+            return float(price_str) if price_str else 0.0
+        except (ValueError, AttributeError):
+            return 0.0
+    
+    def _normalize_weight(self, weight_value) -> str:
+        """Normalize weight string for comparison"""
+        if not weight_value:
+            return ''
+        
+        # Convert to string and normalize
+        weight_str = str(weight_value).strip().lower()
+        # Remove spaces between number and unit (e.g., "1 g" -> "1g")
+        weight_str = ''.join(weight_str.split())
+        return weight_str
         
     def _classify_product_type(self, json_product: Dict) -> str:
         """Classify product type from JSON data"""
