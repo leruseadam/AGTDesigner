@@ -3154,12 +3154,18 @@ def upload_file():
                                 logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
                                 logging.error(traceback.format_exc())
 
+                            # CRITICAL PERFORMANCE: Update global processor IMMEDIATELY so frontend can access tags
+                            # Do this BEFORE slow database operations
+                            global _excel_processor
+                            _excel_processor = processor
+                            logging.info("[BACKGROUND] ✅ Updated global Excel processor - tags now available for frontend")
+
                             # Update preroll items from newly loaded Excel data
                             if hasattr(processor, 'df') and processor.df is not None:
                                 # Pass session_id from outer scope since we're in background thread
                                 update_preroll_items_from_excel(processor.df, session_id=background_session_id)
 
-                            # Store in database
+                            # Store in database (this is slow but frontend doesn't need to wait for it)
                             try:
                                 # Use the selected_store from outer scope
                                 store_name = selected_store
@@ -3171,11 +3177,6 @@ def upload_file():
                                     logging.info(f"[BACKGROUND] Database storage result: {result}")
                             except Exception as db_error:
                                 logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
-
-                            # CRITICAL FIX: Update global processor so tags are available immediately
-                            global _excel_processor
-                            _excel_processor = processor
-                            logging.info("[BACKGROUND] ✅ Updated global Excel processor - tags now available")
 
                             logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
 
