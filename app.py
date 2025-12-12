@@ -8716,8 +8716,24 @@ def get_available_tags():
                         pass
                     return resp
                 else:
-                    # CRITICAL: If Excel processor not ready, return processing status instead of falling through to slow database path
-                    logging.warning(f"⚠️ ULTRA-FAST: Processor not available or empty - returning processing status")
+                    # CRITICAL: If Excel processor not ready, try to use cached tags from background thread
+                    logging.warning(f"⚠️ ULTRA-FAST: Processor not available or empty - checking for cached tags")
+                    
+                    # Try to find cached tags from background processing
+                    file_path = session.get('file_path')
+                    if file_path:
+                        cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                        cached_tags_from_bg = cache.get(cache_key)
+                        if cached_tags_from_bg:
+                            logging.info(f"✅ CACHE FALLBACK: Found {len(cached_tags_from_bg)} cached tags from background processing")
+                            return jsonify({
+                                'tags': cached_tags_from_bg,
+                                'total_count': len(cached_tags_from_bg),
+                                'source': 'cache-bg'
+                            })
+                    
+                    # No cache available - return processing status
+                    logging.warning(f"⚠️ ULTRA-FAST: No processor and no cache - returning processing status")
                     return jsonify({
                         'tags': [],
                         'total_count': 0,
