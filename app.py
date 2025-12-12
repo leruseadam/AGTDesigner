@@ -1433,6 +1433,13 @@ def get_excel_processor():
 
                                 # CRITICAL PERFORMANCE: Use fast_mode=True and skip slow database queries on production
                                 is_production = PYTHONANYWHERE_OPTIMIZATION or os.environ.get('PYTHONANYWHERE_DOMAIN')
+                                lineage_refresh_requested = False
+                                try:
+                                    from flask import has_request_context
+                                    if has_request_context():
+                                        lineage_refresh_requested = bool(session.get('lineage_update_timestamp'))
+                                except Exception:
+                                    lineage_refresh_requested = False
 
                                 # Use fast loading mode for better performance
                                 success = _excel_processor.load_file(default_file, fast_mode=True)
@@ -1445,17 +1452,16 @@ def get_excel_processor():
                                             if canonical_col in _excel_processor.df.columns:
                                                 _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
 
-                                    # CRITICAL PERFORMANCE: Skip slow database lineage updates on production
-                                    # Only do this on local for maximum accuracy
-                                    if not is_production and hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
+                                    # CRITICAL: Always refresh lineage when requested, even on production
+                                    if (lineage_refresh_requested or not is_production) and hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
                                         try:
-                                            logging.info("🔄 Updating DataFrame lineage from database (local only)...")
+                                            logging.info("🔄 Updating DataFrame lineage from database (forced refresh or local)...")
                                             _excel_processor._update_dataframe_lineage_from_database()
                                             logging.info("✅ DataFrame lineage updated from database")
                                         except Exception as df_update_err:
                                             logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
                                     elif is_production:
-                                        logging.info("⚡ FAST: Skipping database lineage update on production for speed")
+                                        logging.info("⚡ FAST: Skipping database lineage update on production for speed (no refresh requested)")
                                     
                                     # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
                                     if hasattr(_excel_processor, '_cache_dropdown_values'):
