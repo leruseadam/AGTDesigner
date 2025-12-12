@@ -1492,6 +1492,11 @@ const TagManager = {
 
     saveSelectionState(actionType = 'checkbox_selection', extraPayload = {}) {
         try {
+            // Clear redo stack when making a new selection (can't redo after new action)
+            if (this.state.redoStack) {
+                this.state.redoStack = [];
+            }
+
             // IMMEDIATE: Save to local undo stack for instant undo
             if (!this.state.localUndoStack) {
                 this.state.localUndoStack = [];
@@ -11023,198 +11028,122 @@ const TagManager = {
 
     async undoMove() {
         try {
-            console.log('🔙 Starting undo operation...');
-            console.log('📊 Local undo stack size:', this.state.localUndoStack?.length || 0);
-            verboseLog('Starting undo operation...');
-            verboseLog('Local undo stack size:', this.state.localUndoStack?.length || 0);
-            
+            console.log('🔙 Undoing most recent checkbox selection...');
+
+            // Check if there's anything to undo
+            if (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0) {
+                if (window.Toast) {
+                    Toast.show('info', 'Nothing to undo - no tags selected');
+                }
+                return;
+            }
+
             // Show user feedback immediately
             if (window.Toast) {
-                Toast.show('info', 'Processing undo...');
+                Toast.show('info', 'Undoing last selection...');
             }
 
-            // IMMEDIATE: Update UI from local state first (optimistic update)
-            const localUndoStack = this.state.localUndoStack || [];
-            let uiUpdated = false;
+            // SIMPLE: Remove the most recently selected tag (last item in the array)
+            const lastSelectedTag = this.state.persistentSelectedTags[this.state.persistentSelectedTags.length - 1];
 
-            if (localUndoStack.length > 0) {
-                const lastState = localUndoStack[localUndoStack.length - 1];
-                verboseLog('Restoring from local undo stack:', lastState);
-
-                const actionType = lastState.action_type || 'checkbox_selection';
-
-                // Only use local cache for selection actions, not lineage edits
-                if (actionType !== 'lineage_edit') {
-                    // Update UI immediately from cached state
-                    this.state.persistentSelectedTags = lastState.selected_tag_names || [];
-                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-
-                    // Update the selected tags display immediately
-                    const selectedTagObjects = this.state.persistentSelectedTags.map(tagName =>
-                        this.state.tags.find(t => t['Product Name*'] === tagName)
-                    ).filter(Boolean);
-                    this.updateSelectedTags(selectedTagObjects);
-
-                    // Update available tags display immediately
-                    const availableTagObjects = this.state.tags.filter(tag =>
-                        !this.state.persistentSelectedTags.includes(tag['Product Name*'])
-                    );
-                    this.updateAvailableTagsOptimized(availableTagObjects.map(t => t['Product Name*']));
-
-                    // Remove from local stack
-                    localUndoStack.pop();
-                    this.state.localUndoStack = localUndoStack;
-                    uiUpdated = true;
-
-                    // Show success message
-                    if (window.Toast) {
-                        Toast.show('success', 'Undo successful!');
-                    }
-
-                    verboseLog('Undo completed immediately - restored previous state from cache');
-                }
+            // Save to redo stack before removing
+            if (!this.state.redoStack) {
+                this.state.redoStack = [];
             }
-            
-            // Call backend API (either for sync or as fallback if local stack is empty)
-            try {
-                const response = await fetch('/api/undo-move', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                verboseLog('Undo API response status:', response.status);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    verboseLog('Undo API response data:', data);
-
-                    if (data.success) {
-                        const actionType = data.action_type || 'checkbox_selection';
-
-                        if (actionType === 'lineage_edit') {
-                            // Lineage edit was undone - refresh the tags to show updated lineages
-                            verboseLog('Lineage edit undone, refreshing tags...');
-
-                            // Reload available tags to get updated lineages
-                            await this.fetchAndUpdateAvailableTags();
-
-                            if (window.Toast) {
-                                const message = data.message || `Reverted lineage changes for ${data.changes_reverted || 1} product(s)`;
-                                Toast.show('success', message);
-                            }
-
-                            verboseLog('Lineage undo completed');
-                        } else {
-                            // Selection/move action - update UI with tag lists
-                            if (!uiUpdated) {
-                                this.state.persistentSelectedTags = data.selected_tags || [];
-                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-
-                                this.updateSelectedTags(data.selected_tags.map(tagName =>
-                                    this.state.tags.find(t => t['Product Name*'] === tagName)
-                                ).filter(Boolean));
-
-                                // CRITICAL: Update checkboxes to reflect the undone state
-                                this.updateSelectAllCheckboxes();
-
-                                if (data.available_tags) {
-                                    this.updateAvailableTagsOptimized(data.available_tags);
-                                }
-                                verboseLog('Undo completed from backend');
-                            } else {
-                                // Sync with backend response (may have more up-to-date data)
-                                this.state.persistentSelectedTags = data.selected_tags || this.state.persistentSelectedTags;
-                                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                
-                                // CRITICAL: Update checkboxes to reflect the undone state
-                                this.updateSelectAllCheckboxes();
-                            }
-                        }
-                    } else if (data.success === false) {
-                        // Handle case where backend returns success: false with 200 status (no undo history)
-                        if (!uiUpdated) {
-                            const message = data.message || data.error || 'No actions to undo. Try moving some tags first, then use the undo button.';
-                            if (window.Toast) {
-                                Toast.show('info', message);
-                            } else {
-                                alert(message);
-                            }
-                        }
-                        verboseLog('Nothing to undo on backend (expected when no actions taken)');
-                        return; // Exit early - no need to process further
-                    }
-                } else {
-                    // Handle error - try to parse JSON, but handle cases where response might not be JSON
-                    let errorData = {};
-                    try {
-                        const text = await response.text();
-                        if (text) {
-                            try {
-                                errorData = JSON.parse(text);
-                            } catch (parseError) {
-                                verboseLog('Could not parse error response as JSON:', parseError);
-                                // If response is not JSON, create a default error message based on status
-                                if (response.status === 400) {
-                                    errorData = { error: 'No undo history available' };
-                                }
-                            }
-                        } else if (response.status === 400) {
-                            // Empty response but 400 status - likely no undo history
-                            errorData = { error: 'No undo history available' };
-                        }
-                    } catch (textError) {
-                        verboseLog('Could not read error response text:', textError);
-                        if (response.status === 400) {
-                            errorData = { error: 'No undo history available' };
-                        }
-                    }
-                    
-                    if (response.status === 400 && (errorData.error === 'No undo history available' || !errorData.error)) {
-                        // This is expected when there's nothing to undo - not a real error
-                        // Only show message if UI wasn't updated from local stack
-                        if (!uiUpdated) {
-                            // No local stack and no backend stack
-                            if (window.Toast) {
-                                Toast.show('info', 'No actions to undo. Try moving some tags first, then use the undo button.');
-                            } else {
-                                alert('No actions to undo. Try moving some tags first, then use the undo button.');
-                            }
-                        }
-                        // Don't log as error - this is expected behavior
-                        verboseLog('Nothing to undo on backend (expected when no actions taken)');
-                        // Suppress the console error for this expected case
-                        return; // Exit early - no need to process further
-                    } else {
-                        const errorMessage = errorData.error || `Server error: ${response.status}`;
-                        if (!uiUpdated) {
-                            if (window.Toast) {
-                                Toast.show('error', `Undo failed: ${errorMessage}`);
-                            } else {
-                                alert(`Undo failed: ${errorMessage}`);
-                            }
-                        }
-                    }
-                }
-            } catch (apiError) {
-                // If UI wasn't updated and API fails, show error
-                if (!uiUpdated) {
-                    console.error('Failed to undo move:', apiError.message);
-                    if (window.Toast) {
-                        Toast.show('error', `Undo failed: ${apiError.message}`);
-                    } else {
-                        alert(`Undo failed: ${apiError.message}`);
-                    }
-                } else {
-                    verboseLog('Background undo sync error (non-critical):', apiError);
-                }
+            this.state.redoStack.push(lastSelectedTag);
+            // Limit redo stack to last 10 items
+            if (this.state.redoStack.length > 10) {
+                this.state.redoStack = this.state.redoStack.slice(-10);
             }
-            
+
+            // Remove from persistent selected tags
+            this.state.persistentSelectedTags = this.state.persistentSelectedTags.slice(0, -1);
+            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+
+            // Update the selected tags display
+            const selectedTagObjects = this.state.persistentSelectedTags.map(tagName =>
+                this.state.tags.find(t => t['Product Name*'] === tagName)
+            ).filter(Boolean);
+            this.updateSelectedTags(selectedTagObjects);
+
+            // Uncheck the checkbox for the removed tag in available tags
+            const checkbox = document.querySelector(`#availableTags .tag-checkbox[value="${lastSelectedTag}"]`);
+            if (checkbox) {
+                checkbox.checked = false;
+            }
+
+            // Update Select All checkbox state
+            this.updateSelectAllCheckboxes();
+
+            // Show success message
+            if (window.Toast) {
+                Toast.show('success', `Removed: ${lastSelectedTag}`);
+            }
+
+            verboseLog(`✅ Undone last selection: ${lastSelectedTag}`);
+
         } catch (error) {
-            console.error('Failed to undo move:', error.message);
+            console.error('Failed to undo:', error.message);
             if (window.Toast) {
                 Toast.show('error', `Undo failed: ${error.message}`);
             } else {
                 alert(`Undo failed: ${error.message}`);
+            }
+        }
+    },
+
+    async redoMove() {
+        try {
+            console.log('🔁 Redoing most recent undo...');
+
+            // Check if there's anything to redo
+            if (!this.state.redoStack || this.state.redoStack.length === 0) {
+                if (window.Toast) {
+                    Toast.show('info', 'Nothing to redo');
+                }
+                return;
+            }
+
+            // Show user feedback immediately
+            if (window.Toast) {
+                Toast.show('info', 'Redoing...');
+            }
+
+            // Get the most recently undone tag
+            const tagToRestore = this.state.redoStack.pop();
+
+            // Add back to selected tags
+            this.state.persistentSelectedTags.push(tagToRestore);
+            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+
+            // Update the selected tags display
+            const selectedTagObjects = this.state.persistentSelectedTags.map(tagName =>
+                this.state.tags.find(t => t['Product Name*'] === tagName)
+            ).filter(Boolean);
+            this.updateSelectedTags(selectedTagObjects);
+
+            // Check the checkbox for the restored tag in available tags
+            const checkbox = document.querySelector(`#availableTags .tag-checkbox[value="${tagToRestore}"]`);
+            if (checkbox) {
+                checkbox.checked = true;
+            }
+
+            // Update Select All checkbox state
+            this.updateSelectAllCheckboxes();
+
+            // Show success message
+            if (window.Toast) {
+                Toast.show('success', `Restored: ${tagToRestore}`);
+            }
+
+            verboseLog(`✅ Redone: ${tagToRestore}`);
+
+        } catch (error) {
+            console.error('Failed to redo:', error.message);
+            if (window.Toast) {
+                Toast.show('error', `Redo failed: ${error.message}`);
+            } else {
+                alert(`Redo failed: ${error.message}`);
             }
         }
     },
@@ -14324,7 +14253,42 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Try to attach the listener immediately (we're already inside DOMContentLoaded)
+    // Add event listener for the redo button with retry mechanism
+    function attachRedoButtonListener() {
+        const redoButton = document.getElementById('redo-move-btn');
+        if (redoButton) {
+            // Remove any existing listeners to prevent duplicates
+            const newButton = redoButton.cloneNode(true);
+            redoButton.parentNode.replaceChild(newButton, redoButton);
+
+            newButton.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('🔁 Redo button clicked');
+                verboseLog('Redo button clicked');
+
+                if (window.TagManager && typeof TagManager.redoMove === 'function') {
+                    console.log('✅ Calling TagManager.redoMove()');
+                    verboseLog('Calling TagManager.redoMove()');
+                    TagManager.redoMove().catch(error => {
+                        console.error('❌ Error in redoMove:', error);
+                        alert(`Redo failed: ${error.message || error}`);
+                    });
+                } else {
+                    console.error('❌ TagManager or redoMove method not available');
+                    alert('Redo functionality is not available. Please try refreshing the page.');
+                }
+            });
+            console.log('✅ Redo button event listener attached successfully');
+            verboseLog('Redo button event listener attached successfully');
+            return true;
+        } else {
+            console.error('❌ Redo button not found in DOM');
+            return false;
+        }
+    }
+
+    // Try to attach the listeners immediately (we're already inside DOMContentLoaded)
     if (!attachUndoButtonListener()) {
         // If not found, retry after a short delay
         setTimeout(() => {
@@ -14333,6 +14297,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Final retry after longer delay
                 setTimeout(() => {
                     attachUndoButtonListener();
+                }, 2000);
+            }
+        }, 1000);
+    }
+
+    // Attach redo button listener
+    if (!attachRedoButtonListener()) {
+        // If not found, retry after a short delay
+        setTimeout(() => {
+            if (!attachRedoButtonListener()) {
+                console.warn('⚠️ Redo button still not found after retry');
+                // Final retry after longer delay
+                setTimeout(() => {
+                    attachRedoButtonListener();
                 }, 2000);
             }
         }, 1000);

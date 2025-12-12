@@ -3731,27 +3731,23 @@ def upload_file_simple_pythonanywhere():
         request_start = time.time()
         logging.info("=== INSTANT UPLOAD START ===")
 
-        # CRITICAL: Require store selection before upload
         if not has_store_selection():
             logging.error("Upload attempted without store selection")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
 
-        # Get current store selection
         selected_store = get_current_store_name()
 
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
-        
+
         file = request.files['file']
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
-        
+
         if not file.filename.lower().endswith('.xlsx'):
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
-        
-        # Validate filename contains store name and matches selected store
+
         is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
-        
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
             return jsonify({
@@ -3760,239 +3756,132 @@ def upload_file_simple_pythonanywhere():
                 'selected_store': selected_store,
                 'detected_store': detected_store
             }), 400
-        
-        # Sanitize filename
-        sanitized_filename = sanitize_filename(file.filename)
 
-        # INSTANT: Save file and return immediately - process in background
         import tempfile
         save_start = time.time()
+        sanitized_filename = sanitize_filename(file.filename)
         temp_path = os.path.join(tempfile.gettempdir(), f"upload_{sanitized_filename}")
         file.save(temp_path)
         save_duration = time.time() - save_start
         logging.info(f"[INSTANT] File saved in {save_duration:.2f}s -> {temp_path}")
 
-        # Update session immediately
         session['file_path'] = temp_path
         session['uploaded_filename'] = sanitized_filename
         session['selected_tags'] = []
         session.modified = True
+        update_processing_status(file.filename, 'processing')
 
-        # Start background processing thread
         from flask import copy_current_request_context
         import threading
 
         @copy_current_request_context
         def process_file_in_background():
-            """Process the uploaded file completely in background"""
             bg_start = time.time()
             try:
-                logging.info(f"[BG] Starting background processing for {temp_path}")
                 from src.core.data.excel_processor import ExcelProcessor
                 processor = ExcelProcessor()
 
-                # Enable database integration for new product storage
                 if hasattr(processor, 'enable_product_db_integration'):
                     processor.enable_product_db_integration(True)
-                    logging.info("[BG] Product database integration enabled")
-                
-                # CRITICAL OPTIMIZATION: Check file size and environment to choose best loading method
+
                 import os
                 file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
-                logging.info(f"[UPLOAD] File size: {file_size_mb:.1f} MB")
-                
-                # Check if running on PythonAnywhere
                 is_pythonanywhere = IS_PYTHONANYWHERE or PYTHONANYWHERE_OPTIMIZATION
-                if is_pythonanywhere:
-                    logging.info("[UPLOAD] PythonAnywhere detected - using optimized loading strategy")
-                
-                # OPTIMIZATION: Try multiple loading methods with optimized order
+
                 import pandas as pd
                 success = False
-                load_start = time.time()
-            
-                # CRITICAL: On PythonAnywhere, prioritize pythonanywhere_fast_load first (optimized for production)
+
                 if is_pythonanywhere and hasattr(processor, 'pythonanywhere_fast_load'):
                     try:
                         success = processor.pythonanywhere_fast_load(temp_path)
-                        if success:
-                            logging.info(f"[UPLOAD] ✅ PythonAnywhere fast load complete: {len(processor.df)} rows (production optimized)")
                     except Exception as e:
                         logging.warning(f"PythonAnywhere fast load failed: {e}")
-                
-                # For large files (>10MB), prioritize minimal_load_file (fastest)
-                # For smaller files, try ultra_fast_load first
-                if not success and file_size_mb > 10:
-                    logging.info("[UPLOAD] Large file detected - using minimal_load_file for maximum speed")
-                    # Method 1: Try minimal_load_file first for large files (fastest - no processing)
-                    if hasattr(processor, 'minimal_load_file'):
-                        try:
-                            success = processor.minimal_load_file(temp_path)
-                            if success:
-                                logging.info(f"[UPLOAD] ✅ Minimal load complete: {len(processor.df)} rows (fastest method)")
-                        except Exception as e:
-                            logging.warning(f"Minimal load failed: {e}")
-                
-                # Method 2: Try ultra-fast load (now optimized for large files - no row limit)
+
+                if not success and file_size_mb > 10 and hasattr(processor, 'minimal_load_file'):
+                    try:
+                        success = processor.minimal_load_file(temp_path)
+                    except Exception as e:
+                        logging.warning(f"Minimal load failed: {e}")
+
                 if not success and hasattr(processor, 'ultra_fast_load'):
                     try:
                         success = processor.ultra_fast_load(temp_path)
-                        if success:
-                            logging.info(f"[UPLOAD] ✅ Used ultra_fast_load method: {len(processor.df)} rows (optimized, no limit)")
                     except Exception as e:
                         logging.warning(f"Ultra-fast load failed: {e}")
-                
-                # Method 3: Try fast_load_file (optimized with chunking for large files)
+
                 if not success and hasattr(processor, 'fast_load_file'):
                     try:
                         success = processor.fast_load_file(temp_path)
-                        if success:
-                            logging.info(f"[UPLOAD] ✅ Used fast_load_file method: {len(processor.df)} rows (optimized)")
                     except Exception as e:
                         logging.warning(f"Fast load failed: {e}")
-                
-                # Method 5: Try optimized pandas read (no row limit, optimized parameters)
+
                 if not success:
                     try:
-                        # CRITICAL OPTIMIZATION: Maximum speed parameters for large files
-                        # - dtype=str: Skip type inference (major speedup)
-                        # - na_filter=False: Skip NA detection (major speedup)
-                        # - keep_default_na=False: Skip default NA handling
-                        # - converters=None: No converters (faster)
-                        # - header=0: First row is header
                         df = pd.read_excel(
-                            temp_path, 
-                            engine='openpyxl', 
-                            dtype=str,  # Read as strings (skips type inference - 2-3x faster)
-                            na_filter=False,  # Don't filter NA values (major speedup)
-                            keep_default_na=False,  # Don't use default NA values
-                            converters=None,  # No converters (faster)
-                            header=0  # First row is header
-                            # No nrows limit - read entire file for large files
+                            temp_path,
+                            engine='openpyxl',
+                            dtype=str,
+                            na_filter=False,
+                            keep_default_na=False,
+                            converters=None,
+                            header=0
                         )
                         if not df.empty:
                             processor.df = df
                             success = True
-                            logging.info(f"[UPLOAD] Loaded {len(df)} rows (optimized pandas, no limit)")
-                        else:
-                            success = False
                     except Exception as e:
                         logging.warning(f"Optimized pandas load failed: {e}")
-                
-                # Method 6: Fallback to standard load
+
                 if not success:
                     try:
                         success = processor.load_file(temp_path)
-                        logging.info("[UPLOAD] Used standard load_file method")
                     except Exception as e:
                         logging.warning(f"Standard load failed: {e}")
-            
-            load_duration = time.time() - load_start
-            logging.info(f"[UPLOAD] Load pipeline duration: {load_duration:.2f}s")
-            
-            if not success or processor.df is None or processor.df.empty:
-                return jsonify({'error': 'Failed to process file'}), 400
-            
-            # Store in global processor (thread-safe)
-            global _excel_processor
-            with excel_processor_lock:
-                _excel_processor = processor
-                try:
+
+                if not success or processor.df is None or processor.df.empty:
+                    update_processing_status(file.filename, 'error: load_failed')
+                    return
+
+                global _excel_processor
+                with excel_processor_lock:
+                    _excel_processor = processor
                     _excel_processor._last_loaded_file = temp_path
+
+                try:
+                    tags = processor.get_available_tags(filters=None)
+                    safe_tags = make_json_safe(tags)
+                    cache_key = get_session_cache_key(f'available_tags_{temp_path}')
+                    cache.set(cache_key, safe_tags, timeout=300)
+                except Exception as cache_error:
+                    logging.warning(f"[UPLOAD][BG-CACHE] Could not cache tags: {cache_error}")
+
+                try:
+                    if hasattr(processor, '_store_upload_in_database'):
+                        processor._store_upload_in_database(processor.df, temp_path)
+                except Exception as db_err:
+                    logging.warning(f"[UPLOAD][BG-DB] Database storage failed: {db_err}")
+
+                update_processing_status(file.filename, 'ready')
+                logging.info(f"[BG] Completed background processing in {time.time() - bg_start:.2f}s")
+            except Exception as process_error:
+                logging.error(f"[BG] Processing failed: {process_error}")
+                update_processing_status(file.filename, f'error: {process_error}')
+            finally:
+                try:
+                    os.remove(temp_path)
                 except Exception:
                     pass
-            
-            # Kick off tag caching and database storage in the background to avoid blocking response
-            db_thread_started = False
 
-            # Capture session context for background thread
-            from flask import copy_current_request_context
+        threading.Thread(target=process_file_in_background, daemon=True).start()
 
-            try:
-                import threading
-                # Create an event to signal when tag caching is complete
-                cache_ready_event = threading.Event()
+        total_duration = time.time() - request_start
+        return jsonify({
+            'message': 'File uploaded successfully, processing in background',
+            'filename': sanitized_filename,
+            'status': 'processing',
+            'upload_time_seconds': total_duration
+        })
 
-                @copy_current_request_context
-                def store_upload_with_signal(df_snapshot, source_path):
-                    bg_start = time.time()
-                    try:
-                        # CRITICAL: Pre-cache tags FIRST for instant frontend access
-                        try:
-                            tags = processor.get_available_tags(filters=None)
-                            safe_tags = make_json_safe(tags)
-                            cache_key = get_session_cache_key(f'available_tags_{source_path}')
-                            cache.set(cache_key, safe_tags, timeout=300)
-                            logging.info(f"[UPLOAD][BG-CACHE] ✅ Cached {len(safe_tags)} tags for instant frontend access")
-                            # Signal that caching is complete
-                            cache_ready_event.set()
-                        except Exception as cache_error:
-                            logging.warning(f"[UPLOAD][BG-CACHE] ⚠️ Could not cache tags: {cache_error}")
-                            # Signal anyway so we don't block
-                            cache_ready_event.set()
-
-                        # Then do database storage (slower operation)
-                        if hasattr(processor, '_store_upload_in_database'):
-                            logging.info(f"[UPLOAD][BG-DB] Starting async database storage for {len(df_snapshot)} rows")
-                            storage_result = processor._store_upload_in_database(df_snapshot, source_path)
-                            logging.info(f"[UPLOAD][BG-DB] ✅ Completed in {time.time() - bg_start:.2f}s: {storage_result}")
-                        else:
-                            logging.warning("[UPLOAD][BG-DB] ExcelProcessor missing _store_upload_in_database; skipping DB write")
-                    except Exception as db_err:
-                        logging.error(f"[UPLOAD][BG-DB] Database storage failed: {db_err}")
-                        cache_ready_event.set()  # Signal even on error
-
-                threading.Thread(
-                    target=store_upload_with_signal,
-                    args=(processor.df, temp_path),
-                    daemon=True
-                ).start()
-                db_thread_started = True
-                logging.info("[UPLOAD] Background thread started for tag caching and DB storage")
-
-                # Wait briefly (max 500ms) for tag caching to complete
-                # This ensures tags are available when frontend requests them
-                cache_ready = cache_ready_event.wait(timeout=0.5)
-                if cache_ready:
-                    logging.info("[UPLOAD] ✅ Tag caching completed before response")
-                else:
-                    logging.info("[UPLOAD] ⚠️ Tag caching still in progress, returning anyway")
-
-            except Exception as thread_error:
-                logging.error(f"[UPLOAD] Failed to start background thread: {thread_error}")
-
-            # Update session
-            session['file_path'] = temp_path
-            session['selected_tags'] = []
-
-            # Mark processing status immediately ready for UI
-            update_processing_status(file.filename, 'ready')
-            
-            # Clean up temp file (keep if background thread needs it only for metadata)
-            try:
-                os.remove(temp_path)
-            except Exception as cleanup_error:
-                logging.warning(f"[UPLOAD] Temp cleanup skipped: {cleanup_error}")
-            
-            total_duration = time.time() - request_start
-            return jsonify({
-                'message': 'File uploaded and processed successfully',
-                'filename': sanitized_filename,
-                'rows': len(processor.df),
-                'status': 'ready',
-                'optimization': 'enhanced',
-                'timings': {
-                    'save_seconds': save_duration,
-                    'load_seconds': load_duration,
-                    'total_seconds': total_duration
-                },
-                'db_storage_deferred': db_thread_started
-            })
-            
-        except Exception as process_error:
-            logging.error(f"Processing error: {process_error}")
-            return jsonify({'error': f'Processing failed: {str(process_error)}'}), 500
-            
     except Exception as e:
         logging.error(f"Upload error: {e}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
