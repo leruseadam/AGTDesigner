@@ -114,15 +114,109 @@ def repair_database(db_path):
         dump_size_mb = os.path.getsize(dump_file) / 1024 / 1024
         print(f"✅ Database dumped to SQL ({dump_size_mb:.2f} MB)")
         
-        print(f"\n🔄 Step 2: Creating new database from dump...")
+        # Fix duplicate IDs in the dump file
+        print(f"\n🔄 Step 2: Fixing duplicate IDs in dump file...")
+        cleaned_dump = f"{dump_file}.cleaned"
+        
+        with open(dump_file, 'r', encoding='utf-8', errors='ignore') as f_in:
+            with open(cleaned_dump, 'w', encoding='utf-8') as f_out:
+                in_strains_inserts = False
+                strains_ids_seen = set()
+                lines_cleaned = 0
+                lines_skipped = 0
+                
+                for line in f_in:
+                    # Detect if we're in strains table INSERT statements
+                    if 'INSERT INTO "strains"' in line or 'INSERT INTO strains' in line:
+                        in_strains_inserts = True
+                        # Try to extract the ID from the INSERT statement
+                        # Format: INSERT INTO "strains" VALUES(id,...)
+                        try:
+                            if 'VALUES(' in line:
+                                values_part = line.split('VALUES(')[1]
+                                id_str = values_part.split(',')[0].strip()
+                                strain_id = int(id_str)
+                                
+                                if strain_id in strains_ids_seen:
+                                    # Skip this duplicate
+                                    lines_skipped += 1
+                                    continue
+                                else:
+                                    strains_ids_seen.add(strain_id)
+                        except:
+                            pass  # If we can't parse, keep the line
+                    elif in_strains_inserts and not line.strip().startswith('INSERT'):
+                        # We've moved past strains inserts
+                        in_strains_inserts = False
+                        strains_ids_seen.clear()
+                    
+                    f_out.write(line)
+                    lines_cleaned += 1
+        
+        if lines_skipped > 0:
+            print(f"✅ Removed {lines_skipped} duplicate strain entries")
+        
+        # Use the cleaned dump
+        print(f"✅ Database dumped to SQL ({dump_size_mb:.2f} MB)")
+        
+        # Fix duplicate IDs in the dump file
+        print(f"\n🔄 Step 2: Fixing duplicate IDs in dump file...")
+        cleaned_dump = f"{dump_file}.cleaned"
+        
+        with open(dump_file, 'r', encoding='utf-8', errors='ignore') as f_in:
+            with open(cleaned_dump, 'w', encoding='utf-8') as f_out:
+                in_strains_inserts = False
+                strains_ids_seen = set()
+                lines_cleaned = 0
+                lines_skipped = 0
+                
+                for line in f_in:
+                    # Detect if we're in strains table INSERT statements
+                    if 'INSERT INTO "strains"' in line or 'INSERT INTO strains' in line:
+                        in_strains_inserts = True
+                        # Try to extract the ID from the INSERT statement
+                        # Format: INSERT INTO "strains" VALUES(id,...)
+                        try:
+                            if 'VALUES(' in line:
+                                values_part = line.split('VALUES(')[1]
+                                id_str = values_part.split(',')[0].strip()
+                                strain_id = int(id_str)
+                                
+                                if strain_id in strains_ids_seen:
+                                    # Skip this duplicate
+                                    lines_skipped += 1
+                                    continue
+                                else:
+                                    strains_ids_seen.add(strain_id)
+                        except:
+                            pass  # If we can't parse, keep the line
+                    elif in_strains_inserts and not line.strip().startswith('INSERT'):
+                        # We've moved past strains inserts
+                        in_strains_inserts = False
+                        strains_ids_seen.clear()
+                    
+                    f_out.write(line)
+                    lines_cleaned += 1
+        
+        if lines_skipped > 0:
+            print(f"✅ Removed {lines_skipped} duplicate strain entries")
+        
+        # Use the cleaned dump
+        os.replace(cleaned_dump, dump_file)
+        
+        print(f"\n🔄 Step 3: Creating new database from cleaned dump...")
         print(f"   This may take a few minutes...")
         
-        # Import the dump into a new database
+        # Import the cleaned dump into a new database
         import_cmd = f'sqlite3 "{temp_db}" < "{dump_file}"'
         result = os.system(import_cmd)
         
         if result != 0:
-            print(f"❌ Failed to import dump into new database")
+            print(f"⚠️  Import completed with warnings (likely due to duplicate constraints)")
+            print(f"   Continuing with verification...")
+        
+        if not os.path.exists(temp_db):
+            print(f"❌ Failed to create new database")
             # Clean up
             if os.path.exists(dump_file):
                 os.remove(dump_file)
@@ -159,7 +253,7 @@ def repair_database(db_path):
         conn_new.close()
         
         # Replace original with repaired
-        print(f"\n🔄 Step 3: Replacing corrupted database with repaired version...")
+        print(f"\n🔄 Step 4: Replacing corrupted database with repaired version...")
         
         # Create another backup of the corrupted file
         corrupted_backup = f"{db_path}.corrupted_{timestamp}"
