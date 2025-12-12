@@ -3895,7 +3895,7 @@ def upload_file_simple_pythonanywhere():
 
                 if not success:
                     try:
-                        success = processor.load_file(temp_path)
+                        success = processor.load_file(temp_path, fast_mode=True)
                     except Exception as e:
                         logging.warning(f"Standard load failed: {e}")
 
@@ -8756,7 +8756,12 @@ def get_available_tags():
                     safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
                     # Cache under generic key so reloads stay instant
                     cache_key = get_session_cache_key('available_tags')
-                    cache.set(cache_key, safe_excel_tags, timeout=300)
+                    try:
+                        cache.set(cache_key, safe_excel_tags, timeout=300)
+                    except OSError as cache_os_err:
+                        logging.warning(f"Cache write skipped (OSError): {cache_os_err}")
+                    except Exception as cache_err:
+                        logging.warning(f"Cache write skipped: {cache_err}")
                     return jsonify({
                         'tags': safe_excel_tags,
                         'total_count': len(safe_excel_tags),
@@ -8840,7 +8845,12 @@ def get_available_tags():
                     excel_tags = _excel_processor.get_available_tags(filters=None)
                     safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
                     cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                    cache.set(cache_key, safe_excel_tags, timeout=300)
+                    try:
+                        cache.set(cache_key, safe_excel_tags, timeout=300)
+                    except OSError as cache_os_err:
+                        logging.warning(f"Cache write skipped (OSError): {cache_os_err}")
+                    except Exception as cache_err:
+                        logging.warning(f"Cache write skipped: {cache_err}")
                     return jsonify({
                         'tags': safe_excel_tags,
                         'total_count': len(safe_excel_tags),
