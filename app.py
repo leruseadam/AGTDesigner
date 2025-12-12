@@ -8687,7 +8687,15 @@ def get_available_tags():
                         pass
                     return resp
                 else:
-                    logging.warning(f"⚠️ ULTRA-FAST: Processor not available or empty (processor={excel_processor is not None}, df={excel_processor.df is not None if excel_processor else False}, empty={excel_processor.df.empty if excel_processor and excel_processor.df is not None else True})")
+                    # CRITICAL: If Excel processor not ready, return processing status instead of falling through to slow database path
+                    logging.warning(f"⚠️ ULTRA-FAST: Processor not available or empty - returning processing status")
+                    return jsonify({
+                        'tags': [],
+                        'total_count': 0,
+                        'status': 'processing',
+                        'message': 'File is still being processed. Please wait...',
+                        'source': 'processing'
+                    }), 202  # 202 Accepted - processing
             except Exception as ultra_err:
                 logging.error(f"❌ Ultra-fast Excel-only tag path failed: {ultra_err}")
                 import traceback
