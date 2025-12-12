@@ -10348,6 +10348,16 @@ def get_available_tags():
                 prefer_db, len(database_tags) if 'database_tags' in locals() else 'unknown'
             ))
         
+        # PERFORMANCE: Clear lineage refresh flag after a successful response so future
+        # requests can use fast-load and cached tags without forced lineage alignment.
+        try:
+            if 'lineage_update_timestamp' in session:
+                del session['lineage_update_timestamp']
+                session.modified = True
+                logging.info("✅ Cleared lineage_update_timestamp after successful available-tags response")
+        except Exception as clear_ts_err:
+            logging.debug(f"Could not clear lineage_update_timestamp: {clear_ts_err}")
+        
         resp = jsonify({
             'tags': safe_all_tags,  # Frontend expects 'tags' property
             'total_count': len(safe_all_tags),
