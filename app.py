@@ -1430,8 +1430,12 @@ def get_excel_processor():
                             logging.info(f"🔍 TRACE get_excel_processor: default_file = {default_file}")
                             if default_file and os.path.exists(default_file):
                                 logging.info(f"Loading default file in get_excel_processor: {default_file}")
+
+                                # CRITICAL PERFORMANCE: Use fast_mode=True and skip slow database queries on production
+                                is_production = PYTHONANYWHERE_OPTIMIZATION or os.environ.get('PYTHONANYWHERE_DOMAIN')
+
                                 # Use fast loading mode for better performance
-                                success = _excel_processor.load_file(default_file)
+                                success = _excel_processor.load_file(default_file, fast_mode=True)
                                 if success:
                                     _excel_processor._last_loaded_file = default_file
                                     # Optimize DataFrame
@@ -1440,16 +1444,18 @@ def get_excel_processor():
                                             canonical_col = get_canonical_field(col)
                                             if canonical_col in _excel_processor.df.columns:
                                                 _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
-                                    
-                                    # GUARANTEED FIX: Force DataFrame update from database after loading default file
-                                    # This ensures database lineage is ALWAYS used, even on app restart
-                                    if hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
+
+                                    # CRITICAL PERFORMANCE: Skip slow database lineage updates on production
+                                    # Only do this on local for maximum accuracy
+                                    if not is_production and hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
                                         try:
-                                            logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database after default file load...")
+                                            logging.info("🔄 Updating DataFrame lineage from database (local only)...")
                                             _excel_processor._update_dataframe_lineage_from_database()
-                                            logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database after default file load")
+                                            logging.info("✅ DataFrame lineage updated from database")
                                         except Exception as df_update_err:
-                                            logging.warning(f"Could not update DataFrame lineage from database after default file load: {df_update_err}")
+                                            logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
+                                    elif is_production:
+                                        logging.info("⚡ FAST: Skipping database lineage update on production for speed")
                                     
                                     # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
                                     if hasattr(_excel_processor, '_cache_dropdown_values'):
@@ -3720,19 +3726,19 @@ def process_small_file_optimized(temp_path: str, filename: str, start_time: floa
         return jsonify({'error': str(e)}), 500
 @app.route('/upload-pythonanywhere', methods=['POST'])
 def upload_file_simple_pythonanywhere():
-    """OPTIMIZED upload endpoint tuned for PythonAnywhere latency."""
+    """INSTANT upload endpoint - saves file and returns immediately, processes in background."""
     try:
         request_start = time.time()
-        logging.info("=== OPTIMIZED PYTHONANYWHERE UPLOAD START ===")
-        
+        logging.info("=== INSTANT UPLOAD START ===")
+
         # CRITICAL: Require store selection before upload
         if not has_store_selection():
             logging.error("Upload attempted without store selection")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
-        
+
         # Get current store selection
         selected_store = get_current_store_name()
-        
+
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
         
@@ -3757,24 +3763,38 @@ def upload_file_simple_pythonanywhere():
         
         # Sanitize filename
         sanitized_filename = sanitize_filename(file.filename)
-        
-        # Save file temporarily
+
+        # INSTANT: Save file and return immediately - process in background
         import tempfile
         save_start = time.time()
         temp_path = os.path.join(tempfile.gettempdir(), f"upload_{sanitized_filename}")
         file.save(temp_path)
         save_duration = time.time() - save_start
-        logging.info(f"[UPLOAD] Temp save complete in {save_duration:.2f}s -> {temp_path}")
-        
-        # Process with optimizations
-        try:
-            from src.core.data.excel_processor import ExcelProcessor
-            processor = ExcelProcessor()
-            
-            # Enable database integration for new product storage
-            if hasattr(processor, 'enable_product_db_integration'):
-                processor.enable_product_db_integration(True)
-                logging.info("[UPLOAD] Product database integration enabled for new product storage")
+        logging.info(f"[INSTANT] File saved in {save_duration:.2f}s -> {temp_path}")
+
+        # Update session immediately
+        session['file_path'] = temp_path
+        session['uploaded_filename'] = sanitized_filename
+        session['selected_tags'] = []
+        session.modified = True
+
+        # Start background processing thread
+        from flask import copy_current_request_context
+        import threading
+
+        @copy_current_request_context
+        def process_file_in_background():
+            """Process the uploaded file completely in background"""
+            bg_start = time.time()
+            try:
+                logging.info(f"[BG] Starting background processing for {temp_path}")
+                from src.core.data.excel_processor import ExcelProcessor
+                processor = ExcelProcessor()
+
+                # Enable database integration for new product storage
+                if hasattr(processor, 'enable_product_db_integration'):
+                    processor.enable_product_db_integration(True)
+                    logging.info("[BG] Product database integration enabled")
             
             # CRITICAL OPTIMIZATION: Check file size and environment to choose best loading method
             import os
@@ -3976,6 +3996,115 @@ def upload_file_simple_pythonanywhere():
     except Exception as e:
         logging.error(f"Upload error: {e}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+@app.route('/upload-instant', methods=['POST'])
+def upload_instant():
+    """INSTANT upload - saves file and returns immediately, all processing in background."""
+    try:
+        request_start = time.time()
+        logging.info("=== INSTANT UPLOAD START ===")
+
+        # Validate store selection
+        if not has_store_selection():
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+
+        selected_store = get_current_store_name()
+
+        # Validate file
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+
+        file = request.files['file']
+        if not file or file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+
+        if not file.filename.lower().endswith('.xlsx'):
+            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+
+        # Validate filename
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        if not is_valid:
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
+
+        # Save file (ONLY blocking operation)
+        import tempfile
+        sanitized_filename = sanitize_filename(file.filename)
+        temp_path = os.path.join(tempfile.gettempdir(), f"upload_{sanitized_filename}")
+        save_start = time.time()
+        file.save(temp_path)
+        save_duration = time.time() - save_start
+
+        # Update session
+        session['file_path'] = temp_path
+        session['uploaded_filename'] = sanitized_filename
+        session['selected_tags'] = []
+        session.modified = True
+
+        # Start background processing
+        from flask import copy_current_request_context
+        import threading
+
+        @copy_current_request_context
+        def process_in_background():
+            try:
+                logging.info(f"[BG] Processing {temp_path}")
+                from src.core.data.excel_processor import ExcelProcessor
+                processor = ExcelProcessor()
+
+                # Load file
+                success = processor.load_file(temp_path, fast_mode=True)
+                if success and processor.df is not None:
+                    # Update global processor
+                    global _excel_processor
+                    with excel_processor_lock:
+                        _excel_processor = processor
+                        _excel_processor._last_loaded_file = temp_path
+
+                    # Cache tags
+                    try:
+                        tags = processor.get_available_tags(filters=None)
+                        safe_tags = make_json_safe(tags)
+                        cache_key = get_session_cache_key(f'available_tags_{temp_path}')
+                        cache.set(cache_key, safe_tags, timeout=300)
+                        logging.info(f"[BG] ✅ Cached {len(safe_tags)} tags")
+                    except Exception as e:
+                        logging.warning(f"[BG] Tag caching failed: {e}")
+
+                    # Store in database (optional, slow)
+                    if hasattr(processor, '_store_upload_in_database'):
+                        try:
+                            processor._store_upload_in_database(processor.df, temp_path)
+                            logging.info(f"[BG] ✅ Stored in database")
+                        except Exception as e:
+                            logging.warning(f"[BG] Database storage failed: {e}")
+
+                    logging.info(f"[BG] ✅ Complete: {len(processor.df)} rows")
+                else:
+                    logging.error(f"[BG] File load failed")
+            except Exception as e:
+                logging.error(f"[BG] Processing failed: {e}")
+
+        # Start thread and return IMMEDIATELY
+        threading.Thread(target=process_in_background, daemon=True).start()
+
+        total_duration = time.time() - request_start
+        logging.info(f"✅ INSTANT upload response in {total_duration:.3f}s")
+
+        return jsonify({
+            'message': 'File uploaded successfully, processing in background',
+            'filename': sanitized_filename,
+            'status': 'processing',
+            'upload_time_seconds': total_duration
+        })
+
+    except Exception as e:
+        logging.error(f"Upload error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/upload-simple', methods=['POST'])
 def upload_file_simple():
@@ -8665,10 +8794,20 @@ def get_available_tags():
                 file_exists = False
         
         if not session_file_path or not file_exists:
-            logging.info("⚠️ No uploaded file in session - skipping cache, will fetch fresh data")
-            cached_tags = None
-            # Still define cache_key for later use
+            logging.info("⚠️ No uploaded file in session - checking for cached data")
             cache_key = get_session_cache_key('available_tags')
+            cached_tags = cache.get(cache_key)
+
+            # CRITICAL PERFORMANCE FIX: If no file and no cache, return empty immediately
+            # Don't try to load default files on production - it's too slow
+            if not cached_tags and (PYTHONANYWHERE_OPTIMIZATION or os.environ.get('PYTHONANYWHERE_DOMAIN')):
+                logging.info("⚡ FAST: No file uploaded and no cache on production - returning empty tags immediately")
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'empty-no-file',
+                    'message': 'No file uploaded. Please upload an Excel file to get started.'
+                }), 200
         else:
             cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
             cached_tags = cache.get(cache_key) if not prefer_db else None

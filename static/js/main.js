@@ -267,11 +267,8 @@ const PRODUCT_TYPE_OVERRIDES = {
     
     // Choose upload endpoint based on environment
     function getUploadEndpoint() {
-        if (isPythonAnywhere()) {
-            return '/upload-pythonanywhere';
-        } else {
-            return '/upload';
-        }
+        // ALWAYS use instant upload for maximum speed
+        return '/upload-instant';
     }
 function normalizeProductType(productType) {
   if (!productType) return productType;
@@ -8275,7 +8272,7 @@ const TagManager = {
                             </div>
                         `;
                     }
-                }, 15000); // Reduced from 35000ms to 15000ms for faster feedback
+                }, 30000); // 30 seconds - enough time for slow operations but not indefinite
             }
             
             if (!hasExistingTags) {
