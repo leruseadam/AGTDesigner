@@ -5495,6 +5495,15 @@ class ExcelProcessor:
                 return 'each'
             return unit
 
+        # Display helper: strip trailing .0/.00 from numeric weights (e.g., 1.0g -> 1g)
+        def clean_weight_display(text: str) -> str:
+            if not text:
+                return text
+            cleaned = str(text)
+            cleaned = re.sub(r'(\d+)\.0+(?=\D|$)', r'\1', cleaned)
+            cleaned = re.sub(r'(\d+\.\d*[1-9])0+(?=\D|$)', r'\1', cleaned)
+            return cleaned
+
         # Get weight and units from Excel data first (priority)
         excel_weight_used = False
         excel_weight = safe_get_value(record.get('Weight*', None))
@@ -5654,6 +5663,9 @@ class ExcelProcessor:
                 result = normalize_units(units_val)
             else:
                 result = ""
+
+        # Global rule: never display unrounded trailing .0 values
+        result = clean_weight_display(result)
         
         # Debug: Log result for first few records
         if self._debug_count <= 5:

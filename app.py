@@ -3804,36 +3804,69 @@ def upload_file_simple_pythonanywhere():
                 except Exception:
                     pass
             
-            # Kick off database storage in the background to avoid blocking response
+            # Kick off tag caching and database storage in the background to avoid blocking response
             db_thread_started = False
-            def store_upload_async(df_snapshot, source_path):
-                bg_start = time.time()
-                try:
-                    if hasattr(processor, '_store_upload_in_database'):
-                        logging.info(f"[UPLOAD][BG-DB] Starting async database storage for {len(df_snapshot)} rows")
-                        storage_result = processor._store_upload_in_database(df_snapshot, source_path)
-                        logging.info(f"[UPLOAD][BG-DB] ✅ Completed in {time.time() - bg_start:.2f}s: {storage_result}")
-                    else:
-                        logging.warning("[UPLOAD][BG-DB] ExcelProcessor missing _store_upload_in_database; skipping DB write")
-                except Exception as db_err:
-                    logging.error(f"[UPLOAD][BG-DB] Database storage failed: {db_err}")
-            
+
+            # Capture session context for background thread
+            from flask import copy_current_request_context
+
             try:
                 import threading
+                # Create an event to signal when tag caching is complete
+                cache_ready_event = threading.Event()
+
+                @copy_current_request_context
+                def store_upload_with_signal(df_snapshot, source_path):
+                    bg_start = time.time()
+                    try:
+                        # CRITICAL: Pre-cache tags FIRST for instant frontend access
+                        try:
+                            tags = processor.get_available_tags(filters=None)
+                            safe_tags = make_json_safe(tags)
+                            cache_key = get_session_cache_key(f'available_tags_{source_path}')
+                            cache.set(cache_key, safe_tags, timeout=300)
+                            logging.info(f"[UPLOAD][BG-CACHE] ✅ Cached {len(safe_tags)} tags for instant frontend access")
+                            # Signal that caching is complete
+                            cache_ready_event.set()
+                        except Exception as cache_error:
+                            logging.warning(f"[UPLOAD][BG-CACHE] ⚠️ Could not cache tags: {cache_error}")
+                            # Signal anyway so we don't block
+                            cache_ready_event.set()
+
+                        # Then do database storage (slower operation)
+                        if hasattr(processor, '_store_upload_in_database'):
+                            logging.info(f"[UPLOAD][BG-DB] Starting async database storage for {len(df_snapshot)} rows")
+                            storage_result = processor._store_upload_in_database(df_snapshot, source_path)
+                            logging.info(f"[UPLOAD][BG-DB] ✅ Completed in {time.time() - bg_start:.2f}s: {storage_result}")
+                        else:
+                            logging.warning("[UPLOAD][BG-DB] ExcelProcessor missing _store_upload_in_database; skipping DB write")
+                    except Exception as db_err:
+                        logging.error(f"[UPLOAD][BG-DB] Database storage failed: {db_err}")
+                        cache_ready_event.set()  # Signal even on error
+
                 threading.Thread(
-                    target=store_upload_async,
+                    target=store_upload_with_signal,
                     args=(processor.df, temp_path),
                     daemon=True
                 ).start()
                 db_thread_started = True
-                logging.info("[UPLOAD] DB storage deferred to background thread")
+                logging.info("[UPLOAD] Background thread started for tag caching and DB storage")
+
+                # Wait briefly (max 500ms) for tag caching to complete
+                # This ensures tags are available when frontend requests them
+                cache_ready = cache_ready_event.wait(timeout=0.5)
+                if cache_ready:
+                    logging.info("[UPLOAD] ✅ Tag caching completed before response")
+                else:
+                    logging.info("[UPLOAD] ⚠️ Tag caching still in progress, returning anyway")
+
             except Exception as thread_error:
-                logging.error(f"[UPLOAD] Failed to start DB storage thread: {thread_error}")
-            
+                logging.error(f"[UPLOAD] Failed to start background thread: {thread_error}")
+
             # Update session
             session['file_path'] = temp_path
             session['selected_tags'] = []
-            
+
             # Mark processing status immediately ready for UI
             update_processing_status(file.filename, 'ready')
             
@@ -15157,17 +15190,27 @@ def json_match():
             return jsonify({'error': 'Failed to initialize JSON matcher'}), 500
         
         logging.info("JSON matcher created successfully")
-        
-        # Perform JSON matching with Product Database integration
-        # Start with full database-aware matching so we reuse prices/brands whenever possible.
-        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
-        logging.info(f"JSON matching (database-first) returned {len(matched_products) if matched_products else 0} products")
 
-        # If nothing matched (e.g., database unavailable), fall back to the legacy simplified flow.
-        if not matched_products:
-            logging.warning("Primary database matching returned no products – falling back to simplified matcher")
+        # PERFORMANCE OPTIMIZATION: Use simplified matching on PythonAnywhere to avoid slow database queries
+        # On production, database queries can take 2+ minutes per item, making JSON match unusably slow
+        is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
+
+        if is_pythonanywhere or PYTHONANYWHERE_OPTIMIZATION:
+            # Production: Use fast simplified matching (no database queries)
+            logging.info("🚀 PythonAnywhere detected - using simplified matching for fast JSON match")
             matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
-            logging.info(f"JSON matching (simplified fallback) returned {len(matched_products) if matched_products else 0} products")
+            logging.info(f"JSON matching (simplified/fast) returned {len(matched_products) if matched_products else 0} products")
+        else:
+            # Local: Use full database-aware matching for better accuracy
+            logging.info("💻 Local environment - using database-first matching for maximum accuracy")
+            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
+            logging.info(f"JSON matching (database-first) returned {len(matched_products) if matched_products else 0} products")
+
+            # If nothing matched (e.g., database unavailable), fall back to the legacy simplified flow.
+            if not matched_products:
+                logging.warning("Primary database matching returned no products – falling back to simplified matcher")
+                matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
+                logging.info(f"JSON matching (simplified fallback) returned {len(matched_products) if matched_products else 0} products")
         
         # Sort matched products alphabetically by product name
         if matched_products:
