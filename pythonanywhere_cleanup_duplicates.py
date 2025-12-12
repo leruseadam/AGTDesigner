@@ -115,11 +115,15 @@ def cleanup_duplicates(db_path, dry_run=False):
             duplicate_groups = cursor.fetchall()
         else:
             # Primary method: Use normalized_name + vendor + brand
+            # Use COALESCE to treat NULL as empty string for grouping
             cursor.execute('''
-                SELECT normalized_name, "Vendor/Supplier*", "Product Brand", COUNT(*) as count
+                SELECT normalized_name, 
+                       COALESCE("Vendor/Supplier*", '') as vendor,
+                       COALESCE("Product Brand", '') as brand,
+                       COUNT(*) as count
                 FROM products
                 WHERE normalized_name IS NOT NULL AND normalized_name != ''
-                GROUP BY normalized_name, "Vendor/Supplier*", "Product Brand"
+                GROUP BY normalized_name, vendor, brand
                 HAVING count > 1
             ''')
             duplicate_groups = cursor.fetchall()
@@ -153,13 +157,14 @@ def cleanup_duplicates(db_path, dry_run=False):
                 norm_name, vendor, brand, count = group
                 
                 # Get all entries for this duplicate group, ordered by most recent first
+                # Use COALESCE to match NULL values correctly
                 cursor.execute('''
                     SELECT id, "Product Name*", 
                            COALESCE(updated_at, created_at, '1970-01-01') as last_updated
                     FROM products
                     WHERE normalized_name = ? 
-                      AND "Vendor/Supplier*" = ? 
-                      AND "Product Brand" = ?
+                      AND COALESCE("Vendor/Supplier*", '') = ? 
+                      AND COALESCE("Product Brand", '') = ?
                     ORDER BY last_updated DESC, id DESC
                 ''', (norm_name, vendor, brand))
             
