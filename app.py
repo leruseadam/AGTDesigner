@@ -8714,15 +8714,32 @@ def get_available_tags():
         cache_key = get_session_cache_key(f'available_tags_{session_file_path}') if session_file_path else get_session_cache_key('available_tags')
         cached_tags = cache.get(cache_key) if not prefer_db else None
         
-        # Only return empty immediately when there is truly no session file AND no cache
-        if (not session_file_path) and not cached_tags and (PYTHONANYWHERE_OPTIMIZATION or os.environ.get('PYTHONANYWHERE_DOMAIN')):
-            logging.info("⚡ FAST: No file uploaded and no cache on production - returning empty tags immediately")
-            return jsonify({
-                'tags': [],
-                'total_count': 0,
-                'source': 'empty-no-file',
-                'message': 'No file uploaded. Please upload an Excel file to get started.'
-            }), 200
+        # Only return empty immediately when there is truly no data available.
+        # If the in-memory processor still has data, serve that instead of showing "processing".
+        if (not session_file_path) and not cached_tags:
+            if _excel_processor is not None and getattr(_excel_processor, 'df', None) is not None and not _excel_processor.df.empty:
+                try:
+                    logging.info("⚡ FAST: Serving tags from in-memory processor (no session file/cached tags)")
+                    excel_tags = _excel_processor.get_available_tags(filters=None)
+                    safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
+                    # Cache under generic key so reloads stay instant
+                    cache_key = get_session_cache_key('available_tags')
+                    cache.set(cache_key, safe_excel_tags, timeout=300)
+                    return jsonify({
+                        'tags': safe_excel_tags,
+                        'total_count': len(safe_excel_tags),
+                        'source': 'excel-memory'
+                    })
+                except Exception as mem_err:
+                    logging.warning(f"Failed to serve in-memory tags fallback: {mem_err}")
+            if (PYTHONANYWHERE_OPTIMIZATION or os.environ.get('PYTHONANYWHERE_DOMAIN')):
+                logging.info("⚡ FAST: No file uploaded and no cache on production - returning empty tags immediately")
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'empty-no-file',
+                    'message': 'No file uploaded. Please upload an Excel file to get started.'
+                }), 200
         
         # Initialize flags
         all_tags = []  # Initialize all_tags before checking cache
