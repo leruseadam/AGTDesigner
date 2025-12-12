@@ -118,12 +118,12 @@ def cleanup_duplicates(db_path, dry_run=False):
             # Use COALESCE to treat NULL as empty string for grouping
             cursor.execute('''
                 SELECT normalized_name, 
-                       COALESCE("Vendor/Supplier*", '') as vendor,
-                       COALESCE("Product Brand", '') as brand,
+                       COALESCE("Vendor/Supplier*", ''),
+                       COALESCE("Product Brand", ''),
                        COUNT(*) as count
                 FROM products
                 WHERE normalized_name IS NOT NULL AND normalized_name != ''
-                GROUP BY normalized_name, vendor, brand
+                GROUP BY normalized_name, COALESCE("Vendor/Supplier*", ''), COALESCE("Product Brand", '')
                 HAVING count > 1
             ''')
             duplicate_groups = cursor.fetchall()
@@ -170,6 +170,10 @@ def cleanup_duplicates(db_path, dry_run=False):
             
             entries = cursor.fetchall()
             
+            # Debug: log if we found entries but not duplicates
+            if idx <= 3:  # Log first 3 groups for debugging
+                print(f"  DEBUG [{idx}]: Found {len(entries)} entries for group")
+            
             if len(entries) > 1:
                 # Keep the first (most recent), delete the rest
                 keep_id = entries[0][0]
@@ -192,6 +196,8 @@ def cleanup_duplicates(db_path, dry_run=False):
                 
                 deleted_count += len(ids_to_delete)
                 kept_count += 1
+            elif idx <= 3:  # Debug first 3 non-duplicate groups
+                print(f"  DEBUG [{idx}]: Skipping - only {len(entries)} entry found (expected >1)")
         
         if not dry_run:
             conn.commit()
