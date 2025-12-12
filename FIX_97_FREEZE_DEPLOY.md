@@ -2,14 +2,21 @@
 
 ## The Problem (SOLVED!)
 
-Upload was freezing at 97% for 18+ seconds because the background thread was doing expensive database operations (strain updates, sovereign protection) **BEFORE** caching tags for the frontend.
+Upload was freezing at 97% for 18+ seconds because of TWO issues:
+
+1. **Processing Order**: Background thread was doing expensive database operations BEFORE caching tags
+2. **Cache Key Mismatch**: Background thread and frontend were using different cache keys, so cached tags were never found
 
 ## The Solution
 
-Reordered background processing to:
+### Fix #1: Reorder Processing
 1. ✅ Load Excel file (~500ms)
 2. ✅ Cache tags IMMEDIATELY (~1-2 seconds)
 3. ✅ **THEN** do database operations in background (15-18 seconds, but frontend doesn't wait)
+
+### Fix #2: Cache Key Alignment
+- **Before**: Background used session ID 'background', frontend used user's session ID → cache miss
+- **After**: Both use file-path-only cache key: `tags_file_{sha256(file_path)}` → cache hit!
 
 ## Expected Results After Deployment
 
