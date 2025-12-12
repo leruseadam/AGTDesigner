@@ -3230,27 +3230,34 @@ def upload_file():
                             logging.info("[BACKGROUND] ✅ Updated global Excel processor IMMEDIATELY - DataFrame now accessible")
 
                             # ULTRA-FAST: Pre-cache tags with skip_enrichment for instant frontend response
-                            try:
-                                # Skip enrichment for maximum speed
-                                if hasattr(processor, '_skip_enrichment'):
-                                    processor._skip_enrichment = True
-                                
-                                tags = processor.get_available_tags(filters=None)
-                                
-                                # Reset enrichment flag
-                                if hasattr(processor, '_skip_enrichment'):
-                                    processor._skip_enrichment = False
-                                
-                                safe_tags = make_json_safe(tags)
-                                cache_key = get_session_cache_key(f'available_tags_{file_path}')
-                                cache.set(cache_key, safe_tags, timeout=300)
-                                logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access (skip_enrichment enabled)")
+                            # Do this in a separate try-except to not block if it fails
+                            def cache_tags_async():
+                                try:
+                                    # Skip enrichment for maximum speed
+                                    if hasattr(processor, '_skip_enrichment'):
+                                        processor._skip_enrichment = True
+                                    
+                                    # Get tags without filters for maximum speed
+                                    tags = processor.get_available_tags(filters=None)
+                                    
+                                    # Reset enrichment flag
+                                    if hasattr(processor, '_skip_enrichment'):
+                                        processor._skip_enrichment = False
+                                    
+                                    # Make JSON safe and cache
+                                    safe_tags = make_json_safe(tags)
+                                    cache_key = get_session_cache_key(f'available_tags_{file_path}')
+                                    cache.set(cache_key, safe_tags, timeout=300)
+                                    logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags for instant frontend access")
 
-                                # Update status to indicate tags are ready
-                                update_processing_status(original_filename, 'tags_ready')
-                            except Exception as cache_error:
-                                logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
-                                logging.error(traceback.format_exc())
+                                    # Update status to indicate tags are ready
+                                    update_processing_status(original_filename, 'tags_ready')
+                                except Exception as cache_error:
+                                    logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
+                                    logging.error(traceback.format_exc())
+                            
+                            # Execute caching immediately (not async - need it done ASAP)
+                            cache_tags_async()
 
                             # Update preroll items from newly loaded Excel data
                             if hasattr(processor, 'df') and processor.df is not None:
