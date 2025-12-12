@@ -8821,6 +8821,17 @@ def get_available_tags():
                 'source': 'cache-fast'
             })
 
+        # If fast_load with no cache and no immediate in-memory tags, fail fast with processing to unblock UI
+        if fast_load and not cached_tags and (session_file_path or file_exists):
+            elapsed_fast = (time.time() - start_time) * 1000
+            logging.info(f"⚡ FAST-LOAD: No cached tags yet (elapsed {elapsed_fast:.1f}ms) - returning processing to unblock UI")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'processing',
+                'message': 'File is being processed. Tags will load momentarily.'
+            }), 202
+
         # CRITICAL FIX: If file exists but no cached tags yet, try in-memory processor before returning processing
         if fast_load and session_file_path and file_exists and not cached_tags:
             if _excel_processor is not None and getattr(_excel_processor, 'df', None) is not None and not _excel_processor.df.empty:
@@ -8938,6 +8949,7 @@ def get_available_tags():
 
                     # Try to find cached tags from background processing
                     file_path = session.get('file_path')
+                    logging.info(f"🔍 DEBUG: Looking for cached tags, session file_path={file_path}")
                     if file_path:
                         # Use file-path-only cache key (matches background thread)
                         import hashlib
