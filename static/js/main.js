@@ -8462,9 +8462,8 @@ const TagManager = {
                     
                     if (retryCount < maxRetries - 1) {
                         retryCount++;
-                        const delay = Math.min(1000 * retryCount, 3000);
-                        verboseLog(`Retrying in ${delay}ms...`);
-                        await new Promise(resolve => setTimeout(resolve, delay));
+                        verboseLog(`Retrying immediately...`);
+                        // PERFORMANCE: No delay - retry immediately for faster response
                     } else {
                         throw error;
                     }

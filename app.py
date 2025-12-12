@@ -8756,7 +8756,18 @@ def get_available_tags():
                 'total_count': len(cached_tags),
                 'source': 'cache-fast'
             })
-        
+
+        # CRITICAL FIX: If file exists but no cached tags yet (background still processing), return empty with processing status
+        # This prevents hanging - frontend will retry and get tags when background caching completes
+        if fast_load and session_file_path and file_exists and not cached_tags:
+            logging.info(f"⚡ FAST: File uploaded but tags not cached yet - returning empty (background processing)")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'processing',
+                'message': 'File is being processed. Tags will load momentarily.'
+            }), 202  # 202 Accepted - processing in progress
+
         # INSTANT TAGS: Return immediately if file is still loading - don't wait
         # Background thread will cache tags when ready, frontend will poll and get them
         if file_exists and not cached_tags:
