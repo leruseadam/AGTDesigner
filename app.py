@@ -8822,12 +8822,15 @@ def get_available_tags():
                             try:
                                 all_search_names = list(set(product_names + normalized_names))
 
-                                # PERFORMANCE: Use larger batch size for faster processing
-                                # SQLite handles up to 50000 items efficiently with proper indexing
-                                # For very large datasets, use even larger batches to reduce query overhead
-                                MAX_BATCH_SIZE = 50000  # Increased for better performance with large datasets
-                                if len(all_search_names) > MAX_BATCH_SIZE:
+                                # PERFORMANCE: Skip lineage query for fast initial load
+                                # Only do lineage alignment if explicitly requested or data is stale
+                                SKIP_LINEAGE_ON_FIRST_LOAD = True
+                                if SKIP_LINEAGE_ON_FIRST_LOAD and len(all_search_names) > 1000:
+                                    logging.info(f"⚡ FAST MODE: Skipping lineage query for {len(all_search_names)} products - using Excel lineage")
+                                    batch_results = []
+                                elif len(all_search_names) > 50000:
                                     # Process in chunks but use larger chunks for speed
+                                    MAX_BATCH_SIZE = 50000
                                     all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
                                     # Process all chunks, not just the first one, to ensure complete coverage
                                     all_batch_results = []
