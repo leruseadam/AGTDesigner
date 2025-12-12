@@ -3589,6 +3589,11 @@ class ExcelProcessor:
     
     def _enrich_tags_with_database_values(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Enrich tags with current database values (lineage, DOH, etc.) to reflect latest updates."""
+        # CRITICAL PERFORMANCE FIX: Skip enrichment if flag is set (for fast loading)
+        if getattr(self, '_skip_enrichment', False):
+            logger.info("⚡ Skipping database enrichment for fast tag loading")
+            return tags
+        
         try:
             # Try to get the product database using lazy import to avoid circular dependencies
             product_db = None
