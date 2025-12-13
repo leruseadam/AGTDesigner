@@ -6998,7 +6998,18 @@ class ExcelProcessor:
                 }
             
             # Use the product database's store_excel_data method
-            storage_result = product_db.store_excel_data(filtered_df, source_file)
+            try:
+                storage_result = product_db.store_excel_data(filtered_df, source_file)
+            except OSError as ose:
+                # Handle disk/quota write errors gracefully so UI flow continues
+                logger.error(f"OS write error while storing Excel upload: {ose}")
+                storage_result = {
+                    'stored': 0,
+                    'updated': 0,
+                    'errors': 1,
+                    'excluded_json_matches': excluded_count,
+                    'message': f'OS write error while storing Excel upload: {ose}'
+                }
             
             # Add JSON match exclusion information to the result
             storage_result['excluded_json_matches'] = excluded_count
