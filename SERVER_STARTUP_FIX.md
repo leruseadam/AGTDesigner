@@ -59,14 +59,21 @@ Two expensive database operations were happening on every page reload:
 ## When Does Lineage Get Updated?
 
 Lineage will still be updated when:
-- User explicitly requests a lineage refresh (via UI or API)
-- `session.get('lineage_update_timestamp')` is set
-- User manually triggers a database sync
+- **User updates lineage via UI** (e.g., changing a strain's lineage) → Sets `session['lineage_update_timestamp']`
+- **User explicitly requests a lineage refresh** (via API)
+- **Batch lineage updates** → Sets `session['lineage_update_timestamp']`
+- **Any lineage update endpoint** → Sets `session['lineage_update_timestamp']`
 
 It will NO LONGER auto-update on:
-- Page reload
-- File load from session
+- Page reload (unless lineage was just updated)
+- File load from session (unless lineage was just updated)
 - Default file load on local development
+
+**IMPORTANT**: Your lineage update feature still works perfectly! When you update a strain's lineage in the UI:
+1. The update endpoint sets `session['lineage_update_timestamp']`
+2. Next page load detects this timestamp
+3. Runs `_update_dataframe_lineage_from_database()` to sync ALL products with that strain
+4. All iterations of the strain get updated lineage ✅
 
 ## Expected Performance Improvement
 
@@ -122,18 +129,22 @@ Loading default file in get_excel_processor: /uploads/default.xlsx
 
 ## Impact on Functionality
 
-**This change is SAFE** because:
-1. Tags and product data are still loaded from the Excel file (fast)
-2. Lineage data is already in the Excel file
-3. Database lineage updates only needed when:
-   - Adding new products to database
-   - Syncing lineage changes from database
-   - User explicitly requests refresh
+**This change is 100% SAFE** - No functionality is lost!
 
-**For normal tag generation:**
-- Tags work perfectly without database lineage update
-- Lineage comes from Excel file (already loaded)
-- No functionality is lost!
+✅ **Lineage updates still work:**
+- When you change a strain's lineage → All products with that strain get updated
+- The `session['lineage_update_timestamp']` flag triggers the database sync
+- Multi-weight products (e.g., "Strain A 3.5g", "Strain A 7g") all get updated ✅
+
+✅ **Tags work perfectly:**
+- Tags are loaded from Excel file (fast, already has lineage)
+- Database sync only runs when you actually change lineage
+- No unnecessary database queries on normal page loads
+
+✅ **Database still works:**
+- Updates happen when you make changes
+- Automatic background sync still occurs
+- Just skips redundant syncs on every page load
 
 ## Testing
 
