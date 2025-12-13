@@ -8402,7 +8402,7 @@ const TagManager = {
                         
                         // Show user-friendly loading message
                         const progressPercent = Math.round((processingRetryCount / maxProcessingRetries) * 100);
-                        const loadingMsg = `⏳ Loading file (${progressPercent}%)... Please wait, this may take a minute for large files.`;
+                        const loadingMsg = `⏳ Loading tags (${progressPercent}%)...`;
                         if (typeof this.updateUploadUI === 'function') {
                             this.updateUploadUI(loadingMsg);
                         }
