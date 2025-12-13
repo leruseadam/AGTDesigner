@@ -1403,15 +1403,11 @@ def get_excel_processor():
                             logging.info(f"✅ CRITICAL FIX: Successfully loaded session file with FAST MODE: {session_file_path}")
                             row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
                             logging.info(f"✅ Loaded {row_count} rows from session file")
-                            
-                            # GUARANTEED FIX: Force DataFrame update from database after loading
-                            if hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
-                                try:
-                                    logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database after session file load...")
-                                    _excel_processor._update_dataframe_lineage_from_database()
-                                    logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database after session file load")
-                                except Exception as df_update_err:
-                                    logging.warning(f"Could not update DataFrame lineage from database after session file load: {df_update_err}")
+
+                            # PERFORMANCE: Skip expensive database lineage update on session file load
+                            # Database lineage will be updated when explicitly requested or on lineage refresh
+                            # This dramatically improves page reload performance
+                            logging.info("⚡ FAST: Skipping database lineage update on session file load for speed")
                         else:
                             logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
                             _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
@@ -1452,16 +1448,17 @@ def get_excel_processor():
                                             if canonical_col in _excel_processor.df.columns:
                                                 _excel_processor.df[canonical_col] = _excel_processor.df[canonical_col].astype('category')
 
-                                    # CRITICAL: Always refresh lineage when requested, even on production
-                                    if (lineage_refresh_requested or not is_production) and hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
+                                    # PERFORMANCE: Only refresh lineage when explicitly requested
+                                    # Skip automatic lineage refresh on file load for faster page loads
+                                    if lineage_refresh_requested and hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
                                         try:
-                                            logging.info("🔄 Updating DataFrame lineage from database (forced refresh or local)...")
+                                            logging.info("🔄 Updating DataFrame lineage from database (explicit refresh requested)...")
                                             _excel_processor._update_dataframe_lineage_from_database()
                                             logging.info("✅ DataFrame lineage updated from database")
                                         except Exception as df_update_err:
                                             logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
-                                    elif is_production:
-                                        logging.info("⚡ FAST: Skipping database lineage update on production for speed (no refresh requested)")
+                                    else:
+                                        logging.info("⚡ FAST: Skipping database lineage update for speed (no explicit refresh requested)")
                                     
                                     # CRITICAL FIX: Ensure dropdown cache is populated after successful file load
                                     if hasattr(_excel_processor, '_cache_dropdown_values'):
