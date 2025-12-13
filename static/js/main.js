@@ -14196,10 +14196,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log('🔙 Undo button clicked');
                 verboseLog('Undo button clicked');
                 
-                if (window.TagManager && typeof TagManager.undoMove === 'function') {
+                if (window.TagManager && typeof window.TagManager.undoMove === 'function') {
                     console.log('✅ Calling TagManager.undoMove()');
                     verboseLog('Calling TagManager.undoMove()');
-                    TagManager.undoMove().catch(error => {
+                    window.TagManager.undoMove().catch(error => {
                         console.error('❌ Error in undoMove:', error);
                         alert(`Undo failed: ${error.message || error}`);
                     });
@@ -14246,10 +14246,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log('🔁 Redo button clicked');
                 verboseLog('Redo button clicked');
 
-                if (window.TagManager && typeof TagManager.redoMove === 'function') {
+                if (window.TagManager && typeof window.TagManager.redoMove === 'function') {
                     console.log('✅ Calling TagManager.redoMove()');
                     verboseLog('Calling TagManager.redoMove()');
-                    TagManager.redoMove().catch(error => {
+                    window.TagManager.redoMove().catch(error => {
                         console.error('❌ Error in redoMove:', error);
                         alert(`Redo failed: ${error.message || error}`);
                     });
