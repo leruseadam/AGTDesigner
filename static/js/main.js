@@ -12344,6 +12344,11 @@ const TagManager = {
                             }
 
                             tagsLoaded = true;
+                            // Update upload UI to show completion
+                            if (typeof this.updateUploadUI === 'function') {
+                                const fileName = document.querySelector('.file-path')?.textContent || 'File';
+                                this.updateUploadUI(`✅ ${fileName} ready!`, 'Tags loaded successfully', 'success');
+                            }
                             return; // Success - tags loaded instantly!
                         }
                     }

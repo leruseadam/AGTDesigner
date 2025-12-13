@@ -4381,6 +4381,20 @@ body.modal-open #mainContent.store-selection-disabled,
   display: block;
   text-align: center;
 }
+
+/* Compact undo/redo pair */
+.undo-redo-group {
+  width: 85% !important;
+  max-width: 320px !important;
+  margin: 0 auto 0.25rem !important;
+}
+
+.undo-redo-group .btn-compact-duo {
+  width: 45% !important;
+  max-width: 45% !important;
+  min-height: 72px !important;
+  padding: 1rem 0.6rem !important;
+}
   /* Select All checkbox styling - no extra scaling needed, already 32px */
   #selectAllAvailable {
     margin-right: 8px;
