@@ -2715,7 +2715,11 @@ class ExcelProcessor:
                     # For edibles, only assign CBD lineage if they are explicitly high-CBD products
                     edible_cbd_blend_explicit = cbd_blend_mask & edible_mask & (
                         (self.df["Product Type*"].str.strip().str.lower() == "high cbd edible liquid") |
-                        (self.df[product_name_col].str.contains(r"\bCBD\b", case=False, na=False) if product_name_col else False)
+                        (
+                            self.df[product_name_col].str.contains(
+                                r"\b(?:CBD|CBG|CBN|CBC)\b", case=False, na=False
+                            ) if product_name_col else False
+                        )
                     )
                     
                     combined_cbd_blend_mask = non_edible_cbd_blend | edible_cbd_blend_explicit
@@ -2751,7 +2755,11 @@ class ExcelProcessor:
                 # For edibles, only assign CBD lineage if they are explicitly high-CBD products
                 edible_cbd_explicit = cbd_mask & edible_mask & (
                     (self.df["Product Type*"].str.strip().str.lower() == "high cbd edible liquid") |
-                    (product_names_for_cbd.str.contains(r"\bCBD\b", case=False, na=False) if product_name_col else False)
+                    (
+                        product_names_for_cbd.str.contains(
+                            r"\b(?:CBD|CBG|CBN|CBC)\b", case=False, na=False
+                        ) if product_name_col else False
+                    )
                 )
                 
                 combined_cbd_mask = non_edible_cbd | edible_cbd_explicit
