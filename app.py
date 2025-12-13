@@ -1340,6 +1340,21 @@ def get_excel_processor():
                                 _excel_processor._last_loaded_file = session_file_path
                                 row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
                                 logging.info(f"✅ Successfully loaded {row_count} rows from persisted session file")
+
+                                # CRITICAL: Check if lineage was recently updated - if so, sync from database
+                                lineage_refresh_requested = False
+                                try:
+                                    lineage_refresh_requested = bool(session.get('lineage_update_timestamp'))
+                                except Exception:
+                                    pass
+
+                                if lineage_refresh_requested and hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
+                                    try:
+                                        logging.info("🔄 Syncing lineage from database after user update (processor creation)...")
+                                        _excel_processor._update_dataframe_lineage_from_database()
+                                        logging.info("✅ Lineage synced from database")
+                                    except Exception as df_update_err:
+                                        logging.warning(f"Could not sync lineage from database: {df_update_err}")
                             else:
                                 logging.warning(f"⚠️ Failed to load persisted session file: {session_file_path}")
                         elif session_file_path:
@@ -1400,14 +1415,26 @@ def get_excel_processor():
                         success = _excel_processor.load_file(session_file_path)
                         if success:
                             _excel_processor._last_loaded_file = session_file_path
-                            logging.info(f"✅ CRITICAL FIX: Successfully loaded session file with FAST MODE: {session_file_path}")
+                            logging.info(f"✅ CRITICAL FIX: Successfully loaded session file: {session_file_path}")
                             row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
                             logging.info(f"✅ Loaded {row_count} rows from session file")
 
-                            # PERFORMANCE: Skip expensive database lineage update on session file load
-                            # Database lineage will be updated when explicitly requested or on lineage refresh
-                            # This dramatically improves page reload performance
-                            logging.info("⚡ FAST: Skipping database lineage update on session file load for speed")
+                            # CRITICAL: Check if lineage was recently updated - if so, sync from database
+                            lineage_refresh_requested = False
+                            try:
+                                lineage_refresh_requested = bool(session.get('lineage_update_timestamp'))
+                            except Exception:
+                                pass
+
+                            if lineage_refresh_requested and hasattr(_excel_processor, '_update_dataframe_lineage_from_database'):
+                                try:
+                                    logging.info("🔄 Syncing lineage from database after user update...")
+                                    _excel_processor._update_dataframe_lineage_from_database()
+                                    logging.info("✅ Lineage synced from database")
+                                except Exception as df_update_err:
+                                    logging.warning(f"Could not sync lineage from database: {df_update_err}")
+                            else:
+                                logging.info("⚡ FAST: Skipping database lineage update (no recent changes)")
                         else:
                             logging.error(f"❌ CRITICAL FIX: Failed to load session file: {session_file_path}")
                             _excel_processor.df = pd.DataFrame()  # Fallback to empty DataFrame
