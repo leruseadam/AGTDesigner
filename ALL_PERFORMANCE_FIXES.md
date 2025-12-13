@@ -7,8 +7,9 @@ Fixed ALL performance issues with the label maker app:
 2. ✅ Tags not reappearing after page reload
 3. ✅ Slow server startup (5-8 seconds → 1-2 seconds)
 4. ✅ Slow page reloads (4-6 seconds → 1 second)
+5. ✅ Updated UI message to reflect faster upload times
 
-## The Three Fixes
+## The Four Fixes
 
 ### Fix #1: 97% Upload Freeze
 **Problem**: Upload froze at 97% for 18+ seconds  
@@ -25,11 +26,18 @@ Fixed ALL performance issues with the label maker app:
 **Documented**: [PAGE_RELOAD_FIX.md](PAGE_RELOAD_FIX.md)
 
 ### Fix #3: Slow Server Startup and Page Reload
-**Problem**: Server took 5-8 seconds to start, page reloads took 4-6 seconds  
-**Cause**: Automatic database lineage updates on every file load (3-5 seconds each)  
-**Solution**: Skip automatic lineage updates, only run when explicitly requested  
-**Files**: [app.py:1407-1410](app.py#L1407-L1410), [app.py:1451-1461](app.py#L1451-L1461)  
+**Problem**: Server took 5-8 seconds to start, page reloads took 4-6 seconds
+**Cause**: Automatic database lineage updates on every file load (3-5 seconds each)
+**Solution**: Skip automatic lineage updates, only run when explicitly requested
+**Files**: [app.py:1407-1410](app.py#L1407-L1410), [app.py:1451-1461](app.py#L1451-L1461)
 **Documented**: [SERVER_STARTUP_FIX.md](SERVER_STARTUP_FIX.md)
+
+### Fix #4: Update UI Progress Message
+**Problem**: Upload progress showed "Please wait, this may take a minute for large files" even though upload now completes in 1-2 seconds
+**Cause**: Old messaging from before performance optimizations
+**Solution**: Changed message from "⏳ Loading file (97%)... Please wait, this may take a minute" to "⏳ Loading tags (97%)..."
+**Files**: [static/js/main.js:8405](static/js/main.js#L8405)
+**Impact**: Cleaner UI that accurately reflects the fast upload experience
 
 ## Performance Improvements
 
