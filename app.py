@@ -1334,8 +1334,8 @@ def get_excel_processor():
                         session_file_path = session.get('file_path')
                         if session_file_path and os.path.exists(session_file_path):
                             logging.info(f"✅ Loading persisted file from session on processor creation: {session_file_path}")
-                            # PERFORMANCE: Use fast_mode for instant loading
-                            success = _excel_processor.load_file(session_file_path, fast_mode=True)
+                            # Load file (fast_mode removed - not available on PythonAnywhere)
+                            success = _excel_processor.load_file(session_file_path)
                             if success:
                                 _excel_processor._last_loaded_file = session_file_path
                                 row_count = len(_excel_processor.df) if hasattr(_excel_processor, 'df') and _excel_processor.df is not None else 0
@@ -1395,9 +1395,9 @@ def get_excel_processor():
                             logging.info(f"📂 Loading session file (different from current): {session_file_path}")
                         else:
                             logging.info(f"📂 Reloading session file (processor has no data): {session_file_path}")
-                        
-                        # PERFORMANCE: Use fast_mode for instant loading on first tag request
-                        success = _excel_processor.load_file(session_file_path, fast_mode=True)
+
+                        # Load file (fast_mode removed - not available on PythonAnywhere)
+                        success = _excel_processor.load_file(session_file_path)
                         if success:
                             _excel_processor._last_loaded_file = session_file_path
                             logging.info(f"✅ CRITICAL FIX: Successfully loaded session file with FAST MODE: {session_file_path}")
@@ -1441,8 +1441,8 @@ def get_excel_processor():
                                 except Exception:
                                     lineage_refresh_requested = False
 
-                                # Use fast loading mode for better performance
-                                success = _excel_processor.load_file(default_file, fast_mode=True)
+                                # Load file (fast_mode removed - not available on PythonAnywhere)
+                                success = _excel_processor.load_file(default_file)
                                 if success:
                                     _excel_processor._last_loaded_file = default_file
                                     # Optimize DataFrame
@@ -2528,8 +2528,8 @@ def get_session_excel_processor():
                     default_file = get_default_upload_file(selected_store)
                     if default_file and os.path.exists(default_file):
                         logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
-                        # PERFORMANCE: Use fast_mode for instant loading
-                        success = g.excel_processor.load_file(default_file, fast_mode=True)
+                        # Load file (fast_mode removed - not available on PythonAnywhere)
+                        success = g.excel_processor.load_file(default_file)
                         if success:
                             logging.info(f"CRITICAL FIX: Successfully loaded default file")
                             # Populate dropdown cache
@@ -3895,7 +3895,7 @@ def upload_file_simple_pythonanywhere():
 
                 if not success:
                     try:
-                        success = processor.load_file(temp_path, fast_mode=True)
+                        success = processor.load_file(temp_path)
                     except Exception as e:
                         logging.warning(f"Standard load failed: {e}")
 
@@ -4007,7 +4007,7 @@ def upload_instant():
                 processor = ExcelProcessor()
 
                 # Load file
-                success = processor.load_file(temp_path, fast_mode=True)
+                success = processor.load_file(temp_path)
                 if success and processor.df is not None:
                     # Update global processor
                     global _excel_processor

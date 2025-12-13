@@ -2,10 +2,11 @@
 
 ## The Problem (SOLVED!)
 
-Upload was freezing at 97% for 18+ seconds because of TWO issues:
+Upload was freezing at 97% for 18+ seconds, and tags didn't reappear after page reload, because of THREE issues:
 
 1. **Processing Order**: Background thread was doing expensive database operations BEFORE caching tags
 2. **Cache Key Mismatch**: Background thread and frontend were using different cache keys, so cached tags were never found
+3. **TypeError on Page Reload**: Code tried to use `fast_mode=True` parameter that doesn't exist on PythonAnywhere, causing file restoration to fail
 
 ## The Solution
 
@@ -17,6 +18,11 @@ Upload was freezing at 97% for 18+ seconds because of TWO issues:
 ### Fix #2: Cache Key Alignment
 - **Before**: Background used session ID 'background', frontend used user's session ID → cache miss
 - **After**: Both use file-path-only cache key: `tags_file_{sha256(file_path)}` → cache hit!
+
+### Fix #3: Remove fast_mode Parameter (NEW!)
+- **Before**: Code tried to restore file from session on page reload using `load_file(path, fast_mode=True)`
+- **Problem**: PythonAnywhere's ExcelProcessor doesn't have `fast_mode` parameter → TypeError → file not restored
+- **After**: Removed all `fast_mode=True` parameters (7 instances) → file restores successfully on page reload!
 
 ## Expected Results After Deployment
 
@@ -36,6 +42,7 @@ Upload → 97% freeze (18 seconds) → timeout/retry → eventually loads
 ### After (This Fix):
 ```
 Upload → Tags load in 1-2 seconds → 100% complete! → Database continues in background
+Page reload → Tags reappear instantly from session file!
 ```
 
 **Expected log:**
@@ -44,6 +51,10 @@ Upload → Tags load in 1-2 seconds → 100% complete! → Database continues in
 22:44:13 - Background thread starts
 22:44:14 - ✅ Cached 2132 tags (1500ms)
 [Database operations continue, frontend doesn't care]
+
+[On page reload]
+✅ Loading persisted file from session on processor creation: /tmp/upload.xlsx
+✅ Successfully loaded 2132 rows from persisted session file
 ```
 
 ## Deploy to PythonAnywhere
@@ -139,8 +150,14 @@ Fast-forward
 ## Technical Details
 
 ### Files Changed:
-- [app.py:3246-3299](app.py#L3246-L3299) - PythonAnywhere background processing
-- [app.py:3413-3451](app.py#L3413-L3451) - Local development background processing
+- [app.py:3246-3299](app.py#L3246-L3299) - PythonAnywhere background processing (cache tags before DB)
+- [app.py:3413-3451](app.py#L3413-L3451) - Local development background processing (cache tags before DB)
+- [app.py:1338](app.py#L1338) - Remove fast_mode from processor creation restore
+- [app.py:1400](app.py#L1400) - Remove fast_mode from session file reload
+- [app.py:1445](app.py#L1445) - Remove fast_mode from default file loading
+- [app.py:2532](app.py#L2532) - Remove fast_mode from critical fix default file
+- [app.py:3898](app.py#L3898) - Remove fast_mode from standard load
+- [app.py:4010](app.py#L4010) - Remove fast_mode from background processing
 
 ### Key Changes:
 
