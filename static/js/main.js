@@ -12345,9 +12345,11 @@ const TagManager = {
 
                             tagsLoaded = true;
                             // Update upload UI to show completion
-                            if (typeof this.updateUploadUI === 'function') {
+                            // Update file info text to show completion
+                            const fileInfoElement = document.getElementById('fileInfoText');
+                            if (fileInfoElement) {
                                 const fileName = sessionStorage.getItem('uploaded_filename') || 'File';
-                                this.updateUploadUI(`✅ ${fileName} ready!`, 'Tags loaded successfully', 'success');
+                                fileInfoElement.textContent = `✅ ${fileName} ready!`;
                             }
                             return; // Success - tags loaded instantly!
                         }
