@@ -57,7 +57,7 @@ html {
 
 
 body {
-  font-size: 1rem;
+  font-size: 1.1rem; /* Increased base font size for better readability */
   line-height: 1.5;
   width: 100%;
   min-height: 100vh;
@@ -67,6 +67,7 @@ body {
   overflow-y: auto; /* Allow vertical scrolling when content exceeds viewport */
   /* Ensure body doesn't interfere with fullscreen canvas */
   position: relative;
+  color: #f7f8ff; /* Vibrant light text color across the app */
   /* Ensure smooth zoom scaling */
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
