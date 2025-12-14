@@ -3240,16 +3240,21 @@ def upload_file():
                 # CRITICAL FIX: Use application context for background thread
                 # Flask's g object and session require application context
                 with app.app_context():
+                    bg_start_time = time.time()
+                    max_bg_time = 300  # 5 minutes max for background processing
                     try:
                         logging.info(f"[BACKGROUND] Processing file: {file_path} for store: {selected_store}")
-                        
+
                         # CRITICAL FIX: Create processor with store name in background thread
                         # Don't use get_excel_processor() as it might not have the correct context
                         from src.core.data.excel_processor import ExcelProcessor
                         processor = ExcelProcessor(store_name=selected_store)
                         logging.info(f"[BACKGROUND] Created ExcelProcessor with store: {selected_store}")
                         
-                        # Load the file
+                        # Load the file with timeout check
+                        if time.time() - bg_start_time > max_bg_time:
+                            raise TimeoutError(f"Background processing exceeded {max_bg_time}s")
+
                         success = processor.load_file(file_path)
 
                         if success:
@@ -3296,11 +3301,15 @@ def upload_file():
                                 cache_elapsed = (time.time() - cache_start) * 1000
                                 logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags with key={cache_key[:16]}... ({cache_elapsed:.0f}ms)")
 
-                                # Update status to indicate tags are ready
-                                update_processing_status(original_filename, 'tags_ready')
+                                # CRITICAL FIX: Mark as 'ready' immediately after caching tags
+                                # Frontend needs 'ready' status to proceed, not 'tags_ready'
+                                update_processing_status(original_filename, 'ready')
+                                logging.info(f"[BACKGROUND] ✅ Marked {original_filename} as READY (tags cached)")
                             except Exception as cache_error:
                                 logging.warning(f"[BACKGROUND] ⚠️ Could not pre-cache tags: {cache_error}")
                                 logging.error(traceback.format_exc())
+                                # Even if tag caching fails, mark as ready so frontend can try to load
+                                update_processing_status(original_filename, 'ready')
 
                             # NOW do expensive database operations AFTER tags are cached
                             # Frontend doesn't need to wait for these
@@ -3369,6 +3378,23 @@ def upload_file():
                         update_processing_status(original_filename, f'error: {str(e)}')
                         # Signal completion even on error so we don't wait forever
                         completion_event.set()
+                    finally:
+                        # CRITICAL SAFETY NET: Ensure status is never left as 'processing'
+                        # If we get here and status is still 'processing', mark as ready if we have data
+                        with processing_lock:
+                            current_status = processing_status.get(original_filename, 'unknown')
+                            if current_status == 'processing':
+                                # Check if we actually loaded data successfully
+                                if _excel_processor and hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
+                                    logging.warning(f"[BACKGROUND] SAFETY NET: Status still 'processing' but data loaded - marking as ready")
+                                    update_processing_status(original_filename, 'ready')
+                                else:
+                                    logging.error(f"[BACKGROUND] SAFETY NET: Status still 'processing' and no data - marking as error")
+                                    update_processing_status(original_filename, 'error: Processing incomplete')
+                                completion_event.set()
+
+                        bg_elapsed = time.time() - bg_start_time
+                        logging.info(f"[BACKGROUND] Thread completed in {bg_elapsed:.1f}s")
 
             # Start background thread with completion tracking
             thread = threading.Thread(target=process_in_background)
@@ -5010,42 +5036,64 @@ def upload_status():
         filename = request.args.get('filename')
         if not filename:
             return jsonify({'error': 'No filename provided'}), 400
-        
+
         logging.info(f"Status check for: {filename}")
-        
+
         # Ensure filename is properly sanitized
         filename = sanitize_filename(filename)
-        
+
         # Clean up old entries periodically (but not on every request to reduce overhead)
         if random.random() < 0.05:  # Only cleanup 5% of the time (reduced from 10%)
             cleanup_old_processing_status()
 
-        # Auto-clear stuck processing statuses (older than 15 minutes) - less aggressive
-        # Only run cleanup occasionally to avoid race conditions
-        if random.random() < 0.02:  # Only cleanup 2% of the time (reduced from 5%)
-            current_time = time.time()
-            cutoff_time = current_time - 900  # 15 minutes (increased from 10)
-            
+        # CRITICAL FIX: More aggressive auto-recovery for stuck uploads
+        # Check on EVERY status request if this specific file is stuck (not random)
+        current_time = time.time()
+        with processing_lock:
+            status = processing_status.get(filename, 'not_found')
+            timestamp = processing_timestamps.get(filename, 0)
+            age = current_time - timestamp if timestamp > 0 else 0
+
+            # If file has been "processing" for more than 30 seconds, check if it's actually ready
+            if status == 'processing' and age > 30:
+                logging.warning(f"⚠️ Upload stuck in 'processing' for {age:.1f}s: {filename}")
+
+                # Check if the file actually loaded successfully
+                local_processor = get_excel_processor()
+                if local_processor and hasattr(local_processor, 'df') and local_processor.df is not None and not local_processor.df.empty:
+                    # File is actually ready! Background thread must have failed to update status
+                    logging.info(f"✅ AUTO-RECOVERY: File {filename} is actually ready (has {len(local_processor.df)} rows)")
+                    processing_status[filename] = 'ready'
+                    processing_timestamps[filename] = current_time
+                    status = 'ready'
+                elif age > 120:  # Stuck for more than 2 minutes
+                    # File is stuck and not loaded - mark as error so frontend can retry
+                    logging.error(f"❌ AUTO-RECOVERY: File {filename} stuck for {age:.1f}s with no data - marking as error")
+                    processing_status[filename] = 'error: Upload timeout - please try again'
+                    status = 'error: Upload timeout - please try again'
+
+        # Auto-clear very old stuck processing statuses (older than 15 minutes) - random check
+        if random.random() < 0.02:
+            cutoff_time = current_time - 900  # 15 minutes
+
             with processing_lock:
-                # Check for stuck processing statuses
                 stuck_files = []
-                for fname, status in list(processing_status.items()):
-                    timestamp = processing_timestamps.get(fname, 0)
-                    age = current_time - timestamp
-                    if age > cutoff_time and status == 'processing':
+                for fname, fstatus in list(processing_status.items()):
+                    ftimestamp = processing_timestamps.get(fname, 0)
+                    fage = current_time - ftimestamp
+                    if fage > cutoff_time and fstatus == 'processing':
                         stuck_files.append(fname)
                         del processing_status[fname]
                         if fname in processing_timestamps:
                             del processing_timestamps[fname]
-                
+
                 if stuck_files:
-                    logging.warning(f"Auto-cleared {len(stuck_files)} stuck processing statuses: {stuck_files}")
-        
+                    logging.warning(f"Auto-cleared {len(stuck_files)} very old stuck statuses: {stuck_files}")
+
         with processing_lock:
-            status = processing_status.get(filename, 'not_found')
-            all_statuses = dict(processing_status)  # Copy for debugging
-            timestamp = processing_timestamps.get(filename, 0)
-            age = time.time() - timestamp if timestamp > 0 else 0
+            status = processing_status.get(filename, status)  # Get updated status
+            all_statuses = dict(processing_status)
+            age = current_time - timestamp if timestamp > 0 else 0
         
         logging.info(f"Upload status request for {filename}: {status} (age: {age:.1f}s)")
         logging.debug(f"All processing statuses: {all_statuses}")
