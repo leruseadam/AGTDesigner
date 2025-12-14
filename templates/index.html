@@ -586,13 +586,41 @@
       
       if (storeConfirmed && !window.checkingStoreRequired) {
         console.log('✅ Store already confirmed (in memory or sessionStorage), skipping check');
+
         // Restore the in-memory flag if it was in sessionStorage
         if (!window.storeConfirmed && storeJustSelected) {
           window.storeConfirmed = true;
         }
+
+        // Ensure UI is ready when store is already confirmed (e.g., on reload)
+        const modalElement = document.getElementById('storeSelectionModal');
+        const mainContent = document.getElementById('mainContent');
+        if (modalElement) {
+          modalElement.style.display = 'none';
+          modalElement.classList.remove('show');
+        }
+        document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
+        document.body.classList.remove('modal-open');
+        document.body.style.overflow = '';
+
+        if (mainContent) {
+          mainContent.style.display = 'block';
+          mainContent.style.visibility = 'visible';
+          mainContent.style.pointerEvents = '';
+          mainContent.classList.remove('store-selection-disabled');
+          mainContent.classList.add('store-selected');
+          setTimeout(() => mainContent.classList.add('loaded'), 50);
+        }
+
+        // Update store labels immediately so tags can load without waiting for another fetch
+        if (selectedStore) {
+          updateCurrentStoreDisplay(selectedStore);
+          updateStoreStatus(`Store: ${selectedStore.replace(/_/g, ' ')}`, 'active');
+        }
+
         // Store is already confirmed, just call the callback if provided
         if (typeof onStoreConfirmed === 'function') {
-          onStoreConfirmed();
+          setTimeout(onStoreConfirmed, 50);
         }
         return;
       }
