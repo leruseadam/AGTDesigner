@@ -3095,8 +3095,8 @@ body.modal-open #mainContent.store-selection-disabled,
     font-size: 1.25rem !important; /* Larger text */
     font-weight: 650 !important;
     min-height: 128px !important; /* Taller height */
-    width: 100% !important; /* Uniform full width */
-    max-width: 100% !important;
+    width: 85% !important; /* Match undo/redo button width */
+    max-width: 85% !important;
     margin: 0 auto !important; /* Keep centered if container narrower */
     border-radius: 12px !important;
     display: flex !important;
