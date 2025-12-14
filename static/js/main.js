@@ -12783,9 +12783,16 @@ const TagManager = {
                 this.hideExcelLoadingSplash();
                 this.updateUploadUI(filename, 'Upload recovered successfully', 'success');
 
-                // Load filters and selected tags
-                await this.fetchAndPopulateFilters();
-                await this.fetchAndUpdateSelectedTags();
+                // CRITICAL FIX: Load filters and selected tags in parallel for faster recovery
+                try {
+                    await Promise.all([
+                        this.fetchAndPopulateFilters(),
+                        this.fetchAndUpdateSelectedTags()
+                    ]);
+                    verboseLog('[UPLOAD DEBUG] Filters and selected tags loaded after recovery');
+                } catch (loadErr) {
+                    console.warn('⚠️ Could not load filters/selected tags after recovery:', loadErr);
+                }
 
                 alert('Upload completed successfully after recovery.');
                 return;
