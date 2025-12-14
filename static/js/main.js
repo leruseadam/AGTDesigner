@@ -8401,11 +8401,6 @@ const TagManager = {
                         }
                         
                         // Show user-friendly loading message
-                        const progressPercent = Math.round((processingRetryCount / maxProcessingRetries) * 100);
-                        const loadingMsg = `⏳ Loading tags (${progressPercent}%)...`;
-                        if (typeof this.updateUploadUI === 'function') {
-                            this.updateUploadUI(loadingMsg);
-                        }
                         
                         verboseLog(`⏳ File still processing (202), retrying immediately... (${processingRetryCount}/${maxProcessingRetries})`);
                         // PERFORMANCE: No delay - retry immediately for faster response
