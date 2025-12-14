@@ -11724,20 +11724,39 @@ def update_doh():
         # Now update the Excel processor DataFrame (skip for JSON matched tags)
         excel_update_success = False
         if excel_processor and not is_json_matched_tag:
+            logging.info(f"🔍 DOH UPDATE: Attempting to update Excel for variants: {name_variants}")
             for candidate in name_variants:
+                # Ensure DOH columns exist before attempting update (defensive)
+                try:
+                    if excel_processor.df is not None:
+                        if 'DOH' not in excel_processor.df.columns:
+                            excel_processor.df['DOH'] = ''
+                            logging.info(f"Added missing DOH column to Excel DataFrame")
+                        if 'DOH Compliant (Yes/No)' not in excel_processor.df.columns:
+                            excel_processor.df['DOH Compliant (Yes/No)'] = ''
+                            logging.info(f"Added missing DOH Compliant column to Excel DataFrame")
+                except Exception as col_err:
+                    logging.warning(f"Could not ensure DOH columns exist before update: {col_err}")
+
+                logging.info(f"🔍 DOH UPDATE: Trying candidate '{candidate}'...")
                 if excel_processor.update_doh_in_current_data(candidate, doh_storage_value):
                     excel_update_success = True
                     canonical_variant_used = canonical_variant_used or candidate
+                    logging.info(f"✅ DOH UPDATE: Successfully updated Excel for '{candidate}'")
                     break
+                else:
+                    logging.warning(f"⚠️  DOH UPDATE: Failed to update Excel for candidate '{candidate}'")
         elif is_json_matched_tag:
             # For JSON matched tags, Excel update is not required
             excel_update_success = True
             logging.info(f"✅ DOH UPDATE: Skipped Excel update for JSON matched tag '{tag_name}' (database updated)")
-        
+        elif not excel_processor:
+            logging.error(f"❌ DOH UPDATE: Excel processor is None - cannot update Excel data")
+
         if excel_update_success:
             logging.info(f"✅ Updated DOH in Excel processor DataFrame")
         else:
-            logging.warning(f"⚠️  Could not update Excel processor DataFrame for '{tag_name}'")
+            logging.warning(f"⚠️  Could not update Excel processor DataFrame for '{tag_name}' (tried variants: {name_variants})")
         
         # Persist a session-scoped override so generation always reflects the latest user choice
         try:
