@@ -12585,6 +12585,14 @@ const TagManager = {
                 if (status === 'ready' || status === 'done') {
                     // File is ready for basic operations
                     verboseLog(`[UPLOAD DEBUG] File marked as ready: ${filename}`);
+
+                    // CRITICAL FIX: Clear splash timeout on success
+                    if (window._splashTimeoutId) {
+                        clearTimeout(window._splashTimeoutId);
+                        window._splashTimeoutId = null;
+                        verboseLog('[UPLOAD DEBUG] Cleared splash timeout');
+                    }
+
                     this.hideExcelLoadingSplash();
                     this.updateUploadUI(displayName, 'File ready!', 'success');
 
@@ -12733,6 +12741,16 @@ const TagManager = {
                     this.hideExcelLoadingSplash();
                     this.updateUploadUI('Upload failed', 'Network error', 'error');
                     console.error('Upload failed: Network error. Please try again.');
+
+                    // CRITICAL FIX: Clear splash timeout on error
+                    if (window._splashTimeoutId) {
+                        clearTimeout(window._splashTimeoutId);
+                        window._splashTimeoutId = null;
+                    }
+
+                    if (confirm('Upload failed due to network error. Would you like to reload and try again?')) {
+                        window.location.reload();
+                    }
                     return;
                 }
                 
@@ -12748,10 +12766,48 @@ const TagManager = {
             await new Promise(resolve => setTimeout(resolve, pollInterval));
         }
         
-        // Timeout
+        // Timeout - try one last recovery attempt
+        console.error('⚠️ Upload polling timed out - attempting final recovery');
+        this.updateExcelLoadingStatus('Timeout - attempting recovery...');
+
+        try {
+            // Final attempt to load data directly
+            verboseLog('[UPLOAD DEBUG] Final recovery attempt - loading data directly');
+            await fetch('/api/clear-cache', { method: 'POST' }).catch(() => {});
+            this._forceDatabaseLineage = true;
+            const loaded = await this.fetchAndUpdateAvailableTags();
+            this._forceDatabaseLineage = false;
+
+            if (loaded && this.state.tags && this.state.tags.length > 0) {
+                verboseLog('[UPLOAD DEBUG] Recovery successful - data found');
+                this.hideExcelLoadingSplash();
+                this.updateUploadUI(filename, 'Upload recovered successfully', 'success');
+
+                // Load filters and selected tags
+                await this.fetchAndPopulateFilters();
+                await this.fetchAndUpdateSelectedTags();
+
+                alert('Upload completed successfully after recovery.');
+                return;
+            }
+        } catch (recoveryError) {
+            console.error('[UPLOAD DEBUG] Final recovery failed:', recoveryError);
+        }
+
+        // If recovery failed, show error and offer reload
         this.hideExcelLoadingSplash();
         this.updateUploadUI('Upload timed out', 'Processing took too long', 'error');
-                            console.error('Upload timed out. Please try again.');
+        console.error('Upload timed out. Please try again.');
+
+        // CRITICAL FIX: Clear splash timeout on final timeout
+        if (window._splashTimeoutId) {
+            clearTimeout(window._splashTimeoutId);
+            window._splashTimeoutId = null;
+        }
+
+        if (confirm('Upload timed out. Would you like to reload the page and try again?')) {
+            window.location.reload();
+        }
     },
 
     updateUploadUI(fileName, statusMessage, statusType) {

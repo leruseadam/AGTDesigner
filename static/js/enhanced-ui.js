@@ -131,6 +131,50 @@ async function handleFiles(files) {
       splash.style.width = '100%';
       splash.style.height = '100%';
       console.log('✅ SPLASH SHOWN - display:', splash.style.display);
+
+      // CRITICAL FIX: Add automatic timeout recovery to prevent infinite hanging
+      // If splash is still visible after 4 minutes, force recovery
+      const maxSplashTime = 240000; // 4 minutes
+      const splashTimeoutId = setTimeout(() => {
+        if (splash.style.display !== 'none') {
+          console.error('⚠️ CRITICAL: Splash screen timeout - forcing recovery');
+          statusElement.textContent = 'Upload took too long. Attempting recovery...';
+
+          // Try to recover by loading data directly
+          setTimeout(async () => {
+            try {
+              console.log('🔄 Attempting recovery by loading data directly...');
+              if (typeof TagManager !== 'undefined') {
+                await fetch('/api/clear-cache', { method: 'POST' }).catch(() => {});
+                TagManager._forceDatabaseLineage = true;
+                const loaded = await TagManager.fetchAndUpdateAvailableTags();
+                TagManager._forceDatabaseLineage = false;
+
+                if (loaded && TagManager.state.tags && TagManager.state.tags.length > 0) {
+                  console.log('✅ Recovery successful - data loaded');
+                  splash.style.display = 'none';
+                  uploadInProgress = false;
+                  alert('Upload completed successfully after recovery.');
+                } else {
+                  throw new Error('Recovery failed - no data');
+                }
+              } else {
+                throw new Error('TagManager not available');
+              }
+            } catch (error) {
+              console.error('❌ Recovery failed:', error);
+              splash.style.display = 'none';
+              uploadInProgress = false;
+              if (confirm('Upload recovery failed. Would you like to reload the page?')) {
+                window.location.reload();
+              }
+            }
+          }, 1000);
+        }
+      }, maxSplashTime);
+
+      // Store timeout ID so it can be cleared if upload completes normally
+      window._splashTimeoutId = splashTimeoutId;
     } else {
       console.error('❌ UPLOAD: Could not find splash elements:', {
         splash: !!splash,
@@ -277,28 +321,58 @@ async function handleFiles(files) {
           }
           
           // Start polling backend until the upload is ready, then stop normal success flow.
-          if (typeof window.pollUploadStatus === 'function') {
+          // CRITICAL FIX: Use TagManager's poll method which is guaranteed to exist
+          if (typeof TagManager !== 'undefined' && typeof TagManager.pollUploadStatusAndUpdateUI === 'function') {
+            console.log('✅ Using TagManager.pollUploadStatusAndUpdateUI');
+            TagManager.pollUploadStatusAndUpdateUI(data.filename || file.name, file.name);
+            // Reset upload flag after polling starts
+            uploadInProgress = false;
+          } else if (typeof window.pollUploadStatus === 'function') {
             console.log('✅ Using window.pollUploadStatus');
             window.pollUploadStatus(data.filename || file.name);
-          } else if (typeof pollUploadStatus === 'function') {
-            console.log('✅ Using local pollUploadStatus');
-            pollUploadStatus(data.filename || file.name);
+            uploadInProgress = false;
           } else {
-            console.warn('⚠️ pollUploadStatus function not available; falling back to manual reload');
-            if (window.safeReload) {
-              window.safeReload(2000);
-            } else {
-              // CRITICAL FIX: Debounce reloads to prevent flashing
-              if (window._reloadTimeout) {
-                clearTimeout(window._reloadTimeout);
-              }
-              window._reloadTimeout = setTimeout(() => {
-                if (!window._reloadInProgress) {
-                  window._reloadInProgress = true;
-                  window.location.reload();
+            console.warn('⚠️ pollUploadStatus function not available; loading data directly');
+            // CRITICAL FIX: Instead of reloading, try to load data directly
+            if (statusElement) statusElement.textContent = 'Loading data...';
+
+            setTimeout(async () => {
+              try {
+                if (typeof TagManager !== 'undefined') {
+                  console.log('Attempting direct data load after upload...');
+                  // Clear cache first
+                  await fetch('/api/clear-cache', { method: 'POST' }).catch(() => {});
+
+                  // Load tags directly
+                  TagManager._forceDatabaseLineage = true;
+                  const loaded = await TagManager.fetchAndUpdateAvailableTags();
+                  TagManager._forceDatabaseLineage = false;
+
+                  if (loaded && TagManager.state.tags && TagManager.state.tags.length > 0) {
+                    console.log('✅ Data loaded successfully');
+                    if (splash) splash.style.display = 'none';
+                    uploadInProgress = false;
+                  } else {
+                    throw new Error('No data loaded');
+                  }
+                } else {
+                  throw new Error('TagManager not available');
                 }
-              }, 2000);
-            }
+              } catch (error) {
+                console.error('Failed to load data directly, reloading page...', error);
+                if (window.safeReload) {
+                  window.safeReload(2000);
+                } else {
+                  if (window._reloadTimeout) clearTimeout(window._reloadTimeout);
+                  window._reloadTimeout = setTimeout(() => {
+                    if (!window._reloadInProgress) {
+                      window._reloadInProgress = true;
+                      window.location.reload();
+                    }
+                  }, 2000);
+                }
+              }
+            }, 2000);
           }
           return;
         }
@@ -532,6 +606,13 @@ async function handleFiles(files) {
       // CRITICAL FIX: Reset upload flag to allow future uploads
       uploadInProgress = false;
       console.log('✅ Upload flag reset - ready for next upload');
+
+      // CRITICAL FIX: Clear splash timeout if it exists
+      if (window._splashTimeoutId) {
+        clearTimeout(window._splashTimeoutId);
+        window._splashTimeoutId = null;
+        console.log('✅ Cleared splash timeout');
+      }
     }
   }
 }
