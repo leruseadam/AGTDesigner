@@ -144,14 +144,25 @@ async function handleFiles(files) {
           setTimeout(async () => {
             try {
               console.log('🔄 Attempting recovery by loading data directly...');
-              if (typeof TagManager !== 'undefined') {
+              if (typeof TagManager !== 'undefined' && TagManager.fetchAndUpdateAvailableTags) {
                 await fetch('/api/clear-cache', { method: 'POST' }).catch(() => {});
                 TagManager._forceDatabaseLineage = true;
                 const loaded = await TagManager.fetchAndUpdateAvailableTags();
                 TagManager._forceDatabaseLineage = false;
 
-                if (loaded && TagManager.state.tags && TagManager.state.tags.length > 0) {
+                if (loaded && TagManager.state && TagManager.state.tags && TagManager.state.tags.length > 0) {
                   console.log('✅ Recovery successful - data loaded');
+
+                  // CRITICAL FIX: Also load filters after recovery
+                  try {
+                    if (TagManager.fetchAndPopulateFilters) {
+                      await TagManager.fetchAndPopulateFilters();
+                      console.log('✅ Filters loaded after recovery');
+                    }
+                  } catch (filterErr) {
+                    console.warn('⚠️ Could not load filters after recovery:', filterErr);
+                  }
+
                   splash.style.display = 'none';
                   uploadInProgress = false;
                   alert('Upload completed successfully after recovery.');
@@ -338,7 +349,7 @@ async function handleFiles(files) {
 
             setTimeout(async () => {
               try {
-                if (typeof TagManager !== 'undefined') {
+                if (typeof TagManager !== 'undefined' && TagManager.fetchAndUpdateAvailableTags) {
                   console.log('Attempting direct data load after upload...');
                   // Clear cache first
                   await fetch('/api/clear-cache', { method: 'POST' }).catch(() => {});
@@ -348,8 +359,19 @@ async function handleFiles(files) {
                   const loaded = await TagManager.fetchAndUpdateAvailableTags();
                   TagManager._forceDatabaseLineage = false;
 
-                  if (loaded && TagManager.state.tags && TagManager.state.tags.length > 0) {
+                  if (loaded && TagManager.state && TagManager.state.tags && TagManager.state.tags.length > 0) {
                     console.log('✅ Data loaded successfully');
+
+                    // CRITICAL FIX: Load filters after tags
+                    try {
+                      if (TagManager.fetchAndPopulateFilters) {
+                        await TagManager.fetchAndPopulateFilters();
+                        console.log('✅ Filters loaded successfully');
+                      }
+                    } catch (filterErr) {
+                      console.warn('⚠️ Could not load filters:', filterErr);
+                    }
+
                     if (splash) splash.style.display = 'none';
                     uploadInProgress = false;
                   } else {
@@ -431,11 +453,22 @@ async function handleFiles(files) {
             if (TagManager.refreshTagLists) {
               console.time('post-upload-refresh-async');
               TagManager.refreshTagLists({ preserveFilters: true, force: true })
-                .then(() => {
+                .then(async () => {
                   console.timeEnd('post-upload-refresh-async');
                   console.log('✅ Tags loaded successfully via refreshTagLists');
                   // Clear force flag after successful load
                   TagManager._forceDatabaseLineage = false;
+
+                  // CRITICAL FIX: Populate filters after tags are loaded
+                  console.log('🔄 Loading filters after successful tag refresh...');
+                  try {
+                    if (TagManager.fetchAndPopulateFilters) {
+                      await TagManager.fetchAndPopulateFilters();
+                      console.log('✅ Filters populated successfully');
+                    }
+                  } catch (filterErr) {
+                    console.error('⚠️ Filter population failed (non-critical):', filterErr);
+                  }
                 })
                 .catch(err => {
                   console.error('❌ refreshTagLists failed:', err);
@@ -471,8 +504,18 @@ async function handleFiles(files) {
                     console.log(`🔄 Attempt ${retryAttempt}/${maxRetries} to load tags...`);
                     
                     TagManager.fetchAndUpdateAvailableTags?.()
-                      .then(() => {
+                      .then(async () => {
                         console.log('✅ Tags loaded successfully via fetchAndUpdateAvailableTags');
+
+                        // CRITICAL FIX: Load filters after tags succeed
+                        try {
+                          if (TagManager.fetchAndPopulateFilters) {
+                            await TagManager.fetchAndPopulateFilters();
+                            console.log('✅ Filters populated after retry');
+                          }
+                        } catch (filterErr) {
+                          console.error('⚠️ Filter population failed (non-critical):', filterErr);
+                        }
                       })
                       .catch(fetchErr => {
                         console.error(`❌ Attempt ${retryAttempt} failed:`, fetchErr);
