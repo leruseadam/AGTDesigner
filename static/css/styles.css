@@ -3091,13 +3091,13 @@ body.modal-open #mainContent.store-selection-disabled,
   .control-panel .btn-glass.btn-control,
   .control-panel .d-grid .btn-control,
   .btn-control {
-    padding: 2.2rem 1.2rem !important; /* Further increased vertical padding */
-    font-size: 1.1rem !important;
-    font-weight: 600 !important;
-    min-height: 110px !important; /* Increased from 88px */
-    width: 85% !important; /* Decreased from 100% */
-    max-width: 85% !important; /* Decreased from 100% */
-    margin: 0 auto !important; /* Center the narrower buttons */
+    padding: 2.6rem 1.4rem !important; /* Taller buttons */
+    font-size: 1.25rem !important; /* Larger text */
+    font-weight: 650 !important;
+    min-height: 128px !important; /* Taller height */
+    width: 100% !important; /* Uniform full width */
+    max-width: 100% !important;
+    margin: 0 auto !important; /* Keep centered if container narrower */
     border-radius: 12px !important;
     display: flex !important;
     align-items: center !important;
@@ -7536,6 +7536,15 @@ body.modal-open #mainContent.store-selection-disabled,
   max-width: 100% !important;
 }
 
+/* DOH dropdown: show muted placeholder until a value is selected */
+.filter-select.doh-empty {
+  color: rgba(255, 255, 255, 0.55) !important;
+  background: linear-gradient(135deg, rgba(0, 212, 170, 0.08), rgba(0, 212, 170, 0.12)) !important;
+}
+.filter-select.doh-has-value {
+  color: #ffffff !important;
+}
+
 @media (max-width: 1199px) {
   .main-content-row {
     grid-template-columns: 1fr;
@@ -8006,6 +8015,44 @@ body.modal-open #mainContent.store-selection-disabled,
   flex: 1 1 0 !important;
   min-width: 0 !important; /* Remove fixed min-width to allow equal distribution */
   max-width: none !important; /* Remove max-width constraints */
+}
+
+/* Responsive layout for filters and main panels so the UI holds shape when resized (e.g., devtools open) */
+.filter-row {
+  flex-wrap: wrap !important;
+  column-gap: 0.5rem !important;
+  row-gap: 0.5rem !important;
+}
+.filter-row .filter-group {
+  flex: 1 1 180px !important;
+  min-width: 140px !important;
+  max-width: 100% !important;
+}
+.filter-row .filter-select {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+@media (max-width: 1400px) {
+  .filter-row .filter-group {
+    flex-basis: 150px !important;
+    min-width: 130px !important;
+  }
+}
+@media (max-width: 1200px) {
+  .filter-row .filter-group {
+    flex-basis: 140px !important;
+    min-width: 120px !important;
+  }
+}
+
+/* Let main content containers shrink without overlapping when viewport narrows */
+.main-content-row > [data-container-type] {
+  flex: 1 1 360px !important;
+  min-width: 300px !important;
+}
+.main-content-row .glass-card {
+  min-height: 0 !important;
 }
   .horizontal-filter-bar select:focus,
   .horizontal-filter-bar .form-select:focus,
