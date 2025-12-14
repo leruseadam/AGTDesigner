@@ -3091,12 +3091,12 @@ body.modal-open #mainContent.store-selection-disabled,
   .control-panel .btn-glass.btn-control,
   .control-panel .d-grid .btn-control,
   .btn-control {
-    padding: 3.2rem 1.4rem !important; /* Increased padding for taller buttons */
-    font-size: 1.25rem !important; /* Larger text */
+    padding: 0.5rem 0.4rem !important; /* Compact padding to match undo/redo */
+    font-size: 0.85rem !important; /* Smaller font for compact buttons */
     font-weight: 650 !important;
-    min-height: 160px !important; /* Increased height using negative space */
-    width: 100% !important; /* Uniform full width to match undo/redo */
-    max-width: 100% !important;
+    min-height: 42px !important; /* Compact height to match undo/redo */
+    width: 85% !important; /* Match undo/redo button width */
+    max-width: 85% !important;
     margin: 0 auto !important; /* Keep centered if container narrower */
     border-radius: 12px !important;
     display: flex !important;
@@ -4383,29 +4383,32 @@ body.modal-open #mainContent.store-selection-disabled,
   text-align: center;
 }
 
-/* Compact undo/redo pair */
+/* Undo/Redo pair: same sizing/colors as main control buttons */
 .undo-redo-group {
-  width: 85% !important;          /* match main control button width */
-  max-width: 85% !important;
-  margin: 0 auto 0.35rem auto !important; /* center and give a little bottom spacing */
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 auto 0.5rem auto !important;
 }
 
 .undo-redo-group .btn-compact-duo {
-  flex: 1 1 0;
-  width: auto !important;
-  max-width: none !important;
-  min-height: 42px !important;    /* Reduced for better column alignment */
-  padding: 0.5rem 0.4rem !important;  /* Reduced padding for smaller buttons */
-  font-size: 0.85rem !important;  /* Smaller font to fit compact size */
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 160px !important;
+  padding: 3.2rem 1.4rem !important;
+  font-size: 1.25rem !important;
+  font-weight: 650 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 .undo-redo-group .btn-compact-duo svg {
-  width: 14px !important;
-  height: 14px !important;
+  width: 18px !important;
+  height: 18px !important;
 }
 
 .undo-redo-group .btn-compact-duo .icon-btn {
-  gap: 0.4rem !important;
+  gap: 0.6rem !important;
 }
   /* Select All checkbox styling - no extra scaling needed, already 32px */
   #selectAllAvailable {
