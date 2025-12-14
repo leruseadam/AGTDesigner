@@ -5427,7 +5427,7 @@ const TagManager = {
             }
         `;
         document.head.appendChild(style);
-        // Add lineage options - filter based on product type
+        // Add lineage options (no product-type filtering)
         const allLineageOptions = [
             { value: 'SATIVA', label: 'S' },
             { value: 'INDICA', label: 'I' },
@@ -5466,45 +5466,8 @@ const TagManager = {
             }
         }
         
-        // CRITICAL FIX: Determine product type and filter lineage options accordingly
-        const productTypeForDropdown = tag['Product Type*'] || tag.productType || tag.ProductType || '';
-        const classicTypesForDropdown = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
-        const isClassicTypeForDropdown = classicTypesForDropdown.map(ct => ct.toLowerCase()).includes((productTypeForDropdown || '').toString().toLowerCase());
-        const isParaphernaliaType = (productTypeForDropdown || '').toString().toLowerCase() === 'paraphernalia';
-        
-        // CRITICAL FIX: Show all lineage options for nonclassic types (user may need all options)
-        // For paraphernalia, only show PARA
-        // For classic types, show all classic lineages (no MIXED, no PARA)
-        // For nonclassic types, show ALL options including classic lineages
-        let uniqueLineages;
-        if (isParaphernaliaType) {
-            // Paraphernalia: only show PARA
-            uniqueLineages = [
-                { value: 'PARA', label: 'P' }
-            ];
-        } else if (!isClassicTypeForDropdown) {
-            // Nonclassic types (edibles, tinctures, topicals, capsules, etc.): show ALL lineage options
-            // User may need SATIVA, INDICA, HYBRID, etc. for nonclassic types
-            uniqueLineages = allLineageOptions.filter(opt => opt.value !== 'PARA');
-            // For High CBD products, ensure CBD is selected by default (but still show all options)
-            const isHighCbdType = (productTypeForDropdown || '').toString().toLowerCase().startsWith('high cbd');
-            if (isHighCbdType && normalizedLineage !== 'CBD_BLEND' && normalizedLineage !== 'CBD') {
-                normalizedLineage = 'CBD_BLEND';
-                console.log(`🎯 High CBD product: Forcing CBD_BLEND lineage for dropdown: "${displayName}"`);
-            }
-        } else {
-            // Classic types: show all classic lineages (no MIXED, no PARA)
-            uniqueLineages = allLineageOptions.filter(opt => 
-                opt.value !== 'MIXED' && opt.value !== 'PARA'
-            );
-        }
-        
-        // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage in dropdown - convert to HYBRID
-        // This must happen AFTER getting database lineage but BEFORE setting dropdown value
-        if (isClassicTypeForDropdown && (normalizedLineage === 'MIXED' || normalizedLineage === 'THC')) {
-            console.log(`🔄 DROPDOWN FIX: Converting ${normalizedLineage} to HYBRID for classic type "${displayName}" (${productTypeForDropdown})`);
-            normalizedLineage = 'HYBRID';
-        }
+        // Show all lineage options for every product type (no restrictions)
+        let uniqueLineages = allLineageOptions;
         
         // Helper function to determine if a lineage should map to MIXED
         const shouldMapToMixed = (lineageValue) => {
