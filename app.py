@@ -12045,6 +12045,8 @@ def get_web_filter_options():
 def _get_filter_options_from_database(store_name=None):
     """Helper function to get filter options from product database when Excel is not available."""
     try:
+        from src.core.constants import EXCLUDED_PRODUCT_TYPES
+        excluded_types_lower = {t.lower().strip() for t in EXCLUDED_PRODUCT_TYPES}
         product_db = get_product_database(store_name)
         if not product_db:
             return None
@@ -12098,7 +12100,11 @@ def _get_filter_options_from_database(store_name=None):
             # Product Type
             product_type = product.get('Product Type*', '') or product.get('Product Type', '')
             if product_type and str(product_type).strip():
-                product_types.add(str(product_type).strip())
+                pt_clean = str(product_type).strip()
+                pt_lower = pt_clean.lower()
+                if ("deactivated" in pt_lower or "trade sample" in pt_lower or pt_lower in excluded_types_lower):
+                    continue
+                product_types.add(pt_clean)
             
             # Lineage - only add if not already loaded from database query above
             if not lineages:
@@ -12147,6 +12153,14 @@ def _get_filter_options_from_database(store_name=None):
         def clean_list(lst):
             return [v for v in lst if v and str(v).strip() and str(v).strip().lower() != 'nan']
         options = {k: clean_list(v) for k, v in options.items()}
+        # Remove deactivated/sample product types from dropdowns
+        options['productType'] = [
+            pt for pt in options.get('productType', [])
+            if pt and pt.strip() and
+               ("deactivated" not in pt.lower()) and
+               ("trade sample" not in pt.lower()) and
+               (pt.lower() not in excluded_types_lower)
+        ]
         
         # CRITICAL FIX: Process High CBD filter the same way as Excel processor
         # Check if any product types start with "high cbd"
