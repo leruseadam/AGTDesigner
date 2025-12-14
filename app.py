@@ -8874,8 +8874,8 @@ def get_available_tags():
             fast_load = False  # Disable fast_load when lineage was recently updated
             cached_tags = None  # CRITICAL: Bypass cache when lineage was updated to ensure fresh database values
             nocache = True  # Force fresh fetch
-            prefer_db = False  # Don't set prefer_db - we still want Excel tags but with fresh database lineage
-            logging.info("✅ CRITICAL: Bypassing cache due to recent lineage updates - will load tags and apply GUARANTEED FIX for fresh database lineage")
+            prefer_db = True  # CRITICAL FIX: Force database lineage after manual lineage updates
+            logging.info("✅ CRITICAL: Bypassing cache AND forcing prefer_db=True due to recent lineage updates - will load tags from DATABASE with updated lineage")
             
             # CRITICAL: Clear the cache to ensure stale data isn't served
             try:
