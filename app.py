@@ -9834,17 +9834,8 @@ def get_available_tags():
         excel_processor = None
         excel_tags = []
 
-        # CRITICAL FIX: ALWAYS update DataFrame lineage from database, even when prefer_db=True
-        # This ensures Excel DataFrame has correct database lineage for future requests
+        # Get excel processor for later use
         excel_processor = get_excel_processor()
-        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-            if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
-                try:
-                    logging.info("🔄 CRITICAL FIX: Updating DataFrame lineage from database (ALWAYS, not just when prefer_db=False)...")
-                    excel_processor._update_dataframe_lineage_from_database()
-                    logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database - Excel DataFrame now has DB lineage")
-                except Exception as df_update_err:
-                    logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
 
         # CRITICAL FIX: If all_tags already has Excel tags (from earlier processing), don't process Excel again
         if not prefer_db and len(all_tags) == 0:
