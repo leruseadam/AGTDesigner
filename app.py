@@ -8861,33 +8861,58 @@ def get_available_tags():
         if request.args.get('fast_load') not in ('0', 'false', 'False'):
             fast_load = True  # Default to fast loading - CRITICAL for upload speed
         
-        # If lineage was recently changed, force a full refresh even if fast_load requested
-        lineage_update_ts = session.get('lineage_update_timestamp')
+        # CRITICAL FIX: Always check if database has lineage overrides
+        # Database lineage should ALWAYS take precedence over Excel lineage, not just for 10 minutes
+        # This ensures manual lineage changes persist permanently
         force_full_refresh = False
-        if lineage_update_ts:
-            try:
-                force_full_refresh = (time.time() - float(lineage_update_ts)) < 600  # 10 minutes
-            except Exception:
-                force_full_refresh = False
-        if force_full_refresh:
-            logging.info("⚠️  Recent lineage updates detected – disabling fast_load cache and bypassing cache for this request.")
-            fast_load = False  # Disable fast_load when lineage was recently updated
-            cached_tags = None  # CRITICAL: Bypass cache when lineage was updated to ensure fresh database values
-            nocache = True  # Force fresh fetch
-            prefer_db = True  # CRITICAL FIX: Force database lineage after manual lineage updates
-            logging.info("✅ CRITICAL: Bypassing cache AND forcing prefer_db=True due to recent lineage updates - will load tags from DATABASE with updated lineage")
-            
-            # CRITICAL: Clear the cache to ensure stale data isn't served
-            try:
-                session_file_path = session.get('file_path', '')
-                if session_file_path:
-                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                else:
-                    cache_key = get_session_cache_key('available_tags')
-                cache.delete(cache_key)
-                logging.info(f"✅ CRITICAL: Cleared cache key '{cache_key}' due to recent lineage updates")
-            except Exception as cache_clear_err:
-                logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
+        has_db_lineage = False
+
+        try:
+            # Check if product database has any lineage data (strains with sovereign_lineage)
+            product_db = get_product_database(store_name)
+            if product_db:
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM strains WHERE sovereign_lineage IS NOT NULL AND sovereign_lineage != ''")
+                strain_count = cursor.fetchone()[0]
+                if strain_count > 0:
+                    has_db_lineage = True
+                    logging.info(f"✅ Found {strain_count} strains with database lineage - will use prefer_db mode")
+        except Exception as db_check_err:
+            logging.warning(f"Could not check for database lineage: {db_check_err}")
+
+        # Force database lineage if we have any database lineage data
+        if has_db_lineage or prefer_db:
+            logging.info("⚠️ Database lineage detected - forcing prefer_db mode to ensure DB lineage takes precedence")
+            fast_load = False  # Disable fast_load to ensure proper lineage alignment
+            prefer_db = True  # CRITICAL: Always prefer database lineage when it exists
+
+            # Also check for recent lineage updates timestamp (for immediate cache clearing)
+            lineage_update_ts = session.get('lineage_update_timestamp')
+            recently_updated = False
+            if lineage_update_ts:
+                try:
+                    recently_updated = (time.time() - float(lineage_update_ts)) < 60  # 1 minute for cache clearing
+                except Exception:
+                    recently_updated = False
+
+            if recently_updated:
+                # Clear cache immediately after update to force fresh fetch
+                cached_tags = None
+                nocache = True
+                logging.info("✅ CRITICAL: Recent lineage update - bypassing cache for immediate refresh")
+
+                # Clear the cache to ensure stale data isn't served
+                try:
+                    session_file_path = session.get('file_path', '')
+                    if session_file_path:
+                        cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                    else:
+                        cache_key = get_session_cache_key('available_tags')
+                    cache.delete(cache_key)
+                    logging.info(f"✅ CRITICAL: Cleared cache key '{cache_key}' due to recent lineage update")
+                except Exception as cache_clear_err:
+                    logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
         # ULTRA-FAST RETURN FROM CACHE: if fast_load and we already have cached tags, return immediately
         if fast_load and cached_tags:
@@ -9808,19 +9833,25 @@ def get_available_tags():
         # 1. Optionally get products from Excel (only if not prefer_db and not already processed)
         excel_processor = None
         excel_tags = []
+
+        # CRITICAL FIX: ALWAYS update DataFrame lineage from database, even when prefer_db=True
+        # This ensures Excel DataFrame has correct database lineage for future requests
+        excel_processor = get_excel_processor()
+        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
+            if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                try:
+                    logging.info("🔄 CRITICAL FIX: Updating DataFrame lineage from database (ALWAYS, not just when prefer_db=False)...")
+                    excel_processor._update_dataframe_lineage_from_database()
+                    logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database - Excel DataFrame now has DB lineage")
+                except Exception as df_update_err:
+                    logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
+
         # CRITICAL FIX: If all_tags already has Excel tags (from earlier processing), don't process Excel again
         if not prefer_db and len(all_tags) == 0:
-            excel_processor = get_excel_processor()
+            # Re-get processor in case it was cleared
+            if excel_processor is None:
+                excel_processor = get_excel_processor()
             if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-                # CRITICAL FIX: Update DataFrame lineage from database BEFORE loading tags
-                # This ensures lineage changes persist after page refresh
-                if hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
-                    try:
-                        logging.info("🔄 CRITICAL FIX: Updating DataFrame lineage from database before loading tags (fallback path)...")
-                        excel_processor._update_dataframe_lineage_from_database()
-                        logging.info("✅ CRITICAL FIX: DataFrame lineage updated from database (fallback path)")
-                    except Exception as df_update_err:
-                        logging.warning(f"Could not update DataFrame lineage from database (fallback path): {df_update_err}")
                 try:
                     excel_tags = excel_processor.get_available_tags()
                     logging.info(f"Excel processor returned {len(excel_tags)} tags")
