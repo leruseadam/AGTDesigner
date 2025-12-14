@@ -4384,16 +4384,27 @@ body.modal-open #mainContent.store-selection-disabled,
 
 /* Compact undo/redo pair */
 .undo-redo-group {
-  width: 85% !important;
-  max-width: 320px !important;
-  margin: 0 auto 0.25rem !important;
+  width: 85% !important;          /* match main control button width */
+  max-width: 85% !important;
+  margin: 0 auto 0.35rem auto !important; /* center and give a little bottom spacing */
 }
 
 .undo-redo-group .btn-compact-duo {
-  width: 45% !important;
-  max-width: 45% !important;
-  min-height: 72px !important;
-  padding: 1rem 0.6rem !important;
+  flex: 1 1 0;
+  width: auto !important;
+  max-width: none !important;
+  min-height: 42px !important;    /* Reduced for better column alignment */
+  padding: 0.5rem 0.4rem !important;  /* Reduced padding for smaller buttons */
+  font-size: 0.85rem !important;  /* Smaller font to fit compact size */
+}
+
+.undo-redo-group .btn-compact-duo svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.undo-redo-group .btn-compact-duo .icon-btn {
+  gap: 0.4rem !important;
 }
   /* Select All checkbox styling - no extra scaling needed, already 32px */
   #selectAllAvailable {
@@ -6606,8 +6617,9 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     margin-left: auto !important;
     margin-right: auto !important;
-    padding-left: 45px !important; /* Symmetric padding to center text accounting for arrow */
-    padding-right: 45px !important;
+  /* Keep padding symmetric so text sits truly centered */
+  padding-left: 32px !important;
+  padding-right: 32px !important;
   }
   
   /* CRITICAL: Force text centering by adjusting padding to account for arrow */
@@ -6626,8 +6638,8 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align: center !important;
     text-align-last: center !important;
     /* Adjust padding to visually center text - symmetric padding with arrow accounted for */
-    padding-left: 45px !important;
-    padding-right: 45px !important;
+  padding-left: 32px !important;
+  padding-right: 32px !important;
     direction: ltr !important;
     /* Ensure text appears centered visually */
     text-indent: 0 !important;

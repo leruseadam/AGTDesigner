@@ -1850,9 +1850,39 @@ class TemplateProcessor:
                 if group_info and isinstance(group_info, dict):
                     group_display_name = group_info.get('display_name', '')
                     if group_display_name:
-                        # Force DescAndWeight to use group name ONLY (no weight, no individual product info)
-                        label_context['DescAndWeight'] = wrap_with_marker(group_display_name, 'DESC')
-                        self.logger.info(f"PREROLL GROUP: Set DescAndWeight to group name '{group_display_name}' (group_id: {group_id})")
+                        # CRITICAL FIX: Check if group display name already contains weight information
+                        # Patterns that indicate weight is already in the name:
+                        # - "Assorted Pre-Roll 1g x 5 Packs" (has "Xg x Y")
+                        # - "Pre-Roll - 1g" (has "- Xg" or "Xg" at end)
+                        # - "Infused Pre-Roll - 0.5g" (has "- Xg")
+                        import re
+                        has_weight_in_name = bool(re.search(r'\d+\.?\d*\s*g(?:\s*x\s*\d+)?(?:\s+Pack)?', group_display_name, re.IGNORECASE))
+
+                        if has_weight_in_name:
+                            # Group name already includes weight, use it as-is
+                            desc_and_weight = group_display_name
+                            self.logger.info(f"PREROLL GROUP: Using group name as-is (already contains weight): '{desc_and_weight}' (group_id: {group_id})")
+                        else:
+                            # Group name doesn't include weight, add it from JointRatio/WeightUnits
+                            # Get JointRatio-derived weight from WeightUnits (set earlier for preroll products)
+                            weight_units = label_context.get('WeightUnits', '') or record.get('WeightUnits', '')
+                            if weight_units:
+                                # Remove newline prefix if present, and strip whitespace
+                                clean_weight = weight_units.replace('\n', '').strip()
+                                # Check if weight is already formatted with hyphen
+                                if clean_weight.startswith('\u2011') or clean_weight.startswith('-'):
+                                    # Weight already has hyphen, just append it
+                                    desc_and_weight = f"{group_display_name} {clean_weight}"
+                                else:
+                                    # Add non-breaking hyphen and space before weight
+                                    desc_and_weight = f"{group_display_name} \u2011\u00A0{clean_weight}"
+                                self.logger.info(f"PREROLL GROUP: Added weight to group name: '{desc_and_weight}' (group: '{group_display_name}', weight: '{clean_weight}', group_id: {group_id})")
+                            else:
+                                # No weight available, use group name only
+                                desc_and_weight = group_display_name
+                                self.logger.info(f"PREROLL GROUP: Using group name only (no weight available): '{group_display_name}' (group_id: {group_id})")
+
+                        label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
                         # Skip all DescAndWeight construction below - we're done
                         # Continue to QR code generation
                     else:

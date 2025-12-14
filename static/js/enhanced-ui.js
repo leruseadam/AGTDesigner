@@ -1,6 +1,9 @@
 // Enhanced UI JavaScript
 // This file contains all the enhanced UI functionality
 
+// CRITICAL FIX: Global flag to prevent duplicate uploads on PC
+let uploadInProgress = false;
+
 // Immediately attach handlers - page should already be loaded
 console.log('🔧 Enhanced UI: Loading...');
 const fileDropZone = document.getElementById('fileDropZone');
@@ -95,10 +98,20 @@ function hideSplashWithDelay(splashStartTime, minDisplayTime = 800) {
 
 async function handleFiles(files) {
   console.log('📁 handleFiles called with:', files.length, 'files');
+
+  // CRITICAL FIX: Prevent duplicate uploads on PC
+  if (uploadInProgress) {
+    console.warn('⚠️ Upload already in progress, ignoring duplicate call');
+    return;
+  }
+
   if (files.length > 0) {
     const file = files[0];
     console.log('📄 File selected:', file.name, 'size:', file.size);
-    
+
+    // Set upload flag IMMEDIATELY to prevent duplicates
+    uploadInProgress = true;
+
     // CRITICAL: Show Excel loading splash screen FIRST before anything else
     const splashStartTime = Date.now();
     console.log('🎬 UPLOAD: Showing splash IMMEDIATELY for:', file.name);
@@ -124,6 +137,8 @@ async function handleFiles(files) {
         filenameElement: !!filenameElement,
         statusElement: !!statusElement
       });
+      // Reset upload flag on error
+      uploadInProgress = false;
       alert('Error: Upload splash screen not found. Please refresh the page.');
       return;
     }
@@ -240,6 +255,8 @@ async function handleFiles(files) {
         console.error('❌ Upload failed:', errorMessage);
         if (statusElement) statusElement.textContent = `❌ Error: ${errorMessage}`;
         if (splash) splash.style.display = 'none';
+        // Reset upload flag on error
+        uploadInProgress = false;
         alert(`Upload failed: ${errorMessage}`);
         return;
       }
@@ -316,6 +333,8 @@ async function handleFiles(files) {
             // User cancelled, don't reload - hide splash directly
             const splash = document.getElementById('excelLoadingSplash');
             if (splash) splash.style.display = 'none';
+            // Reset upload flag when user cancels
+            uploadInProgress = false;
             return;
           }
         }
@@ -510,6 +529,9 @@ async function handleFiles(files) {
       if (splash) splash.style.display = 'none';
     } finally {
       TagManager.setLoading(false);
+      // CRITICAL FIX: Reset upload flag to allow future uploads
+      uploadInProgress = false;
+      console.log('✅ Upload flag reset - ready for next upload');
     }
   }
 }
