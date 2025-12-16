@@ -1323,19 +1323,17 @@ def get_excel_processor():
             except:
                 pass
             
-            # Force reload if session has a different file than what's currently loaded
-            # OR if processor has no data but session has a file
-            if _excel_processor is not None and session_file_path:
-                current_file = getattr(_excel_processor, '_last_loaded_file', None)
-                has_data = hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty
-                
-                # Reload if: different file OR processor has no data but session has a file
-                if (current_file != session_file_path and os.path.exists(session_file_path)) or (not has_data and os.path.exists(session_file_path)):
-                    if current_file != session_file_path:
-                        logging.info(f"🔄 FORCE RELOAD: Session has different file ({session_file_path}) than loaded ({current_file})")
-                    else:
-                        logging.info(f"🔄 FORCE RELOAD: Processor has no data, loading session file: {session_file_path}")
-                    _excel_processor = None  # Force recreation with new file
+            # CRITICAL FIX: ALWAYS reload if session file doesn't match processor file
+            # The global processor is shared across ALL requests and must be validated EVERY time
+            if session_file_path and os.path.exists(session_file_path):
+                current_file = getattr(_excel_processor, '_last_loaded_file', None) if _excel_processor else None
+                if current_file != session_file_path:
+                    logging.info(f"🔄 FORCE RELOAD: Session file mismatch - session={session_file_path}, loaded={current_file}")
+                    _excel_processor = None  # Force recreation with correct session file
+            elif _excel_processor is not None and not session_file_path:
+                # If no session file but processor exists, it's stale from another session
+                logging.info("🔄 CLEAR: No session file but processor exists - clearing stale processor")
+                _excel_processor = None
             
             # Determine the active store for this request (if any)
             selected_store = None
