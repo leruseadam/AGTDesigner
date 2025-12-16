@@ -8682,23 +8682,43 @@ def get_available_tags():
                         product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
                         logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
 
+                        lineage_map = {}
                         if product_names:
-                            db_products = product_db.get_products_by_names(product_names)
-                            logging.info(f"📦 SIMPLE PATH: Database returned {len(db_products) if db_products else 0} products")
+                            try:
+                                # PERFORMANCE FIX: Query only lineage fields, not all 47 columns
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
 
-                            lineage_map = {}
-                            if db_products:
-                                for db_product in db_products:
-                                    db_name = db_product.get('Product Name*')
-                                    db_lineage = (
-                                        db_product.get('currentLineage') or
-                                        db_product.get('canonical_lineage') or
-                                        db_product.get('Lineage')
-                                    )
-                                    if db_name and db_lineage:
-                                        lineage_map[db_name] = str(db_lineage).strip().upper()
+                                # Normalize product names for query
+                                normalized_names = [product_db._normalize_product_name(name) for name in product_names]
 
-                            logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
+                                # SQLite has a parameter limit (typically 999) – chunk to avoid failures
+                                chunk_size = 400
+                                total_results = 0
+                                for chunk_start in range(0, len(normalized_names), chunk_size):
+                                    chunk = normalized_names[chunk_start:chunk_start + chunk_size]
+                                    placeholders = ','.join(['?' for _ in chunk])
+                                    cursor.execute(f'''
+                                        SELECT "Product Name*", "Lineage"
+                                        FROM products
+                                        WHERE normalized_name IN ({placeholders})
+                                    ''', chunk)
+                                    results = cursor.fetchall()
+                                    total_results += len(results)
+
+                                    # Build lineage map from this chunk
+                                    for row in results:
+                                        db_name = row[0]
+                                        db_lineage = row[1]
+                                        if db_name and db_lineage:
+                                            lineage_map[db_name] = str(db_lineage).strip().upper()
+
+                                logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products across {len(normalized_names)//chunk_size + 1} chunk(s)")
+                                logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
+                            except Exception as lineage_query_err:
+                                logging.warning(f"Lineage enrichment query failed: {lineage_query_err}")
+                                import traceback
+                                logging.warning(traceback.format_exc())
 
                             enriched_count = 0
                             fallback_count = 0
