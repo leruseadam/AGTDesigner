@@ -865,9 +865,9 @@ body.modal-open #mainContent.store-selection-disabled,
 .help-button-container {
   position: relative !important;
   left: auto !important;
-  transform: none !important; /* Even vertical positioning */
+  transform: translateY(-7rem) !important; /* Lift roughly 3cm */
   bottom: auto !important;
-  margin: 2rem 0 2rem 0 !important; /* Balanced top/bottom spacing */
+  margin: 0 0 1rem 0 !important; /* Minimal margins since we're lifting */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2941,9 +2941,9 @@ body.modal-open #mainContent.store-selection-disabled,
   .help-button-container {
     position: relative !important;
     left: auto !important;
-    transform: none !important;
+    transform: translateY(-7rem) !important;
     bottom: auto !important;
-    margin: 2rem 0 2rem 0 !important;
+    margin: 0 0 1rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7854,9 +7854,9 @@ body.modal-open #mainContent.store-selection-disabled,
   .help-button-container {
     position: relative !important;
     left: auto !important;
-    transform: none !important;
+    transform: translateY(-7rem) !important;
     bottom: auto !important;
-    margin: 2rem 0 2rem 0 !important;
+    margin: 0 0 1rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;

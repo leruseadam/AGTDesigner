@@ -6783,42 +6783,9 @@ const TagManager = {
     },
     
     _performUpdateSelectedTags(tags) {
-        // CRITICAL FIX: NEVER clear selected tags during lineage updates
-        // Check if we're in the middle of a lineage update
-        const isLineageUpdateActive = this._lineageUpdateInProgress || 
-                                      this._lineageUpdateProcessing || 
-                                      (this._lineageUpdatePending && this._lineageUpdatePending.size > 0);
-        
-        if (isLineageUpdateActive) {
-            // If called with empty array during lineage update, ignore it completely
-            if (!tags || tags.length === 0) {
-                console.log('🚫 BLOCKED updateSelectedTags([]) during lineage update - preserving selected tags');
-                return;
-            }
-            // If called with tags but we have existing selections, merge instead of replace
-            if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
-                const existingSet = new Set(this.state.persistentSelectedTags);
-                const newTagNames = tags.map(t => t['Product Name*'] || t.ProductName).filter(Boolean);
-                const merged = [...new Set([...this.state.persistentSelectedTags, ...newTagNames])];
-                if (merged.length > this.state.persistentSelectedTags.length) {
-                    console.log('🔄 Merging tags during lineage update instead of replacing');
-                    // PERFORMANCE: Use Map lookup for O(1) instead of array.find() - O(n²) becomes O(n)
-                    tags = merged.map(name => {
-                        // Try Map lookup first (fastest)
-                        let tag = this._tagLookupMap?.get(name);
-                        // Fallback to tags array if not in Map
-                        if (!tag) {
-                            tag = tags.find(t => (t['Product Name*'] || t.ProductName) === name);
-                        }
-                        return tag || null;
-                    }).filter(Boolean);
-                }
-            }
-        }
-        
         // CRITICAL FIX: Removed console.time/timeEnd to prevent "Timer does not exist" errors
         // These were only for debugging and causing issues when called from lineage updates
-        
+
         if (!tags || !Array.isArray(tags)) {
             console.warn('updateSelectedTags called with invalid tags:', tags);
             tags = [];
