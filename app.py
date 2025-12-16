@@ -9038,8 +9038,8 @@ def get_available_tags():
 
         # ULTRA-FAST PATH: Use fast mode after Excel upload for instant response
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
-        # CRITICAL FIX: Only use fast mode when Excel file exists - otherwise use database
-        has_excel_file = file_exists or (_excel_processor is not None and _excel_processor.df is not None and not _excel_processor.df.empty)
+        # CRITICAL FIX: Only check file_exists, don't trust global _excel_processor
+        has_excel_file = file_exists
         if fast_load and has_excel_file and not prefer_db and not force_full_refresh:
             try:
                 # Get processor (may have been loaded synchronously above)
