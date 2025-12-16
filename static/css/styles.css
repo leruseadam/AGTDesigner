@@ -7828,12 +7828,12 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    margin: 0.25rem 0 1.5rem 0 !important; /* Increased bottom margin for equal spacing */
+    margin: 0.25rem 0 0.5rem 0 !important; /* Pull help button higher */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.9rem 0.75rem !important; /* Equal top and bottom padding */
+    padding: 0.6rem 0.75rem !important; /* Slightly less padding to save vertical space */
     position: relative !important;
     z-index: 1 !important;
   }
