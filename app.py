@@ -8703,9 +8703,61 @@ def get_available_tags():
         else:
             cached_tags = cache.get(cache_key) if not prefer_db else None
 
-        # CRITICAL FIX: When no Excel file, return empty immediately - don't load from database
-        # Database-only mode causes confusion with stale Excel data mixing with DB data
+        # CRITICAL FIX: When no Excel file, check for cached tags before returning empty
+        # This allows tags to load even if the session file was cleaned up but tags are cached
         if not has_excel_data:
+            # Try to use cached tags as fallback before returning empty
+            if cached_tags and len(cached_tags) > 0:
+                logging.info(f"⚡ No Excel file but found {len(cached_tags)} cached tags - returning cached data")
+                return jsonify({
+                    'tags': cached_tags,
+                    'total_count': len(cached_tags),
+                    'source': 'cache-no-excel',
+                    'message': 'Using cached tags (file may have been cleaned up)'
+                }), 200
+            
+            # Also try file-specific cache keys if session_file_path was cleared but file existed before
+            if session_file_path:
+                try:
+                    file_specific_cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}')
+                    file_cached_tags = cache.get(file_specific_cache_key)
+                    if file_cached_tags and len(file_cached_tags) > 0:
+                        logging.info(f"⚡ No Excel file but found {len(file_cached_tags)} tags in file-specific cache - returning cached data")
+                        return jsonify({
+                            'tags': file_cached_tags,
+                            'total_count': len(file_cached_tags),
+                            'source': 'cache-file-specific',
+                            'message': 'Using cached tags from previous upload'
+                        }), 200
+                except Exception as file_cache_err:
+                    logging.warning(f"Failed to check file-specific cache: {file_cache_err}")
+            
+            # Also try to initialize processor from default file if available
+            if store_name:
+                try:
+                    from src.core.data.excel_processor import get_default_upload_file
+                    default_file = get_default_upload_file(store_name)
+                    if default_file and os.path.exists(default_file):
+                        logging.info(f"⚡ No session file but found default file: {default_file} - loading it")
+                        from src.core.data.excel_processor import ExcelProcessor
+                        default_processor = ExcelProcessor(store_name=store_name)
+                        if default_processor.load_file(default_file):
+                            default_tags = default_processor.get_available_tags(filters=None)
+                            if default_tags and len(default_tags) > 0:
+                                # Update session with default file
+                                session['file_path'] = default_file
+                                session['uploaded_filename'] = os.path.basename(default_file)
+                                session.modified = True
+                                logging.info(f"✅ Loaded {len(default_tags)} tags from default file")
+                                safe_default_tags = make_json_safe(default_tags)
+                                return jsonify({
+                                    'tags': safe_default_tags,
+                                    'total_count': len(safe_default_tags),
+                                    'source': 'default-file'
+                                }), 200
+                except Exception as default_load_err:
+                    logging.warning(f"Failed to load default file as fallback: {default_load_err}")
+            
             logging.info("⚡ No Excel file uploaded - returning empty (database-only mode disabled)")
             # Clear any stale cached tags
             try:
