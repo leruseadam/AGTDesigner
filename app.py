@@ -11138,27 +11138,18 @@ def update_lineage():
         
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
-        
+
         # Step 4: Verify the update actually worked - CRITICAL for persistence
-        # Wait a tiny bit to ensure commit is fully flushed
         import time
-        time.sleep(0.1)
-        
-        # Try multiple verification strategies
+
+        # PERFORMANCE FIX: Single verification instead of multiple attempts
         verified_lineage = None
-        verification_attempts = [
-            lambda: product_db.get_product_lineage(tag_name),
-            lambda: product_db.get_product_lineage(tag_name.strip()),
-        ]
-        
-        for attempt_num, verify_func in enumerate(verification_attempts, 1):
-            try:
-                verified_lineage = verify_func()
-                if verified_lineage and str(verified_lineage).strip().upper() == str(new_lineage).strip().upper():
-                    logging.info(f"✅ VERIFIED (attempt {attempt_num}): Lineage update persisted correctly - '{tag_name}' now has lineage '{verified_lineage}'")
-                    break
-            except Exception as verify_err:
-                logging.debug(f"Verification attempt {attempt_num} failed: {verify_err}")
+        try:
+            verified_lineage = product_db.get_product_lineage(tag_name)
+            if verified_lineage and str(verified_lineage).strip().upper() == str(new_lineage).strip().upper():
+                logging.info(f"✅ VERIFIED: Lineage update persisted correctly - '{tag_name}' now has lineage '{verified_lineage}'")
+        except Exception as verify_err:
+            logging.debug(f"Verification failed: {verify_err}")
         
         if not verified_lineage or str(verified_lineage).strip().upper() != str(new_lineage).strip().upper():
             logging.warning(f"⚠️ VERIFICATION FAILED: Expected '{new_lineage}', got '{verified_lineage}' for '{tag_name}'")
@@ -11179,12 +11170,11 @@ def update_lineage():
                 
                 # Force update one more time
                 cursor.execute("""
-                    UPDATE products 
-                    SET Lineage = ? 
+                    UPDATE products
+                    SET Lineage = ?
                     WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
                 """, (new_lineage, tag_name, tag_name, product_db._normalize_product_name(tag_name)))
                 conn.commit()
-                time.sleep(0.1)  # Wait for commit
                 verified_lineage = product_db.get_product_lineage(tag_name)
                 logging.info(f"🔄 FORCE UPDATE RETRY - verified lineage: '{verified_lineage}'")
             except Exception as retry_err:
@@ -11233,7 +11223,8 @@ def update_lineage():
         
         # Clear caches AND Excel processor to force fresh data load
         try:
-            cache.clear()
+            # PERFORMANCE FIX: Only clear lineage-related caches, not ALL caches
+            # cache.clear() was causing 10+ second delays
             clear_available_tags_cache(reason="lineage_update")
             # CRITICAL FIX: Clear filter options cache so lineage dropdown refreshes with database values
             try:
