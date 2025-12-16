@@ -6726,6 +6726,20 @@ def _extract_price_from_database_product(product):
     # Return empty string if no price found
     return ''
 
+def _normalize_weight_string(weight_str):
+    """
+    Normalize weight strings so trailing .0 values are removed (e.g., 1.0g -> 1g).
+    Keeps other decimals intact (e.g., 0.5g stays 0.5g).
+    """
+    if weight_str is None:
+        return weight_str
+    s = str(weight_str).strip()
+    if s == '':
+        return s
+    # Remove trailing .0 (or .00, etc.) when followed by units or string end
+    s = re.sub(r'(\d+)\.0+(?=\s*[a-zA-Z]|$)', r'\1', s)
+    return s
+
 def _create_desc_and_weight(product_name, weight_units):
     """Create DescAndWeight field with 'Product Name - Weight' format (matching Excel processor)."""
     # CRITICAL FIX: Import re module locally to avoid scoping issues
@@ -6744,8 +6758,9 @@ def _create_desc_and_weight(product_name, weight_units):
     # Apply Excel processor formula: Remove weight information (patterns like " - 1g", " - .5g")
     description = re.sub(r' - [\d.].*$', '', description)
     
-    # Get weight units, clean them up
-    weight = str(weight_units).strip() if weight_units else ''
+    # Get weight units, clean them up (normalize trailing .0 cases)
+    weight = _normalize_weight_string(weight_units)
+    weight = str(weight).strip() if weight is not None else ''
     if weight and weight.lower() not in ['nan', 'none', 'null', '']:
         # Combine product name and weight with hyphen staying with weight (space after hyphen)
         # Use same format as Excel processor: -\u00A0 (hyphen + non-breaking space)
@@ -6754,11 +6769,63 @@ def _create_desc_and_weight(product_name, weight_units):
         # Just return the product name if no weight
         return description
 
+def _normalize_weight_fields(record):
+    """
+    Normalize all weight-related fields on a record so values like '1.0g'
+    are rendered as '1g' and DescAndWeight stays in sync.
+    """
+    if not isinstance(record, dict):
+        return record
+    
+    weight_fields = [
+        'Weight*', 'Weight', 'CombinedWeight', 'WeightUnits',
+        'WeightWithUnits', 'weightWithUnits'
+    ]
+    
+    for field in weight_fields:
+        if field in record:
+            record[field] = _normalize_weight_string(record.get(field))
+    
+    # If CombinedWeight is still missing, rebuild it from Weight* and Units
+    combined_weight = record.get('CombinedWeight')
+    if not combined_weight or str(combined_weight).strip() == '':
+        weight_value = record.get('Weight*') or record.get('Weight')
+        units_value = record.get('Units', '')
+        if weight_value:
+            combined_weight = f"{_normalize_weight_string(weight_value)}{units_value}".strip()
+            record['CombinedWeight'] = _normalize_weight_string(combined_weight)
+    
+    # Keep alias fields aligned
+    if record.get('CombinedWeight'):
+        record['WeightUnits'] = record.get('WeightUnits') or record['CombinedWeight']
+        record['WeightWithUnits'] = record.get('WeightWithUnits') or record['CombinedWeight']
+        record['weightWithUnits'] = record.get('weightWithUnits') or record['CombinedWeight']
+    
+    # Regenerate DescAndWeight with normalized weight if possible
+    product_name = (
+        record.get('Product Name*') or
+        record.get('ProductName') or
+        record.get('Product Name') or
+        record.get('Description')
+    )
+    weight_for_desc = (
+        record.get('CombinedWeight') or
+        record.get('WeightUnits') or
+        record.get('WeightWithUnits') or
+        record.get('weightWithUnits')
+    )
+    if product_name and weight_for_desc:
+        record['DescAndWeight'] = _create_desc_and_weight(product_name, weight_for_desc)
+        if not record.get('Description'):
+            record['Description'] = record['DescAndWeight']
+    
+    return record
+
 def _calculate_joint_ratio_for_record(db_record):
     """Calculate joint ratio for pre-roll products from database record."""
     product_name = db_record.get('Product Name*', '')
     product_type = db_record.get('Product Type*', '')
-    weight = db_record.get('Weight*', '')
+    weight = _normalize_weight_string(db_record.get('Weight*', ''))
     
     # Only calculate for pre-roll products
     if not product_type or 'pre-roll' not in str(product_type).lower():
@@ -6784,9 +6851,9 @@ def _calculate_joint_ratio_for_record(db_record):
             try:
                 count_int = int(count)
                 if count_int == 1:
-                    return f"{amount}g"
+                    return _normalize_weight_string(f"{amount}g")
                 else:
-                    return f"{amount}g x {count} Pack"
+                    return _normalize_weight_string(f"{amount}g x {count} Pack")
             except ValueError:
                 continue
     
@@ -6795,7 +6862,7 @@ def _calculate_joint_ratio_for_record(db_record):
     match = re.search(single_pre_roll_pattern, product_name_str, re.IGNORECASE)
     if match:
         amount = match.group(1)
-        return f"{amount}g"
+        return _normalize_weight_string(f"{amount}g")
     
     # If no pattern found, try to generate from weight
     if weight and str(weight).strip() != '' and str(weight).lower() != 'nan':
@@ -6810,7 +6877,7 @@ def _calculate_joint_ratio_for_record(db_record):
                 else:
                     # Round to 2 decimal places and remove trailing zeros
                     formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
-                return formatted_weight
+                return _normalize_weight_string(formatted_weight)
         except (ValueError, TypeError):
             pass
     
@@ -8449,7 +8516,7 @@ def process_database_product_for_api(db_product):
         processed_product = db_product.copy()
     
     # Create CombinedWeight if missing or empty
-    combined_weight = processed_product.get('CombinedWeight', '')
+    combined_weight = _normalize_weight_string(processed_product.get('CombinedWeight', ''))
     if not combined_weight or combined_weight == '' or str(combined_weight).strip() == '':
         weight_value = processed_product.get('Weight*', '')
         units = processed_product.get('Units', '')
@@ -8513,6 +8580,8 @@ def process_database_product_for_api(db_product):
         else:
             # No weight available
             combined_weight = 'N/A'
+
+    combined_weight = _normalize_weight_string(combined_weight)
     
     # CRITICAL FIX: Set all weight field variations for frontend compatibility
     processed_product['CombinedWeight'] = combined_weight
@@ -8544,7 +8613,7 @@ def process_database_product_for_api(db_product):
     
     # Create DescAndWeight field - always regenerate to ensure it has weight
     product_name = processed_product.get('Product Name*', processed_product.get('Product Name', ''))
-    weight_units = processed_product.get('CombinedWeight', '')
+    weight_units = _normalize_weight_string(processed_product.get('CombinedWeight', ''))
     
     # CRITICAL FIX: Always regenerate DescAndWeight to ensure it includes weight
     # If CombinedWeight is missing or N/A, try to extract from product name
