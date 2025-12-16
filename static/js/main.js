@@ -1025,7 +1025,9 @@ const TagManager = {
         _memoryOptimized: true,
         _lastCleanup: Date.now(),
         // Local undo stack for immediate undo
-        localUndoStack: []
+        localUndoStack: [],
+        // Redo stack for snapshot-based redo
+        redoSnapshotStack: []
     },
     SIMPLIFIED_RENDER_THRESHOLD: 900,
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
@@ -1496,6 +1498,9 @@ const TagManager = {
             // Clear redo stack when making a new selection (can't redo after new action)
             if (this.state.redoStack) {
                 this.state.redoStack = [];
+            }
+            if (this.state.redoSnapshotStack) {
+                this.state.redoSnapshotStack = [];
             }
 
             // IMMEDIATE: Save to local undo stack for instant undo
@@ -10973,56 +10978,55 @@ const TagManager = {
             console.log('🔙 Undoing most recent checkbox selection...');
 
             // Check if there's anything to undo
-            if (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0) {
+            if (!this.state.localUndoStack || this.state.localUndoStack.length === 0) {
                 if (window.Toast) {
-                    Toast.show('info', 'Nothing to undo - no tags selected');
+                    Toast.show('info', 'Nothing to undo');
                 }
                 return;
             }
 
             // Show user feedback immediately
             if (window.Toast) {
-                Toast.show('info', 'Undoing last selection...');
+                Toast.show('info', 'Undoing last selection batch...');
             }
 
-            // SIMPLE: Remove the most recently selected tag (last item in the array)
-            const lastSelectedTag = this.state.persistentSelectedTags[this.state.persistentSelectedTags.length - 1];
+            // Capture current state for redo
+            const captureCurrentState = () => ({
+                selected_tag_names: [...(this.state.persistentSelectedTags || [])],
+                available_tag_names: (this.state.tags || [])
+                    .filter(tag => tag && !this.state.persistentSelectedTags.includes(tag['Product Name*']))
+                    .map(tag => tag['Product Name*']),
+                action_type: 'undo_capture',
+                timestamp: new Date().toISOString()
+            });
 
-            // Save to redo stack before removing
-            if (!this.state.redoStack) {
-                this.state.redoStack = [];
+            if (!this.state.redoSnapshotStack) {
+                this.state.redoSnapshotStack = [];
             }
-            this.state.redoStack.push(lastSelectedTag);
-            // Limit redo stack to last 10 items
-            if (this.state.redoStack.length > 10) {
-                this.state.redoStack = this.state.redoStack.slice(-10);
+            this.state.redoSnapshotStack.push(captureCurrentState());
+            if (this.state.redoSnapshotStack.length > 5) {
+                this.state.redoSnapshotStack = this.state.redoSnapshotStack.slice(-5);
             }
 
-            // Remove from persistent selected tags
-            this.state.persistentSelectedTags = this.state.persistentSelectedTags.slice(0, -1);
-            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+            // Restore the last saved snapshot
+            const lastSnapshot = this.state.localUndoStack.pop();
+            const selectedNames = lastSnapshot.selected_tag_names || [];
 
-            // Update the selected tags display
-            const selectedTagObjects = this.state.persistentSelectedTags.map(tagName =>
+            this.state.persistentSelectedTags = [...selectedNames];
+            this.state.selectedTags = new Set(selectedNames);
+
+            const selectedTagObjects = selectedNames.map(tagName =>
                 this.state.tags.find(t => t['Product Name*'] === tagName)
             ).filter(Boolean);
             this.updateSelectedTags(selectedTagObjects);
-
-            // Uncheck the checkbox for the removed tag in available tags
-            const checkbox = document.querySelector(`#availableTags .tag-checkbox[value="${lastSelectedTag}"]`);
-            if (checkbox) {
-                checkbox.checked = false;
-            }
-
-            // Update Select All checkbox state
+            this._restoreCheckboxStates();
             this.updateSelectAllCheckboxes();
 
-            // Show success message
             if (window.Toast) {
-                Toast.show('success', `Removed: ${lastSelectedTag}`);
+                Toast.show('success', `Undo: restored ${selectedNames.length} selection(s)`);
             }
 
-            verboseLog(`✅ Undone last selection: ${lastSelectedTag}`);
+            verboseLog(`✅ Undo applied - restored ${selectedNames.length} selections`);
 
         } catch (error) {
             console.error('Failed to undo:', error.message);
@@ -11039,7 +11043,7 @@ const TagManager = {
             console.log('🔁 Redoing most recent undo...');
 
             // Check if there's anything to redo
-            if (!this.state.redoStack || this.state.redoStack.length === 0) {
+            if (!this.state.redoSnapshotStack || this.state.redoSnapshotStack.length === 0) {
                 if (window.Toast) {
                     Toast.show('info', 'Nothing to redo');
                 }
@@ -11048,37 +11052,44 @@ const TagManager = {
 
             // Show user feedback immediately
             if (window.Toast) {
-                Toast.show('info', 'Redoing...');
+                Toast.show('info', 'Redoing last batch...');
             }
 
-            // Get the most recently undone tag
-            const tagToRestore = this.state.redoStack.pop();
+            // Capture current state for future undo
+            const captureCurrentState = () => ({
+                selected_tag_names: [...(this.state.persistentSelectedTags || [])],
+                available_tag_names: (this.state.tags || [])
+                    .filter(tag => tag && !this.state.persistentSelectedTags.includes(tag['Product Name*']))
+                    .map(tag => tag['Product Name*']),
+                action_type: 'redo_capture',
+                timestamp: new Date().toISOString()
+            });
 
-            // Add back to selected tags
-            this.state.persistentSelectedTags.push(tagToRestore);
-            this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+            const snapshotToRestore = this.state.redoSnapshotStack.pop();
+            if (!this.state.localUndoStack) {
+                this.state.localUndoStack = [];
+            }
+            this.state.localUndoStack.push(captureCurrentState());
+            if (this.state.localUndoStack.length > 5) {
+                this.state.localUndoStack = this.state.localUndoStack.slice(-5);
+            }
 
-            // Update the selected tags display
-            const selectedTagObjects = this.state.persistentSelectedTags.map(tagName =>
+            const selectedNames = snapshotToRestore.selected_tag_names || [];
+            this.state.persistentSelectedTags = [...selectedNames];
+            this.state.selectedTags = new Set(selectedNames);
+
+            const selectedTagObjects = selectedNames.map(tagName =>
                 this.state.tags.find(t => t['Product Name*'] === tagName)
             ).filter(Boolean);
             this.updateSelectedTags(selectedTagObjects);
-
-            // Check the checkbox for the restored tag in available tags
-            const checkbox = document.querySelector(`#availableTags .tag-checkbox[value="${tagToRestore}"]`);
-            if (checkbox) {
-                checkbox.checked = true;
-            }
-
-            // Update Select All checkbox state
+            this._restoreCheckboxStates();
             this.updateSelectAllCheckboxes();
 
-            // Show success message
             if (window.Toast) {
-                Toast.show('success', `Restored: ${tagToRestore}`);
+                Toast.show('success', `Redo: restored ${selectedNames.length} selection(s)`);
             }
 
-            verboseLog(`✅ Redone: ${tagToRestore}`);
+            verboseLog(`✅ Redo applied - restored ${selectedNames.length} selections`);
 
         } catch (error) {
             console.error('Failed to redo:', error.message);
@@ -12039,9 +12050,23 @@ const TagManager = {
     },
 
     async uploadFile(file) {
+        // CRITICAL FIX: Prevent concurrent uploads
+        if (this._uploadInProgress) {
+            console.warn('⚠️ Upload already in progress, ignoring duplicate request');
+            return;
+        }
+
+        this._uploadInProgress = true;
+
+        // CRITICAL FIX: Disable upload button and file input during upload
+        const uploadBtn = document.getElementById('uploadTriggerBtn');
+        const fileInput = document.getElementById('fileInput');
+        if (uploadBtn) uploadBtn.disabled = true;
+        if (fileInput) fileInput.disabled = true;
+
         try {
             verboseLog(`🚀 Starting LIGHTNING upload:`, file.name, 'Size:', file.size, 'bytes');
-            
+
             // CRITICAL: Check store selection before attempting upload
             try {
                 const storeCheckResponse = await fetch('/api/check-store-required');
@@ -12219,9 +12244,19 @@ const TagManager = {
                     }, 30000); // 30s timeout for PythonAnywhere - backend is fast but network can be slow
 
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
-                    const tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
-                        signal: tagsController.signal
-                    });
+                    let tagsResponse;
+                    try {
+                        tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
+                            signal: tagsController.signal
+                        });
+                    } catch (fetchError) {
+                        console.error(`⚠️ Tag fetch failed (attempt ${attempt + 1}/${maxRetries}):`, fetchError);
+                        if (tagsTimeout) clearTimeout(tagsTimeout);
+                        if (attempt < maxRetries - 1) {
+                            continue; // Retry
+                        }
+                        throw fetchError; // Last attempt failed
+                    }
                     clearTimeout(tagsTimeout);
                     
                     if (tagsResponse.ok) {
@@ -12436,6 +12471,13 @@ const TagManager = {
                 alert(fullErrorMessage);
             }
             return;
+        } finally {
+            // CRITICAL FIX: Always clear upload flag and re-enable controls
+            this._uploadInProgress = false;
+            const uploadBtn = document.getElementById('uploadTriggerBtn');
+            const fileInput = document.getElementById('fileInput');
+            if (uploadBtn) uploadBtn.disabled = false;
+            if (fileInput) fileInput.disabled = false;
         }
     },
     // Fallback upload method for PythonAnywhere
