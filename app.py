@@ -6509,7 +6509,6 @@ def _extract_product_name_from_full_name(full_name):
         return name.split(' by ')[0].strip()
     elif ' - ' in name:
         # Only split on dashes followed by weight information (numbers, decimals, units)
-        import re
         if re.search(r' - [\d.]', name):
             # Remove weight part but preserve the dash in product names
             return re.sub(r' - [\d.].*$', '', name).strip()
@@ -6574,7 +6573,6 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
             
             # CRITICAL FIX: Remove vendor suffixes for better matching
             # Common patterns: "by Vendor", " - Vendor", etc.
-            import re
             clean_tag = re.sub(r'\s*(?:by|from|-\s*)([^-]*?)(?:\s*$)', '', tag_lower)
             clean_tag = clean_tag.strip()
             
@@ -6686,7 +6684,6 @@ def _create_desc_and_weight(product_name, weight_units):
         description = description.split(" by ")[0].strip()
     
     # Apply Excel processor formula: Remove weight information (patterns like " - 1g", " - .5g")
-    import re
     description = re.sub(r' - [\d.].*$', '', description)
     
     # Get weight units, clean them up
@@ -6712,7 +6709,6 @@ def _calculate_joint_ratio_for_record(db_record):
     if not product_name:
         return db_record.get('JointRatio', '')
     
-    import re
     product_name_str = str(product_name)
     
     # Look for patterns like "0.5g x 2 Pack", "1g x 28 Pack", etc.
@@ -7823,7 +7819,6 @@ def generate_labels():
                         return str(n).lower().strip()
                 
                 # Helper to extract base name (remove " by Vendor - Weight" suffix)
-                import re
                 def _base_name(full_name):
                     base = re.sub(r'\s+by\s+[^-]+(\s*-\s*\d+\s*\w+)?$', '', str(full_name), flags=re.IGNORECASE).strip()
                     base = re.sub(r'\s*-\s*\d+\s*\w+$', '', base).strip()
@@ -8463,7 +8458,6 @@ def process_database_product_for_api(db_product):
     product_name = str(processed_product.get('Product Name*', '')).lower()
     if ('concentrate' in product_type or 'wax' in product_name or 'hash' in product_name or 'oil' in product_name) and combined_weight == 'N/A':
         # Try to extract weight from product name
-        import re
         weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|gram|grams|oz|ounce|ounces)', product_name)
         if weight_match:
             weight_value = weight_match.group(1)
@@ -8489,7 +8483,6 @@ def process_database_product_for_api(db_product):
     # If CombinedWeight is missing or N/A, try to extract from product name
     if not weight_units or weight_units == '' or weight_units == 'N/A':
         # Try to extract weight from product name (e.g., "Gelato Distillate Cartridge - 1g")
-        import re
         weight_match = re.search(r' - ([\d.]+[a-z]+)', str(product_name))
         if weight_match:
             weight_units = weight_match.group(1)
@@ -8500,7 +8493,6 @@ def process_database_product_for_api(db_product):
         processed_product['DescAndWeight'] = _create_desc_and_weight(product_name, weight_units)
     elif product_name:
         # If still no weight, just use the cleaned product name
-        import re
         description = str(product_name).strip()
         if " by " in description:
             description = description.split(" by ")[0].strip()
@@ -8641,6 +8633,22 @@ def get_available_tags():
         # The processor is not session-safe and can contain data from other users
         has_excel_data = file_exists and session_file_path
 
+        # Fallback: if no session file, try default file for the selected store
+        if not has_excel_data:
+            try:
+                from src.core.data.excel_processor import get_default_upload_file
+                default_file = get_default_upload_file(store_name)
+                if default_file and os.path.exists(default_file):
+                    logging.info(f"ℹ️ No session file; using default store file: {default_file}")
+                    session['file_path'] = default_file
+                    session['uploaded_filename'] = os.path.basename(default_file)
+                    session.modified = True
+                    session_file_path = default_file
+                    has_excel_data = True
+                    file_exists = True
+            except Exception as default_err:
+                logging.warning(f"Default file fallback failed: {default_err}")
+
         # CRITICAL: If file doesn't exist but session says it should, clear the stale session
         if not file_exists and session_file_path:
             logging.warning(f"⚠️ Session file path exists but file missing: {session_file_path}")
@@ -8700,6 +8708,27 @@ def get_available_tags():
                 'message': 'No file uploaded. Please upload an Excel file to get started.'
             }), 200
 
+        # CRITICAL: Validate that the session file matches the selected store
+        # This prevents wrong store data from being loaded
+        if session_file_path:
+            session_filename = os.path.basename(session_file_path)
+            detected_store = extract_store_from_filename(session_filename)
+
+            if detected_store and detected_store != store_name:
+                logging.error(f"❌ STORE MISMATCH DETECTED: Session has {detected_store} file but {store_name} store selected")
+                # Clear the bad session file
+                if 'file_path' in session:
+                    del session['file_path']
+                    session.modified = True
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'store-mismatch-error',
+                    'error': f'Store mismatch detected: {detected_store} file loaded in {store_name} store. Please re-upload the correct file.',
+                    'detected_store': detected_store,
+                    'current_store': store_name
+                }), 400
+
         # CRITICAL: SIMPLE PATH - When Excel exists, load ONLY from Excel, skip ALL other logic
         logging.info(f"✅ Excel file exists: {session_file_path} - using SIMPLE Excel-only path")
         try:
@@ -8729,6 +8758,14 @@ def get_available_tags():
                                 # Normalize product names for query
                                 normalized_names = [product_db._normalize_product_name(name) for name in product_names]
 
+                                # Create reverse mapping: normalized_name -> original Excel names
+                                norm_to_excel = {}
+                                for excel_name in product_names:
+                                    norm = product_db._normalize_product_name(excel_name)
+                                    if norm not in norm_to_excel:
+                                        norm_to_excel[norm] = []
+                                    norm_to_excel[norm].append(excel_name)
+
                                 # SQLite has a parameter limit (typically 999) – chunk to avoid failures
                                 chunk_size = 400
                                 total_results = 0
@@ -8736,7 +8773,7 @@ def get_available_tags():
                                     chunk = normalized_names[chunk_start:chunk_start + chunk_size]
                                     placeholders = ','.join(['?' for _ in chunk])
                                     cursor.execute(f'''
-                                        SELECT "Product Name*", "Lineage"
+                                        SELECT "Product Name*", "Lineage", normalized_name
                                         FROM products
                                         WHERE normalized_name IN ({placeholders})
                                     ''', chunk)
@@ -8744,14 +8781,27 @@ def get_available_tags():
                                     total_results += len(results)
 
                                     # Build lineage map from this chunk
+                                    # CRITICAL: Map to ALL Excel names that normalize to this database product
                                     for row in results:
                                         db_name = row[0]
                                         db_lineage = row[1]
-                                        if db_name and db_lineage:
-                                            lineage_map[db_name] = str(db_lineage).strip().upper()
+                                        norm_name = row[2]
 
-                                logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products across {len(normalized_names)//chunk_size + 1} chunk(s)")
+                                        if db_lineage:
+                                            clean_lineage = str(db_lineage).strip().upper()
+                                            # Map exact database name
+                                            if db_name:
+                                                lineage_map[db_name] = clean_lineage
+                                            # Map all Excel names that normalize to this product
+                                            if norm_name in norm_to_excel:
+                                                for excel_name in norm_to_excel[norm_name]:
+                                                    lineage_map[excel_name] = clean_lineage
+
+                                logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products across {(len(normalized_names)-1)//chunk_size + 1} chunk(s)")
                                 logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
+                                if len(lineage_map) > 0:
+                                    sample = list(lineage_map.items())[:2]
+                                    logging.info(f"📋 Sample mappings: {sample}")
                             except Exception as lineage_query_err:
                                 logging.warning(f"Lineage enrichment query failed: {lineage_query_err}")
                                 import traceback
