@@ -823,8 +823,8 @@ body.modal-open #mainContent.store-selection-disabled,
   flex-direction: column !important;
   align-items: center !important;
   width: 100% !important;
-  padding-bottom: 12rem !important; /* Space for pinned help button */
-  position: relative !important;    /* Anchor for absolute-position help button */
+  padding-bottom: 4rem !important; /* Gentle padding below controls */
+  position: relative !important;
 }
 
 .control-panel > * {
@@ -863,17 +863,17 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .help-button-container {
-  position: absolute !important;
-  left: 50% !important;
-  transform: translateX(-50%) !important;
-  bottom: 6rem !important;          /* Mid position between edge and controls */
-  margin: 0 !important;
-  width: auto !important;
+  position: static !important;
+  left: auto !important;
+  transform: none !important;
+  bottom: auto !important;
+  margin: 1.5rem 0 2rem 0 !important;
+  width: 100% !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
   padding: 0.6rem 0.75rem !important;
-  z-index: 3 !important;
+  z-index: 1 !important;
 }
 
 .help-button-container .big-glow-help-btn {
@@ -2935,16 +2935,16 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Center column specific spacing reductions */
   .help-button-container {
-    position: absolute !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    bottom: 6rem !important;
-    margin: 0 !important;
-    width: auto !important;
+    position: static !important;
+    left: auto !important;
+    transform: none !important;
+    bottom: auto !important;
+    margin: 1.5rem 0 2rem 0 !important;
+    width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    z-index: 3 !important;
+    z-index: 1 !important;
     padding: 0.6rem 0.75rem !important;
   }
   
@@ -7848,17 +7848,17 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    position: absolute !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
-    bottom: 6rem !important;
-    margin: 0 !important;
-    width: auto !important;
+    position: static !important;
+    left: auto !important;
+    transform: none !important;
+    bottom: auto !important;
+    margin: 1.5rem 0 2rem 0 !important;
+    width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
     padding: 0.6rem 0.75rem !important;
-    z-index: 3 !important;
+    z-index: 1 !important;
   }
   
   .help-label {
