@@ -1296,13 +1296,50 @@ def update_processing_status(filename, status):
         logging.debug(f"Current processing statuses: {dict(processing_status)}")
 
 def get_excel_processor():
-    """DEPRECATED: Returns None to force callers to create new processor instances.
+    """Return a fresh ExcelProcessor for the current store/session.
 
-    The global processor causes data leakage between sessions. All callers should now
-    create their own ExcelProcessor instances per-request.
+    Avoids sharing processors across requests while keeping callers intact.
     """
-    logging.warning("⚠️ DEPRECATED: get_excel_processor() called - should create new instance instead")
-    return None
+    from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
+
+    # Resolve store context
+    store_name = None
+    try:
+        store_name = get_current_store_name(allow_fallback=True)
+    except Exception:
+        store_name = None
+
+    processor = ExcelProcessor(store_name=store_name)
+
+    # Enable product DB integration by default for lineage lookups
+    if hasattr(processor, 'enable_product_db_integration'):
+        try:
+            processor.enable_product_db_integration(True)
+        except Exception:
+            pass
+
+    # Try to load session file if present
+    try:
+        from flask import has_request_context, session
+        if has_request_context():
+            session_file = session.get('file_path')
+            if session_file and os.path.exists(session_file):
+                processor.load_file(session_file)
+                processor._last_loaded_file = session_file
+    except Exception:
+        pass
+
+    # If nothing loaded, optionally load default file for the store
+    if not getattr(processor, '_last_loaded_file', None):
+        try:
+            default_file = get_default_upload_file(store_name or get_current_store_name(allow_fallback=True))
+            if default_file and os.path.exists(default_file):
+                if processor.load_file(default_file):
+                    processor._last_loaded_file = default_file
+        except Exception:
+            pass
+
+    return processor
 
 # Ensure no stray indentation or orphaned blocks before function definition
 def _resolve_database_path_for_store(store_name: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
