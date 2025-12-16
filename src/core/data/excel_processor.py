@@ -1917,17 +1917,24 @@ class ExcelProcessor:
             try:
                 self.logger.debug(f"Reading with engine: {excel_engine}")
                 
+                # PERFORMANCE OPTIMIZATION: Use faster pandas reading options
                 # Standard reading approach for both environments
                 # Prevent pandas from converting empty cells to NaN values
+                import time
+                read_start = time.time()
+                
+                # Optimize reading: na_filter=False and keep_default_na=False are already fastest
+                # For very large files, consider reading in chunks, but for now use optimized single read
                 df = pd.read_excel(
                     file_path, 
                     engine=excel_engine, 
                     dtype=dtype_dict,
-                    na_filter=False,  # Don't filter NA values
-                    keep_default_na=False  # Don't use default NA values
+                    na_filter=False,  # Don't filter NA values - faster (already set)
+                    keep_default_na=False  # Don't use default NA values - faster (already set)
                 )
                 
-                self.logger.info(f"Successfully read file with {excel_engine} engine: {len(df)} rows, {len(df.columns)} columns")
+                read_time = time.time() - read_start
+                self.logger.info(f"✅ File read completed in {read_time:.2f}s: {len(df)} rows, {len(df.columns)} columns")
                     
             except Exception as e:
                 self.logger.error(f"Failed to read with {excel_engine} engine: {e}")
@@ -3330,8 +3337,12 @@ class ExcelProcessor:
         
         tags = []
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
+
+        # PERFORMANCE OPTIMIZATION: Convert DataFrame to dict records - much faster than iterrows()
+        # This is 5-10x faster than iterrows() for large DataFrames
+        rows_dict = filtered_df.to_dict('records')
         
-        for _, row in filtered_df.iterrows():
+        for row in rows_dict:
             # Get quantity from various possible column names
             quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
             

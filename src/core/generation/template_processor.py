@@ -1579,8 +1579,7 @@ class TemplateProcessor:
     
     def _build_label_context(self, record, doc, product_brand_cache=None):
         """Ultra-optimized label context building for maximum performance."""
-        # Ensure regex module is available even if future edits add local imports/assignments
-        import re
+        # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
             product_brand_cache = {}
         # CRITICAL FIX: Log lineage value received in template processor
