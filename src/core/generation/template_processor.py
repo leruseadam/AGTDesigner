@@ -1579,6 +1579,8 @@ class TemplateProcessor:
     
     def _build_label_context(self, record, doc, product_brand_cache=None):
         """Ultra-optimized label context building for maximum performance."""
+        # Ensure regex module is available even if future edits add local imports/assignments
+        import re
         if product_brand_cache is None:
             product_brand_cache = {}
         # CRITICAL FIX: Log lineage value received in template processor
@@ -1855,7 +1857,6 @@ class TemplateProcessor:
                         # - "Assorted Pre-Roll 1g x 5 Packs" (has "Xg x Y")
                         # - "Pre-Roll - 1g" (has "- Xg" or "Xg" at end)
                         # - "Infused Pre-Roll - 0.5g" (has "- Xg")
-                        import re
                         has_weight_in_name = bool(re.search(r'\d+\.?\d*\s*g(?:\s*x\s*\d+)?(?:\s+Pack)?', group_display_name, re.IGNORECASE))
 
                         if has_weight_in_name:
