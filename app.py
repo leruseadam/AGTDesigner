@@ -8658,6 +8658,62 @@ def get_available_tags():
                 'source': 'empty-no-excel',
                 'message': 'No file uploaded. Please upload an Excel file to get started.'
             }), 200
+
+        # CRITICAL: SIMPLE PATH - When Excel exists, load ONLY from Excel, skip ALL other logic
+        logging.info(f"✅ Excel file exists: {session_file_path} - using SIMPLE Excel-only path")
+        try:
+            from src.core.data.excel_processor import ExcelProcessor
+            simple_processor = ExcelProcessor(store_name=store_name)
+            simple_processor.load_file(session_file_path)
+
+            if simple_processor.df is not None and not simple_processor.df.empty:
+                simple_tags = simple_processor.get_available_tags(filters=None)
+                logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
+
+                # Enrich with database lineage ONLY (don't add database products)
+                try:
+                    product_db = get_product_database(store_name)
+                    if product_db and simple_tags:
+                        product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
+                        if product_names:
+                            db_products = product_db.get_products_by_names(product_names)
+                            lineage_map = {}
+                            if db_products:
+                                for db_product in db_products:
+                                    db_name = db_product.get('Product Name*')
+                                    db_lineage = (
+                                        db_product.get('currentLineage') or
+                                        db_product.get('canonical_lineage') or
+                                        db_product.get('Lineage')
+                                    )
+                                    if db_name and db_lineage:
+                                        lineage_map[db_name] = str(db_lineage).strip().upper()
+
+                            for tag in simple_tags:
+                                product_name = tag.get('Product Name*')
+                                if product_name and product_name in lineage_map:
+                                    db_lineage_clean = lineage_map[product_name]
+                                    tag['currentLineage'] = db_lineage_clean
+                                    tag['canonical_lineage'] = db_lineage_clean
+                                    tag['Lineage'] = db_lineage_clean
+                                    tag['lineage'] = db_lineage_clean.lower()
+                            logging.info(f"✅ Enriched {len(lineage_map)} products with database lineage")
+                except Exception as enrich_err:
+                    logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+
+                safe_simple_tags = make_json_safe(simple_tags)
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags")
+                return jsonify({
+                    'tags': safe_simple_tags,
+                    'total_count': len(safe_simple_tags),
+                    'source': 'excel-simple'
+                })
+        except Exception as simple_err:
+            logging.error(f"❌ SIMPLE PATH failed: {simple_err}")
+            import traceback
+            logging.error(traceback.format_exc())
+            # Fall through to complex path below
         
         # Initialize flags
         all_tags = []  # Initialize all_tags before checking cache
