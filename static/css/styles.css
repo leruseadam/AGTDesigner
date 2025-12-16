@@ -867,7 +867,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important; /* Remove transform to match other buttons spacing */
   bottom: auto !important;
-  margin: 0 0.5rem 0 !important;
+  margin: 0 0.5rem 1.5rem 0.5rem !important; /* Add bottom margin to create space from bottom edge */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2943,7 +2943,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important; /* Remove transform to match other buttons spacing */
     bottom: auto !important;
-    margin: 0 0.5rem 0 !important;
+    margin: 0 0.5rem 1.5rem 0.5rem !important; /* Add bottom margin to create space from bottom edge */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7856,7 +7856,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important; /* Remove transform to match other buttons spacing */
     bottom: auto !important;
-    margin: 0 0.5rem 0 !important;
+    margin: 0 0.5rem 1.5rem 0.5rem !important; /* Add bottom margin to create space from bottom edge */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
