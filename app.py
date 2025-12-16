@@ -8868,8 +8868,12 @@ def get_available_tags():
             session.modified = True
             has_excel_data = False
 
+        # CRITICAL FIX: Include upload timestamp in cache key to ensure each upload has unique cache
+        # This prevents serving stale data from previous uploads or other sessions
+        upload_timestamp = session.get('upload_timestamp', '')
         if has_excel_data and session_file_path:
-            cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}')
+            logging.info(f"📦 Cache key with timestamp: ..._{upload_timestamp}")
         else:
             cache_key = get_session_cache_key('available_tags')
             # CRITICAL: If no Excel data, clear any old file-specific caches to prevent stale data
@@ -9006,7 +9010,8 @@ def get_available_tags():
                     logging.info("⚡ FAST: Serving tags from session processor while cache builds (fast_load, file exists)")
                     excel_tags = session_processor.get_available_tags(filters=None)
                     safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
-                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                    upload_ts = session.get('upload_timestamp', '')
+                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_ts}')
                     try:
                         cache.set(cache_key, safe_excel_tags, timeout=300)
                     except OSError as cache_os_err:
@@ -10574,8 +10579,9 @@ def get_available_tags():
             # CRITICAL FIX: Ensure cache_key is defined before using it (when prefer_db path is taken)
             if 'cache_key' not in locals():
                 session_file_path = session.get('file_path', '')
+                upload_ts = session.get('upload_timestamp', '')
                 if session_file_path:
-                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_ts}')
                 else:
                     cache_key = get_session_cache_key('available_tags')
             cache.set(cache_key, safe_all_tags, timeout=300)  # Cache for 5 minutes
