@@ -887,15 +887,10 @@ def get_current_store_name(allow_fallback=True):
                 return 'AGT_Bothell'  # Default fallback
             return None
         
-        # CRITICAL FIX: Check Flask session first (more reliable on PythonAnywhere)
-        if session.get('selected_store'):
-            if session.get('store_server_id') == SERVER_INSTANCE_ID:
-                logging.debug(f"Returning store from session: {session.get('selected_store')}")
-                return session.get('selected_store')
-            else:
-                logging.info("Session store belongs to previous server instance, clearing")
-                session.pop('selected_store', None)
-                session.pop('store_server_id', None)
+    # CRITICAL FIX: Check Flask session first (most reliable). Keep the value even if server instance changed.
+    if session.get('selected_store'):
+        logging.debug(f"Returning store from session: {session.get('selected_store')}")
+        return session.get('selected_store')
         
         # Fallback to IP-based selection
         ip_address = get_client_ip()
@@ -916,56 +911,9 @@ def get_current_store_name(allow_fallback=True):
                         # Remove expired selection
                         del _ip_store_selections[ip_address]
         
-        if allow_fallback:
-            # JSON MATCH FIX: If no store is selected, find and use the database with the most products
-            # This ensures JSON matching works even without explicit store selection
-            logging.info("No store selected, finding database with most products for JSON matching...")
-            try:
-                import os
-                import glob
-                import sqlite3
-                
-                # Check for database files
-                db_dir = os.path.join(os.getcwd(), 'uploads')
-                if os.path.exists(db_dir):
-                    db_files = glob.glob(os.path.join(db_dir, 'product_database_*.db'))
-                    
-                    best_db = None
-                    best_count = 0
-                    best_store = None
-                    
-                    for db_file in db_files:
-                        try:
-                            conn = create_db_connection(db_file)
-                            cursor = conn.cursor()
-                            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                            if cursor.fetchone():
-                                cursor.execute("SELECT COUNT(*) FROM products")
-                                count = cursor.fetchone()[0]
-                                if count > best_count:
-                                    best_count = count
-                                    best_db = db_file
-                                    # Extract store name from filename
-                                    filename = os.path.basename(db_file)
-                                    best_store = filename.replace('product_database_', '').replace('.db', '')
-                            conn.close()
-                        except Exception as e:
-                            logging.debug(f"Error checking database {db_file}: {e}")
-                            continue
-                    
-                    if best_store and best_count > 0:
-                        logging.info(f"JSON MATCH FIX: Auto-selected store '{best_store}' with {best_count} products")
-                        # Save to session so future requests use the same store (only if we have request context)
-                        from flask import has_request_context
-                        if has_request_context():
-                            session['selected_store'] = best_store
-                            session['store_server_id'] = SERVER_INSTANCE_ID
-                        return best_store
-            except Exception as e:
-                logging.warning(f"Error finding best database: {e}")
-        
-        # No store selection found - return None (caller must handle)
-        return None
+    if allow_fallback:
+        # Simpler fallback: default to Bothell instead of auto-picking largest DB (avoids surprise switches)
+        return 'AGT_Bothell'
     except Exception as e:
         logging.warning(f"Error getting current store name: {e}")
         return None
@@ -978,15 +926,10 @@ def has_store_selection():
         if not has_request_context():
             return False
         
-        # CRITICAL FIX: Check Flask session FIRST (most reliable)
+        # CRITICAL FIX: Check Flask session FIRST (most reliable) and keep value even if server instance changed
         if session.get('selected_store'):
-            if session.get('store_server_id') == SERVER_INSTANCE_ID:
-                logging.debug(f"has_store_selection: Found store in session: {session.get('selected_store')}")
-                return True
-            else:
-                logging.info("has_store_selection: Session store belongs to previous server instance; clearing")
-                session.pop('selected_store', None)
-                session.pop('store_server_id', None)
+            logging.debug(f"has_store_selection: Found store in session: {session.get('selected_store')}")
+            return True
         
         # Fallback to IP-based selection
         ip_address = get_client_ip()
