@@ -8467,7 +8467,13 @@ def get_session_cache_key(base_key):
     if _excel_processor is not None:
         file_path = getattr(_excel_processor, '_last_loaded_file', '')
 
-    key_str = f"{base_key}:{sid}:{file_path}"
+    # CRITICAL: Include current store in cache key to prevent cross-store pollution
+    try:
+        store_name = get_current_store_name()
+    except Exception:
+        store_name = ''
+
+    key_str = f"{base_key}:{sid}:{store_name}:{file_path}"
     return hashlib.sha256(key_str.encode()).hexdigest()
 
 def clear_available_tags_cache(reason=None):
@@ -9006,6 +9012,18 @@ def get_available_tags():
                 # CRITICAL: Must call get_excel_processor() to ensure correct session file is loaded
                 # Never trust global _excel_processor as it may contain other user's data
                 session_processor = get_excel_processor()
+
+                # CRITICAL FIX: Verify processor has correct file loaded before using
+                if session_processor:
+                    loaded_file = getattr(session_processor, '_last_loaded_file', None)
+                    if loaded_file != session_file_path:
+                        logging.error(f"❌ SESSION PROCESSOR MISMATCH: session={session_file_path}, loaded={loaded_file}")
+                        # Force reload
+                        if hasattr(session_processor, 'load_file') and session_file_path:
+                            logging.info(f"🔄 Force reloading session file: {session_file_path}")
+                            session_processor.load_file(session_file_path)
+                            session_processor._last_loaded_file = session_file_path
+
                 if session_processor is not None and getattr(session_processor, 'df', None) is not None and not session_processor.df.empty:
                     logging.info("⚡ FAST: Serving tags from session processor while cache builds (fast_load, file exists)")
                     excel_tags = session_processor.get_available_tags(filters=None)
@@ -9064,8 +9082,18 @@ def get_available_tags():
                 try:
                     if file_exists:
                         excel_processor = get_excel_processor()
+                        # CRITICAL FIX: Verify processor loaded correct file before using it
+                        if excel_processor:
+                            loaded_file = getattr(excel_processor, '_last_loaded_file', None)
+                            if loaded_file != session_file_path:
+                                logging.error(f"❌ PROCESSOR FILE MISMATCH: session={session_file_path}, loaded={loaded_file}")
+                                # Force reload with correct file
+                                if hasattr(excel_processor, 'load_file') and session_file_path:
+                                    logging.info(f"🔄 Force reloading correct file: {session_file_path}")
+                                    excel_processor.load_file(session_file_path)
+                                    excel_processor._last_loaded_file = session_file_path
                     else:
-                        excel_processor = _excel_processor if _excel_processor is not None else None
+                        excel_processor = None  # Don't use global processor if no file
                 except Exception as get_proc_err:
                     logging.warning(f"Could not get Excel processor for fast_load: {get_proc_err}")
                     excel_processor = None
