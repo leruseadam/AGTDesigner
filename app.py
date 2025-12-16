@@ -7527,6 +7527,7 @@ def generate_labels():
                                     'Barcode': processed_record.get('Barcode*', ''),
                                     'Quantity': processed_record.get('Quantity*', '1')
                                 }
+                                record = _normalize_weight_fields(record)
                                 print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
                                 print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
                                 print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
@@ -7739,6 +7740,7 @@ def generate_labels():
                                 'Test result unit (% or mg)': json_product.get('Test result unit (% or mg)', '%'),
                                 'Source': 'JSON Match'
                             }
+                            record = _normalize_weight_fields(record)
                             records.append(record)
                             logging.info(f"CRITICAL FIX: Created record for JSON matched product '{product_name}'")
                     
