@@ -821,11 +821,10 @@ def cleanup_non_store_databases():
 
 
 def start_storage_cleanup_scheduler():
-    """Run periodic cleanup (hourly) to prune old uploads and stray DBs."""
+    """Run periodic cleanup (hourly) to prune stray DBs."""
     def _worker():
         while True:
             try:
-                cleanup_old_uploads()
                 cleanup_non_store_databases()
             except Exception as e:
                 logging.warning(f"Cleanup scheduler error: {e}")
@@ -834,9 +833,36 @@ def start_storage_cleanup_scheduler():
     try:
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
-        logging.info("Cleanup scheduler started (uploads + non-store DBs)")
+        logging.info("Cleanup scheduler started (non-store DBs hourly)")
     except Exception as e:
         logging.warning(f"Failed to start cleanup scheduler: {e}")
+
+
+def start_daily_upload_cleanup_scheduler(run_hour: int = 0, run_minute: int = 0):
+    """Schedule upload cleanup to run once daily at the specified time (default: midnight)."""
+    def seconds_until_target():
+        now = datetime.now()
+        target = now.replace(hour=run_hour, minute=run_minute, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return (target - now).total_seconds()
+
+    def _worker():
+        while True:
+            try:
+                wait_seconds = max(60, seconds_until_target())
+                time.sleep(wait_seconds)
+                cleanup_old_uploads()
+            except Exception as e:
+                logging.warning(f"Daily upload cleanup error: {e}")
+                time.sleep(600)  # Backoff before retrying
+
+    try:
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        logging.info("Daily upload cleanup scheduler started (runs at midnight server time)")
+    except Exception as e:
+        logging.warning(f"Failed to start daily upload cleanup scheduler: {e}")
 
 def get_client_ip():
     """Get the client's IP address."""
@@ -2043,6 +2069,7 @@ def add_performance_headers(response):
 
 # Start periodic storage cleanup (uploads + stray DBs)
 start_storage_cleanup_scheduler()
+start_daily_upload_cleanup_scheduler(run_hour=0, run_minute=0)
 
 @app.before_request
 def start_request_timer():
@@ -7914,6 +7941,11 @@ def generate_labels():
         # PREROLL TEMPLATE: Group by unique vendor + description combination
         if template_type == 'preroll':
             records = generate_preroll_tags(records, cache)
+            # If preroll grouping produced no records (e.g., brand filtering removed all items),
+            # bail out early with a clear error instead of letting downstream code hit None.save().
+            if not records:
+                logging.error("PREROLL: No preroll groups generated after filtering/grouping")
+                return jsonify({'error': 'No preroll items found to generate. Please verify preroll data and allowed brands.'}), 400
         
         # For mini templates, log how many labels will be filled vs. left blank
         if template_type == 'mini':
