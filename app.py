@@ -9732,22 +9732,30 @@ def get_available_tags():
         excel_processor = None
         excel_tags = []
 
-        # Get excel processor for later use
-        excel_processor = get_excel_processor()
+        # CRITICAL: Create NEW processor instance instead of using deprecated global
+        if has_excel_data and session_file_path and not prefer_db and len(all_tags) == 0:
+            try:
+                from src.core.data.excel_processor import ExcelProcessor
+                logging.info(f"🆕 Creating NEW processor for main path: {session_file_path}")
+                excel_processor = ExcelProcessor(store_name=store_name)
+                excel_processor.load_file(session_file_path)
+                excel_processor._last_loaded_file = session_file_path
 
-        # CRITICAL FIX: If all_tags already has Excel tags (from earlier processing), don't process Excel again
-        if not prefer_db and len(all_tags) == 0:
-            # Re-get processor in case it was cleared
-            if excel_processor is None:
-                excel_processor = get_excel_processor()
-            if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-                try:
+                if excel_processor.df is not None and not excel_processor.df.empty:
                     excel_tags = excel_processor.get_available_tags()
                     logging.info(f"Excel processor returned {len(excel_tags)} tags")
+                    # Log sample products for debugging
+                    if excel_tags:
+                        sample_products = [tag.get('Product Name*', 'NO_NAME') for tag in excel_tags[:5]]
+                        logging.info(f"🏷️ Main path sample products: {sample_products}")
                     all_tags.extend(excel_tags)
-                except Exception as e:
-                    logging.warning(f"Error getting Excel processor tags: {e}")
-                    excel_tags = []
+                else:
+                    logging.warning("Excel processor has no data after loading")
+            except Exception as e:
+                logging.warning(f"Error creating/using Excel processor: {e}")
+                import traceback
+                logging.warning(traceback.format_exc())
+                excel_tags = []
         elif not prefer_db and len(all_tags) > 0:
             # Excel tags already processed, use them for merging
             excel_tags = all_tags.copy()
@@ -10400,18 +10408,8 @@ def get_available_tags():
                     logging.info(f"✅ FINAL CHECK: Set database lineage on {final_lineage_check_count} tags that were missing it")
         
         safe_all_tags = make_json_safe(all_tags)
-        # Cache the results for faster subsequent requests (unless nocache requested)
-        if safe_all_tags and not nocache:
-            # CRITICAL FIX: Ensure cache_key is defined before using it (when prefer_db path is taken)
-            if 'cache_key' not in locals():
-                session_file_path = session.get('file_path', '')
-                upload_ts = session.get('upload_timestamp', '')
-                if session_file_path:
-                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_ts}')
-                else:
-                    cache_key = get_session_cache_key('available_tags')
-            cache.set(cache_key, safe_all_tags, timeout=300)  # Cache for 5 minutes
-            logging.info(f"✅ Cached {len(safe_all_tags)} tags for future requests")
+        # CRITICAL: NO CACHING - always return fresh data to prevent stale data issues
+        logging.info(f"🚫 CACHE DISABLED: Not caching tags to prevent stale data")
         try:
             final_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
             save_available_tags_cache(_normalize_store_key(final_store_for_cache), safe_all_tags)
