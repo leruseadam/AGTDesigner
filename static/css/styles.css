@@ -863,9 +863,9 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .help-button-container {
-  position: static !important;
+  position: relative !important;
   left: auto !important;
-  transform: none !important;
+  transform: translateY(-3rem) !important; /* Lift roughly half an inch */
   bottom: auto !important;
   margin: 1.5rem 0 2rem 0 !important;
   width: 100% !important;
@@ -2935,9 +2935,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Center column specific spacing reductions */
   .help-button-container {
-    position: static !important;
+    position: relative !important;
     left: auto !important;
-    transform: none !important;
+    transform: translateY(-3rem) !important;
     bottom: auto !important;
     margin: 1.5rem 0 2rem 0 !important;
     width: 100% !important;
@@ -7848,9 +7848,9 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    position: static !important;
+    position: relative !important;
     left: auto !important;
-    transform: none !important;
+    transform: translateY(-3rem) !important;
     bottom: auto !important;
     margin: 1.5rem 0 2rem 0 !important;
     width: 100% !important;
