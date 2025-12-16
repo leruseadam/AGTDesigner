@@ -9006,23 +9006,18 @@ def get_available_tags():
             }), 202
 
         # CRITICAL FIX: If file exists but no cached tags yet, try in-memory processor before returning processing
-        # ALWAYS use get_excel_processor() to ensure we get the correct session's data
+        # Create NEW processor instance to completely avoid shared global state
         if fast_load and session_file_path and file_exists and not cached_tags:
             try:
-                # CRITICAL: Must call get_excel_processor() to ensure correct session file is loaded
-                # Never trust global _excel_processor as it may contain other user's data
-                session_processor = get_excel_processor()
+                # CRITICAL: Create BRAND NEW processor instance to avoid ANY shared state
+                # This completely bypasses the global _excel_processor
+                from src.core.data.excel_processor import ExcelProcessor
+                logging.info(f"🆕 Creating NEW processor instance for session file: {session_file_path}")
+                session_processor = ExcelProcessor(store_name=store_name)
 
-                # CRITICAL FIX: Verify processor has correct file loaded before using
-                if session_processor:
-                    loaded_file = getattr(session_processor, '_last_loaded_file', None)
-                    if loaded_file != session_file_path:
-                        logging.error(f"❌ SESSION PROCESSOR MISMATCH: session={session_file_path}, loaded={loaded_file}")
-                        # Force reload
-                        if hasattr(session_processor, 'load_file') and session_file_path:
-                            logging.info(f"🔄 Force reloading session file: {session_file_path}")
-                            session_processor.load_file(session_file_path)
-                            session_processor._last_loaded_file = session_file_path
+                # Load THIS session's file directly
+                session_processor.load_file(session_file_path)
+                session_processor._last_loaded_file = session_file_path
 
                 if session_processor is not None and getattr(session_processor, 'df', None) is not None and not session_processor.df.empty:
                     logging.info("⚡ FAST: Serving tags from session processor while cache builds (fast_load, file exists)")
@@ -9075,27 +9070,22 @@ def get_available_tags():
         has_excel_file = file_exists
         if fast_load and has_excel_file and not prefer_db and not force_full_refresh:
             try:
-                # Get processor (may have been loaded synchronously above)
-                # Use get_excel_processor() to get the most up-to-date processor
-                # Wrap in try-catch to handle loading failures gracefully
+                # CRITICAL: Create BRAND NEW processor instance to avoid ANY shared state
+                # This completely bypasses the global _excel_processor
                 excel_processor = None
                 try:
-                    if file_exists:
-                        excel_processor = get_excel_processor()
-                        # CRITICAL FIX: Verify processor loaded correct file before using it
-                        if excel_processor:
-                            loaded_file = getattr(excel_processor, '_last_loaded_file', None)
-                            if loaded_file != session_file_path:
-                                logging.error(f"❌ PROCESSOR FILE MISMATCH: session={session_file_path}, loaded={loaded_file}")
-                                # Force reload with correct file
-                                if hasattr(excel_processor, 'load_file') and session_file_path:
-                                    logging.info(f"🔄 Force reloading correct file: {session_file_path}")
-                                    excel_processor.load_file(session_file_path)
-                                    excel_processor._last_loaded_file = session_file_path
+                    if file_exists and session_file_path:
+                        from src.core.data.excel_processor import ExcelProcessor
+                        logging.info(f"🆕 Creating NEW processor instance for ULTRA-FAST path: {session_file_path}")
+                        excel_processor = ExcelProcessor(store_name=store_name)
+
+                        # Load THIS session's file directly
+                        excel_processor.load_file(session_file_path)
+                        excel_processor._last_loaded_file = session_file_path
                     else:
-                        excel_processor = None  # Don't use global processor if no file
+                        excel_processor = None  # Don't use processor if no file
                 except Exception as get_proc_err:
-                    logging.warning(f"Could not get Excel processor for fast_load: {get_proc_err}")
+                    logging.warning(f"Could not create Excel processor for fast_load: {get_proc_err}")
                     excel_processor = None
 
                 if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
@@ -18254,6 +18244,31 @@ def set_strain_lineage():
             
             logging.info(f"Updated lineage for strain '{strain_name}' to '{lineage}'. Affected {product_count} products (using {'strain_id' if has_strain_id else 'Product Strain'}).")
             
+            # Clear caches so refreshed views use the new lineage
+            try:
+                clear_available_tags_cache(reason=f"lineage_update:{strain_name}")
+            except Exception as cache_err:
+                logging.warning(f"Failed to clear available tags cache after lineage update: {cache_err}")
+
+            # Update in-memory Excel processor data if loaded (prevents stale lineage until reload)
+            try:
+                global _excel_processor
+                if _excel_processor is not None and hasattr(_excel_processor, 'df') and _excel_processor.df is not None:
+                    df = _excel_processor.df
+                    if 'Product Strain' in df.columns and 'Lineage' in df.columns:
+                        strain_mask = df['Product Strain'].astype(str).str.strip().str.lower() == strain_name.strip().lower()
+                        if strain_mask.any():
+                            # Ensure category exists before assignment when Lineage is categorical
+                            try:
+                                if hasattr(df['Lineage'], 'cat') and lineage not in df['Lineage'].cat.categories:
+                                    df['Lineage'] = df['Lineage'].cat.add_categories([lineage])
+                            except Exception:
+                                pass
+                            df.loc[strain_mask, 'Lineage'] = lineage
+                            logging.info(f"[ExcelProcessor] Updated in-memory lineage for '{strain_name}' to '{lineage}'")
+            except Exception as excel_err:
+                logging.warning(f"Failed to update in-memory Excel lineage cache: {excel_err}")
+
             return jsonify({
                 'success': True,
                 'strain_name': strain_name,
