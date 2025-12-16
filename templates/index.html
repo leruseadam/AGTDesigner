@@ -556,47 +556,13 @@
     function checkStoreRequired(onStoreConfirmed) {
       // CRITICAL FIX: Don't check again if store was already confirmed
       // This prevents the modal from reappearing after uploads or page reloads
-      // Check both in-memory flag and sessionStorage for persistence across reloads
-      // CRITICAL FIX: ALWAYS check backend - removed frontend cache check that was skipping store modal
-      // DISABLED: const storeJustSelected = sessionStorage.getItem('store_just_selected') === 'true';
-      // DISABLED: const selectedStore = sessionStorage.getItem('selected_store');
-      // DISABLED: const storeConfirmed = window.storeConfirmed || (storeJustSelected && selectedStore);
-      // DISABLED:       // DISABLED: if (storeConfirmed && !window.checkingStoreRequired) {
-      // DISABLED: console.log('✅ Store already confirmed (in memory or sessionStorage), skipping check');
-      // DISABLED:         // Restore the in-memory flag if it was in sessionStorage
-      // DISABLED: if (!window.storeConfirmed && storeJustSelected) {
-      // DISABLED: window.storeConfirmed = true;
-      // DISABLED: }
-      // DISABLED:         // Ensure UI is ready when store is already confirmed (e.g., on reload)
-      // DISABLED: const modalElement = document.getElementById('storeSelectionModal');
-      // DISABLED: const mainContent = document.getElementById('mainContent');
-      // DISABLED: if (modalElement) {
-      // DISABLED: modalElement.style.display = 'none';
-      // DISABLED: modalElement.classList.remove('show');
-      // DISABLED: }
-      // DISABLED: document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
-      // DISABLED: document.body.classList.remove('modal-open');
-      // DISABLED: document.body.style.overflow = '';
-      // DISABLED:       // DISABLED: if (mainContent) {
-      // DISABLED: mainContent.style.display = 'block';
-      // DISABLED: mainContent.style.visibility = 'visible';
-      // DISABLED: mainContent.style.pointerEvents = '';
-      // DISABLED: mainContent.classList.remove('store-selection-disabled');
-      // DISABLED: mainContent.classList.add('store-selected');
-      // DISABLED: setTimeout(() => mainContent.classList.add('loaded'), 50);
-      // DISABLED: }
-      // DISABLED:         // Update store labels immediately so tags can load without waiting for another fetch
-      // DISABLED: if (selectedStore) {
-      // DISABLED: updateCurrentStoreDisplay(selectedStore);
-      // DISABLED: updateStoreStatus(`Store: ${selectedStore.replace(/_/g, ' ')}`, 'active');
-      // DISABLED: }
-      // DISABLED:         // Store is already confirmed, just call the callback if provided
-      // DISABLED: if (typeof onStoreConfirmed === 'function') {
-      // DISABLED: setTimeout(onStoreConfirmed, 50);
-        }
+      // SIMPLE FIX: If store was just confirmed in this session, skip the check
+      // This prevents modal from showing twice after selecting a store
+      if (window.storeConfirmed) {
+        console.log('✅ Store already confirmed in this session, skipping check');
         return;
       }
-      
+
       // Prevent multiple simultaneous calls
       if (window.checkingStoreRequired) {
         console.log('⚠️ checkStoreRequired already in progress, skipping...');

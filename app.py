@@ -8674,9 +8674,14 @@ def get_available_tags():
                 try:
                     product_db = get_product_database(store_name)
                     if product_db and simple_tags:
+                        logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database lineage...")
                         product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
+                        logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
+
                         if product_names:
                             db_products = product_db.get_products_by_names(product_names)
+                            logging.info(f"📦 SIMPLE PATH: Database returned {len(db_products) if db_products else 0} products")
+
                             lineage_map = {}
                             if db_products:
                                 for db_product in db_products:
@@ -8689,17 +8694,41 @@ def get_available_tags():
                                     if db_name and db_lineage:
                                         lineage_map[db_name] = str(db_lineage).strip().upper()
 
+                            logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
+
+                            enriched_count = 0
+                            fallback_count = 0
                             for tag in simple_tags:
                                 product_name = tag.get('Product Name*')
                                 if product_name and product_name in lineage_map:
+                                    # Use database lineage (product exists in database)
                                     db_lineage_clean = lineage_map[product_name]
                                     tag['currentLineage'] = db_lineage_clean
                                     tag['canonical_lineage'] = db_lineage_clean
                                     tag['Lineage'] = db_lineage_clean
                                     tag['lineage'] = db_lineage_clean.lower()
-                            logging.info(f"✅ Enriched {len(lineage_map)} products with database lineage")
+                                    enriched_count += 1
+                                else:
+                                    # Fallback: Use Excel Lineage field for canonical fields
+                                    # This handles products that haven't been saved to database yet
+                                    excel_lineage = tag.get('Lineage')
+                                    if excel_lineage:
+                                        excel_lineage_clean = str(excel_lineage).strip().upper()
+                                        tag['currentLineage'] = excel_lineage_clean
+                                        tag['canonical_lineage'] = excel_lineage_clean
+                                        tag['lineage'] = excel_lineage_clean.lower()
+                                        fallback_count += 1
+
+                            logging.info(f"✅ SIMPLE PATH: Enriched {enriched_count}/{len(simple_tags)} tags with database lineage, {fallback_count} with Excel fallback")
+
+                            # Log sample of enriched tags for debugging
+                            if enriched_count > 0:
+                                sample = [(t.get('Product Name*'), t.get('currentLineage')) for t in simple_tags[:3]]
+                                logging.info(f"📋 SIMPLE PATH: Sample enriched tags: {sample}")
                 except Exception as enrich_err:
                     logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+                    import traceback
+                    logging.warning(traceback.format_exc())
 
                 safe_simple_tags = make_json_safe(simple_tags)
                 elapsed = (time.time() - start_time) * 1000
