@@ -3172,11 +3172,6 @@ def upload_file():
             session['selected_tags'] = []
             logging.info("✅ Cleared selected tags from session")
 
-            # CRITICAL: Set upload marker to prevent serving any cached data during upload processing
-            session['upload_in_progress'] = True
-            session.modified = True
-            logging.info("✅ Set upload_in_progress flag to prevent stale cache usage")
-
         except Exception as cache_error:
             logging.warning(f"⚠️ Error clearing cache: {cache_error}")
         
@@ -3595,12 +3590,6 @@ def upload_file():
             # Mark file as ready
             update_processing_status(file.filename, 'ready')
             logging.info(f"✅ Marked {file.filename} as ready")
-
-            # CRITICAL: Clear upload_in_progress flag now that processing is complete
-            if 'upload_in_progress' in session:
-                del session['upload_in_progress']
-                session.modified = True
-                logging.info("✅ Cleared upload_in_progress flag - safe to serve cached data")
 
             # CRITICAL: Clear old caches but preserve the new file's tag cache
             try:
@@ -8899,12 +8888,7 @@ def get_available_tags():
                 except Exception:
                     pass
 
-        # CRITICAL FIX: Don't serve cached tags if upload is in progress - prevents stale data during upload
-        if session.get('upload_in_progress'):
-            logging.info("⚠️ Upload in progress - skipping cache to prevent serving stale data")
-            cached_tags = None
-        else:
-            cached_tags = cache.get(cache_key) if not prefer_db else None
+        cached_tags = cache.get(cache_key) if not prefer_db else None
 
         # CRITICAL FIX: When no Excel file, return empty immediately - don't load from database
         # Database-only mode causes confusion with stale Excel data mixing with DB data
