@@ -865,7 +865,7 @@ body.modal-open #mainContent.store-selection-disabled,
 .help-button-container {
   position: relative !important;
   left: auto !important;
-  transform: translateY(-7rem) !important; /* Lift roughly 3cm */
+  transform: translateY(2rem) !important; /* Lift roughly 3cm */
   bottom: auto !important;
   margin: 0 0 1rem 0 !important; /* Minimal margins since we're lifting */
   width: 100% !important;

@@ -1981,11 +1981,15 @@ def initialize_excel_processor():
         # Skip initialization if startup file loading is disabled for performance
         if DISABLE_STARTUP_FILE_LOADING:
             logging.info("Startup file loading disabled for faster application startup")
-            excel_processor = get_excel_processor()
-            excel_processor.logger.setLevel(logging.WARNING)
             return
-        
+
+        # CRITICAL FIX: get_excel_processor() is deprecated and returns None
+        # Skip initialization - processors are now created per-request
         excel_processor = get_excel_processor()
+        if excel_processor is None:
+            logging.info("Excel processor initialization skipped - using per-request processors")
+            return
+
         excel_processor.logger.setLevel(logging.WARNING)
         
         # Enable product database integration by default
