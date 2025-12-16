@@ -8891,7 +8891,22 @@ def get_available_tags():
                 except Exception:
                     pass
 
-        cached_tags = cache.get(cache_key) if not prefer_db else None
+        # CRITICAL FIX: DISABLE CACHING ENTIRELY for Excel data to prevent any stale data issues
+        # Always load fresh from the Excel file to ensure correct session data
+        # This prevents ANY possibility of serving cached data from other sessions
+        if has_excel_data and session_file_path:
+            logging.info(f"🚫 CACHE DISABLED: Always loading fresh Excel data to prevent stale data")
+            cached_tags = None
+            # Clear any existing caches for this session
+            try:
+                cache.delete(cache_key)
+                old_cache_key_no_ts = get_session_cache_key(f'available_tags_{session_file_path}')
+                cache.delete(old_cache_key_no_ts)
+                logging.info(f"🧹 Cleared all caches for this session")
+            except Exception:
+                pass
+        else:
+            cached_tags = cache.get(cache_key) if not prefer_db else None
 
         # CRITICAL FIX: When no Excel file, return empty immediately - don't load from database
         # Database-only mode causes confusion with stale Excel data mixing with DB data
@@ -9020,21 +9035,42 @@ def get_available_tags():
                 session_processor._last_loaded_file = session_file_path
 
                 if session_processor is not None and getattr(session_processor, 'df', None) is not None and not session_processor.df.empty:
-                    logging.info("⚡ FAST: Serving tags from session processor while cache builds (fast_load, file exists)")
+                    logging.info("⚡ FAST: Serving tags from NEW session processor (no cache)")
                     excel_tags = session_processor.get_available_tags(filters=None)
-                    safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
-                    upload_ts = session.get('upload_timestamp', '')
-                    cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_ts}')
+
+                    # CRITICAL: Enrich with database lineage BEFORE returning
+                    # This ensures UI shows current lineage from database, not stale Excel lineage
                     try:
-                        cache.set(cache_key, safe_excel_tags, timeout=300)
-                    except OSError as cache_os_err:
-                        logging.warning(f"Cache write skipped (OSError): {cache_os_err}")
-                    except Exception as cache_err:
-                        logging.warning(f"Cache write skipped: {cache_err}")
+                        product_db = get_product_database(store_name)
+                        if product_db and excel_tags:
+                            logging.info(f"🔄 Enriching {len(excel_tags)} tags with database lineage...")
+                            for tag in excel_tags:
+                                product_name = tag.get('Product Name*')
+                                if product_name:
+                                    # Get database lineage for this product
+                                    db_products = product_db.get_products_by_names([product_name])
+                                    if db_products and len(db_products) > 0:
+                                        db_lineage = (
+                                            db_products[0].get('currentLineage') or
+                                            db_products[0].get('canonical_lineage') or
+                                            db_products[0].get('Lineage')
+                                        )
+                                        if db_lineage:
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            tag['currentLineage'] = db_lineage_clean
+                                            tag['canonical_lineage'] = db_lineage_clean
+                                            tag['Lineage'] = db_lineage_clean
+                                            tag['lineage'] = db_lineage_clean.lower()
+                            logging.info(f"✅ Database lineage enrichment complete")
+                    except Exception as enrich_err:
+                        logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+
+                    safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
+                    # NO CACHING - always load fresh to prevent stale data
                     return jsonify({
                         'tags': safe_excel_tags,
                         'total_count': len(safe_excel_tags),
-                        'source': 'excel-memory'
+                        'source': 'excel-fresh'
                     })
             except Exception as mem_err:
                 logging.warning(f"Failed to serve in-memory tags fallback (fast_load): {mem_err}")
@@ -9109,29 +9145,44 @@ def get_available_tags():
                     # Reset enrichment flag
                     if hasattr(excel_processor, '_skip_enrichment'):
                         excel_processor._skip_enrichment = False
-                    
-                    safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
-                    
-                    # Cache for this session/file so subsequent requests are instant
+
+                    # CRITICAL: Enrich with database lineage BEFORE returning
+                    # This ensures UI shows current lineage from database, not stale Excel lineage
                     try:
-                        if 'cache_key' not in locals():
-                            session_file_path = session.get('file_path', '')
-                            if session_file_path:
-                                cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
-                            else:
-                                cache_key = get_session_cache_key('available_tags')
-                        if safe_all_tags:
-                            cache.set(cache_key, safe_all_tags, timeout=300)
-                            logging.info(f"✅ Cached {len(safe_all_tags)} ultra-fast Excel tags.")
-                    except Exception as cache_err:
-                        logging.warning(f"Could not cache ultra-fast Excel tags: {cache_err}")
-                    
+                        product_db = get_product_database(store_name)
+                        if product_db and excel_tags:
+                            logging.info(f"🔄 Enriching {len(excel_tags)} tags with database lineage...")
+                            for tag in excel_tags:
+                                product_name = tag.get('Product Name*')
+                                if product_name:
+                                    # Get database lineage for this product
+                                    db_products = product_db.get_products_by_names([product_name])
+                                    if db_products and len(db_products) > 0:
+                                        db_lineage = (
+                                            db_products[0].get('currentLineage') or
+                                            db_products[0].get('canonical_lineage') or
+                                            db_products[0].get('Lineage')
+                                        )
+                                        if db_lineage:
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            tag['currentLineage'] = db_lineage_clean
+                                            tag['canonical_lineage'] = db_lineage_clean
+                                            tag['Lineage'] = db_lineage_clean
+                                            tag['lineage'] = db_lineage_clean.lower()
+                            logging.info(f"✅ Database lineage enrichment complete")
+                    except Exception as enrich_err:
+                        logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+
+                    safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
+
+                    # NO CACHING - always load fresh to prevent any stale data issues
+
                     elapsed = (time.time() - start_time) * 1000
-                    logging.info(f"✅ ULTRA-FAST available-tags completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} Excel-only tags")
+                    logging.info(f"✅ ULTRA-FAST available-tags completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} Excel-only tags (NO CACHE)")
                     resp = jsonify({
                         'tags': safe_all_tags,
                         'total_count': len(safe_all_tags),
-                        'source': 'excel-fast'
+                        'source': 'excel-fresh-no-cache'
                     })
                     try:
                         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
