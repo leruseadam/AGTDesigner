@@ -2916,7 +2916,15 @@ def upload_file():
         logging.info(f"🔍 Store diagnostics - Session: {session_store}, IP-based: {ip_store}, Final: {selected_store}")
         
         # CRITICAL FIX: Allow store override from request body if provided (for UI consistency)
-        request_store = request.form.get('store') or (request.get_json() or {}).get('store')
+        # CRITICAL FIX: Only try to get JSON if Content-Type is application/json (file uploads use multipart/form-data)
+        request_store = request.form.get('store')
+        if not request_store and request.is_json:
+            try:
+                json_data = request.get_json(silent=True)
+                if json_data:
+                    request_store = json_data.get('store')
+            except Exception:
+                pass  # Ignore JSON parsing errors for file uploads
         if request_store:
             logging.info(f"🔍 Request specifies store: {request_store}, current selected: {selected_store}")
             # If request store matches detected store in filename, use it

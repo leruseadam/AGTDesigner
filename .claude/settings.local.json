@@ -20,7 +20,8 @@
       "Bash(find:*)",
       "Bash(cat:*)",
       "Bash(ls -lh \"/Users/adamcordova/Desktop/labelMaker_ QR copy final/uploads/\"product_database_AGT_*.db)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []
