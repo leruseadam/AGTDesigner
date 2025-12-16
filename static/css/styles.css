@@ -861,7 +861,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .help-button-container {
-  margin: 0.25rem 0 1.5rem 0 !important; /* Increased bottom margin for equal spacing */
+  margin: 0.25rem 0 3rem 0 !important; /* Healthy bottom margin from edge */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;

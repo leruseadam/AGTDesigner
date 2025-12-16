@@ -1014,6 +1014,7 @@ const TagManager = {
             'CBD_BLEND': 'var(--lineage-cbd)'
         },
         filterCache: null, // Single cache entry
+        activeFilteredTags: null, // Currently applied filter result (for search)
         updateAvailableTagsTimer: null,
         isSearching: false,
         initialDataAttempts: 0,
@@ -2212,6 +2213,7 @@ const TagManager = {
         if (allFiltersAll) {
             verboseLog('🔍 All filters empty - showing all tags');
             this.state.filterCache = null;
+            this.state.activeFilteredTags = null;
             // Use immediate update if requested, otherwise debounced
             if (immediate) {
                 this._updateAvailableTags(this.state.originalTags, null);
@@ -2241,6 +2243,7 @@ const TagManager = {
         if (this.state.filterCache && this.state.filterCache.key === filterKey) {
             // Always pass original tags to preserve persistent selections
             // Use immediate update if requested, otherwise debounced
+            this.state.activeFilteredTags = this.state.filterCache.result || null;
             if (immediate) {
                 this._updateAvailableTags(this.state.originalTags, this.state.filterCache.result);
             } else {
@@ -2412,6 +2415,8 @@ const TagManager = {
             key: filterKey,
             result: filteredTags
         };
+        // Track the currently active filtered set so searches respect filters
+        this.state.activeFilteredTags = filteredTags;
         
         // Always pass original tags to preserve persistent selections, with filtered tags for display
         // Use immediate update if requested (for filter changes), otherwise debounced (for search)
@@ -2446,7 +2451,11 @@ const TagManager = {
             // Choose which tags to filter
             let tags = [];
             if (listId === 'availableTags') {
-                tags = this.state.originalTags || [];
+                // Respect current filters: fall back to original if no active filters
+                const filtered = (this.state.activeFilteredTags && this.state.activeFilteredTags.length > 0)
+                    ? this.state.activeFilteredTags
+                    : (this.state.filterCache && this.state.filterCache.result ? this.state.filterCache.result : null);
+                tags = filtered || this.state.originalTags || [];
             } else if (listId === 'selectedTags') {
                 tags = Array.from(this.state.selectedTags).map(name =>
                     this.state.originalTags.find(t => t['Product Name*'] === name)
@@ -2456,7 +2465,11 @@ const TagManager = {
             if (!searchTerm) {
                 // Restore full list
                 if (listId === 'availableTags') {
-                    this.debouncedUpdateAvailableTags(this.state.originalTags, null);
+                    // If filters are active, restore the filtered list; otherwise show all
+                    const base = (this.state.activeFilteredTags && this.state.activeFilteredTags.length > 0)
+                        ? this.state.activeFilteredTags
+                        : (this.state.filterCache && this.state.filterCache.result ? this.state.filterCache.result : null);
+                    this.debouncedUpdateAvailableTags(this.state.originalTags, base || null);
                 } else if (listId === 'selectedTags') {
                     this.updateSelectedTags(tags);
                 }
@@ -2960,7 +2973,8 @@ const TagManager = {
         
         // Show loading splash for tag population
         const tagsToShow = filteredTags || originalTags;
-        if (tagsToShow && tagsToShow.length > 0) {
+        // Avoid showing splash when user is actively typing/searching to reduce flicker
+        if (tagsToShow && tagsToShow.length > 0 && !this.state.isSearching) {
             this.showActionSplash('Loading tags...');
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen

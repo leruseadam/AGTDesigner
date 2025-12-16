@@ -6109,142 +6109,83 @@
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close help modal"></button>
         </div>
         <div class="modal-body">
-          <div class="row">
-            <div class="col-md-6">
-              <h6 class="text-info mb-3">📥 How to Download LOTs Data</h6>
-              <ol class="mb-0">
-                <li class="mb-2">Log in to <a href="https://app.posabit.com/" target="_blank" rel="noopener" class="text-info">app.posabit.com</a></li>
-                <li class="mb-2">Navigate to <strong>Inventory</strong> → <strong>LOTs</strong></li>
-                <li class="mb-2">Set "Select State" to <strong>Active</strong></li>
-                <li class="mb-2">Click the green <strong>Search</strong> button</li>
-                <li class="mb-2">Click the blue <strong>Download CSV</strong> button</li>
-                <li class="mb-2">Upload the downloaded file here using the "Upload Data" button</li>
-              </ol>
-            </div>
-            <div class="col-md-6">
-              <h6 class="text-info mb-3">🎯 Key Features</h6>
-              <ul class="mb-0">
-                <li class="mb-2"><strong>Smart Filtering:</strong> Filter by vendor, brand, type, lineage, and weight</li>
-                <li class="mb-2"><strong>Tag Management:</strong> Move tags between available and selected panels</li>
-                <li class="mb-2"><strong>Multiple Templates:</strong> Choose from Horizontal, Vertical, Mini, and Inventory layouts</li>
-                <li class="mb-2"><strong>Customizable Scale:</strong> Adjust label size for different printer requirements</li>
-                <li class="mb-2"><strong>Lineage Control:</strong> Modify tag colors based on cannabis lineage</li>
-                <li class="mb-2"><strong>Batch Generation:</strong> Create multiple labels at once</li>
-              </ul>
-            </div>
-          </div>
-          
-          <div class="mt-4 p-3" style="background: rgba(255,255,255,0.1); border-radius: 8px;">
-            <h6 class="text-warning mb-2">💡 Pro Tips & Best Practices</h6>
-            <div class="row">
-              <div class="col-md-6">
-                <ul class="mb-0 small">
-                  <li>Use search boxes to quickly find specific tags</li>
-                  <li>"Select All" checkboxes work for entire categories</li>
-                  <li>Tags auto-organize by vendor, brand, and product type</li>
-                  <li>Use the Undo button to reverse your last action</li>
-                </ul>
+          <div class="row gy-3">
+            <div class="col-lg-7">
+              <div class="p-3 h-100" style="background: linear-gradient(135deg, rgba(79, 70, 229, 0.18), rgba(0, 212, 170, 0.14)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 30px rgba(0,0,0,0.25);">
+                <h6 class="text-info mb-3">🚀 Quick Start (Current Flow)</h6>
+                <ol class="mb-3 ps-3">
+                  <li class="mb-2">Upload product data: use <strong>Upload Excel</strong> (POSaBIT LOTs CSV) or <strong>Match JSON</strong> to merge database records.</li>
+                  <li class="mb-2">Choose your <strong>Store</strong> (top center) to load the right inventory.</li>
+                  <li class="mb-2">Filter by <strong>Vendor, Brand, Product Type, Lineage, Weight, DOH, High CBD</strong>.</li>
+                  <li class="mb-2">Select tags: check items on the left, or use <strong>Select All</strong> for a vendor/category. Drag to reorder in Selected.</li>
+                  <li class="mb-2">Pick a <strong>Template</strong> (Horizontal, Vertical, Mini, Double, Preroll, Inventory) and click <strong>Generate Tags</strong>.</li>
+                  <li class="mb-2">Export or manage data with <strong>Export Data</strong>, <strong>Data & Analytics</strong>, <strong>Edit DB</strong>, and <strong>Lineage Editor</strong>.</li>
+                </ol>
+                <div class="d-flex flex-wrap gap-2">
+                  <span class="badge bg-info text-dark px-3 py-2">Batch Undo/Redo saves full selection snapshots</span>
+                  <span class="badge bg-secondary px-3 py-2">Global filters stay while switching templates</span>
+                </div>
               </div>
-              <div class="col-md-6">
-                <ul class="mb-0 small">
-                  <li>Different templates work best for different label sizes</li>
-                  <li>Export data to Excel for external record keeping</li>
-                  <li>Clear filters to see all available tags</li>
+            </div>
+            <div class="col-lg-5">
+              <div class="p-3 h-100" style="background: linear-gradient(135deg, rgba(255, 193, 7, 0.16), rgba(160, 132, 232, 0.14)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 30px rgba(0,0,0,0.25);">
+                <h6 class="text-warning mb-3">🎯 Key Features</h6>
+                <ul class="mb-3">
+                  <li class="mb-2"><strong>Smart Filters</strong>: stacked filter bar with live counts.</li>
+                  <li class="mb-2"><strong>Batch Selection</strong>: vendor/category select-all, drag reorder.</li>
+                  <li class="mb-2"><strong>Templates</strong>: multiple label layouts with color-coded controls.</li>
+                  <li class="mb-2"><strong>Lineage Editor</strong>: edit lineage/colors directly from the center column.</li>
+                  <li class="mb-2"><strong>Data Tools</strong>: Export, Analytics, Edit DB, JSON matching.</li>
+                  <li class="mb-2"><strong>Undo/Redo</strong>: snapshot-based—restores whole batches, not single tags.</li>
                 </ul>
+                <div class="small text-muted">Tip: Keep the help overlay handy—press the “?” button anytime.</div>
               </div>
             </div>
           </div>
 
-          <div class="mt-4 p-3" style="background: linear-gradient(135deg, rgba(255, 193, 7, 0.15), rgba(255, 152, 0, 0.15)); border-radius: 8px; border-left: 4px solid #ffc107; border-right: 4px solid #ff9800; box-shadow: 0 4px 15px rgba(255, 193, 7, 0.2);">
-            <h6 class="text-info mb-2">🔧 Quick Actions Guide</h6>
-            <div class="row">
-              <div class="col-md-4">
-                <strong>Upload:</strong> Click "Upload Data" to load your LOTs CSV file
-              </div>
-              <div class="col-md-4">
-                <strong>Filter:</strong> Use dropdowns to narrow down available tags
-              </div>
-              <div class="col-md-4">
-                <strong>Select:</strong> Check tags and use arrow buttons to move them
+          <div class="row gy-3 mt-3">
+            <div class="col-lg-6">
+              <div class="p-3 h-100" style="background: rgba(255,255,255,0.07); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);">
+                <h6 class="text-info mb-2">⌨️ Shortcuts & Controls</h6>
+                <ul class="mb-0 small">
+                  <li class="mb-1"><strong>Undo / Redo:</strong> Ctrl/Cmd + Z / Ctrl/Cmd + Y (or buttons). Works on full selection snapshots.</li>
+                  <li class="mb-1"><strong>Search:</strong> use the search bars above each list to filter instantly.</li>
+                  <li class="mb-1"><strong>Drag & Drop:</strong> reorder selected tags to set print order.</li>
+                  <li class="mb-1"><strong>Select All:</strong> vendor/category select toggles all items within that group.</li>
+                  <li class="mb-1"><strong>Filters Persist:</strong> filters remain active when regenerating or switching templates.</li>
+                </ul>
               </div>
             </div>
-            <div class="row mt-2">
-              <div class="col-md-4">
-                <strong>Template:</strong> Choose the best layout for your labels
-              </div>
-              <div class="col-md-4">
-                <strong>Generate:</strong> Click "Generate Tags" to create your labels
-              </div>
-              <div class="col-md-4">
-                <strong>Export:</strong> Download selected data as Excel file
+            <div class="col-lg-6">
+              <div class="p-3 h-100" style="background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">
+                <h6 class="text-warning mb-2">🛠️ Troubleshooting</h6>
+                <ul class="mb-2 small">
+                  <li class="mb-1">Upload stalled? Reclick <strong>Upload Excel</strong> and choose the CSV; refresh if TagManager isn’t ready.</li>
+                  <li class="mb-1">Missing tags? Clear filters or reload current store from the store selector.</li>
+                  <li class="mb-1">Undo/Redo not responding? Confirm the latest action saved—snapshot depth is 5.</li>
+                  <li class="mb-1">Lineage colors off? Open <strong>Lineage Editor</strong> to re-map strains.</li>
+                  <li class="mb-1">Layout tight? Use the template dropdown to switch to Inventory or Mini.</li>
+                </ul>
+                <div class="small text-muted">Still stuck? Try refresh; data and filters reload automatically when the store is selected.</div>
               </div>
             </div>
           </div>
-          
 
-          
-          <div class="mt-4 p-3" style="background: linear-gradient(135deg, rgba(255, 193, 7, 0.15), rgba(255, 152, 0, 0.15)); border-radius: 8px; border-left: 4px solid #ffc107; border-right: 4px solid #ff9800; box-shadow: 0 4px 15px rgba(255, 193, 7, 0.2);">
-            <h6 class="text-warning mb-3" style="text-align: center; font-size: 1.1rem;">
-              <span style="font-size: 1.3rem; animation: sparkle 2s ease-in-out infinite;">🌟</span> Special Thanks <span style="font-size: 1.3rem; animation: sparkle 2s ease-in-out infinite 1s;">🌟</span>
-            </h6>
-            <div class="text-center mb-3">
-              
-            </div>
-            <div class="row text-center">
-              <div class="col-md-6">
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Taylor Rowland</strong>
-                  
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Donna Wilner</strong>
-                  
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Madison Ostman</strong>
-                  
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Brett Hulet</strong>
-                  
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">James Van Dyke</strong>
-             
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Hema Lee</strong>
-             
-                </div>
-              </div>
-              <div class="col-md-6">
-        
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Jason Ruiz</strong>
-                  
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Chris Campagnano</strong>
-                  
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Sean Puigmire</strong>
-                  
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Brie Dyson</strong>
-                
-                </div>
-                <div class="mb-2">
-                  <strong style="color: #ffc107;">Jared Dyson</strong>
-                
-                </div>
-              </div>
-            </div>
-            <div class="text-center mt-3">
-              <p class="mb-0" style="font-size: 0.9rem; color: rgba(255, 255, 255, 0.8); font-style: italic;">
-                Thank you to the following individuals for their input and testing of this application!
-              </p>
+          <div class="mt-4 p-3 text-center" style="background: linear-gradient(135deg, rgba(0, 212, 170, 0.12), rgba(160, 132, 232, 0.16)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);">
+            <h6 class="text-info mb-2">🌟 Special Thanks</h6>
+            <p class="mb-2 small text-muted">Appreciation for the testers and collaborators who shaped this release.</p>
+            <div class="d-flex flex-wrap gap-3 justify-content-center small">
+              <span class="badge bg-secondary text-light">Taylor Rowland</span>
+              <span class="badge bg-secondary text-light">Donna Wilner</span>
+              <span class="badge bg-secondary text-light">Madison Ostman</span>
+              <span class="badge bg-secondary text-light">Brett Hulet</span>
+              <span class="badge bg-secondary text-light">James Van Dyke</span>
+              <span class="badge bg-secondary text-light">Hema Lee</span>
+              <span class="badge bg-secondary text-light">Jason Ruiz</span>
+              <span class="badge bg-secondary text-light">Chris Campagnano</span>
+              <span class="badge bg-secondary text-light">Sean Puigmire</span>
+              <span class="badge bg-secondary text-light">Brie Dyson</span>
+              <span class="badge bg-secondary text-light">Jared Dyson</span>
             </div>
           </div>
         </div>
@@ -7920,19 +7861,24 @@
           // Retry after a short delay
           setTimeout(initializeFileUpload, 100);
         } else {
-          // Don't give up - keep retrying indefinitely but with longer intervals
-          // This handles cases where store selection takes longer than 5 seconds
-          console.warn('⚠️ File upload initialization delayed - TagManager not ready yet');
-          console.warn('⚠️ TagManager available:', !!window.TagManager);
-          console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
-          console.warn('⚠️ main.js loaded:', window.mainJsLoaded || false);
-          console.warn('⚠️ main.js error:', window.mainJsError || 'None');
-          console.warn('⚠️ Will continue retrying every 2 seconds until TagManager is ready...');
-          
-          // Reset counter and retry with longer interval (2 seconds instead of 100ms)
-          // This prevents console spam while still allowing recovery
-          window.fileUploadInitAttempts = 0;
-          setTimeout(initializeFileUpload, 2000);
+          // CRITICAL FIX: Stop retrying after max attempts to prevent memory buildup
+          // Set a hard limit of 100 total retries (50 fast + 50 slow)
+          if (!window.fileUploadSlowRetries) {
+            window.fileUploadSlowRetries = 0;
+          }
+          window.fileUploadSlowRetries++;
+
+          if (window.fileUploadSlowRetries < 50) {
+            // Continue retrying with longer intervals for up to 50 more attempts (100 seconds)
+            console.warn(`⚠️ File upload initialization delayed - TagManager not ready yet (slow retry ${window.fileUploadSlowRetries}/50)`);
+            console.warn('⚠️ TagManager available:', !!window.TagManager);
+            console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
+            setTimeout(initializeFileUpload, 2000);
+          } else {
+            // Give up after 100 total attempts to prevent infinite loop
+            console.error('❌ File upload initialization failed - TagManager never became ready after 100 attempts');
+            console.error('❌ This may indicate a JavaScript loading error. Please refresh the page.');
+          }
         }
       }
       
@@ -7943,9 +7889,16 @@
       // On Windows, use File System Access API to open Downloads folder
       // On Mac, regular file input already opens to Downloads
       async function handleFileUploadClick() {
+        // CRITICAL FIX: Prevent multiple uploads
+        const uploadBtn = document.getElementById('uploadTriggerBtn');
+        if (uploadBtn && uploadBtn.disabled) {
+          console.warn('⚠️ Upload already in progress');
+          return;
+        }
+
         const isWindows = navigator.platform.toLowerCase().includes('win') ||
                          navigator.userAgent.toLowerCase().includes('windows');
-        
+
         // Try to use File System Access API on Windows (if supported)
         // This API allows specifying a suggested start directory
         if (isWindows && 'showOpenFilePicker' in window) {

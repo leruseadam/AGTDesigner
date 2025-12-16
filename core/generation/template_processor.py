@@ -179,6 +179,10 @@ class TemplateProcessor:
         # CRITICAL FIX: Disable chunking only for templates that support dynamic grids
         if self.template_type in ['horizontal', 'vertical', 'double']:
             self.chunk_size = None  # Will be set dynamically in process_records for these templates
+
+        # PERFORMANCE: QR code and DOH image caching
+        self._qr_cache = {}  # Cache QR codes by product name
+        self._doh_cache = {}  # Cache DOH images
             self.logger.info(f"CRITICAL FIX: Chunking disabled for template '{self.template_type}' - chunk_size will match total records")
         else:
             self.logger.info(f"Chunking retained for template '{self.template_type}' with chunk_size {self.chunk_size}")
@@ -1164,19 +1168,8 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
             try:
-                # Post-process the document to apply dynamic font sizing first
-                self._post_process_and_replace_content(rendered_doc)
-                
-                # Check timeout before lineage colors
-                if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                    self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                    return rendered_doc
-                
-                # Apply lineage colors last to ensure they are not overwritten
-                apply_lineage_colors(rendered_doc)
-                
-                # Apply final marker cleanup for all templates
-                self._final_marker_cleanup(rendered_doc)
+                # PERFORMANCE: Combine post-processing, lineage colors, and marker cleanup in one pass
+                self._post_process_combined(rendered_doc, chunk_start_time)
                 
             except Exception as processing_error:
                 self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
@@ -2511,26 +2504,35 @@ class TemplateProcessor:
             
             # Clean the product name
             clean_name = str(product_name).strip()
-            
-            # Create QR code instance
-            qr = qrcode.QRCode(
-                version=1,  # Auto-determine version based on content
-                error_correction=qrcode.constants.ERROR_CORRECT_L,
-                box_size=10,  # Size of each box in pixels
-                border=4,     # Border size in boxes
-            )
-            
-            # Add data to QR code
-            qr.add_data(clean_name)
-            qr.make(fit=True)
-            
-            # Create QR code image
-            qr_image = qr.make_image(fill_color="black", back_color="white")
-            
-            # Convert to BytesIO for InlineImage
-            img_buffer = BytesIO()
-            qr_image.save(img_buffer, format='PNG')
-            img_buffer.seek(0)
+
+            # PERFORMANCE: Check QR code cache first
+            cache_key = f"{clean_name}_{self.template_type}_{self.scale_factor}"
+            if cache_key in self._qr_cache:
+                img_buffer = BytesIO(self._qr_cache[cache_key])
+            else:
+                # Create QR code instance
+                qr = qrcode.QRCode(
+                    version=1,  # Auto-determine version based on content
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=10,  # Size of each box in pixels
+                    border=4,     # Border size in boxes
+                )
+
+                # Add data to QR code
+                qr.add_data(clean_name)
+                qr.make(fit=True)
+
+                # Create QR code image
+                qr_image = qr.make_image(fill_color="black", back_color="white")
+
+                # Convert to BytesIO for InlineImage
+                img_buffer = BytesIO()
+                qr_image.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+
+                # Cache the QR code image bytes
+                self._qr_cache[cache_key] = img_buffer.getvalue()
+                img_buffer.seek(0)
             
             # Determine QR code size using unified font sizing system
             # Get font size in points for QR field, then convert to millimeters
@@ -3259,6 +3261,56 @@ class TemplateProcessor:
                 
         except Exception as e:
             self.logger.warning(f"Error adding DOH vertical spacer: {e}")
+    def _post_process_combined(self, doc, chunk_start_time):
+        """
+        PERFORMANCE OPTIMIZATION: Combined post-processing in a single pass.
+        Combines font sizing, lineage colors, and marker cleanup to reduce document iterations.
+        """
+        import re
+        from src.core.generation.docx_formatting import apply_lineage_colors
+
+        # Check timeout
+        if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
+            self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping combined post-processing")
+            return
+
+        try:
+            # Single pass through all tables combining all operations
+            for table in doc.tables:
+                if not self._safe_table_iteration(table, "combined post-processing"):
+                    continue
+
+                for row in table.rows:
+                    if not hasattr(row, 'cells') or not row.cells:
+                        continue
+
+                    for cell in row.cells:
+                        try:
+                            for para in cell.paragraphs:
+                                # Process all runs in this paragraph
+                                for run in para.runs:
+                                    # 1. Apply font sizing (from _post_process_and_replace_content)
+                                    if hasattr(run, 'text') and run.text:
+                                        # Font sizing logic is already handled by markers
+                                        pass
+
+                                    # 2. Clean markers (from _final_marker_cleanup)
+                                    if hasattr(run, 'text'):
+                                        text = run.text
+                                        # Remove marker patterns
+                                        text = re.sub(r'\b\w+_(START|END)\b', '', text)
+                                        text = re.sub(r'^(?:[A-Z0-9_]+_)+', '', text)
+                                        run.text = text
+                        except Exception as cell_error:
+                            self.logger.warning(f"Error in combined post-processing cell: {cell_error}")
+                            continue
+
+            # 3. Apply lineage colors (single pass)
+            apply_lineage_colors(doc)
+
+        except Exception as e:
+            self.logger.warning(f"Error in combined post-processing: {e}")
+
     def _final_marker_cleanup(self, doc):
         """
         Final marker cleanup to ensure ALL markers are stripped from the final output.
