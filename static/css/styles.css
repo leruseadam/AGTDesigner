@@ -861,7 +861,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .help-button-container {
-  margin: 0.25rem 0 14rem 0 !important; /* Increase bottom margin to lift button further */
+  margin: 0.25rem 0 18rem 0 !important; /* Lift button higher from bottom */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2930,7 +2930,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Center column specific spacing reductions */
   .help-button-container {
-    margin: 0.25rem 0 14rem 0 !important; /* Increase bottom margin to lift button further */
+    margin: 0.25rem 0 18rem 0 !important; /* Lift button higher from bottom */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7840,7 +7840,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    margin: 0.25rem 0 14rem 0 !important; /* Increase bottom margin to lift button further */
+    margin: 0.25rem 0 18rem 0 !important; /* Lift button higher from bottom */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;

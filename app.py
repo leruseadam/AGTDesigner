@@ -8964,13 +8964,25 @@ def get_available_tags():
                     logging.warning(f"⚠️ Failed to clear cache: {cache_clear_err}")
         
         # ULTRA-FAST RETURN FROM CACHE: if fast_load and we already have cached tags, return immediately
-        if fast_load and cached_tags:
+        # CRITICAL FIX: Don't return cached tags if lineage was recently updated - need fresh database lineage
+        lineage_update_ts = session.get('lineage_update_timestamp')
+        recently_updated_lineage = False
+        if lineage_update_ts:
+            try:
+                recently_updated_lineage = (time.time() - float(lineage_update_ts)) < 60  # 1 minute
+            except Exception:
+                recently_updated_lineage = False
+
+        if fast_load and cached_tags and not recently_updated_lineage:
             logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags)")
             return jsonify({
                 'tags': cached_tags,
                 'total_count': len(cached_tags),
                 'source': 'cache-fast'
             })
+        elif recently_updated_lineage:
+            logging.info(f"⚠️ Recent lineage update detected - bypassing cache to fetch fresh database lineage")
+            cached_tags = None  # Force fresh fetch with database lineage
 
         # If fast_load with no cache and no immediate in-memory tags, fail fast with processing to unblock UI
         if fast_load and not cached_tags and (session_file_path or file_exists):
