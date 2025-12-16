@@ -9028,44 +9028,67 @@ def get_available_tags():
                 # This completely bypasses the global _excel_processor
                 from src.core.data.excel_processor import ExcelProcessor
                 logging.info(f"🆕 Creating NEW processor instance for session file: {session_file_path}")
+                logging.info(f"📂 Session: store={store_name}, file_exists={os.path.exists(session_file_path) if session_file_path else False}")
                 session_processor = ExcelProcessor(store_name=store_name)
 
                 # Load THIS session's file directly
-                session_processor.load_file(session_file_path)
+                load_success = session_processor.load_file(session_file_path)
+                logging.info(f"📥 Load result: success={load_success}, df_shape={session_processor.df.shape if session_processor.df is not None else 'None'}")
                 session_processor._last_loaded_file = session_file_path
 
                 if session_processor is not None and getattr(session_processor, 'df', None) is not None and not session_processor.df.empty:
-                    logging.info("⚡ FAST: Serving tags from NEW session processor (no cache)")
+                    logging.info(f"⚡ FAST: Serving {len(session_processor.df)} tags from NEW session processor (no cache)")
                     excel_tags = session_processor.get_available_tags(filters=None)
+                    logging.info(f"📊 Got {len(excel_tags) if excel_tags else 0} tags from processor")
 
                     # CRITICAL: Enrich with database lineage BEFORE returning
                     # This ensures UI shows current lineage from database, not stale Excel lineage
                     try:
                         product_db = get_product_database(store_name)
                         if product_db and excel_tags:
-                            logging.info(f"🔄 Enriching {len(excel_tags)} tags with database lineage...")
-                            for tag in excel_tags:
-                                product_name = tag.get('Product Name*')
-                                if product_name:
-                                    # Get database lineage for this product
-                                    db_products = product_db.get_products_by_names([product_name])
-                                    if db_products and len(db_products) > 0:
+                            logging.info(f"🔄 Enriching {len(excel_tags)} tags with database lineage (BATCH)...")
+
+                            # BATCH QUERY: Get all product names and query database once
+                            product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
+
+                            if product_names:
+                                # Use batch query to get all lineages at once
+                                db_products = product_db.get_products_by_names(product_names)
+
+                                # Create lookup map: product_name -> lineage
+                                lineage_map = {}
+                                if db_products:
+                                    for db_product in db_products:
+                                        db_name = db_product.get('Product Name*')
                                         db_lineage = (
-                                            db_products[0].get('currentLineage') or
-                                            db_products[0].get('canonical_lineage') or
-                                            db_products[0].get('Lineage')
+                                            db_product.get('currentLineage') or
+                                            db_product.get('canonical_lineage') or
+                                            db_product.get('Lineage')
                                         )
-                                        if db_lineage:
-                                            db_lineage_clean = str(db_lineage).strip().upper()
-                                            tag['currentLineage'] = db_lineage_clean
-                                            tag['canonical_lineage'] = db_lineage_clean
-                                            tag['Lineage'] = db_lineage_clean
-                                            tag['lineage'] = db_lineage_clean.lower()
-                            logging.info(f"✅ Database lineage enrichment complete")
+                                        if db_name and db_lineage:
+                                            lineage_map[db_name] = str(db_lineage).strip().upper()
+
+                                # Apply lineage to all tags
+                                for tag in excel_tags:
+                                    product_name = tag.get('Product Name*')
+                                    if product_name and product_name in lineage_map:
+                                        db_lineage_clean = lineage_map[product_name]
+                                        tag['currentLineage'] = db_lineage_clean
+                                        tag['canonical_lineage'] = db_lineage_clean
+                                        tag['Lineage'] = db_lineage_clean
+                                        tag['lineage'] = db_lineage_clean.lower()
+
+                                logging.info(f"✅ Database lineage enrichment complete ({len(lineage_map)} products enriched)")
                     except Exception as enrich_err:
                         logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+                        import traceback
+                        logging.warning(traceback.format_exc())
 
                     safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
+                    # Log first few product names for debugging
+                    if safe_excel_tags:
+                        sample_products = [tag.get('Product Name*', 'NO_NAME') for tag in safe_excel_tags[:5]]
+                        logging.info(f"🏷️ Sample products being returned: {sample_products}")
                     # NO CACHING - always load fresh to prevent stale data
                     return jsonify({
                         'tags': safe_excel_tags,
@@ -9151,27 +9174,43 @@ def get_available_tags():
                     try:
                         product_db = get_product_database(store_name)
                         if product_db and excel_tags:
-                            logging.info(f"🔄 Enriching {len(excel_tags)} tags with database lineage...")
-                            for tag in excel_tags:
-                                product_name = tag.get('Product Name*')
-                                if product_name:
-                                    # Get database lineage for this product
-                                    db_products = product_db.get_products_by_names([product_name])
-                                    if db_products and len(db_products) > 0:
+                            logging.info(f"🔄 Enriching {len(excel_tags)} tags with database lineage (BATCH)...")
+
+                            # BATCH QUERY: Get all product names and query database once
+                            product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
+
+                            if product_names:
+                                # Use batch query to get all lineages at once
+                                db_products = product_db.get_products_by_names(product_names)
+
+                                # Create lookup map: product_name -> lineage
+                                lineage_map = {}
+                                if db_products:
+                                    for db_product in db_products:
+                                        db_name = db_product.get('Product Name*')
                                         db_lineage = (
-                                            db_products[0].get('currentLineage') or
-                                            db_products[0].get('canonical_lineage') or
-                                            db_products[0].get('Lineage')
+                                            db_product.get('currentLineage') or
+                                            db_product.get('canonical_lineage') or
+                                            db_product.get('Lineage')
                                         )
-                                        if db_lineage:
-                                            db_lineage_clean = str(db_lineage).strip().upper()
-                                            tag['currentLineage'] = db_lineage_clean
-                                            tag['canonical_lineage'] = db_lineage_clean
-                                            tag['Lineage'] = db_lineage_clean
-                                            tag['lineage'] = db_lineage_clean.lower()
-                            logging.info(f"✅ Database lineage enrichment complete")
+                                        if db_name and db_lineage:
+                                            lineage_map[db_name] = str(db_lineage).strip().upper()
+
+                                # Apply lineage to all tags
+                                for tag in excel_tags:
+                                    product_name = tag.get('Product Name*')
+                                    if product_name and product_name in lineage_map:
+                                        db_lineage_clean = lineage_map[product_name]
+                                        tag['currentLineage'] = db_lineage_clean
+                                        tag['canonical_lineage'] = db_lineage_clean
+                                        tag['Lineage'] = db_lineage_clean
+                                        tag['lineage'] = db_lineage_clean.lower()
+
+                                logging.info(f"✅ Database lineage enrichment complete ({len(lineage_map)} products enriched)")
                     except Exception as enrich_err:
                         logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+                        import traceback
+                        logging.warning(traceback.format_exc())
 
                     safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
 
@@ -9191,36 +9230,23 @@ def get_available_tags():
                         pass
                     return resp
                 else:
-                    # CRITICAL: If Excel processor not ready, try to use cached tags from background thread
-                    logging.warning(f"⚠️ ULTRA-FAST: Processor not available or empty - checking for cached tags")
+                    # CRITICAL: Don't use cached tags - they may contain stale data from previous sessions
+                    # ALWAYS force fresh data load to prevent wrong data
+                    logging.warning(f"⚠️ ULTRA-FAST: Processor not available or empty - SKIP CACHE, returning processing status")
 
-                    # Try to find cached tags from background processing
+                    # Clear any background cache to prevent stale data
                     file_path = session.get('file_path')
-                    logging.info(f"🔍 DEBUG: Looking for cached tags, session file_path={file_path}")
                     if file_path:
-                        # Use file-path-only cache key (matches background thread)
                         import hashlib
                         cache_key = f"tags_file_{hashlib.sha256(file_path.encode()).hexdigest()}"
-                        cached_tags_from_bg = cache.get(cache_key)
+                        try:
+                            cache.delete(cache_key)
+                            logging.info(f"🧹 Cleared background cache to prevent stale data")
+                        except Exception:
+                            pass
 
-                        if cached_tags_from_bg:
-                            logging.info(f"✅ CACHE HIT: Found {len(cached_tags_from_bg)} cached tags from background (key={cache_key[:16]}...)")
-                            resp = jsonify({
-                                'tags': cached_tags_from_bg,
-                                'total_count': len(cached_tags_from_bg),
-                                'source': 'cache-bg'
-                            })
-                            try:
-                                resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                                resp.headers['Pragma'] = 'no-cache'
-                            except Exception:
-                                pass
-                            return resp
-                        else:
-                            logging.warning(f"⚠️ CACHE MISS: No tags found with key={cache_key[:16]}... (file_path={file_path[:50] if file_path else 'None'}...)")
-                    
                     # No cache available - return processing status
-                    logging.warning(f"⚠️ ULTRA-FAST: No processor and no cache - returning processing status")
+                    logging.warning(f"⚠️ ULTRA-FAST: No processor - returning processing status")
                     return jsonify({
                         'tags': [],
                         'total_count': 0,
@@ -9235,6 +9261,12 @@ def get_available_tags():
 
         # Note: Synchronous loading already handled above (line 8510-8528) for instant tags
         # This ensures tags appear immediately without waiting for background processing
+
+        # CRITICAL: NEVER use cached tags when Excel data exists - ALWAYS load fresh
+        # This prevents ANY possibility of serving stale cached data
+        if has_excel_data and cached_tags:
+            logging.warning(f"⚠️ CACHE BYPASS: Excel data exists - clearing cached_tags to force fresh load")
+            cached_tags = None
 
         # PERFORMANCE: Even when nocache=1, allow fast_load requests to reuse
         # per-file cached tags. The cache key already includes the uploaded file

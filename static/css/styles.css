@@ -823,7 +823,8 @@ body.modal-open #mainContent.store-selection-disabled,
   flex-direction: column !important;
   align-items: center !important;
   width: 100% !important;
-  padding-bottom: 10rem !important; /* Extra space to lift bottom controls/help */
+  padding-bottom: 12rem !important; /* Space for pinned help button */
+  position: relative !important;    /* Anchor for absolute-position help button */
 }
 
 .control-panel > * {
@@ -862,14 +863,17 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .help-button-container {
-  margin: 0.25rem 0 38rem 0 !important; /* Lift button higher from bottom */
-  width: 100% !important;
+  position: absolute !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  bottom: 4rem !important;          /* Pin above bottom edge */
+  margin: 0 !important;
+  width: auto !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 0.9rem 0 !important; /* Equal top and bottom padding */
-  position: relative !important;
-  z-index: 1 !important;
+  padding: 0.6rem 0.75rem !important;
+  z-index: 3 !important;
 }
 
 .help-button-container .big-glow-help-btn {
@@ -2931,14 +2935,17 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Center column specific spacing reductions */
   .help-button-container {
-    margin: 0.25rem 0 38rem 0 !important; /* Lift button higher from bottom */
-    width: 100% !important;
+    position: absolute !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    bottom: 4rem !important;
+    margin: 0 !important;
+    width: auto !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    position: relative !important;
-    z-index: 1 !important;
-    padding: 0.9rem 0.75rem !important; /* Equal top and bottom padding */
+    z-index: 3 !important;
+    padding: 0.6rem 0.75rem !important;
   }
   
   .help-button-container .big-glow-help-btn {
@@ -7841,14 +7848,17 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    margin: 0.25rem 0 38rem 0 !important; /* Lift button higher from bottom */
-    width: 100% !important;
+    position: absolute !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    bottom: 4rem !important;
+    margin: 0 !important;
+    width: auto !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.6rem 0.75rem !important; /* Slightly less padding to save vertical space */
-    position: relative !important;
-    z-index: 1 !important;
+    padding: 0.6rem 0.75rem !important;
+    z-index: 3 !important;
   }
   
   .help-label {
