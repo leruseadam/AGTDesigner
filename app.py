@@ -8856,24 +8856,19 @@ def get_available_tags():
                 logging.warning(f"Error checking file path: {path_err}")
                 file_exists = False
 
-        # CRITICAL FIX: If no Excel file and no in-memory processor, don't use file-specific cache
-        # This prevents returning stale Excel tags when user is in database-only mode
-        # Also check that processor file path matches session to avoid serving stale data
-        processor_has_data = False
-        if _excel_processor is not None and _excel_processor.df is not None and not _excel_processor.df.empty:
-            # Verify processor is for current file, not old file
-            processor_file_path = getattr(_excel_processor, 'file_path', None)
-            if processor_file_path and session_file_path and processor_file_path == session_file_path:
-                processor_has_data = True
-            elif not session_file_path:
-                # No session file path means we might be in database mode, don't trust processor
-                processor_has_data = False
-            else:
-                # Processor file doesn't match session - stale processor
-                logging.warning(f"⚠️ Processor file mismatch: processor={processor_file_path}, session={session_file_path}")
-                processor_has_data = False
+        # CRITICAL FIX: Don't rely on global _excel_processor - it's shared across all sessions/users
+        # Only trust file existence and session state to prevent serving wrong user's data
+        # The processor is not session-safe and can contain data from other users
+        has_excel_data = file_exists and session_file_path
 
-        has_excel_data = file_exists or processor_has_data
+        # CRITICAL: If file doesn't exist but session says it should, clear the stale session
+        if not file_exists and session_file_path:
+            logging.warning(f"⚠️ Session file path exists but file missing: {session_file_path}")
+            logging.info("🧹 Clearing stale session file path")
+            session.pop('file_path', None)
+            session.pop('uploaded_filename', None)
+            session.modified = True
+            has_excel_data = False
 
         if has_excel_data and session_file_path:
             cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
