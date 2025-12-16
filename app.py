@@ -8835,7 +8835,7 @@ def get_available_tags():
         # Skip cache entirely if prefer_db is set (we want fresh DB data)
         # CRITICAL FIX: Include file path in cache key to prevent stale data from previous uploads
         session_file_path = session.get('file_path', '')
-        
+
         # CRITICAL FIX: Cache key should use session file path even if the temp file was cleaned up.
         # Rely on cache/_excel_processor instead of file existence to avoid losing tags after reload.
         file_exists = False
@@ -8845,41 +8845,41 @@ def get_available_tags():
             except Exception as path_err:
                 logging.warning(f"Error checking file path: {path_err}")
                 file_exists = False
-        
-        cache_key = get_session_cache_key(f'available_tags_{session_file_path}') if session_file_path else get_session_cache_key('available_tags')
+
+        # CRITICAL FIX: If no Excel file and no in-memory processor, don't use file-specific cache
+        # This prevents returning stale Excel tags when user is in database-only mode
+        has_excel_data = file_exists or (_excel_processor is not None and _excel_processor.df is not None and not _excel_processor.df.empty)
+
+        if has_excel_data and session_file_path:
+            cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+        else:
+            cache_key = get_session_cache_key('available_tags')
+            # CRITICAL: If no Excel data, clear any old file-specific caches to prevent stale data
+            if not has_excel_data and session_file_path:
+                old_cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
+                try:
+                    cache.delete(old_cache_key)
+                    logging.info(f"✅ Cleared stale Excel cache (no Excel data): {old_cache_key[:30]}...")
+                except Exception:
+                    pass
+
         cached_tags = cache.get(cache_key) if not prefer_db else None
         
-        # Only return empty immediately when there is truly no data available.
-        # If the in-memory processor still has data, serve that instead of showing "processing".
-        if (not session_file_path) and not cached_tags:
-            if _excel_processor is not None and getattr(_excel_processor, 'df', None) is not None and not _excel_processor.df.empty:
-                try:
-                    logging.info("⚡ FAST: Serving tags from in-memory processor (no session file/cached tags)")
-                    excel_tags = _excel_processor.get_available_tags(filters=None)
-                    safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
-                    # Cache under generic key so reloads stay instant
-                    cache_key = get_session_cache_key('available_tags')
-                    try:
-                        cache.set(cache_key, safe_excel_tags, timeout=300)
-                    except OSError as cache_os_err:
-                        logging.warning(f"Cache write skipped (OSError): {cache_os_err}")
-                    except Exception as cache_err:
-                        logging.warning(f"Cache write skipped: {cache_err}")
-                    return jsonify({
-                        'tags': safe_excel_tags,
-                        'total_count': len(safe_excel_tags),
-                        'source': 'excel-memory'
-                    })
-                except Exception as mem_err:
-                    logging.warning(f"Failed to serve in-memory tags fallback: {mem_err}")
-            if (PYTHONANYWHERE_OPTIMIZATION or os.environ.get('PYTHONANYWHERE_DOMAIN')):
-                logging.info("⚡ FAST: No file uploaded and no cache on production - returning empty tags immediately")
-                return jsonify({
-                    'tags': [],
-                    'total_count': 0,
-                    'source': 'empty-no-file',
-                    'message': 'No file uploaded. Please upload an Excel file to get started.'
-                }), 200
+        # CRITICAL FIX: When no Excel file, return empty immediately - don't load from database
+        # Database-only mode causes confusion with stale Excel data mixing with DB data
+        if not has_excel_data:
+            logging.info("⚡ No Excel file uploaded - returning empty (database-only mode disabled)")
+            # Clear any stale cached tags
+            try:
+                cache.delete(cache_key)
+            except Exception:
+                pass
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'empty-no-excel',
+                'message': 'No file uploaded. Please upload an Excel file to get started.'
+            }), 200
         
         # Initialize flags
         all_tags = []  # Initialize all_tags before checking cache
@@ -9264,11 +9264,12 @@ def get_available_tags():
                             try:
                                 all_search_names = list(set(product_names + normalized_names))
 
-                                # CRITICAL PERFORMANCE FIX: Always skip lineage query on fast_load to prevent 2min timeout
-                                # Database lineage query takes 2+ minutes on PythonAnywhere - skip entirely for fast loads
-                                SKIP_LINEAGE_ON_FAST_LOAD = fast_load or (not prefer_db and not force_full_refresh)
-                                if SKIP_LINEAGE_ON_FAST_LOAD:
-                                    logging.info(f"⚡ FAST MODE: Skipping lineage query for {len(all_search_names)} products - using Excel lineage (fast_load={fast_load})")
+                                # CRITICAL FIX: Never skip lineage query - database is source of truth for lineage
+                                # Even in fast_load mode, we need database lineage for user changes to persist
+                                # Use optimized batch query to keep it fast
+                                SKIP_LINEAGE_QUERY = False  # Always query database for lineage
+                                if SKIP_LINEAGE_QUERY:
+                                    logging.info(f"⚡ FAST MODE: Skipping lineage query for {len(all_search_names)} products")
                                     batch_results = []
                                 elif len(all_search_names) > 50000:
                                     # Process in chunks but use larger chunks for speed
@@ -9663,8 +9664,8 @@ def get_available_tags():
         
         # PERFORMANCE: Query database for lineage for ALL tags using optimized batch query
         # Database lineage is the source of truth and overrides Excel/cached lineage
-        # CRITICAL: Only do database queries when not using fast_load (fast_load skips this for speed)
-        if all_tags and not fast_load:
+        # CRITICAL FIX: Always query database even during fast_load - lineage must come from DB
+        if all_tags:
             try:
                 store_name = get_current_store_name(allow_fallback=True)  # Use fallback to ensure we have a store
                 if not store_name:
