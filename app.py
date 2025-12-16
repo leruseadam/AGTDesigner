@@ -10046,11 +10046,6 @@ def get_available_tags():
                     logging.error(f"   Debug - Store: {debug_store}, DB exists: {debug_db is not None}, DB path: {debug_db.db_path if debug_db else 'N/A'}")
                 except:
                     pass
-            except Exception as db_err:
-                logging.warning(f"Failed to load database tags: {db_err}")
-                import traceback
-                logging.warning(traceback.format_exc())
-
         # 3. Combine and deduplicate products
         # CRITICAL FIX: Always use database if we have no Excel tags, regardless of prefer_db flag
         # If we have database tags and no Excel tags, use database
