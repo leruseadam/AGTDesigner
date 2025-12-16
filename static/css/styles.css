@@ -11,14 +11,14 @@
   --bg-secondary: rgba(60, 45, 75, 0.9);
   --accent-color: rgba(160, 132, 232, 1);
 
-  /* Normal responsive sizing - INCREASED */
-  --base-font-size: 1.15rem;
-  --small-font-size: 1rem;
-  --large-font-size: 1.4rem;
+  /* Normal responsive sizing */
+  --base-font-size: 1rem;
+  --small-font-size: 0.875rem;
+  --large-font-size: 1.25rem;
 
   /* Button sizing */
-  --btn-height: 48px;
-  --btn-padding: 0.8rem 1.4rem;
+  --btn-height: 44px;
+  --btn-padding: 0.7rem 1.3rem;
   
   /* Spacing */
   --spacing-xs: 0.25rem;
@@ -33,9 +33,21 @@
   --tag-list-scroll-padding: 1rem;
 }
 
-/* Normal base font size - INCREASED */
+/* ========================================================================
+   CRITICAL WARNING: DO NOT MODIFY THE HTML FONT-SIZE VALUE BELOW
+   ========================================================================
+   Changing the html font-size from 16px will cause the ENTIRE app to zoom
+   in or out because ALL rem units throughout the app are calculated from
+   this base value. This creates a compounding zoom effect that persists
+   even through git reverts because browsers cache CSS files.
+
+   If you need to increase text sizes:
+   - Use pixel values (px) instead of rem
+   - Target specific elements with their own font-size
+   - Never change this 16px value
+   ======================================================================== */
 html {
-  font-size: 20px; /* Increased from 17.6px for better readability */
+  font-size: 16px !important; /* LOCKED AT 16px - DO NOT CHANGE */
   width: 100%;
   height: 100%;
   min-height: 100vh;
@@ -57,7 +69,7 @@ html {
 
 
 body {
-  font-size: 1.15rem; /* Increased base font size for better readability */
+  font-size: 1rem; /* Standard base font size */
   line-height: 1.5;
   width: 100%;
   min-height: 100vh;
@@ -126,10 +138,10 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
 }
 
-/* Constrain large monitors - INCREASED font sizes */
+/* Constrain large monitors - standard sizing */
 @media (min-width: 1921px) {
   html {
-    font-size: 18px !important; /* Increased from 14px for better readability */
+    font-size: 16px !important; /* Standard base size */
   }
 
   body {
@@ -148,13 +160,13 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
     min-height: auto !important;
   }
 
-  /* Slightly reduce font sizes - EXCEPT tag lists */
+  /* Keep standard font sizes - EXCEPT tag lists */
   *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
-    font-size: 0.95em !important; /* Only slight reduction (5%) instead of 22% */
+    font-size: 1em !important; /* Standard sizing */
   }
 
   html {
-    font-size: 18px !important; /* Base size - increased */
+    font-size: 16px !important; /* Base size - standard */
   }
   
   /* Override: Keep inventory list at readable size on large screens - use absolute px to avoid scaling issues */
