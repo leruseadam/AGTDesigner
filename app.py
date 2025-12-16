@@ -3134,10 +3134,23 @@ def upload_file():
         # This prevents old Excel data from persisting when new file is uploaded
         logging.info("🧹 Clearing old Excel data from cache and session...")
         try:
-            # Clear available_tags cache to remove old Excel data
-            cache_key = get_session_cache_key('available_tags')
-            cache.delete(cache_key)
-            logging.info(f"✅ Cleared available_tags cache: {cache_key}")
+            # Get session ID for aggressive cache clearing
+            from flask import session as flask_session
+            session_id = flask_session.get('session_id') or request.cookies.get('session')
+
+            # CRITICAL FIX: Aggressively clear ALL possible cache variations to prevent stale data
+            # This handles race conditions where old cache might be served
+            cache_patterns_to_clear = [
+                'available_tags',
+                'filter_options',
+                'web_filter_options',
+            ]
+
+            for pattern in cache_patterns_to_clear:
+                # Clear generic cache
+                cache_key = get_session_cache_key(pattern)
+                cache.delete(cache_key)
+                logging.info(f"✅ Cleared {pattern} cache: {cache_key[:40]}...")
 
             # CRITICAL FIX: Clear file-specific cache if old file path exists
             old_file_path = session.get('file_path')
@@ -3146,17 +3159,7 @@ def upload_file():
                 cache.delete(old_file_cache_key)
                 logging.info(f"✅ Cleared old file-specific cache: {old_file_cache_key[:50]}...")
 
-            # CRITICAL FIX: Clear filter options cache to ensure fresh vendor data
-            filter_options_cache_key = get_session_cache_key('filter_options')
-            cache.delete(filter_options_cache_key)
-            logging.info(f"✅ Cleared filter_options cache: {filter_options_cache_key}")
-
-            # Clear web filter options cache as well
-            web_filter_options_cache_key = get_session_cache_key('web_filter_options')
-            cache.delete(web_filter_options_cache_key)
-            logging.info(f"✅ Cleared web_filter_options cache: {web_filter_options_cache_key}")
-
-            # Clear Excel processor cache
+            # Clear Excel processor cache - this is critical to prevent serving old data
             reset_excel_processor()
             logging.info("✅ Reset Excel processor")
 
@@ -3168,6 +3171,11 @@ def upload_file():
             # Clear selected tags (they're for old file)
             session['selected_tags'] = []
             logging.info("✅ Cleared selected tags from session")
+
+            # CRITICAL: Set upload marker to prevent serving any cached data during upload processing
+            session['upload_in_progress'] = True
+            session.modified = True
+            logging.info("✅ Set upload_in_progress flag to prevent stale cache usage")
 
         except Exception as cache_error:
             logging.warning(f"⚠️ Error clearing cache: {cache_error}")
@@ -3587,7 +3595,13 @@ def upload_file():
             # Mark file as ready
             update_processing_status(file.filename, 'ready')
             logging.info(f"✅ Marked {file.filename} as ready")
-            
+
+            # CRITICAL: Clear upload_in_progress flag now that processing is complete
+            if 'upload_in_progress' in session:
+                del session['upload_in_progress']
+                session.modified = True
+                logging.info("✅ Cleared upload_in_progress flag - safe to serve cached data")
+
             # CRITICAL: Clear old caches but preserve the new file's tag cache
             try:
                 # Clear non-file-specific caches that need refresh
@@ -8885,8 +8899,13 @@ def get_available_tags():
                 except Exception:
                     pass
 
-        cached_tags = cache.get(cache_key) if not prefer_db else None
-        
+        # CRITICAL FIX: Don't serve cached tags if upload is in progress - prevents stale data during upload
+        if session.get('upload_in_progress'):
+            logging.info("⚠️ Upload in progress - skipping cache to prevent serving stale data")
+            cached_tags = None
+        else:
+            cached_tags = cache.get(cache_key) if not prefer_db else None
+
         # CRITICAL FIX: When no Excel file, return empty immediately - don't load from database
         # Database-only mode causes confusion with stale Excel data mixing with DB data
         if not has_excel_data:
