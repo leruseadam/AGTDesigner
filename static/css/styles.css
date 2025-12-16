@@ -7528,10 +7528,11 @@ body.modal-open #mainContent.store-selection-disabled,
   min-height: 80vh;
   align-items: center !important;
   display: grid !important;
-  grid-template-columns: minmax(320px, 1fr) minmax(230px, 280px) minmax(320px, 1fr);
+  grid-template-columns: 1fr minmax(230px, 280px) 1fr;
   gap: 1rem !important;
   padding-top: 0 !important;
   margin-top: 0 !important;
+  justify-items: center !important;
 }
 
 .main-content-row > [data-container-type] {
