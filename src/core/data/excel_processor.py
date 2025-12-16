@@ -334,6 +334,22 @@ def handle_duplicate_columns(df):
         
     return df
     
+def drop_sensitive_columns(df, logger=None):
+    """
+    Remove sensitive columns (e.g., cost/unit cost) from uploaded data before any processing.
+    This prevents sensitive financial data from being cached or stored.
+    """
+    try:
+        sensitive_cols = [c for c in df.columns if 'cost' in c.lower()]
+        if sensitive_cols:
+            df = df.drop(columns=sensitive_cols, errors='ignore')
+            if logger:
+                logger.info(f"Removed sensitive columns from upload: {sensitive_cols}")
+    except Exception as e:
+        if logger:
+            logger.warning(f"Failed to drop sensitive columns: {e}")
+    return df
+
 def optimized_lineage_persistence(processor, df):
     """Optimized lineage persistence that's always enabled and performs well."""
     if not ENABLE_LINEAGE_PERSISTENCE:
@@ -1937,6 +1953,8 @@ class ExcelProcessor:
             
             # Handle duplicate columns before processing
             df = handle_duplicate_columns(df)
+            # Strip sensitive columns (cost/unit cost) immediately after read
+            df = drop_sensitive_columns(df, logger=self.logger)
             
             # Remove duplicates and reset index to avoid duplicate labels
             initial_count = len(df)
@@ -1981,6 +1999,8 @@ class ExcelProcessor:
             self.df = df
             # Handle duplicate columns before any operations
             self.df = handle_duplicate_columns(self.df)
+            # Strip sensitive columns (cost/unit cost) in the in-memory copy as well
+            self.df = drop_sensitive_columns(self.df, logger=self.logger)
             # Reset index immediately after assignment to prevent duplicate labels
             self.df.reset_index(drop=True, inplace=True)
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
