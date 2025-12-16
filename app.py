@@ -6560,6 +6560,12 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
         tag_lower = tag.strip().lower()
         found_match = False  # Initialize found_match for each tag
         
+        # CRITICAL FIX: Initialize clean_tag before the if/else block to avoid UnboundLocalError
+        # Remove vendor suffixes for better matching
+        # Common patterns: "by Vendor", " - Vendor", etc.
+        clean_tag = re.sub(r'\s*(?:by|from|-\s*)([^-]*?)(?:\s*$)', '', tag_lower)
+        clean_tag = clean_tag.strip()
+        
         # First try exact match
         if tag_lower in available_product_names_lower:
             # Use all original cases from Excel data (now a list)
@@ -6570,11 +6576,6 @@ def _validate_tags_against_excel(excel_processor, selected_tags):
             found_match = True  # Mark as found since we found an exact match
         else:
             # Try partial matching - the frontend might send clean names while Excel has "Product Name by Vendor"
-            
-            # CRITICAL FIX: Remove vendor suffixes for better matching
-            # Common patterns: "by Vendor", " - Vendor", etc.
-            clean_tag = re.sub(r'\s*(?:by|from|-\s*)([^-]*?)(?:\s*$)', '', tag_lower)
-            clean_tag = clean_tag.strip()
             
             for excel_name, original_names in available_product_names_lower.items():
                 # Check if the frontend tag is contained within the Excel product name
