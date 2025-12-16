@@ -8986,11 +8986,15 @@ def get_available_tags():
             }), 202
 
         # CRITICAL FIX: If file exists but no cached tags yet, try in-memory processor before returning processing
+        # ALWAYS use get_excel_processor() to ensure we get the correct session's data
         if fast_load and session_file_path and file_exists and not cached_tags:
-            if _excel_processor is not None and getattr(_excel_processor, 'df', None) is not None and not _excel_processor.df.empty:
-                try:
-                    logging.info("⚡ FAST: Serving tags from in-memory processor while cache builds (fast_load, file exists)")
-                    excel_tags = _excel_processor.get_available_tags(filters=None)
+            try:
+                # CRITICAL: Must call get_excel_processor() to ensure correct session file is loaded
+                # Never trust global _excel_processor as it may contain other user's data
+                session_processor = get_excel_processor()
+                if session_processor is not None and getattr(session_processor, 'df', None) is not None and not session_processor.df.empty:
+                    logging.info("⚡ FAST: Serving tags from session processor while cache builds (fast_load, file exists)")
+                    excel_tags = session_processor.get_available_tags(filters=None)
                     safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
                     cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
                     try:
@@ -9004,8 +9008,8 @@ def get_available_tags():
                         'total_count': len(safe_excel_tags),
                         'source': 'excel-memory'
                     })
-                except Exception as mem_err:
-                    logging.warning(f"Failed to serve in-memory tags fallback (fast_load): {mem_err}")
+            except Exception as mem_err:
+                logging.warning(f"Failed to serve in-memory tags fallback (fast_load): {mem_err}")
             logging.info(f"⚡ FAST: File uploaded but tags not cached yet - returning processing status")
             return jsonify({
                 'tags': [],
