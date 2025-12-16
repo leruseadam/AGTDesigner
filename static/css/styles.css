@@ -865,9 +865,9 @@ body.modal-open #mainContent.store-selection-disabled,
 .help-button-container {
   position: relative !important;
   left: auto !important;
-  transform: translateY(-3rem) !important; /* Lift roughly half an inch */
+  transform: none !important; /* Even vertical positioning */
   bottom: auto !important;
-  margin: 1.5rem 0 2rem 0 !important;
+  margin: 2rem 0 2rem 0 !important; /* Balanced top/bottom spacing */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -912,6 +912,10 @@ body.modal-open #mainContent.store-selection-disabled,
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
     --center-panel-height: 57rem;     /* Height of center control panel */
     --tag-list-scroll-padding: 1rem;
+
+    /* Dynamic filter border sizing */
+    --filter-border-width: clamp(1px, 0.2vw, 2.25px);
+    --filter-chip-border-width: clamp(1px, 0.18vw, 2px);
   }
 
   /* Responsive sizing variables for center column buttons */
@@ -2937,9 +2941,9 @@ body.modal-open #mainContent.store-selection-disabled,
   .help-button-container {
     position: relative !important;
     left: auto !important;
-    transform: translateY(-3rem) !important;
+    transform: none !important;
     bottom: auto !important;
-    margin: 1.5rem 0 2rem 0 !important;
+    margin: 2rem 0 2rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7589,7 +7593,7 @@ body.modal-open #mainContent.store-selection-disabled,
 /* DOH dropdown container: light grey frame for visibility */
 #dohFilter {
   background-color: rgba(255, 255, 255, 0.06) !important;
-  border: 2px solid rgba(255, 255, 255, 0.25) !important;
+  border: var(--filter-border-width) solid rgba(255, 255, 255, 0.25) !important;
   box-shadow:
     0 0 0 4px rgba(255, 255, 255, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
@@ -7616,7 +7620,7 @@ body.modal-open #mainContent.store-selection-disabled,
     background: rgba(45, 34, 58, 0.85) !important; /* Match glass-card background */
     backdrop-filter: blur(20px) !important;
     -webkit-backdrop-filter: blur(20px) !important;
-    border: 2px solid rgba(160, 132, 232, 0.2) !important; /* Match glass-card border */
+    border: var(--filter-border-width) solid rgba(160, 132, 232, 0.2) !important; /* Match glass-card border */
     border-radius: 16px !important; /* Reduced from 24px for compactness */
     box-shadow: 
       0 12px 40px rgba(0,0,0,0.15), 
@@ -7654,7 +7658,7 @@ body.modal-open #mainContent.store-selection-disabled,
     margin: 0 !important;
     background: rgba(255, 255, 255, 0.08) !important; /* Subtle white overlay like glass-card */
     border-radius: 10px !important; /* Reduced from 12px */
-    border: 1px solid rgba(160, 132, 232, 0.15) !important;
+    border: var(--filter-chip-border-width) solid rgba(160, 132, 232, 0.15) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
     flex: 1 1 0 !important; /* Equal flex distribution */
     min-width: 0 !important; /* Allow shrinking */
@@ -7701,7 +7705,7 @@ body.modal-open #mainContent.store-selection-disabled,
     background: rgba(42, 32, 64, 0.9) !important; /* Darker background for contrast */
     color: #ffffff !important;
     border-radius: 8px !important;
-    border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
+    border: var(--filter-border-width) solid rgba(160, 132, 232, 0.3) !important;
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important;
     padding: 0.5rem 0.55rem 0.6rem 0.55rem !important; /* Significantly increased vertical padding to prevent text cutoff */
     padding-right: 1.75rem !important; /* Extra space for dropdown arrow */
@@ -7850,9 +7854,9 @@ body.modal-open #mainContent.store-selection-disabled,
   .help-button-container {
     position: relative !important;
     left: auto !important;
-    transform: translateY(-3rem) !important;
+    transform: none !important;
     bottom: auto !important;
-    margin: 1.5rem 0 2rem 0 !important;
+    margin: 2rem 0 2rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
