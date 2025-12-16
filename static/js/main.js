@@ -9004,38 +9004,49 @@ const TagManager = {
             }
             
             verboseLog(`Fetched ${selectedTags.length} selected tags from backend:`, selectedTags.map(tag => tag['Product Name*']));
-            
-            // CRITICAL FIX: Merge backend selections with local selections instead of replacing
-            // This ensures selections don't disappear if backend is out of sync
-            const backendTagNames = selectedTags.map(tag => tag['Product Name*']);
-            const mergedSelections = [...new Set([...localSelections, ...backendTagNames])];
-            
-            verboseLog('Merged selections (local + backend):', mergedSelections);
-            
-            // Update persistentSelectedTags with merged selections
-            this.state.persistentSelectedTags = mergedSelections;
+
+            // CRITICAL FIX: Trust backend as source of truth on page load
+            // Only merge if we have recent local changes (within last 2 seconds)
+            const hasRecentLocalChanges = this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000;
+
+            let finalSelections;
+            let finalTagObjects;
+
+            if (hasRecentLocalChanges && localSelections.length > 0) {
+                // Merge recent local changes with backend to prevent losing selections
+                const backendTagNames = selectedTags.map(tag => tag['Product Name*']);
+                finalSelections = [...new Set([...localSelections, ...backendTagNames])];
+                verboseLog('Merged selections (recent local + backend):', finalSelections);
+            } else {
+                // Trust backend completely on page reload
+                finalSelections = selectedTags.map(tag => tag['Product Name*']);
+                verboseLog('Using backend selections as source of truth:', finalSelections);
+            }
+
+            // Update persistentSelectedTags with final selections
+            this.state.persistentSelectedTags = finalSelections;
             // Save to localStorage for persistence
             this.saveSelectedTagsToStorage();
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-            verboseLog('persistentSelectedTags after merge:', this.state.persistentSelectedTags);
-            
-            // Build tag objects for merged selections
+            verboseLog('persistentSelectedTags updated:', this.state.persistentSelectedTags);
+
+            // Build tag objects for final selections
             const tagsMap = new Map(selectedTags.map(t => [t['Product Name*'], t]));
             const stateTagsMap = new Map(this.state.tags.map(t => [t['Product Name*'], t]));
             const originalTagsMap = new Map(this.state.originalTags.map(t => [t['Product Name*'], t]));
-            
-            const mergedTagObjects = mergedSelections.map(tagName => {
-                return tagsMap.get(tagName) || 
-                       stateTagsMap.get(tagName) || 
+
+            finalTagObjects = finalSelections.map(tagName => {
+                return tagsMap.get(tagName) ||
+                       stateTagsMap.get(tagName) ||
                        originalTagsMap.get(tagName) ||
                        null;
             }).filter(Boolean);
-            
-            verboseLog('Merged tag objects:', mergedTagObjects.length);
-            this.updateSelectedTags(mergedTagObjects);
+
+            verboseLog('Final tag objects:', finalTagObjects.length);
+            this.updateSelectedTags(finalTagObjects);
             
             // Ensure drag and drop is working after fetching tags
-            if (window.dragAndDropManager && mergedTagObjects.length > 0) {
+            if (window.dragAndDropManager && finalTagObjects.length > 0) {
                 setTimeout(() => {
                     verboseLog('Reinitializing drag and drop after fetchAndUpdateSelectedTags');
                     window.dragAndDropManager.reinitializeTagDragAndDrop();

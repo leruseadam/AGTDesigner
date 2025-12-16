@@ -58,12 +58,9 @@ logs/
 *.db-shm
 *.db-wal
 
-# EXCEPTION: Allow store-specific product databases (non-Bothell)
+# EXCEPTION: Allow store-specific product databases (including Bothell)
 !uploads/product_database_AGT_*.db
 !product_database_AGT_*.db
-
-# Block Bothell database specifically
-uploads/product_database_AGT_Bothell.db
 
 # Temporary files
 *.tmp

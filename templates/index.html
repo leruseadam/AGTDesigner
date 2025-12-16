@@ -5388,6 +5388,79 @@
       gap: 0.75rem !important;
     }
 
+    /* Social preview card */
+    .social-preview-card {
+      display: flex;
+      gap: 1rem;
+      padding: 1rem;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+    }
+
+    .social-preview-thumb {
+      width: 170px;
+      aspect-ratio: 1.91 / 1;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      flex-shrink: 0;
+    }
+
+    .social-preview-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .social-preview-body {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      min-width: 0;
+    }
+
+    .social-preview-domain {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.65);
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+
+    .social-preview-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.35;
+    }
+
+    .social-preview-description {
+      font-size: 0.95rem;
+      color: rgba(255, 255, 255, 0.82);
+      line-height: 1.5;
+    }
+
+    .social-preview-footnote {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.72);
+      margin-top: 0.4rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .social-preview-footnote svg {
+      width: 16px;
+      height: 16px;
+      opacity: 0.8;
+    }
+
     /* Responsive adjustments for smaller screens */
     @media (max-width: 768px) {
       .btn-header-action {
@@ -5736,7 +5809,7 @@
                 <div class="d-grid gap-3 w-100">
                   <!-- Undo on top of redo (stacked) -->
                   <div class="d-grid gap-3">
-                    <button id="undo-move-btn" class="btn btn-glass btn-control btn-color-indigo" title="Undo last selection">
+                    <button type="button" id="undo-move-btn" class="btn btn-glass btn-control btn-color-indigo" title="Undo last selection">
                       <span class="icon-btn">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <polyline points="1 4 1 10 7 10"></polyline>
@@ -5745,7 +5818,7 @@
                         Undo
                       </span>
                     </button>
-                    <button id="redo-move-btn" class="btn btn-glass btn-control btn-color-indigo" title="Redo last undo">
+                    <button type="button" id="redo-move-btn" class="btn btn-glass btn-control btn-color-indigo" title="Redo last undo">
                       <span class="icon-btn">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <polyline points="23 4 23 10 17 10"></polyline>
@@ -5812,6 +5885,36 @@
                       Lineage Editor
                     </span>
                   </button>
+                </div>
+              </div>
+
+              <!-- Social share preview -->
+              <div class="control-section mb-2">
+                <label class="filter-label d-flex align-items-center gap-2">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="4" ry="4"></rect>
+                    <path d="M7 12h10"></path>
+                    <path d="M12 7v10"></path>
+                  </svg>
+                  Social Share Preview
+                </label>
+                <div class="social-preview-card">
+                  <div class="social-preview-thumb">
+                    <img src="{{ (request.url_root if request.url_root and request.url_root != 'true' else 'https://www.agtpricetags.com/') }}{{ url_for('static', filename='social-preview.png') }}" alt="Social preview image">
+                  </div>
+                  <div class="social-preview-body">
+                    <div class="social-preview-domain">{{ request.host if request and request.host else 'agtpricetags.com' }}</div>
+                    <div class="social-preview-title">AGT Designer: Auto-Generating Tag Designer</div>
+                    <div class="social-preview-description">Create professional cannabis labels with AGT Designer. Generate compliant labels with custom branding, strain information, and regulatory requirements.</div>
+                  </div>
+                </div>
+                <div class="social-preview-footnote">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="9"></circle>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    <polyline points="11 12 12 12 12 16 13 16"></polyline>
+                  </svg>
+                  <span>Matches the Open Graph / Twitter meta when sharing.</span>
                 </div>
               </div>
 
@@ -5939,8 +6042,8 @@
 
             <button class="btn btn-store-option" onclick="selectStore('Test')">
               <div class="store-option-content">
-                <div class="store-name">Test</div>
-                <div class="store-location">Unspecified,</div>
+                <div class="store-name">Test Store</div>
+                <div class="store-location">Unspecified, WA</div>
               </div>
             </button>
           </div>

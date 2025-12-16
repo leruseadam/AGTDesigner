@@ -19,7 +19,8 @@
       "Bash(timeout 60 python3:*)",
       "Bash(find:*)",
       "Bash(cat:*)",
-      "Bash(ls -lh \"/Users/adamcordova/Desktop/labelMaker_ QR copy final/uploads/\"product_database_AGT_*.db)"
+      "Bash(ls -lh \"/Users/adamcordova/Desktop/labelMaker_ QR copy final/uploads/\"product_database_AGT_*.db)",
+      "Bash(git reset:*)"
     ],
     "deny": [],
     "ask": []

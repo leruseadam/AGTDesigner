@@ -9012,10 +9012,11 @@ def get_available_tags():
                         'loading': True
                     }), 200
 
-        # ULTRA-FAST PATH: Always use fast mode after Excel upload for instant response
+        # ULTRA-FAST PATH: Use fast mode after Excel upload for instant response
         # This gets something on screen as quickly as possible; slower DB alignment can happen later
-        # CRITICAL: Always enable fast mode - database queries take 2+ minutes
-        if (fast_load or True) and not prefer_db and not force_full_refresh:
+        # CRITICAL FIX: Only use fast mode when Excel file exists - otherwise use database
+        has_excel_file = file_exists or (_excel_processor is not None and _excel_processor.df is not None and not _excel_processor.df.empty)
+        if fast_load and has_excel_file and not prefer_db and not force_full_refresh:
             try:
                 # Get processor (may have been loaded synchronously above)
                 # Use get_excel_processor() to get the most up-to-date processor
