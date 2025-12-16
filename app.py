@@ -3138,30 +3138,37 @@ def upload_file():
             cache_key = get_session_cache_key('available_tags')
             cache.delete(cache_key)
             logging.info(f"✅ Cleared available_tags cache: {cache_key}")
-            
+
+            # CRITICAL FIX: Clear file-specific cache if old file path exists
+            old_file_path = session.get('file_path')
+            if old_file_path:
+                old_file_cache_key = get_session_cache_key(f'available_tags_{old_file_path}')
+                cache.delete(old_file_cache_key)
+                logging.info(f"✅ Cleared old file-specific cache: {old_file_cache_key[:50]}...")
+
             # CRITICAL FIX: Clear filter options cache to ensure fresh vendor data
             filter_options_cache_key = get_session_cache_key('filter_options')
             cache.delete(filter_options_cache_key)
             logging.info(f"✅ Cleared filter_options cache: {filter_options_cache_key}")
-            
+
             # Clear web filter options cache as well
             web_filter_options_cache_key = get_session_cache_key('web_filter_options')
             cache.delete(web_filter_options_cache_key)
             logging.info(f"✅ Cleared web_filter_options cache: {web_filter_options_cache_key}")
-            
+
             # Clear Excel processor cache
             reset_excel_processor()
             logging.info("✅ Reset Excel processor")
-            
+
             # Clear lineage update timestamp to force fresh lineage alignment
             if 'lineage_update_timestamp' in session:
                 del session['lineage_update_timestamp']
                 logging.info("✅ Cleared lineage_update_timestamp from session")
-            
+
             # Clear selected tags (they're for old file)
             session['selected_tags'] = []
             logging.info("✅ Cleared selected tags from session")
-            
+
         except Exception as cache_error:
             logging.warning(f"⚠️ Error clearing cache: {cache_error}")
         
@@ -8848,7 +8855,22 @@ def get_available_tags():
 
         # CRITICAL FIX: If no Excel file and no in-memory processor, don't use file-specific cache
         # This prevents returning stale Excel tags when user is in database-only mode
-        has_excel_data = file_exists or (_excel_processor is not None and _excel_processor.df is not None and not _excel_processor.df.empty)
+        # Also check that processor file path matches session to avoid serving stale data
+        processor_has_data = False
+        if _excel_processor is not None and _excel_processor.df is not None and not _excel_processor.df.empty:
+            # Verify processor is for current file, not old file
+            processor_file_path = getattr(_excel_processor, 'file_path', None)
+            if processor_file_path and session_file_path and processor_file_path == session_file_path:
+                processor_has_data = True
+            elif not session_file_path:
+                # No session file path means we might be in database mode, don't trust processor
+                processor_has_data = False
+            else:
+                # Processor file doesn't match session - stale processor
+                logging.warning(f"⚠️ Processor file mismatch: processor={processor_file_path}, session={session_file_path}")
+                processor_has_data = False
+
+        has_excel_data = file_exists or processor_has_data
 
         if has_excel_data and session_file_path:
             cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
