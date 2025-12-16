@@ -1090,7 +1090,30 @@ def validate_excel_filename_for_store(filename, selected_store):
         return False, f"Excel filename must contain a store name (e.g., 'AGT_Bothell', 'AGT_Burien', etc.). Found filename: {filename}", None
     
     if detected_store != selected_store:
-        return False, f"Store mismatch: Cannot upload {detected_store} Excel file to {selected_store}. Please select the correct store or use the correct Excel file.", detected_store
+        # CRITICAL FIX: Add diagnostic information to help debug store mismatch
+        from flask import session, has_request_context
+        session_store = None
+        ip_store = None
+        if has_request_context():
+            session_store = session.get('selected_store')
+            ip_address = get_client_ip()
+            with _ip_store_lock:
+                if ip_address in _ip_store_selections:
+                    ip_store = _ip_store_selections[ip_address].get('store')
+        
+        diagnostic_info = f"Detected store in filename: {detected_store}, Selected store: {selected_store}"
+        if session_store:
+            diagnostic_info += f", Session store: {session_store}"
+        if ip_store:
+            diagnostic_info += f", IP-based store: {ip_store}"
+        
+        logging.error(f"Store mismatch detected: {diagnostic_info}")
+        
+        # CRITICAL FIX: If session has the correct store but selected_store is wrong, suggest refreshing
+        if session_store == detected_store and selected_store != detected_store:
+            return False, f"Store mismatch: Your session shows '{session_store}' but the system selected '{selected_store}'. Please refresh the page and try again, or manually select '{detected_store}' store.", detected_store
+        
+        return False, f"Store mismatch: Cannot upload {detected_store} Excel file to {selected_store}. Please select the correct store or use the correct Excel file. (Session: {session_store}, IP: {ip_store})", detected_store
     
     return True, None, detected_store
 
@@ -2872,10 +2895,6 @@ def upload_file():
             logging.error(f"❌ IP store selections: {list(_ip_store_selections.keys())}")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
         
-        # Get current store selection
-        selected_store = get_current_store_name()
-        logging.info(f"✅ Store selection found: {selected_store}")
-        
         # Validate request
         if 'file' not in request.files:
             logging.error("No file in request")
@@ -2885,6 +2904,30 @@ def upload_file():
         if not file or file.filename == '':
             logging.error("Empty file or filename")
             return jsonify({'error': 'No file selected'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
+        ip_store = None
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                ip_store = _ip_store_selections[ip_address].get('store')
+        
+        logging.info(f"✅ Store selection found: {selected_store}")
+        logging.info(f"🔍 Store diagnostics - Session: {session_store}, IP-based: {ip_store}, Final: {selected_store}")
+        
+        # CRITICAL FIX: Allow store override from request body if provided (for UI consistency)
+        request_store = request.form.get('store') or (request.get_json() or {}).get('store')
+        if request_store:
+            logging.info(f"🔍 Request specifies store: {request_store}, current selected: {selected_store}")
+            # If request store matches detected store in filename, use it
+            detected_store_from_filename = extract_store_from_filename(file.filename)
+            if detected_store_from_filename == request_store:
+                logging.info(f"✅ Request store matches filename - using {request_store}")
+                selected_store = request_store
+                # Update session to match
+                session['selected_store'] = request_store
+                session['store_server_id'] = SERVER_INSTANCE_ID
+                session.modified = True
         
         logging.info(f"Uploading: {file.filename} for store: {selected_store}")
         
@@ -6520,6 +6563,9 @@ def _extract_product_name_from_full_name(full_name):
 
 def _validate_tags_against_excel(excel_processor, selected_tags):
     """Helper function to validate tags against Excel data."""
+    # CRITICAL FIX: Import re module locally to avoid scoping issues
+    import re
+    
     valid_selected_tags = []
     invalid_selected_tags = []
     
@@ -6674,6 +6720,9 @@ def _extract_price_from_database_product(product):
 
 def _create_desc_and_weight(product_name, weight_units):
     """Create DescAndWeight field with 'Product Name - Weight' format (matching Excel processor)."""
+    # CRITICAL FIX: Import re module locally to avoid scoping issues
+    import re
+    
     if not product_name:
         return ''
 
