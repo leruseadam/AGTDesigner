@@ -7320,7 +7320,7 @@ def generate_labels():
 
         # JSON matched products are now in the Excel DataFrame, so no special handling needed
         # All products (including JSON matched) are processed through the normal database/Excel flow
-
+        
         if has_database:
             logging.info("Using database for record generation (preferred source)")
             try:
@@ -7967,6 +7967,11 @@ def generate_labels():
         except Exception as enrich_err:
             logging.error(f"Lineage enrichment failed: {enrich_err}")
         
+        # Bail out early if no records made it this far (prevents NoneType errors downstream)
+        if not records:
+            logging.error("❌ No records available for generation after validation/deduplication")
+            return jsonify({'error': 'No valid tags to generate. Please refresh and try again.'}), 400
+        
         # Fast generation with caching
         fast_engine = FastGenerationEngine(processor)
         cache_hits_before = fast_engine.cache_hits
@@ -7984,7 +7989,11 @@ def generate_labels():
         if hasattr(final_doc, 'labels_rendered'):
             logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
         if final_doc is None:
+            logging.error("❌ Generation returned None document")
             return jsonify({'error': 'Failed to generate document.'}), 500
+        if not hasattr(final_doc, 'save'):
+            logging.error(f"❌ Generation returned unexpected type without save(): {type(final_doc)}")
+            return jsonify({'error': 'Failed to generate document (invalid document type).'}), 500
 
         # Apply custom formatting based on saved settings
         if template_settings:

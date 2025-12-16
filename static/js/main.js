@@ -9835,30 +9835,19 @@ const TagManager = {
                     </div>
                 `;
             } else {
-                // No file - show upload prompt instead of loading splash
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
+                // No file - but still try to load tags from database (store-based)
+                // Show loading indicator while attempting to load from database
+                this.showActionSplash('Loading tags from database...');
                 availableTagsContainer.innerHTML = `
-                    <div class="text-center py-5">
-                        <div class="upload-prompt">
-                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                            <h5 class="text-muted">No product data loaded</h5>
-                            <p class="text-muted">Upload an Excel file to get started</p>
-                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                <i class="fas fa-upload me-2"></i>Upload Excel File
-                            </button>
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
                         </div>
+                        <p class="mt-2 text-white">Loading tags from database...</p>
                     </div>
                 `;
-                // CRITICAL FIX: Complete splash screen even when no file
-                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-                // No file, so exit early
-                this._checkingExistingData = false;
-                return;
+                // Continue to load tags from database even without uploaded file
+                // Don't exit early - let the function continue to fetch from database
             }
         }
 
