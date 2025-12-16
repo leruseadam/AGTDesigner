@@ -8769,22 +8769,8 @@ def get_available_tags():
                 except Exception:
                     pass
 
-        # CRITICAL FIX: DISABLE CACHING ENTIRELY for Excel data to prevent any stale data issues
-        # Always load fresh from the Excel file to ensure correct session data
-        # This prevents ANY possibility of serving cached data from other sessions
-        if has_excel_data and session_file_path:
-            logging.info(f"🚫 CACHE DISABLED: Always loading fresh Excel data to prevent stale data")
-            cached_tags = None
-            # Clear any existing caches for this session
-            try:
-                cache.delete(cache_key)
-                old_cache_key_no_ts = get_session_cache_key(f'available_tags_{session_file_path}')
-                cache.delete(old_cache_key_no_ts)
-                logging.info(f"🧹 Cleared all caches for this session")
-            except Exception:
-                pass
-        else:
-            cached_tags = cache.get(cache_key) if not prefer_db else None
+        # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
+        cached_tags = None if prefer_db or nocache else cache.get(cache_key)
 
         # CRITICAL FIX: When no Excel file, check for cached tags before returning empty
         # This allows tags to load even if the session file was cleaned up but tags are cached
@@ -9298,10 +9284,16 @@ def get_available_tags():
 
                     safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
 
-                    # NO CACHING - always load fresh to prevent any stale data issues
+                    # Cache for this upload to speed up subsequent requests (key includes file + timestamp)
+                    if safe_all_tags and not nocache:
+                        try:
+                            cache.set(cache_key, safe_all_tags, timeout=300)  # 5 minutes
+                            logging.info(f"✅ Cached {len(safe_all_tags)} tags for fast reuse ({cache_key[:40]}...)")
+                        except Exception as cache_err:
+                            logging.warning(f"⚠️ Unable to cache available tags: {cache_err}")
 
                     elapsed = (time.time() - start_time) * 1000
-                    logging.info(f"✅ ULTRA-FAST available-tags completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} Excel-only tags (NO CACHE)")
+                    logging.info(f"✅ ULTRA-FAST available-tags completed ({elapsed:.1f}ms) - returning {len(safe_all_tags)} Excel-only tags")
                     resp = jsonify({
                         'tags': safe_all_tags,
                         'total_count': len(safe_all_tags),
