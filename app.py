@@ -118,7 +118,7 @@ else:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
-VALID_STORES = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT_Seattle', 'AGT_Shoreline', 'AGT_Walla_Walla']
+VALID_STORES = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT_Seattle', 'AGT_Shoreline', 'AGT_Walla_Walla', 'Test']
 CACHE_DIR = os.path.join(UPLOADS_DIR, 'cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -6055,9 +6055,8 @@ def set_store():
         store_value = data['store']
         ip_address = get_client_ip()
         
-        # Validate store selection
-        valid_stores = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT_Seattle', 'AGT_Shoreline', 'AGT_Walla_Walla']
-        if store_value not in valid_stores:
+        # Validate store selection against global list
+        if store_value not in VALID_STORES:
             return jsonify({'success': False, 'error': 'Invalid store selection'}), 400
         
         # CHECK: Warn if switching stores

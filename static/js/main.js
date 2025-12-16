@@ -8201,6 +8201,8 @@ const TagManager = {
         
         // Set flag to prevent concurrent calls
         this._fetchingAvailableTags = true;
+        // Track background-processing retries (reset on success)
+        this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
         // CRITICAL FIX: Add timeout to force hide splash if fetch takes too long
         const splashTimeout = setTimeout(() => {
@@ -8487,6 +8489,26 @@ const TagManager = {
                 if (responseData.error || responseData.message) {
                     const errorMsg = responseData.error || responseData.message;
                     console.warn('Backend returned empty tags with message:', errorMsg);
+
+                    // Auto-retry when backend is still loading the file in background
+                    const lowerMsg = (errorMsg || '').toLowerCase();
+                    const isBackgroundLoading = lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly');
+                    if (isBackgroundLoading) {
+                        this._backgroundProcessingRetries += 1;
+                        const maxBgRetries = 12; // ~24s if 2s delay
+                        if (this._backgroundProcessingRetries <= maxBgRetries) {
+                            const delayMs = 2000;
+                            verboseLog(`⏳ Background load in progress (retry ${this._backgroundProcessingRetries}/${maxBgRetries}) – retrying in ${delayMs}ms`);
+                            setTimeout(() => {
+                                // Fire-and-forget; flag will prevent duplicate overlaps
+                                this.fetchAndUpdateAvailableTags().catch(e => console.warn('Background retry failed:', e));
+                            }, delayMs);
+                            // Keep splash visible; don't overwrite UI with message
+                            return false;
+                        }
+                        console.warn('⚠️ Background loading retries exhausted; showing message to user');
+                    }
+
                     // Try cache as fallback
                     const cachedTags = this.hydrateAvailableTagsFromCache();
                     if (cachedTags) {
@@ -8585,6 +8607,7 @@ const TagManager = {
             // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
             // This is especially important when lineage alignment happened on the backend
             console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
+            this._backgroundProcessingRetries = 0; // reset after successful load
             
             // CRITICAL: If lineage was aligned from database, ensure tags are fully re-rendered to show database lineage
             const lineageWasAligned = responseData && responseData.source && 
