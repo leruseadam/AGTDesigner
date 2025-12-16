@@ -12017,7 +12017,6 @@ def update_doh():
         
         # Persist a session-scoped override so generation always reflects the latest user choice
         try:
-            import re
             overrides = session.get('doh_overrides', {})
             for candidate in name_variants:
                 norm_key = product_db._normalize_product_name(candidate)
