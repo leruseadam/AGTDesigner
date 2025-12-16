@@ -823,6 +823,7 @@ body.modal-open #mainContent.store-selection-disabled,
   flex-direction: column !important;
   align-items: center !important;
   width: 100% !important;
+  padding-bottom: 8rem !important; /* Extra space to lift bottom controls/help */
 }
 
 .control-panel > * {
@@ -861,7 +862,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .help-button-container {
-  margin: 0.25rem 0 22rem 0 !important; /* Lift button higher from bottom */
+  margin: 0.25rem 0 32rem 0 !important; /* Lift button higher from bottom */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2930,7 +2931,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Center column specific spacing reductions */
   .help-button-container {
-    margin: 0.25rem 0 22rem 0 !important; /* Lift button higher from bottom */
+    margin: 0.25rem 0 32rem 0 !important; /* Lift button higher from bottom */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7840,7 +7841,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Help Button Container and Label Styling */
   .help-button-container {
-    margin: 0.25rem 0 22rem 0 !important; /* Lift button higher from bottom */
+    margin: 0.25rem 0 32rem 0 !important; /* Lift button higher from bottom */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
