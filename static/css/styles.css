@@ -866,7 +866,7 @@ body.modal-open #mainContent.store-selection-disabled,
   position: absolute !important;
   left: 50% !important;
   transform: translateX(-50%) !important;
-  bottom: 4rem !important;          /* Pin above bottom edge */
+  bottom: 6rem !important;          /* Mid position between edge and controls */
   margin: 0 !important;
   width: auto !important;
   display: flex !important;
@@ -2938,7 +2938,7 @@ body.modal-open #mainContent.store-selection-disabled,
     position: absolute !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
-    bottom: 4rem !important;
+    bottom: 6rem !important;
     margin: 0 !important;
     width: auto !important;
     display: flex !important;
@@ -7851,7 +7851,7 @@ body.modal-open #mainContent.store-selection-disabled,
     position: absolute !important;
     left: 50% !important;
     transform: translateX(-50%) !important;
-    bottom: 4rem !important;
+    bottom: 6rem !important;
     margin: 0 !important;
     width: auto !important;
     display: flex !important;
