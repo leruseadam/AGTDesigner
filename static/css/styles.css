@@ -138,10 +138,15 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
 }
 
-/* Constrain large monitors - standard sizing */
+/* ========================================================================
+   LARGE MONITOR SETTINGS - DO NOT CHANGE FONT-SIZE VALUES
+   ========================================================================
+   These values MUST match the base html font-size above (16px).
+   Changing these causes zoom issues on large monitors.
+   ======================================================================== */
 @media (min-width: 1921px) {
   html {
-    font-size: 16px !important; /* Standard base size */
+    font-size: 16px !important; /* LOCKED - must match base html font-size */
   }
 
   body {
@@ -162,11 +167,11 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 
   /* Keep standard font sizes - EXCEPT tag lists */
   *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
-    font-size: 1em !important; /* Standard sizing */
+    font-size: 1em !important; /* Standard sizing - DO NOT CHANGE */
   }
 
   html {
-    font-size: 16px !important; /* Base size - standard */
+    font-size: 16px !important; /* LOCKED - must match base html font-size */
   }
   
   /* Override: Keep inventory list at readable size on large screens - use absolute px to avoid scaling issues */
@@ -7540,7 +7545,7 @@ body.modal-open #mainContent.store-selection-disabled,
   min-height: 80vh;
   align-items: center !important;
   display: grid !important;
-  grid-template-columns: 1fr minmax(230px, 280px) 1fr;
+  grid-template-columns: 1fr minmax(280px, 360px) 1fr;
   gap: 1rem !important;
   padding-top: 0 !important;
   margin-top: 0 !important;
