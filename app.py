@@ -2247,10 +2247,12 @@ def get_session_excel_processor():
         g._getting_excel_processor = True  # Set recursion guard
         
         if 'excel_processor' not in g:
-            # Use the global Excel processor instead of creating a new one
-            # This ensures we always have the most up-to-date data
-            g.excel_processor = get_excel_processor()
-            
+            # CRITICAL: Create NEW processor instance instead of using deprecated global
+            # This prevents session data leakage
+            from src.core.data.excel_processor import ExcelProcessor
+            store_name = get_current_store_name() if has_store_selection() else 'AGT_Bothell'
+            g.excel_processor = ExcelProcessor(store_name=store_name)
+
             # CRITICAL FIX: Keep ProductDB integration enabled for lineage support
             # Direct database queries (get_product_lineage) still work even if integration is disabled
             # But enabling it ensures lineage data is available when needed
@@ -2274,14 +2276,22 @@ def get_session_excel_processor():
             session_file_path = session.get('file_path')
             session_store = session.get('file_store', '')
             # Store context removed - using single database
-            
+
             if session_file_path and os.path.exists(session_file_path):
-                # File already loaded by get_excel_processor() above - just verify
-                if hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None and not g.excel_processor.df.empty:
-                    row_count = len(g.excel_processor.df)
-                    logging.info(f"✅ Session file already loaded by get_excel_processor(): {session_file_path} ({row_count} rows)")
-                else:
-                    logging.warning(f"⚠️ Session file not loaded by get_excel_processor(), DataFrame is empty")
+                # CRITICAL: Load the session file into the new processor instance
+                logging.info(f"📂 Loading session file: {session_file_path}")
+                try:
+                    success = g.excel_processor.load_file(session_file_path)
+                    if success and g.excel_processor.df is not None and not g.excel_processor.df.empty:
+                        row_count = len(g.excel_processor.df)
+                        logging.info(f"✅ Loaded session file: {session_file_path} ({row_count} rows)")
+                        g.excel_processor._last_loaded_file = session_file_path
+                    else:
+                        logging.warning(f"⚠️ Failed to load session file or file is empty: {session_file_path}")
+                except Exception as load_err:
+                    logging.error(f"❌ Error loading session file: {load_err}")
+                    import traceback
+                    logging.error(traceback.format_exc())
             elif session_file_path:
                 logging.warning(f"Session uploaded file does not exist: {session_file_path}")
                 # Clear invalid session data
