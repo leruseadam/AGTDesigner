@@ -3121,8 +3121,8 @@ body.modal-open #mainContent.store-selection-disabled,
     font-size: 0.85rem !important; /* Smaller font for compact buttons */
     font-weight: 650 !important;
     min-height: 42px !important; /* Compact height to match undo/redo */
-    width: 85% !important; /* Match undo/redo button width */
-    max-width: 85% !important;
+    width: 70% !important; /* Reduced from 85% for less width */
+    max-width: 70% !important;
     margin: 0 auto !important; /* Keep centered if container narrower */
     border-radius: 12px !important;
     display: flex !important;
