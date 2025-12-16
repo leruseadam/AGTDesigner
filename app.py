@@ -8658,6 +8658,17 @@ def get_available_tags():
             session.modified = True
             has_excel_data = False
 
+        # FALLBACK: If no file but request-scoped processor already loaded, use it
+        if not has_excel_data and getattr(g, 'excel_processor', None):
+            try:
+                proc = g.excel_processor
+                if proc.df is not None and not proc.df.empty:
+                    has_excel_data = True
+                    session_file_path = getattr(proc, '_last_loaded_file', session_file_path)
+                    logging.info("ℹ️ Using in-memory Excel processor data as fallback for available-tags")
+            except Exception as mem_fallback_err:
+                logging.warning(f"In-memory processor fallback failed: {mem_fallback_err}")
+
         # CRITICAL FIX: Include upload timestamp in cache key to ensure each upload has unique cache
         # This prevents serving stale data from previous uploads or other sessions
         upload_timestamp = session.get('upload_timestamp', '')
@@ -8733,8 +8744,21 @@ def get_available_tags():
         logging.info(f"✅ Excel file exists: {session_file_path} - using SIMPLE Excel-only path")
         try:
             from src.core.data.excel_processor import ExcelProcessor
-            simple_processor = ExcelProcessor(store_name=store_name)
-            simple_processor.load_file(session_file_path)
+
+            # PERFORMANCE: Use cached processor from request context if available
+            simple_processor = getattr(g, 'excel_processor', None)
+            needs_load = True
+
+            if simple_processor and hasattr(simple_processor, '_last_loaded_file'):
+                if simple_processor._last_loaded_file == session_file_path:
+                    needs_load = False
+                    logging.info(f"⚡ CACHE HIT: Reusing loaded Excel processor")
+
+            if needs_load or simple_processor is None:
+                simple_processor = ExcelProcessor(store_name=store_name)
+                simple_processor.load_file(session_file_path)
+                g.excel_processor = simple_processor
+                logging.info(f"📂 Loaded Excel file: {session_file_path}")
 
             if simple_processor.df is not None and not simple_processor.df.empty:
                 simple_tags = simple_processor.get_available_tags(filters=None)
@@ -8755,49 +8779,39 @@ def get_available_tags():
                                 conn = product_db._get_connection()
                                 cursor = conn.cursor()
 
-                                # Normalize product names for query
-                                normalized_names = [product_db._normalize_product_name(name) for name in product_names]
-
-                                # Create reverse mapping: normalized_name -> original Excel names
-                                norm_to_excel = {}
-                                for excel_name in product_names:
-                                    norm = product_db._normalize_product_name(excel_name)
-                                    if norm not in norm_to_excel:
-                                        norm_to_excel[norm] = []
-                                    norm_to_excel[norm].append(excel_name)
+                                # PERFORMANCE: Build lowercase lookup for O(1) matching
+                                excel_lower_map = {name.lower().strip(): name for name in product_names}
 
                                 # SQLite has a parameter limit (typically 999) – chunk to avoid failures
                                 chunk_size = 400
                                 total_results = 0
-                                for chunk_start in range(0, len(normalized_names), chunk_size):
-                                    chunk = normalized_names[chunk_start:chunk_start + chunk_size]
-                                    placeholders = ','.join(['?' for _ in chunk])
+                                for chunk_start in range(0, len(product_names), chunk_size):
+                                    chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                    chunk_lower = [name.lower() for name in chunk]
+                                    placeholders = ','.join(['?' for _ in chunk_lower])
+                                    # Use LOWER() with index for fast case-insensitive matching
                                     cursor.execute(f'''
-                                        SELECT "Product Name*", "Lineage", normalized_name
+                                        SELECT "Product Name*", "Lineage"
                                         FROM products
-                                        WHERE normalized_name IN ({placeholders})
-                                    ''', chunk)
+                                        WHERE LOWER("Product Name*") IN ({placeholders})
+                                    ''', chunk_lower)
                                     results = cursor.fetchall()
                                     total_results += len(results)
 
-                                    # Build lineage map from this chunk
-                                    # CRITICAL: Map to ALL Excel names that normalize to this database product
+                                    # Build lineage map with O(1) lookups
                                     for row in results:
                                         db_name = row[0]
                                         db_lineage = row[1]
-                                        norm_name = row[2]
 
                                         if db_lineage:
                                             clean_lineage = str(db_lineage).strip().upper()
-                                            # Map exact database name
-                                            if db_name:
-                                                lineage_map[db_name] = clean_lineage
-                                            # Map all Excel names that normalize to this product
-                                            if norm_name in norm_to_excel:
-                                                for excel_name in norm_to_excel[norm_name]:
-                                                    lineage_map[excel_name] = clean_lineage
+                                            lineage_map[db_name] = clean_lineage
+                                            # O(1) lookup instead of O(n) loop
+                                            excel_key = db_name.lower().strip()
+                                            if excel_key in excel_lower_map:
+                                                lineage_map[excel_lower_map[excel_key]] = clean_lineage
 
-                                logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products across {(len(normalized_names)-1)//chunk_size + 1} chunk(s)")
+                                logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products from {len(product_names)} Excel products")
                                 logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
                                 if len(lineage_map) > 0:
                                     sample = list(lineage_map.items())[:2]

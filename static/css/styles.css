@@ -865,9 +865,9 @@ body.modal-open #mainContent.store-selection-disabled,
 .help-button-container {
   position: relative !important;
   left: auto !important;
-  transform: none !important;
+  transform: translateY(-5rem) !important; /* Lift further from bottom */
   bottom: auto !important;
-  margin: 0.5rem 0 !important;
+  margin: 0 0.5rem 0 !important;
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2941,9 +2941,9 @@ body.modal-open #mainContent.store-selection-disabled,
   .help-button-container {
     position: relative !important;
     left: auto !important;
-    transform: none !important;
+    transform: translateY(-5rem) !important;
     bottom: auto !important;
-    margin: 0.5rem 0 !important;
+    margin: 0 0.5rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7854,9 +7854,9 @@ body.modal-open #mainContent.store-selection-disabled,
   .help-button-container {
     position: relative !important;
     left: auto !important;
-    transform: none !important;
+    transform: translateY(-5rem) !important;
     bottom: auto !important;
-    margin: 0.5rem 0 !important;
+    margin: 0 0.5rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;

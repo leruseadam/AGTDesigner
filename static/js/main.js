@@ -8078,6 +8078,19 @@ const TagManager = {
             clearTimeout(timeoutId);
 
             if (!response.ok) {
+                // Check for store mismatch error
+                if (response.status === 400) {
+                    try {
+                        const errorData = await response.json();
+                        if (errorData.source === 'store-mismatch-error') {
+                            console.error('❌ STORE MISMATCH:', errorData.error);
+                            alert(`⚠️ STORE MISMATCH DETECTED\n\n${errorData.error}\n\nThe wrong file was loaded. Please upload the correct Excel file for ${errorData.current_store}.`);
+                            return;
+                        }
+                    } catch (e) {
+                        // Not JSON or parsing failed, continue
+                    }
+                }
                 verboseLog('Lite tags prefetch skipped – non-OK response:', response.status);
                 return;
             }
@@ -9928,9 +9941,9 @@ const TagManager = {
             return; // Exit early - we have cached data
         }
 
-        // PERFORMANCE FIX: Reduced timeout to 8 seconds - if it takes longer, use cache/fallback
+        // PERFORMANCE FIX: Allow more time for first load to avoid premature timeout
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Initialization timeout')), 8000);
+            setTimeout(() => reject(new Error('Initialization timeout')), 15000);
         });
 
         // Set the safety timeout
