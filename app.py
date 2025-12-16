@@ -8668,6 +8668,22 @@ def get_available_tags():
                     logging.info("ℹ️ Using in-memory Excel processor data as fallback for available-tags")
             except Exception as mem_fallback_err:
                 logging.warning(f"In-memory processor fallback failed: {mem_fallback_err}")
+        
+        # CRITICAL FIX: If processor was cleared after lineage update, try to reload from session file path
+        # This prevents tags from disappearing after lineage updates
+        if not has_excel_data and session_file_path and os.path.exists(session_file_path):
+            try:
+                logging.info(f"🔄 Processor was cleared - reloading from session file: {session_file_path}")
+                from src.core.data.excel_processor import ExcelProcessor
+                reloaded_processor = ExcelProcessor(store_name=store_name)
+                if reloaded_processor.load_file(session_file_path):
+                    if reloaded_processor.df is not None and not reloaded_processor.df.empty:
+                        has_excel_data = True
+                        g.excel_processor = reloaded_processor
+                        reloaded_processor._last_loaded_file = session_file_path
+                        logging.info(f"✅ Reloaded Excel processor from session file: {len(reloaded_processor.df)} rows")
+            except Exception as reload_err:
+                logging.warning(f"Failed to reload processor from session file: {reload_err}")
 
         # CRITICAL FIX: Include upload timestamp in cache key to ensure each upload has unique cache
         # This prevents serving stale data from previous uploads or other sessions
