@@ -62,14 +62,20 @@ logs/
 !uploads/product_database_AGT_*.db
 !product_database_AGT_*.db
 
+# Block Bothell database specifically
+uploads/product_database_AGT_Bothell.db
+
 # Temporary files
 *.tmp
 *.temp
 temp/
 tmp/
 
-# Uploads and outputs
-uploads/
+# Uploads and outputs - Allow uploads folder but block specific items
+!uploads/
+!uploads/**
+uploads/cache/
+uploads/cache/**
 output/
 cache/
 
