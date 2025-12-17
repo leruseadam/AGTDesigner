@@ -217,31 +217,55 @@ def repair_database(db_path, methods=['dump_restore', 'vacuum']):
     return False, "All repair methods failed"
 
 
-def find_databases(data_dir=None):
+def find_databases(data_dir=None, recursive=False):
     """Find all SQLite databases in the data directory."""
+    databases = []
+    
     if data_dir is None:
-        # Try to find data directory
+        # Try to find data directory - search more locations
         script_dir = Path(__file__).parent
         possible_dirs = [
             script_dir / 'data',
             script_dir / 'src' / 'core' / 'data',
+            script_dir / 'src' / 'data',
+            script_dir / 'core' / 'data',
             Path.home() / '.labelmaker' / 'data',
+            Path('/tmp'),
+            Path('/var/tmp'),
         ]
         
+        # Also search recursively from script directory
+        if recursive:
+            print("🔍 Searching recursively for databases...")
+            for root_dir in [script_dir, Path.home()]:
+                if root_dir.exists():
+                    databases.extend(root_dir.rglob('*.db'))
+                    # Limit search depth to avoid scanning entire filesystem
+                    if len(databases) > 0:
+                        break
+        
+        # Try specific directories
         for dir_path in possible_dirs:
             if dir_path.exists():
-                data_dir = dir_path
-                break
+                if recursive:
+                    databases.extend(dir_path.rglob('*.db'))
+                else:
+                    databases.extend(dir_path.glob('*.db'))
         
-        if data_dir is None:
-            return []
+        # Remove duplicates and sort
+        databases = sorted(set(databases), key=lambda p: str(p))
+        return databases
     
+    # Search specified directory
     data_dir = Path(data_dir)
     if not data_dir.exists():
         return []
     
-    # Find all .db files
-    databases = list(data_dir.glob('*.db'))
+    if recursive:
+        databases = list(data_dir.rglob('*.db'))
+    else:
+        databases = list(data_dir.glob('*.db'))
+    
     return databases
 
 
@@ -253,6 +277,10 @@ def main():
                        default='all', help='Repair method to use')
     parser.add_argument('--check-only', action='store_true', 
                        help='Only check integrity, do not repair')
+    parser.add_argument('--find', action='store_true',
+                       help='Find and list all databases without repairing')
+    parser.add_argument('--recursive', action='store_true',
+                       help='Search recursively for databases')
     
     args = parser.parse_args()
     
@@ -270,10 +298,25 @@ def main():
     else:
         # Find all databases
         print("🔍 Searching for databases...")
-        databases = find_databases(args.data_dir)
+        databases = find_databases(args.data_dir, recursive=args.recursive or args.find)
         if not databases:
-            print("❌ No databases found. Please specify a database path.")
+            print("❌ No databases found.")
+            print("\n💡 Try:")
+            print("  1. python repair_database.py --find --recursive")
+            print("  2. python repair_database.py /path/to/database.db")
+            print("  3. python repair_database.py --data-dir /path/to/data/directory")
             sys.exit(1)
+        
+        if args.find:
+            # Just list databases
+            print(f"\n✅ Found {len(databases)} database(s):\n")
+            for db in databases:
+                size = db.stat().st_size / (1024 * 1024)  # Size in MB
+                is_ok, message = check_database_integrity(db)
+                status = "✅ OK" if is_ok else "❌ CORRUPTED"
+                print(f"  {status}  {db} ({size:.2f} MB)")
+            print()
+            sys.exit(0)
         
         databases_to_repair = databases
         print(f"✅ Found {len(databases)} database(s)\n")
