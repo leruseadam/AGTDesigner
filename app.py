@@ -887,10 +887,10 @@ def get_current_store_name(allow_fallback=True):
                 return 'AGT_Bothell'  # Default fallback
             return None
         
-    # CRITICAL FIX: Check Flask session first (most reliable). Keep the value even if server instance changed.
-    if session.get('selected_store'):
-        logging.debug(f"Returning store from session: {session.get('selected_store')}")
-        return session.get('selected_store')
+        # CRITICAL FIX: Check Flask session first (most reliable). Keep the value even if server instance changed.
+        if session.get('selected_store'):
+            logging.debug(f"Returning store from session: {session.get('selected_store')}")
+            return session.get('selected_store')
         
         # Fallback to IP-based selection
         ip_address = get_client_ip()
@@ -911,9 +911,9 @@ def get_current_store_name(allow_fallback=True):
                         # Remove expired selection
                         del _ip_store_selections[ip_address]
         
-    if allow_fallback:
-        # Simpler fallback: default to Bothell instead of auto-picking largest DB (avoids surprise switches)
-        return 'AGT_Bothell'
+        if allow_fallback:
+            # Simpler fallback: default to Bothell instead of auto-picking largest DB (avoids surprise switches)
+            return 'AGT_Bothell'
     except Exception as e:
         logging.warning(f"Error getting current store name: {e}")
         return None
