@@ -6777,6 +6777,8 @@ def _align_tags_with_db_lineage(tags, store_name):
     """
     Ensure tags shown in the UI use the latest lineage from the database.
     Returns a shallow-copied list so cached tag objects are not mutated.
+    CRITICAL: This function ALWAYS overrides Excel lineage with database lineage.
+    Uses the same method as _enrich_tags_with_database_values for consistency.
     """
     if not tags or not isinstance(tags, list):
         return tags
@@ -6784,6 +6786,7 @@ def _align_tags_with_db_lineage(tags, store_name):
     try:
         product_db = get_product_database(store_name)
         if not product_db:
+            logging.debug("No product database available for lineage alignment")
             return tags
         
         # Copy tags so we don't mutate cached objects
@@ -6794,45 +6797,55 @@ def _align_tags_with_db_lineage(tags, store_name):
         if not product_names:
             return aligned_tags
         
-        lineage_map = {}
-        conn = product_db._get_connection()
-        cursor = conn.cursor()
-        
-        chunk_size = 400
-        for start in range(0, len(product_names), chunk_size):
-            chunk = product_names[start:start + chunk_size]
-            placeholders = ','.join(['?' for _ in chunk])
-            cursor.execute(f'''
-                SELECT "Product Name*", "Lineage", "canonical_lineage"
-                FROM products
-                WHERE LOWER("Product Name*") IN ({placeholders})
-            ''', [name.lower() for name in chunk])
-            for row in cursor.fetchall():
-                db_name = row[0]
-                db_lineage = row[1] or row[2]
-                if db_name and db_lineage:
-                    lineage_map[db_name.lower().strip()] = str(db_lineage).strip().upper()
-        
-        if not lineage_map:
+        # CRITICAL FIX: Use get_products_by_names (same as _enrich_tags_with_database_values)
+        # This ensures consistent normalization and matching
+        db_records = product_db.get_products_by_names(product_names)
+        if not db_records:
+            logging.debug(f"No database records found for {len(product_names)} products")
             return aligned_tags
         
-        # Apply lineage to tags
+        # Create lookup map using normalized names (same as _enrich_tags_with_database_values)
+        db_lookup = {}
+        for db_record in db_records:
+            product_name = db_record.get('Product Name*', '')
+            if product_name:
+                normalized_name = product_db._normalize_product_name(product_name)
+                db_lookup[normalized_name] = db_record
+        
+        # CRITICAL FIX: ALWAYS override Excel lineage with database lineage
+        # This ensures database is the source of truth, not Excel
+        enriched_count = 0
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
             name = tag.get('Product Name*')
             if not name:
                 continue
-            db_lineage = lineage_map.get(str(name).lower().strip())
-            if db_lineage:
-                tag['Lineage'] = db_lineage
-                tag['lineage'] = db_lineage.lower()
-                tag['canonical_lineage'] = db_lineage
-                tag['currentLineage'] = db_lineage
+            
+            # Use same normalization as enrichment function
+            normalized_name = product_db._normalize_product_name(name)
+            db_record = db_lookup.get(normalized_name)
+            
+            if db_record:
+                # Get lineage from database (prefer Lineage field, fallback to canonical_lineage)
+                db_lineage = db_record.get('Lineage') or db_record.get('canonical_lineage')
+                if db_lineage:
+                    db_lineage_clean = str(db_lineage).strip().upper()
+                    # CRITICAL: Always override Excel lineage with database lineage
+                    tag['Lineage'] = db_lineage_clean
+                    tag['lineage'] = db_lineage_clean.lower()
+                    tag['canonical_lineage'] = db_lineage_clean
+                    tag['currentLineage'] = db_lineage_clean
+                    enriched_count += 1
+        
+        if enriched_count > 0:
+            logging.info(f"✅ Aligned {enriched_count}/{len(aligned_tags)} tags with database lineage (overrode Excel lineage)")
         
         return aligned_tags
     except Exception as e:
         logging.warning(f"Lineage alignment failed: {e}")
+        import traceback
+        logging.debug(traceback.format_exc())
         return tags
 
 def _calculate_joint_ratio_for_record(db_record):
