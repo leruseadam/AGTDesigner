@@ -231,12 +231,13 @@
             console.log('⚡ Trying fast /api/available-tags endpoint first...');
             let timeoutId = null;
             try {
-                // CRITICAL FIX: Add timeout to prevent hangs - 10 seconds max
+                // CRITICAL FIX: Increased timeout to 30 seconds for large files
+                // Large Excel files can take time to process, especially on first load
                 const controller = new AbortController();
                 timeoutId = setTimeout(() => {
                     controller.abort();
-                    console.warn('⚠️ /api/available-tags timeout after 10 seconds, falling back...');
-                }, 10000);
+                    console.warn('⚠️ /api/available-tags timeout after 30 seconds, falling back...');
+                }, 30000);
                 
                 const quickResponse = await fetch('/api/available-tags?fast_load=1', {
                     signal: controller.signal
@@ -331,18 +332,18 @@
             // FALLBACK: If /api/available-tags didn't work, try /api/initial-data with timeout
             try {
                 console.log('⏳ Trying /api/initial-data as fallback...');
-                // CRITICAL FIX: Reduced timeout to 5 seconds - if server takes longer, use direct API fallback
-                // This makes the page feel much faster
+                // CRITICAL FIX: Increased timeout to 30 seconds for large files
+                // Large Excel files need more time to process
                 const fetchPromise = fetch('/api/initial-data?fast_load=1&stream=1');
                 const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Server timeout')), 5000)
+                    setTimeout(() => reject(new Error('Server timeout')), 30000)
                 );
 
                 let response;
                 try {
                     response = await Promise.race([fetchPromise, timeoutPromise]);
                 } catch (timeoutError) {
-                    console.warn('⚠️ Server fetch timeout after 5 seconds, using fast fallback');
+                    console.warn('⚠️ Server fetch timeout after 30 seconds, using fast fallback');
                     console.log('📊 Current state - tags:', this.state?.tags?.length || 0, 'hasExistingTags:', Array.isArray(this.state?.tags) && this.state.tags.length > 0);
 
                     // CRITICAL FIX: Don't restart - just hide splash and show error
@@ -364,12 +365,13 @@
                         console.log('⚡ Attempting direct /api/available-tags call as emergency fallback');
                         let emergencyTimeoutId = null;
                         try {
-                            // CRITICAL FIX: Add timeout to emergency fallback to prevent hangs
+                            // CRITICAL FIX: Increased timeout to 45 seconds for emergency fallback
+                            // Large files need more time, especially on slower connections
                             const emergencyController = new AbortController();
                             emergencyTimeoutId = setTimeout(() => {
                                 emergencyController.abort();
-                                console.warn('⚠️ Emergency /api/available-tags timeout after 8 seconds');
-                            }, 8000);
+                                console.warn('⚠️ Emergency /api/available-tags timeout after 45 seconds');
+                            }, 45000);
                             
                             const directResponse = await fetch('/api/available-tags?nocache=1&fast_load=1', {
                                 signal: emergencyController.signal
@@ -432,12 +434,47 @@
                             }
                         }
 
-                        // If direct fallback failed, try originalCheckForExistingData
+                        // If direct fallback failed, try originalCheckForExistingData with longer timeout
                         if (originalCheckForExistingData && typeof originalCheckForExistingData === 'function') {
                             console.log('⚡ Calling originalCheckForExistingData as final fallback');
-                            await originalCheckForExistingData.call(this);
+                            try {
+                                // Wrap in Promise.race with longer timeout
+                                const originalPromise = originalCheckForExistingData.call(this);
+                                const finalTimeoutPromise = new Promise((_, reject) =>
+                                    setTimeout(() => reject(new Error('Final fallback timeout')), 60000)
+                                );
+                                await Promise.race([originalPromise, finalTimeoutPromise]);
+                            } catch (finalError) {
+                                console.error('❌ Final fallback also failed:', finalError);
+                                // Show user-friendly error message
+                                const availableTagsContainer = document.getElementById('availableTags');
+                                if (availableTagsContainer && (!this.state?.tags || this.state.tags.length === 0)) {
+                                    availableTagsContainer.innerHTML = `
+                                        <div class="text-center py-5">
+                                            <div class="alert alert-warning">
+                                                <h5>Loading tags is taking longer than expected</h5>
+                                                <p>Your file may be large. Please wait a moment and refresh the page, or try uploading again.</p>
+                                                <button class="btn btn-primary mt-2" onclick="location.reload()">Refresh Page</button>
+                                            </div>
+                                        </div>
+                                    `;
+                                }
+                            }
                         } else {
                             console.warn('⚠️ All fallbacks exhausted - no tags loaded');
+                            // Show user-friendly error message
+                            const availableTagsContainer = document.getElementById('availableTags');
+                            if (availableTagsContainer && (!this.state?.tags || this.state.tags.length === 0)) {
+                                availableTagsContainer.innerHTML = `
+                                    <div class="text-center py-5">
+                                        <div class="alert alert-warning">
+                                            <h5>Unable to load tags</h5>
+                                            <p>Please try refreshing the page or uploading your file again.</p>
+                                            <button class="btn btn-primary mt-2" onclick="location.reload()">Refresh Page</button>
+                                        </div>
+                                    </div>
+                                `;
+                            }
                         }
                     } else {
                         console.warn('⚠️ Skipping fallback - already have tags');
