@@ -8115,37 +8115,104 @@ def generate_labels():
             logging.error(f"DOH override error details: {traceback.format_exc()}")
 
         # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
+        # PERFORMANCE OPTIMIZATION: Batch query all lineages at once instead of N+1 queries
         try:
             store_name = session.get('current_store')
             if store_name:
                 product_db = get_product_database(store_name)
                 if product_db:
-                    enriched_count = 0
-                    for record in records:
-                        product_name = record.get('ProductName') or record.get('Product Name*', '')
-                        if product_name:
-                            # Get lineage from database (product-level first, then strain-level)
-                            db_lineage = product_db.get_product_lineage(product_name)
-                            
-                            # Try strain-level if no product-level lineage
-                            if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
-                                product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
-                                if product_strain:
-                                    strain_info = product_db.get_strain_info(product_strain)
-                                    if strain_info:
-                                        db_lineage = (
-                                            strain_info.get('display_lineage') or
-                                            strain_info.get('sovereign_lineage') or
-                                            strain_info.get('canonical_lineage')
-                                        )
-                            
-                            if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                                record['Lineage'] = str(db_lineage).strip().upper()
-                                record['lineage'] = str(db_lineage).strip().upper()
-                                enriched_count += 1
+                    # Collect all product names and strains that need enrichment
+                    products_to_enrich = []
+                    strains_to_enrich = set()
+                    enrichment_map = {}  # Maps record index to (product_name, strain_name)
                     
-                    if enriched_count > 0:
-                        logging.info(f"✅ Enriched {enriched_count}/{len(records)} records with lineage")
+                    for idx, record in enumerate(records):
+                        # Only enrich if lineage is missing or empty
+                        existing_lineage = record.get('Lineage') or record.get('lineage') or record.get('canonical_lineage')
+                        if not existing_lineage or str(existing_lineage).strip() in ['', 'None', 'nan']:
+                            product_name = record.get('ProductName') or record.get('Product Name*', '')
+                            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+                            if product_name:
+                                products_to_enrich.append(product_name)
+                                enrichment_map[idx] = (product_name, product_strain)
+                                if product_strain:
+                                    strains_to_enrich.add(product_strain)
+                    
+                    if products_to_enrich or strains_to_enrich:
+                        # Batch query product lineages
+                        product_lineage_map = {}
+                        if products_to_enrich:
+                            try:
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
+                                # Use batch query with placeholders and case-insensitive matching
+                                placeholders = ','.join(['?'] * len(products_to_enrich))
+                                # Normalize product names for matching (lowercase, trimmed)
+                                normalized_products = [str(p).strip().lower() for p in products_to_enrich]
+                                # Create reverse lookup: normalized -> original
+                                normalized_to_original = {str(p).strip().lower(): p for p in products_to_enrich}
+                                
+                                batch_query = f'''
+                                    SELECT "Product Name*", "Lineage"
+                                    FROM products
+                                    WHERE LOWER(TRIM("Product Name*")) IN ({placeholders})
+                                    ORDER BY id DESC
+                                '''
+                                cursor.execute(batch_query, normalized_products)
+                                # Build a map with original product names as keys
+                                for row in cursor.fetchall():
+                                    pname, lineage = row
+                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                                        # Match back to original product name (case-preserved)
+                                        pname_normalized = str(pname).strip().lower()
+                                        if pname_normalized in normalized_to_original:
+                                            original_name = normalized_to_original[pname_normalized]
+                                            product_lineage_map[original_name] = str(lineage).strip().upper()
+                            except Exception as batch_err:
+                                logging.warning(f"Batch product lineage query failed: {batch_err}")
+                        
+                        # Batch query strain lineages
+                        strain_lineage_map = {}
+                        if strains_to_enrich:
+                            try:
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
+                                strain_list = list(strains_to_enrich)
+                                placeholders = ','.join(['?'] * len(strain_list))
+                                batch_query = f'''
+                                    SELECT "Strain Name", "display_lineage", "sovereign_lineage", "canonical_lineage"
+                                    FROM strains
+                                    WHERE "Strain Name" IN ({placeholders})
+                                '''
+                                cursor.execute(batch_query, strain_list)
+                                for row in cursor.fetchall():
+                                    strain_name = row[0]
+                                    lineage = row[1] or row[2] or row[3]
+                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                                        strain_lineage_map[strain_name] = str(lineage).strip().upper()
+                            except Exception as strain_err:
+                                logging.warning(f"Batch strain lineage query failed: {strain_err}")
+                        
+                        # Apply enriched lineage to records
+                        enriched_count = 0
+                        for idx, (product_name, product_strain) in enrichment_map.items():
+                            record = records[idx]
+                            db_lineage = None
+                            
+                            # Try product-level lineage first
+                            if product_name in product_lineage_map:
+                                db_lineage = product_lineage_map[product_name]
+                            # Fall back to strain-level lineage
+                            elif product_strain and product_strain in strain_lineage_map:
+                                db_lineage = strain_lineage_map[product_strain]
+                            
+                            if db_lineage:
+                                record['Lineage'] = db_lineage
+                                record['lineage'] = db_lineage
+                                enriched_count += 1
+                        
+                        if enriched_count > 0:
+                            logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
         except Exception as enrich_err:
             logging.error(f"Lineage enrichment failed: {enrich_err}")
         
@@ -9354,7 +9421,10 @@ def get_available_tags():
                         import traceback
                         logging.warning(traceback.format_exc())
 
-                    safe_excel_tags = make_json_safe(excel_tags) if excel_tags else []
+                    # CRITICAL FIX: Always align tags with database lineage before returning
+                    # This ensures UI shows current database lineage, not stale Excel lineage
+                    aligned_excel_tags = _align_tags_with_db_lineage(excel_tags, store_name) if excel_tags else []
+                    safe_excel_tags = make_json_safe(aligned_excel_tags)
                     # Log first few product names for debugging
                     if safe_excel_tags:
                         sample_products = [tag.get('Product Name*', 'NO_NAME') for tag in safe_excel_tags[:5]]
@@ -9554,11 +9624,14 @@ def get_available_tags():
             # Full lineage alignment will still be done later by non-fast-load or
             # prefer_db/refresh calls, but simple page refreshes stay instant.
             if fast_load and not prefer_db:
-                safe_all_tags = make_json_safe(cached_tags)
+                # CRITICAL FIX: Always align cached tags with database lineage before returning
+                # This ensures UI shows current database lineage, not stale cached lineage
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
+                safe_all_tags = make_json_safe(aligned_cached_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(
                     f"⚡ SUPER-FAST: Returning {len(safe_all_tags)} cached tags for fast_load request "
-                    f"({elapsed:.1f}ms, source='cache-ultrafast')"
+                    f"({elapsed:.1f}ms, source='cache-ultrafast', aligned with DB)"
                 )
                 resp = jsonify({
                     'tags': safe_all_tags,
@@ -17657,6 +17730,11 @@ def get_initial_data():
                             'doh': [],
                             'highCbd': []
                         }
+                    # CRITICAL FIX: Always align cached tags with database lineage before returning
+                    # This ensures UI shows current database lineage, not stale cached lineage
+                    store_name = get_current_store_name()
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_available_tags, store_name) if cached_available_tags else []
+                    
                     initial_data = {
                         'success': True,
                         'data_loaded': True,
@@ -17664,9 +17742,9 @@ def get_initial_data():
                         'filepath': session_file_path,
                         'columns': [],
                         'filters': cached_filters,
-                        'available_tags': cached_available_tags,
+                        'available_tags': aligned_cached_tags,
                         'selected_tags': [],
-                        'total_records': len(cached_available_tags),
+                        'total_records': len(aligned_cached_tags),
                         'source': 'cache'
                     }
                     elapsed = (time.time() - start_time) * 1000
@@ -17706,6 +17784,10 @@ def get_initial_data():
                                     'highCbd': []
                                 }
                                 
+                                # CRITICAL FIX: Always align tags with database lineage before returning
+                                # This ensures UI shows current database lineage, not stale Excel lineage
+                                aligned_default_tags = _align_tags_with_db_lineage(default_tags, store_name) if default_tags else []
+                                
                                 initial_data = {
                                     'success': True,
                                     'data_loaded': True,
@@ -17713,9 +17795,9 @@ def get_initial_data():
                                     'filepath': default_file,
                                     'columns': [],
                                     'filters': filters,
-                                    'available_tags': make_json_safe(default_tags),
+                                    'available_tags': make_json_safe(aligned_default_tags),
                                     'selected_tags': [],
-                                    'total_records': len(default_tags),
+                                    'total_records': len(aligned_default_tags),
                                     'source': 'default-file-fast-load'
                                 }
                                 elapsed = (time.time() - start_time) * 1000
@@ -17981,6 +18063,11 @@ def get_initial_data():
                 filters_elapsed = (time.time() - filters_start) * 1000
                 logging.info(f"Filter options processed: {len(filters)} filter categories (took {filters_elapsed:.0f}ms)")
 
+            # CRITICAL FIX: Always align tags with database lineage before returning
+            # This ensures UI shows current database lineage, not stale Excel lineage
+            store_name = get_current_store_name()
+            aligned_available_tags = _align_tags_with_db_lineage(available_tags, store_name) if available_tags else []
+            
             initial_data = {
                 'success': True,
                 'data_loaded': True,  # Add this field for frontend compatibility
@@ -17988,7 +18075,7 @@ def get_initial_data():
                 'filepath': current_file,
                 'columns': excel_processor.df.columns.tolist(),
                 'filters': filters,  # Use the properly formatted filters
-                'available_tags': available_tags,
+                'available_tags': aligned_available_tags,
                 'selected_tags': [],  # Don't restore selected tags on page reload
                 'total_records': len(excel_processor.df),
                 'source': 'excel'

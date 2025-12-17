@@ -6843,6 +6843,33 @@ const TagManager = {
         // CRITICAL FIX: Removed console.time/timeEnd to prevent "Timer does not exist" errors
         // These were only for debugging and causing issues when called from lineage updates
 
+        // CRITICAL FIX: Block any clearing of tags if generation is in progress or just completed
+        const now = Date.now();
+        const isGenerating = this.isGenerating === true;
+        const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000; // 30 seconds
+        
+        if ((isGenerating || recentlyGenerated) && (!tags || tags.length === 0) && this.state.persistentSelectedTags.length > 0) {
+            verboseLog('🚫 BLOCKED: Prevented clearing selected tags during/after generation');
+            // Force re-render with current selections instead
+            const currentTags = this.state.persistentSelectedTags
+                .map(tagName => this._tagLookupMap?.get(tagName) ||
+                               this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                               this.state.originalTags.find(t => t['Product Name*'] === tagName) ||
+                               { 'Product Name*': tagName, displayName: tagName, lineage: 'MIXED' })
+                .filter(Boolean);
+            if (currentTags.length > 0) {
+                tags = currentTags;
+                this._forceSelectedTagsUpdate = true;
+            } else {
+                tags = this.state.persistentSelectedTags.map(name => ({
+                    'Product Name*': name,
+                    displayName: name,
+                    lineage: 'MIXED'
+                }));
+                this._forceSelectedTagsUpdate = true;
+            }
+        }
+
         if (!tags || !Array.isArray(tags)) {
             console.warn('updateSelectedTags called with invalid tags:', tags);
             tags = [];
@@ -6851,23 +6878,50 @@ const TagManager = {
         // CRITICAL FIX: If called with empty array but we have persistentSelectedTags, preserve them
         // This prevents selections from being cleared when updateSelectedTags([]) is called
         if (tags.length === 0 && this.state.persistentSelectedTags.length > 0) {
-            verboseLog('updateSelectedTags called with empty array, but preserving persistentSelectedTags:', this.state.persistentSelectedTags);
-            // PERFORMANCE: Use existing _tagLookupMap instead of creating new Maps
-            // This avoids O(n) Map creation and uses already-built lookup Map
-            tags = this.state.persistentSelectedTags
-                .map(tagName => this._tagLookupMap?.get(tagName))
-                .filter(Boolean);
+            // CRITICAL FIX: If we just generated tags, NEVER clear them (extended protection)
+            const now = Date.now();
+            const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000; // 30 seconds
             
-            if (tags.length === 0) {
-                verboseLog('No tag objects found for persistentSelectedTags, but keeping selections in state - rendering lightweight placeholders');
-                // Render lightweight placeholders so the user still sees and can reselect their tags
-                tags = this.state.persistentSelectedTags.map(name => ({
-                    'Product Name*': name,
-                    displayName: name,
-                    lineage: 'MIXED'
-                }));
-                // Force an update so the placeholders appear
-                this._forceSelectedTagsUpdate = true;
+            if (recentlyGenerated) {
+                verboseLog('🚫 BLOCKED: Attempted to clear selected tags right after generation - preserving selections');
+                // Force re-render with current selections
+                const currentTags = this.state.persistentSelectedTags
+                    .map(tagName => this._tagLookupMap?.get(tagName) ||
+                                   this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                                   this.state.originalTags.find(t => t['Product Name*'] === tagName) ||
+                                   { 'Product Name*': tagName, displayName: tagName, lineage: 'MIXED' })
+                    .filter(Boolean);
+                if (currentTags.length > 0) {
+                    tags = currentTags;
+                    this._forceSelectedTagsUpdate = true;
+                } else {
+                    // Fallback to placeholders
+                    tags = this.state.persistentSelectedTags.map(name => ({
+                        'Product Name*': name,
+                        displayName: name,
+                        lineage: 'MIXED'
+                    }));
+                    this._forceSelectedTagsUpdate = true;
+                }
+            } else {
+                verboseLog('updateSelectedTags called with empty array, but preserving persistentSelectedTags:', this.state.persistentSelectedTags);
+                // PERFORMANCE: Use existing _tagLookupMap instead of creating new Maps
+                // This avoids O(n) Map creation and uses already-built lookup Map
+                tags = this.state.persistentSelectedTags
+                    .map(tagName => this._tagLookupMap?.get(tagName))
+                    .filter(Boolean);
+                
+                if (tags.length === 0) {
+                    verboseLog('No tag objects found for persistentSelectedTags, but keeping selections in state - rendering lightweight placeholders');
+                    // Render lightweight placeholders so the user still sees and can reselect their tags
+                    tags = this.state.persistentSelectedTags.map(name => ({
+                        'Product Name*': name,
+                        displayName: name,
+                        lineage: 'MIXED'
+                    }));
+                    // Force an update so the placeholders appear
+                    this._forceSelectedTagsUpdate = true;
+                }
             }
         }
         
@@ -9041,10 +9095,10 @@ const TagManager = {
                 return true; // Return success to avoid error handling
             }
             
-            // CRITICAL FIX: Prevent clearing tags right after generation (within last 10 seconds)
+            // CRITICAL FIX: Prevent clearing tags right after generation (within last 30 seconds)
             // Generation doesn't clear backend selected tags, so don't fetch and overwrite local selections
-            if (this._lastGenerationTime && (now - this._lastGenerationTime) < 10000) {
-                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent generation detected (within 10s), preserving current selections');
+            if (this._lastGenerationTime && (now - this._lastGenerationTime) < 30000) {
+                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent generation detected (within 30s), preserving current selections');
                 return true; // Return success to preserve current selections
             }
             
@@ -10584,9 +10638,31 @@ const TagManager = {
             this._lastTagSelectionTime = Date.now();
             this._lastGenerationTime = Date.now();
             verboseLog('✅ Generation complete - preserving selected tags');
+            
+            // CRITICAL FIX: Explicitly refresh selected tags display to ensure they remain visible
+            // This prevents any race conditions where other code might clear them
+            if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+                const selectedTagObjects = this.getSelectedTagObjects();
+                if (selectedTagObjects.length > 0) {
+                    // Use setTimeout to ensure this happens after any other pending updates
+                    setTimeout(() => {
+                        this.updateSelectedTags(selectedTagObjects);
+                        verboseLog('✅ Refreshed selected tags display after generation');
+                    }, 100);
+                }
+            }
         } catch (error) {
             console.error('Error generating labels:', error);
+            // CRITICAL FIX: Even on error, mark generation time to preserve selections
+            // This prevents tags from disappearing if generation partially succeeded
+            this._lastTagSelectionTime = Date.now();
+            this._lastGenerationTime = Date.now();
         } finally {
+            // CRITICAL FIX: Ensure generation timestamp is always set, even if something goes wrong
+            if (!this._lastGenerationTime) {
+                this._lastGenerationTime = Date.now();
+                this._lastTagSelectionTime = Date.now();
+            }
             // Hide enhanced generation splash
             this.hideEnhancedGenerationSplash();
             generateBtn.disabled = false;
