@@ -135,10 +135,22 @@ class TemplateProcessor:
         resolved_path = str(template_path.resolve()) if template_path.exists() else str(template_path)
         self.logger.error(f"Template not found: {resolved_path}")
         raise FileNotFoundError(f"Template not found: {resolved_path}")
-    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
+    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None, store_name=None):
         self.template_type = template_type
         self.font_scheme = font_scheme
         self.logger = logging.getLogger(__name__)  # Initialize logger first
+        # Persist store name so lineage/db lookups use the correct database
+        self.store_name = store_name
+
+    def _get_store_name(self):
+        """Return the store name for DB lookups, falling back to current session store."""
+        if self.store_name:
+            return self.store_name
+        try:
+            from app import get_current_store_name
+            return get_current_store_name()
+        except Exception:
+            return None
         
         # CRITICAL FIX: Adjust scale factor for double template 12-label expansion
         # When the double template expands to 12 labels, cells become smaller, so we need to adjust the scale factor
@@ -1265,7 +1277,7 @@ class TemplateProcessor:
             product_brand_cache = {}
             try:
                 from src.core.data.product_database import get_product_database
-                product_db = get_product_database()
+                product_db = get_product_database(self._get_store_name())
                 if product_db:
                     product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
                     product_names = [n for n in product_names if n]
@@ -1670,8 +1682,8 @@ class TemplateProcessor:
             
             # CRITICAL: Always check database FIRST - database lineage always takes priority
             if product_name:
-                from app import get_product_database, get_current_store_name
-                store_name = get_current_store_name()
+                from app import get_product_database
+                store_name = self._get_store_name()
                 product_db = get_product_database(store_name)
                 if product_db:
                     # FIRST: Check product-level lineage (preserves user changes)
@@ -1784,7 +1796,7 @@ class TemplateProcessor:
                     try:
                         # Get JointRatio directly from database
                         from src.core.data.product_database import get_product_database
-                        product_db = get_product_database()
+                        product_db = get_product_database(self._get_store_name())
                         if product_db:
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
@@ -2182,8 +2194,8 @@ class TemplateProcessor:
                 # PRIORITY 2: Fallback to database lookup if record lineage is empty
                 self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking database...")
                 try:
-                    from app import get_product_database, get_current_store_name
-                    store_name = get_current_store_name()
+                    from app import get_product_database
+                    store_name = self._get_store_name()
                     product_db = get_product_database(store_name)
                     
                     # Try to get product-level lineage first (more specific, includes manual updates)
@@ -2658,7 +2670,7 @@ class TemplateProcessor:
             self.logger.debug(f"DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'")
             try:
                 from src.core.data.product_database import get_product_database
-                product_db = get_product_database()
+                product_db = get_product_database(self._get_store_name())
                 strain_info = product_db.get_strain_info(product_strain)
                 self.logger.debug(f"DEBUG: Strain info: {strain_info}")
                 if strain_info and strain_info.get('canonical_lineage'):

@@ -8003,7 +8003,7 @@ def generate_labels():
         
         # Use the already imported TemplateProcessor and get_font_scheme
         font_scheme = get_font_scheme(template_type)
-        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor)
+        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor, store_name=store_name)
         
         # No need to pass preroll_session_id anymore - QR code uses static URL
         
@@ -16441,7 +16441,7 @@ def json_inventory():
         logging.info(f"Creating TemplateProcessor with type: {template_type}")
         logging.info(f"Template path: {template_path}")
         
-        processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor)
+        processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor, store_name=session.get('current_store'))
         
         # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
         if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
