@@ -6773,6 +6773,68 @@ def _normalize_weight_fields(record):
     
     return record
 
+def _align_tags_with_db_lineage(tags, store_name):
+    """
+    Ensure tags shown in the UI use the latest lineage from the database.
+    Returns a shallow-copied list so cached tag objects are not mutated.
+    """
+    if not tags or not isinstance(tags, list):
+        return tags
+    
+    try:
+        product_db = get_product_database(store_name)
+        if not product_db:
+            return tags
+        
+        # Copy tags so we don't mutate cached objects
+        aligned_tags = [tag.copy() if isinstance(tag, dict) else tag for tag in tags]
+        
+        # Collect product names for lookup
+        product_names = [t.get('Product Name*') for t in aligned_tags if isinstance(t, dict) and t.get('Product Name*')]
+        if not product_names:
+            return aligned_tags
+        
+        lineage_map = {}
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        chunk_size = 400
+        for start in range(0, len(product_names), chunk_size):
+            chunk = product_names[start:start + chunk_size]
+            placeholders = ','.join(['?' for _ in chunk])
+            cursor.execute(f'''
+                SELECT "Product Name*", "Lineage", "canonical_lineage"
+                FROM products
+                WHERE LOWER("Product Name*") IN ({placeholders})
+            ''', [name.lower() for name in chunk])
+            for row in cursor.fetchall():
+                db_name = row[0]
+                db_lineage = row[1] or row[2]
+                if db_name and db_lineage:
+                    lineage_map[db_name.lower().strip()] = str(db_lineage).strip().upper()
+        
+        if not lineage_map:
+            return aligned_tags
+        
+        # Apply lineage to tags
+        for tag in aligned_tags:
+            if not isinstance(tag, dict):
+                continue
+            name = tag.get('Product Name*')
+            if not name:
+                continue
+            db_lineage = lineage_map.get(str(name).lower().strip())
+            if db_lineage:
+                tag['Lineage'] = db_lineage
+                tag['lineage'] = db_lineage.lower()
+                tag['canonical_lineage'] = db_lineage
+                tag['currentLineage'] = db_lineage
+        
+        return aligned_tags
+    except Exception as e:
+        logging.warning(f"Lineage alignment failed: {e}")
+        return tags
+
 def _calculate_joint_ratio_for_record(db_record):
     """Calculate joint ratio for pre-roll products from database record."""
     product_name = db_record.get('Product Name*', '')
@@ -8644,9 +8706,11 @@ def get_available_tags():
             cached_tags = cache.get(cache_key)
             if cached_tags:
                 logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
+                safe_cached_tags = make_json_safe(aligned_cached_tags)
                 return jsonify({
-                    'tags': cached_tags,
-                    'total_count': len(cached_tags),
+                    'tags': safe_cached_tags,
+                    'total_count': len(safe_cached_tags),
                     'source': 'cache-memory-fallback',
                     'warning': 'Memory usage high, serving cached data'
                 })
@@ -8795,42 +8859,20 @@ def get_available_tags():
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
 
-        # CRITICAL FIX: When no Excel file, check for cached tags before returning empty
-        # This allows tags to load even if the session file was cleaned up but tags are cached
+        # CRITICAL FIX: When no Excel file, don't use cache - only load if default Excel file exists
+        # This ensures we only show tags when there's an actual Excel file loaded
         if not has_excel_data:
-            # Try to use cached tags as fallback before returning empty
-            if cached_tags and len(cached_tags) > 0:
-                logging.info(f"⚡ No Excel file but found {len(cached_tags)} cached tags - returning cached data")
-                return jsonify({
-                    'tags': cached_tags,
-                    'total_count': len(cached_tags),
-                    'source': 'cache-no-excel',
-                    'message': 'Using cached tags (file may have been cleaned up)'
-                }), 200
+            # Don't use cached tags - require actual Excel file
+            logging.info("⚡ No Excel file - skipping cache, will try default file only")
             
-            # Also try file-specific cache keys if session_file_path was cleared but file existed before
-            if session_file_path:
-                try:
-                    file_specific_cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}')
-                    file_cached_tags = cache.get(file_specific_cache_key)
-                    if file_cached_tags and len(file_cached_tags) > 0:
-                        logging.info(f"⚡ No Excel file but found {len(file_cached_tags)} tags in file-specific cache - returning cached data")
-                        return jsonify({
-                            'tags': file_cached_tags,
-                            'total_count': len(file_cached_tags),
-                            'source': 'cache-file-specific',
-                            'message': 'Using cached tags from previous upload'
-                        }), 200
-                except Exception as file_cache_err:
-                    logging.warning(f"Failed to check file-specific cache: {file_cache_err}")
-            
-            # Also try to initialize processor from default file if available
+            # CRITICAL FIX: Try to load default Excel file for the store when no file uploaded
+            logging.info("⚡ No Excel file uploaded - attempting to load default file for store...")
             if store_name:
                 try:
                     from src.core.data.excel_processor import get_default_upload_file
                     default_file = get_default_upload_file(store_name)
                     if default_file and os.path.exists(default_file):
-                        logging.info(f"⚡ No session file but found default file: {default_file} - loading it")
+                        logging.info(f"⚡ Found default file: {default_file} - loading it")
                         from src.core.data.excel_processor import ExcelProcessor
                         default_processor = ExcelProcessor(store_name=store_name)
                         if default_processor.load_file(default_file):
@@ -8840,22 +8882,54 @@ def get_available_tags():
                                 session['file_path'] = default_file
                                 session['uploaded_filename'] = os.path.basename(default_file)
                                 session.modified = True
+                                
+                                # Enrich with database lineage
+                                try:
+                                    product_db = get_product_database(store_name)
+                                    if product_db and default_tags:
+                                        product_names = [tag.get('Product Name*') for tag in default_tags if tag.get('Product Name*')]
+                                        lineage_map = {}
+                                        if product_names:
+                                            db_products = product_db.get_products_by_names(product_names)
+                                            for db_product in db_products:
+                                                name = db_product.get('Product Name*')
+                                                if name:
+                                                    lineage_value = db_product.get('Lineage') or db_product.get('lineage') or db_product.get('canonical_lineage')
+                                                    if lineage_value:
+                                                        lineage_map[name] = lineage_value
+                                        
+                                        # Apply lineage to tags
+                                        for tag in default_tags:
+                                            name = tag.get('Product Name*')
+                                            if name and name in lineage_map:
+                                                tag['Lineage'] = lineage_map[name]
+                                                tag['lineage'] = lineage_map[name]
+                                                tag['canonical_lineage'] = lineage_map[name]
+                                                tag['currentLineage'] = lineage_map[name]
+                                
+                                except Exception as enrich_err:
+                                    logging.warning(f"Failed to enrich default file tags with database lineage: {enrich_err}")
+                                
                                 logging.info(f"✅ Loaded {len(default_tags)} tags from default file")
                                 safe_default_tags = make_json_safe(default_tags)
+                                
+                                # Cache the tags
+                                if not prefer_db and not nocache:
+                                    try:
+                                        cache.set(cache_key, safe_default_tags, timeout=3600)
+                                    except Exception:
+                                        pass
+                                
                                 return jsonify({
                                     'tags': safe_default_tags,
                                     'total_count': len(safe_default_tags),
-                                    'source': 'default-file'
+                                    'source': 'default-file',
+                                    'message': f'Loaded {len(safe_default_tags)} tags from default Excel file'
                                 }), 200
                 except Exception as default_load_err:
-                    logging.warning(f"Failed to load default file as fallback: {default_load_err}")
+                    logging.warning(f"Failed to load default file: {default_load_err}")
             
-            logging.info("⚡ No Excel file uploaded - returning empty (database-only mode disabled)")
-            # Clear any stale cached tags
-            try:
-                cache.delete(cache_key)
-            except Exception:
-                pass
+            logging.info("⚡ No Excel file uploaded and no default file available - returning empty")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
@@ -9089,10 +9163,12 @@ def get_available_tags():
 
         # CRITICAL: Never return cached tags when Excel data exists
         if fast_load and cached_tags and not recently_updated_lineage and not has_excel_data:
-            logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags)")
+            logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags) with DB lineage alignment")
+            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
+            safe_cached_tags = make_json_safe(aligned_cached_tags)
             return jsonify({
-                'tags': cached_tags,
-                'total_count': len(cached_tags),
+                'tags': safe_cached_tags,
+                'total_count': len(safe_cached_tags),
                 'source': 'cache-fast'
             })
         elif fast_load and cached_tags and has_excel_data:
@@ -17460,7 +17536,7 @@ def get_initial_data():
         
         # PERFORMANCE: For fast_load, check cache and session BEFORE loading any files
         if fast_load:
-            # Check if we have cached tags for session file
+            # Check if we have cached tags for session file (only if file exists)
             session_file_path = session.get('file_path')
             if session_file_path and os.path.exists(session_file_path):
                 available_tags_cache_key = get_session_cache_key(f'available_tags_{session_file_path}')
@@ -17498,10 +17574,65 @@ def get_initial_data():
                     response.headers['X-Cache'] = 'HIT'
                     response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
                     return response
-            
-            # No cached data - check if no file in session, return empty immediately
+
+            # No cached data - check if no file in session, try loading default file (and cache it)
             if not session_file_path or not os.path.exists(session_file_path):
-                logging.info("⚡ Fast load: No file in session - returning empty data immediately (skipped file loading)")
+                logging.info("⚡ Fast load: No file in session - trying to load default Excel file...")
+                try:
+                    store_name = get_current_store_name()
+                    from src.core.data.excel_processor import get_default_upload_file, ExcelProcessor
+                    default_file = get_default_upload_file(store_name)
+                    if default_file and os.path.exists(default_file):
+                        logging.info(f"⚡ Fast load: Found default file: {default_file} - loading it")
+                        default_processor = ExcelProcessor(store_name=store_name)
+                        if default_processor.load_file(default_file):
+                            default_tags = default_processor.get_available_tags(filters=None)
+                            if default_tags and len(default_tags) > 0:
+                                # Update session with default file
+                                session['file_path'] = default_file
+                                session['uploaded_filename'] = os.path.basename(default_file)
+                                session.modified = True
+                                
+                                # Build filters from Excel tags
+                                filters = {
+                                    'vendor': sorted(set(tag.get('Vendor/Supplier*', '') for tag in default_tags if tag.get('Vendor/Supplier*'))),
+                                    'brand': sorted(set(tag.get('Product Brand', '') for tag in default_tags if tag.get('Product Brand'))),
+                                    'productType': sorted(set(tag.get('Product Type*', '') for tag in default_tags if tag.get('Product Type*'))),
+                                    'lineage': sorted(set(tag.get('Lineage', '') or tag.get('lineage', '') or tag.get('canonical_lineage', '') for tag in default_tags if tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage'))),
+                                    'weight': sorted(set(tag.get('Weight*', '') for tag in default_tags if tag.get('Weight*'))),
+                                    'strain': sorted(set(tag.get('Product Strain', '') for tag in default_tags if tag.get('Product Strain'))),
+                                    'doh': sorted(set(tag.get('DOH', '') for tag in default_tags if tag.get('DOH'))),
+                                    'highCbd': []
+                                }
+                                
+                                initial_data = {
+                                    'success': True,
+                                    'data_loaded': True,
+                                    'filename': os.path.basename(default_file),
+                                    'filepath': default_file,
+                                    'columns': [],
+                                    'filters': filters,
+                                    'available_tags': make_json_safe(default_tags),
+                                    'selected_tags': [],
+                                    'total_records': len(default_tags),
+                                    'source': 'default-file-fast-load'
+                                }
+                                elapsed = (time.time() - start_time) * 1000
+                                logging.info(f"⚡ Fast load default file data returned in {elapsed:.0f}ms")
+                                # Cache tags for future fast_load hits
+                                try:
+                                    cache.set(get_session_cache_key(f'available_tags_{default_file}'), make_json_safe(default_tags), timeout=3600)
+                                except Exception:
+                                    pass
+                                response = make_response(jsonify(initial_data))
+                                response.headers['X-Cache'] = 'DEFAULT_FILE'
+                                response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
+                                return response
+                except Exception as default_err:
+                    logging.warning(f"Failed to load default file in fast_load: {default_err}")
+                
+                # Fallback: return empty if default file load failed
+                logging.info("⚡ Fast load: No file and default file load failed - returning empty data")
                 initial_data = {
                     'success': True,
                     'data_loaded': False,
@@ -17582,35 +17713,54 @@ def get_initial_data():
             # PERFORMANCE: Skip default file loading for fast_load to avoid slow file I/O
             if excel_processor.df is None or excel_processor.df.empty:
                 if fast_load:
-                    # For fast_load, skip default file loading - return empty data immediately
-                    logging.info("⚡ Fast load: Skipping default file load - returning empty data")
-                    initial_data = {
-                        'success': True,
-                        'data_loaded': False,
-                        'filename': 'no_data',
-                        'filepath': 'no_data',
-                        'columns': [],
-                        'filters': {
-                            'vendor': [],
-                            'brand': [],
-                            'productType': [],
-                            'lineage': [],
-                            'weight': [],
-                            'strain': [],
-                            'doh': [],
-                            'highCbd': []
-                        },
-                        'available_tags': [],
-                        'selected_tags': [],
-                        'total_records': 0,
-                        'source': 'empty'
-                    }
-                    elapsed = (time.time() - start_time) * 1000
-                    logging.info(f"⚡ Fast load empty data returned in {elapsed:.0f}ms (skipped default file)")
-                    response = make_response(jsonify(initial_data))
-                    response.headers['X-Cache'] = 'FAST_EMPTY'
-                    response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
-                    return response
+                    # For fast_load, still try to load default file (don't skip it)
+                    logging.info("⚡ Fast load: Attempting to load default file...")
+                    from src.core.data.excel_processor import get_default_upload_file
+                    store_name = get_current_store_name()
+                    default_file = get_default_upload_file(store_name)
+                    if default_file and os.path.exists(default_file):
+                        try:
+                            logging.info(f"⚡ Fast load: Found default file: {default_file} - loading it")
+                            success = excel_processor.load_file(default_file)
+                            if success:
+                                excel_processor._last_loaded_file = default_file
+                                logging.info(f"✅ Fast load: Default file loaded successfully")
+                                # Continue processing below instead of returning empty
+                            else:
+                                logging.warning("⚡ Fast load: Default file load failed")
+                        except Exception as e:
+                            logging.warning(f"⚡ Fast load: Error loading default file: {e}")
+                    
+                    # If still no data after trying default file, return empty
+                    if excel_processor.df is None or excel_processor.df.empty:
+                        logging.info("⚡ Fast load: No default file available - returning empty data")
+                        initial_data = {
+                            'success': True,
+                            'data_loaded': False,
+                            'filename': 'no_data',
+                            'filepath': 'no_data',
+                            'columns': [],
+                            'filters': {
+                                'vendor': [],
+                                'brand': [],
+                                'productType': [],
+                                'lineage': [],
+                                'weight': [],
+                                'strain': [],
+                                'doh': [],
+                                'highCbd': []
+                            },
+                            'available_tags': [],
+                            'selected_tags': [],
+                            'total_records': 0,
+                            'source': 'empty'
+                        }
+                        elapsed = (time.time() - start_time) * 1000
+                        logging.info(f"⚡ Fast load empty data returned in {elapsed:.0f}ms (no default file)")
+                        response = make_response(jsonify(initial_data))
+                        response.headers['X-Cache'] = 'FAST_EMPTY'
+                        response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
+                        return response
                 
                 # Normal mode - load default file
                 logging.info("No uploaded file found - attempting to load default file")
