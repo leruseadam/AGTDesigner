@@ -6804,9 +6804,15 @@ const TagManager = {
                 .filter(Boolean);
             
             if (tags.length === 0) {
-                verboseLog('No tag objects found for persistentSelectedTags, but keeping selections in state');
-                // Don't clear - tags might be loading
-                return;
+                verboseLog('No tag objects found for persistentSelectedTags, but keeping selections in state - rendering lightweight placeholders');
+                // Render lightweight placeholders so the user still sees and can reselect their tags
+                tags = this.state.persistentSelectedTags.map(name => ({
+                    'Product Name*': name,
+                    displayName: name,
+                    lineage: 'MIXED'
+                }));
+                // Force an update so the placeholders appear
+                this._forceSelectedTagsUpdate = true;
             }
         }
         

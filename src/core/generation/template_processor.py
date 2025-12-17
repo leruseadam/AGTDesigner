@@ -1690,7 +1690,7 @@ class TemplateProcessor:
                                     None
                                 )
                     
-                    # CRITICAL: Always use database lineage if available, even if Excel lineage exists
+                    # CRITICAL: Always use database lineage if available, never Excel
                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
                         db_lineage_upper = str(db_lineage).strip().upper()
                         # Always override Excel lineage with database lineage
@@ -1698,15 +1698,33 @@ class TemplateProcessor:
                             # Database lineage differs from Excel - use database
                             self.logger.info(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
                         label_context['Lineage'] = db_lineage_upper
-                    elif excel_lineage:
-                        # No DB lineage, but Excel has one - use Excel but ensure uppercase
-                        self.logger.debug(f"⚠️ LINEAGE EXCEL FALLBACK (DOCX): '{product_name}' - Using Excel lineage: '{excel_lineage}' (no DB lineage)")
-                        label_context['Lineage'] = str(excel_lineage).strip().upper()
+                    else:
+                        # No DB lineage - use defaults based on product type (never Excel)
+                        product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
+                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                        
+                        if is_classic:
+                            default_lineage = 'HYBRID'
+                        else:
+                            default_lineage = 'MIXED'
+                        
+                        self.logger.info(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                        label_context['Lineage'] = default_lineage
         except Exception as e:
             self.logger.warning(f"Could not check database lineage for DOCX output: {e}")
-            # On error, still try to use Excel lineage if available
-            if excel_lineage:
-                label_context['Lineage'] = str(excel_lineage).strip().upper()
+            # On error, use defaults based on product type (never Excel)
+            product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
+            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+            
+            if is_classic:
+                default_lineage = 'HYBRID'
+            else:
+                default_lineage = 'MIXED'
+            
+            self.logger.info(f"⚠️ LINEAGE DEFAULT (DOCX ERROR): '{product_name}' - Error checking DB, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+            label_context['Lineage'] = default_lineage
         
         # CRITICAL FIX: Force DOH to be read from the actual data source, not defaults
         # If DOH is 'YES' but we updated it to 'No', use 'No' instead

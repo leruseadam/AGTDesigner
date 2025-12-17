@@ -1081,16 +1081,10 @@ def process_chunk(args):
             is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
             
             if is_classic_type:
-                # For classic types, ensure lineage data is available
-                # CRITICAL FIX: Set default lineage for classic types if missing
-                lineage_val = str(row.get("Lineage", "")).strip()
-                if not lineage_val or lineage_val.lower() in ['', 'nan', 'none', 'null']:
-                    # Set default HYBRID lineage for classic types with missing lineage
-                    lineage_val = "HYBRID"
-                    logger.info(f"🔧 SET DEFAULT LINEAGE: Set HYBRID lineage for classic type '{product_name}' (missing lineage)")
-                
-                # Set lineage data for classic types
-                label_data["Lineage"] = lineage_val
+                # For classic types, lineage will be set after database lookup below
+                # Don't set it here - wait for database lookup to determine lineage
+                # Default will be HYBRID if no database lineage found (never Excel)
+                pass
             else:
                 # For non-classic types, preserve brand data for template processor
                 # The template processor will handle the proper formatting based on template type
@@ -1179,23 +1173,17 @@ def process_chunk(args):
                                     lineage_val = str(preferred).strip().upper()
                                     logger.info(f"✅ DOCX LINEAGE: Using strain-level lineage '{lineage_val}' for '{product_name}' (strain: '{product_strain}', Excel had: '{excel_lineage}')")
                                 else:
-                                    # No strain lineage found, fallback to Excel
-                                    lineage_val = lineage_text.upper() if lineage_text else ""
-                                    if lineage_val:
-                                        logger.warning(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name}' (strain: '{product_strain}'), using Excel lineage '{lineage_val}'")
-                                    else:
-                                        logger.warning(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name}' (strain: '{product_strain}'), Excel lineage also empty")
+                                    # No strain lineage found - use default for classic types
+                                    lineage_val = 'HYBRID'  # Default for classic types
+                                    logger.warning(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name}' (strain: '{product_strain}'), using default '{lineage_val}'")
                             else:
-                                # No strain info found, fallback to Excel
-                                lineage_val = lineage_text.upper() if lineage_text else ""
-                                logger.warning(f"⚠️ DOCX LINEAGE: No strain info found for '{product_strain}', using Excel lineage '{lineage_val}' for '{product_name}'")
+                                # No strain info found - use default for classic types
+                                lineage_val = 'HYBRID'  # Default for classic types
+                                logger.warning(f"⚠️ DOCX LINEAGE: No strain info found for '{product_strain}', using default '{lineage_val}' for '{product_name}'")
                         else:
-                            # No strain, fallback to Excel
-                            lineage_val = lineage_text.upper() if lineage_text else ""
-                            if lineage_val:
-                                logger.warning(f"⚠️ DOCX LINEAGE: No product-level lineage found for '{product_name}' and no strain, using Excel lineage '{lineage_val}'")
-                            else:
-                                logger.warning(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name}' (no strain, Excel lineage also empty)")
+                            # No strain - use default for classic types
+                            lineage_val = 'HYBRID'  # Default for classic types
+                            logger.warning(f"⚠️ DOCX LINEAGE: No product-level lineage found for '{product_name}' and no strain, using default '{lineage_val}'")
                     else:
                         # No product name, try strain-level only from cache
                         if product_strain:
@@ -1206,24 +1194,27 @@ def process_chunk(args):
                                     strain_info.get('sovereign_lineage') or
                                     strain_info.get('canonical_lineage')
                                 )
-                                if preferred:
+                                if preferred and str(preferred).strip() not in ['', 'None', 'nan']:
                                     lineage_val = str(preferred).upper()
                                 else:
-                                    lineage_val = lineage_text.upper() if lineage_text else ""
+                                    lineage_val = 'HYBRID'  # Default for classic types
                             else:
-                                lineage_val = lineage_text.upper() if lineage_text else ""
+                                lineage_val = 'HYBRID'  # Default for classic types
                         else:
-                            lineage_val = lineage_text.upper() if lineage_text else ""
+                            lineage_val = 'HYBRID'  # Default for classic types
                 except Exception as e:
-                    # Fallback to Excel lineage if database lookup fails
-                    lineage_val = lineage_text.upper() if lineage_text else ""
-                    logger.warning(f"⚠️ DOCX LINEAGE ERROR: Database lookup failed for '{product_name}', using Excel lineage '{lineage_val}' - Error: {e}")
+                    # Use default for classic types if database lookup fails
+                    lineage_val = 'HYBRID'  # Default for classic types
+                    logger.warning(f"⚠️ DOCX LINEAGE ERROR: Database lookup failed for '{product_name}', using default '{lineage_val}' - Error: {e}")
             else:
                 # CRITICAL FIX: For ALL non-classic types (edibles, tinctures, gummies, etc.), 
                 # use brand name for Lineage, not the raw Excel lineage value
                 # This prevents "CBD" from appearing in non-classic type labels
-                # If no brand is available, leave Lineage empty - DO NOT fall back to Excel lineage
-                lineage_val = product_brand.upper() if product_brand else ""
+                # If no brand is available, use default "MIXED" - DO NOT fall back to Excel lineage
+                if product_brand and str(product_brand).strip():
+                    lineage_val = product_brand.upper()
+                else:
+                    lineage_val = 'MIXED'  # Default for non-classic types
                 print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
                 
             # No extra space before Lineage in the output
@@ -1232,19 +1223,13 @@ def process_chunk(args):
             # For classic types, set ProductBrand and ProductBrand_Center to lineage
             if is_classic_type:
                 if lineage_val:
-                    # Use the lineage value from database or Excel
+                    # Use the lineage value from database (never Excel)
                     label_data["ProductBrand"] = lineage_val.strip()  # Don't wrap with markers for template rendering
                     label_data["ProductBrand_Center"] = lineage_val.strip()  # Don't wrap with markers for template rendering
                 else:
-                    # Fallback to Excel lineage if no database lineage found
-                    fallback_lineage = lineage_text.upper() if lineage_text else ""
-                    if fallback_lineage:
-                        label_data["ProductBrand"] = fallback_lineage.strip()  # Don't wrap with markers for template rendering
-                        label_data["ProductBrand_Center"] = fallback_lineage.strip()  # Don't wrap with markers for template rendering
-                    else:
-                        # No lineage available, set to empty
-                        label_data["ProductBrand"] = ""
-                        label_data["ProductBrand_Center"] = ""
+                    # No lineage available - use default HYBRID for classic types (never fall back to Excel)
+                    label_data["ProductBrand"] = "HYBRID"
+                    label_data["ProductBrand_Center"] = "HYBRID"
             else:
                 # CRITICAL FIX: For vertical template, ensure brand goes to Lineage field only
                 # and ProductStrain field is cleared to prevent 1pt font issue

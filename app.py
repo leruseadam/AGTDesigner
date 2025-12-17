@@ -7465,6 +7465,17 @@ def generate_labels():
                             logging.info(f"Switching to Excel data for {len(valid_selected_tags)} tags")
                             has_database = False  # Force Excel fallback
                         else:
+                            # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
+                            # This ensures DOCX uses the same lineage shown in the UI
+                            ui_lineage_map = {}
+                            for tag in selected_tags_from_request:
+                                if isinstance(tag, dict):
+                                    product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
+                                    # Use canonical_lineage or currentLineage (what UI displays) as source of truth
+                                    ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
+                                    if product_name and ui_lineage:
+                                        ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
+                            
                             # Convert database records to the format expected by TemplateProcessor
                             records = []
                             for db_record in valid_db_records:
@@ -7475,12 +7486,37 @@ def generate_labels():
                                 # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                 processed_record = process_database_product_for_api(db_record)
                                 
+                                # CRITICAL FIX: Use UI lineage if available, otherwise use database lineage, then defaults
+                                # This ensures DOCX matches what's shown in the UI
+                                lineage_from_ui = ui_lineage_map.get(product_name_for_record.strip())
+                                if lineage_from_ui:
+                                    docx_lineage = lineage_from_ui
+                                    logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (matches UI display)")
+                                else:
+                                    # Try database lineage first
+                                    docx_lineage = processed_record.get('Lineage') or processed_record.get('lineage') or processed_record.get('canonical_lineage')
+                                    if not docx_lineage or str(docx_lineage).strip() in ['', 'None', 'nan']:
+                                        # No database lineage - use defaults based on product type (never Excel)
+                                        product_type = processed_record.get('Product Type*', '').lower()
+                                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                                        
+                                        if is_classic:
+                                            docx_lineage = 'HYBRID'
+                                        else:
+                                            docx_lineage = 'MIXED'
+                                        
+                                        logging.info(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                                    else:
+                                        docx_lineage = str(docx_lineage).strip().upper()
+                                        logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
+                                
                                 # Map database fields to template fields (using correct field names from database)
                                 record = {
                                     'Product Name*': processed_record.get('Product Name*', ''),
                                     'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
                                     'ProductType': processed_record.get('Product Type*', ''),
-                                    'Lineage': processed_record.get('Lineage', 'MIXED'),
+                                    'Lineage': docx_lineage,
                                     'ProductBrand': processed_record.get('Product Brand', ''),
                                     'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
                                     'Vendor': processed_record.get('Vendor/Supplier*', ''),
@@ -7636,10 +7672,44 @@ def generate_labels():
                     lineage = record.get('Lineage', 'NOT_FOUND')
                     logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
             
-            # CRITICAL FIX: Apply database lineage override to ALL records (not just JSON matched)
-            # This ensures that any lineage updates saved to database will always be reflected in output
+            # CRITICAL FIX: Apply UI lineage values first (what user sees in UI), then database override
+            # This ensures DOCX matches what's displayed in the UI
             if records:
-                logging.info("LINEAGE OVERRIDE: Checking database for updated lineage values for all records...")
+                # Build UI lineage map from selected tags
+                ui_lineage_map = {}
+                for tag in selected_tags_from_request:
+                    if isinstance(tag, dict):
+                        product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
+                        # Use canonical_lineage or currentLineage (what UI displays) as source of truth
+                        ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
+                        if product_name and ui_lineage:
+                            ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
+                
+                # Apply UI lineage values first
+                ui_lineage_applied = 0
+                for record in records:
+                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                    if not product_name:
+                        continue
+                    
+                    ui_lineage = ui_lineage_map.get(product_name.strip())
+                    if ui_lineage:
+                        original_lineage = record.get('Lineage', '')
+                        if str(original_lineage).strip().upper() != ui_lineage:
+                            record['Lineage'] = ui_lineage
+                            record['currentLineage'] = ui_lineage
+                            record['canonical_lineage'] = ui_lineage
+                            record['lineage'] = ui_lineage.lower()
+                            logging.info(f"✅ UI LINEAGE APPLIED: '{product_name}' - Record: '{original_lineage}' -> UI: '{ui_lineage}'")
+                            ui_lineage_applied += 1
+                        else:
+                            logging.debug(f"✅ UI LINEAGE CONFIRMED: '{product_name}' - Already matches UI: '{ui_lineage}'")
+                
+                if ui_lineage_applied > 0:
+                    logging.info(f"✅ UI LINEAGE: Applied {ui_lineage_applied} UI lineage values to records (matches UI display)")
+                
+                # Then apply database lineage override for any records without UI lineage
+                logging.info("LINEAGE OVERRIDE: Checking database for updated lineage values for records without UI lineage...")
                 try:
                     store_name = get_current_store_name()
                     product_db = get_product_database(store_name)
@@ -7651,6 +7721,10 @@ def generate_labels():
                         for record in records:
                             product_name = record.get('Product Name*', record.get('ProductName', ''))
                             if not product_name:
+                                continue
+                            
+                            # Skip if UI lineage was already applied
+                            if product_name.strip() in ui_lineage_map:
                                 continue
                             
                             try:
@@ -7703,9 +7777,34 @@ def generate_labels():
                                             if db_lineage_clean != original_lineage_clean:
                                                 logging.info(f"LINEAGE OVERRIDE (strain): '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
                                                 record['Lineage'] = db_lineage_clean
+                                                record['currentLineage'] = db_lineage_clean
+                                                record['canonical_lineage'] = db_lineage_clean
+                                                record['lineage'] = db_lineage_clean.lower()
                                                 lineage_overrides_applied += 1
                                             else:
                                                 record['Lineage'] = db_lineage_clean
+                                                record['currentLineage'] = db_lineage_clean
+                                                record['canonical_lineage'] = db_lineage_clean
+                                                record['lineage'] = db_lineage_clean.lower()
+                                    else:
+                                        # No database lineage found - use defaults based on product type (never Excel)
+                                        product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
+                                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                                        
+                                        if is_classic:
+                                            default_lineage = 'HYBRID'
+                                        else:
+                                            default_lineage = 'MIXED'
+                                        
+                                        original_lineage = record.get('Lineage', '')
+                                        if str(original_lineage).strip().upper() != default_lineage:
+                                            logging.info(f"⚠️ NO DATABASE LINEAGE: '{product_name}' - Using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                                            record['Lineage'] = default_lineage
+                                            record['currentLineage'] = default_lineage
+                                            record['canonical_lineage'] = default_lineage
+                                            record['lineage'] = default_lineage.lower()
+                                            lineage_overrides_applied += 1
                             except Exception as e:
                                 logging.warning(f"Error checking lineage override for product '{product_name}': {e}")
                                 continue

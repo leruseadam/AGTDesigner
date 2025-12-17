@@ -33,6 +33,19 @@
   --tag-list-scroll-padding: 1rem;
 }
 
+/* Final override for help button spacing/position */
+.help-button-container {
+  margin-bottom: 1.5rem !important;
+  padding-bottom: 0.5rem !important;
+  justify-content: center !important;
+}
+
+@media (min-width: 992px) {
+  .help-button-container {
+    margin-bottom: 1.75rem !important;
+  }
+}
+
 /* ========================================================================
    CRITICAL WARNING: DO NOT MODIFY THE HTML FONT-SIZE VALUE BELOW
    ========================================================================
