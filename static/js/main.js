@@ -6560,6 +6560,31 @@ const TagManager = {
                 verboseLog(`✅ Updated selected tag lineage dropdown for ${tagName} to ${newLineage}`);
             }
         }
+
+        // CRITICAL FIX: If there's an active lineage filter and the updated tag's new lineage doesn't match,
+        // clear the lineage filter so the tag remains visible
+        const lineageFilterElement = document.getElementById('lineageFilter');
+        if (lineageFilterElement) {
+            const activeLineageFilter = lineageFilterElement.value || '';
+            if (activeLineageFilter.trim() !== '' && activeLineageFilter.toLowerCase() !== 'all') {
+                const normalizedNewLineage = (typeof window.normalizeLineageValue !== 'undefined')
+                    ? window.normalizeLineageValue(newLineage)
+                    : newLineage.toString().trim().toUpperCase();
+                const normalizedFilter = (typeof window.normalizeLineageValue !== 'undefined')
+                    ? window.normalizeLineageValue(activeLineageFilter)
+                    : activeLineageFilter.toString().trim().toUpperCase();
+                
+                // If the new lineage doesn't match the active filter, clear the filter
+                if (normalizedNewLineage !== normalizedFilter) {
+                    verboseLog(`🔄 Clearing lineage filter (${normalizedFilter}) because updated tag lineage (${normalizedNewLineage}) doesn't match`);
+                    lineageFilterElement.value = 'All';
+                    // Trigger filter update to refresh display
+                    if (typeof this.applyFilters === 'function') {
+                        this.applyFilters(true); // Use immediate update
+                    }
+                }
+            }
+        }
     },
 
     // NEW: Update lineage for all items with the same vendor + strain immediately in UI/state
@@ -6775,6 +6800,31 @@ const TagManager = {
             }
         });
         verboseLog(`✅ Updated ${selectedUpdated} dropdowns in selected tags`);
+
+        // CRITICAL FIX: If there's an active lineage filter and the updated tag's new lineage doesn't match,
+        // clear the lineage filter so the tag remains visible
+        const lineageFilterElement = document.getElementById('lineageFilter');
+        if (lineageFilterElement) {
+            const activeLineageFilter = lineageFilterElement.value || '';
+            if (activeLineageFilter.trim() !== '' && activeLineageFilter.toLowerCase() !== 'all') {
+                const normalizedNewLineage = (typeof window.normalizeLineageValue !== 'undefined')
+                    ? window.normalizeLineageValue(newLineage)
+                    : newLineage.toString().trim().toUpperCase();
+                const normalizedFilter = (typeof window.normalizeLineageValue !== 'undefined')
+                    ? window.normalizeLineageValue(activeLineageFilter)
+                    : activeLineageFilter.toString().trim().toUpperCase();
+                
+                // If the new lineage doesn't match the active filter, clear the filter
+                if (normalizedNewLineage !== normalizedFilter) {
+                    verboseLog(`🔄 Clearing lineage filter (${normalizedFilter}) because updated tag lineage (${normalizedNewLineage}) doesn't match`);
+                    lineageFilterElement.value = 'All';
+                    // Trigger filter update to refresh display
+                    if (typeof this.applyFilters === 'function') {
+                        this.applyFilters(true); // Use immediate update
+                    }
+                }
+            }
+        }
 
         // Propagate lineage change to backend for all affected similar items
         if (typeof this.updateLineageOnBackendDebounced === 'function') {
@@ -12107,6 +12157,10 @@ const TagManager = {
         }
 
         this._uploadInProgress = true;
+        
+        // CRITICAL FIX: Create upload-specific abort controller to prevent global one from interfering
+        const uploadAbortController = new AbortController();
+        this._uploadAbortController = uploadAbortController;
 
         // CRITICAL FIX: Disable upload button and file input during upload
         const uploadBtn = document.getElementById('uploadTriggerBtn');
@@ -12287,10 +12341,21 @@ const TagManager = {
                     // PERFORMANCE: No delays - try immediately for maximum speed
                     // Retries happen instantly without waiting
                     
+                    // CRITICAL FIX: Clean up any previous controller before creating new one
+                    if (tagsController) {
+                        try {
+                            tagsController.abort();
+                        } catch (e) {
+                            // Ignore errors from aborting already-aborted controller
+                        }
+                    }
+                    
                     tagsController = new AbortController();
                     // PERFORMANCE: Longer timeout for PythonAnywhere (network latency + processing time)
                     tagsTimeout = setTimeout(() => {
-                        tagsController.abort();
+                        if (tagsController && !tagsController.signal.aborted) {
+                            tagsController.abort(new DOMException('Request timeout after 30s', 'TimeoutError'));
+                        }
                     }, 30000); // 30s timeout for PythonAnywhere - backend is fast but network can be slow
 
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
@@ -12300,14 +12365,26 @@ const TagManager = {
                             signal: tagsController.signal
                         });
                     } catch (fetchError) {
-                        console.error(`⚠️ Tag fetch failed (attempt ${attempt + 1}/${maxRetries}):`, fetchError);
-                        if (tagsTimeout) clearTimeout(tagsTimeout);
+                        // CRITICAL FIX: Only log if it's not an expected abort
+                        if (fetchError.name !== 'AbortError' || attempt === maxRetries - 1) {
+                            console.error(`⚠️ Tag fetch failed (attempt ${attempt + 1}/${maxRetries}):`, fetchError);
+                        }
+                        if (tagsTimeout) {
+                            clearTimeout(tagsTimeout);
+                            tagsTimeout = null;
+                        }
+                        if (tagsController) {
+                            tagsController = null;
+                        }
                         if (attempt < maxRetries - 1) {
                             continue; // Retry
                         }
                         throw fetchError; // Last attempt failed
                     }
-                    clearTimeout(tagsTimeout);
+                    if (tagsTimeout) {
+                        clearTimeout(tagsTimeout);
+                        tagsTimeout = null;
+                    }
                     
                     if (tagsResponse.ok) {
                         const tagsData = await tagsResponse.json();
@@ -12404,11 +12481,23 @@ const TagManager = {
                         tagsTimeout = null;
                     }
                     if (tagsController) {
+                        try {
+                            if (!tagsController.signal.aborted) {
+                                tagsController.abort();
+                            }
+                        } catch (e) {
+                            // Ignore errors from aborting
+                        }
                         tagsController = null;
                     }
 
                     // Silently handle errors - retry without showing notifications (splash is still visible)
                     const isTimeout = tagsError.name === 'AbortError' || tagsError.message?.includes('aborted');
+                    
+                    // CRITICAL FIX: If it's just a timeout/abort and not the last attempt, silently retry
+                    if (isTimeout && attempt < maxRetries - 1) {
+                        continue; // Silent retry for timeouts
+                    }
 
                     if (attempt === maxRetries - 1) {
                         // Last attempt failed - try using the standard tag loading method instead of reloading
@@ -12524,6 +12613,10 @@ const TagManager = {
         } finally {
             // CRITICAL FIX: Always clear upload flag and re-enable controls
             this._uploadInProgress = false;
+            // Clean up upload-specific abort controller
+            if (this._uploadAbortController) {
+                this._uploadAbortController = null;
+            }
             const uploadBtn = document.getElementById('uploadTriggerBtn');
             const fileInput = document.getElementById('fileInput');
             if (uploadBtn) uploadBtn.disabled = false;
@@ -14742,11 +14835,17 @@ async function performFullAppReset() {
             window.jsonMatchedTags = [];
         }
         
-        // 11. Clear any pending requests
-        if (window.abortController) {
-            window.abortController.abort();
+        // 11. Clear any pending requests (but don't abort upload-specific requests)
+        if (window.abortController && !TagManager._uploadInProgress) {
+            try {
+                window.abortController.abort();
+            } catch (e) {
+                // Ignore errors from aborting
+            }
         }
-        window.abortController = new AbortController();
+        if (!TagManager._uploadInProgress) {
+            window.abortController = new AbortController();
+        }
         
         // 12. Reset UI elements to initial state
         const availableTagsContainer = document.getElementById('availableTags');
