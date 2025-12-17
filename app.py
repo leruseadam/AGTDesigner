@@ -5395,15 +5395,24 @@ def move_tags():
         # Convert available_tags to just names for efficiency
         available_tag_names = [tag.get('Product Name*', '') for tag in available_tags if tag.get('Product Name*', '')]
         
+        # Helper to normalize selected_tags to a list of plain strings (product names)
+        def _normalize_selected_tags_list(tags):
+            normalized = []
+            for t in tags or []:
+                if isinstance(t, dict):
+                    name = t.get('Product Name*') or t.get('ProductName') or t.get('name')
+                    if name:
+                        normalized.append(str(name))
+                elif isinstance(t, str):
+                    normalized.append(t)
+                else:
+                    normalized.append(str(t))
+            return normalized
+
         # Get selected tags - handle both dict and string objects
-        selected_tags = []
-        for tag in excel_processor.selected_tags:
-            if isinstance(tag, dict):
-                selected_tags.append(tag.get('Product Name*', ''))
-            elif isinstance(tag, str):
-                selected_tags.append(tag)
-            else:
-                selected_tags.append(str(tag))
+        selected_tags = _normalize_selected_tags_list(excel_processor.selected_tags)
+        # Ensure processor uses normalized list to avoid dict/string mismatch on removal
+        excel_processor.selected_tags = selected_tags
         
         logging.info(f"Move tags - Current selected tags: {selected_tags}")
         
