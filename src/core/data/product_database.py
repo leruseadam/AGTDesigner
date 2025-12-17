@@ -1450,10 +1450,20 @@ class ProductDatabase:
                     logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
                     
                     # Update existing product with new data (new data always replaces old values)
-                    self._update_existing_product(cursor, product_id, product_data)
-                    conn.commit()
-                    logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
-                    return product_id
+                    try:
+                        self._update_existing_product(cursor, product_id, product_data)
+                        conn.commit()
+                        logger.info(f"Successfully replaced existing product '{existing_name}' with new Excel data")
+                        return product_id
+                    except RuntimeError as e:
+                        # Handle database corruption recovery - retry the entire operation
+                        if "corruption" in str(e).lower() or "recovered" in str(e).lower():
+                            logger.info(f"🔄 Retrying product update after corruption recovery...")
+                            conn.rollback()
+                            # Close connection and retry from the beginning
+                            self.close_all_connections()
+                            return self.add_or_update_product(product_data)
+                        raise
                 
                 # If no exact match, check by name and vendor only (ignore brand differences)
                 cursor.execute('''
@@ -1468,10 +1478,20 @@ class ProductDatabase:
                 if vendor_match:
                     product_id, occurrences, existing_name, existing_brand = vendor_match
                     logger.info(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
-                    self._update_existing_product(cursor, product_id, product_data)
-                    conn.commit()
-                    logger.info(f"Successfully updated product '{existing_name}' with new Excel data")
-                    return product_id
+                    try:
+                        self._update_existing_product(cursor, product_id, product_data)
+                        conn.commit()
+                        logger.info(f"Successfully updated product '{existing_name}' with new Excel data")
+                        return product_id
+                    except RuntimeError as e:
+                        # Handle database corruption recovery - retry the entire operation
+                        if "corruption" in str(e).lower() or "recovered" in str(e).lower():
+                            logger.info(f"🔄 Retrying product update after corruption recovery...")
+                            conn.rollback()
+                            # Close connection and retry from the beginning
+                            self.close_all_connections()
+                            return self.add_or_update_product(product_data)
+                        raise
                 
                 # Check for similar products (same name + vendor, different brand)
                 cursor.execute('''
@@ -3913,8 +3933,25 @@ class ProductDatabase:
             logger.info(f"✅ Successfully updated product ID {product_id} with lineage '{final_lineage}'")
             
         except Exception as e:
-            logger.error(f"Error updating existing product {product_id}: {e}")
-            raise
+            # Check if this is a database corruption error
+            if self._is_corruption_error(e):
+                logger.error(f"⚠️ Database corruption detected while updating product {product_id}: {e}")
+                # Attempt recovery
+                recovery_successful = self._attempt_database_recovery()
+                if recovery_successful:
+                    logger.info(f"🔄 Database recovered successfully. Connection will be refreshed on next operation.")
+                    # Close all connections to force refresh
+                    self.close_all_connections()
+                    # Reset recovery flag so future corruptions can be handled
+                    self._corruption_recovery_attempted = False
+                    # Re-raise as a recoverable error - caller should retry the operation
+                    raise RuntimeError(f"Database corruption detected and recovered. Please retry the operation: {e}") from e
+                else:
+                    logger.error(f"❌ Database recovery failed for product {product_id}")
+                    raise RuntimeError(f"Database corruption detected and recovery failed. Database may need manual repair: {e}") from e
+            else:
+                logger.error(f"Error updating existing product {product_id}: {e}")
+                raise
     
     def _process_description(self, product_name, original_description=''):
         """Process product name to create a clean description using the same rules as Excel processor."""

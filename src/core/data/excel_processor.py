@@ -447,7 +447,7 @@ def batch_lineage_database_update(processor, df):
             return
         
         # Group by strain for efficient batch processing
-        strain_groups = classic_df.groupby('Product Strain')
+        strain_groups = classic_df.groupby('Product Strain', observed=False)
         
         for strain_name, group in strain_groups:
             if not strain_name or pd.isna(strain_name):
@@ -5247,7 +5247,7 @@ class ExcelProcessor:
                 return {"message": "No classic type products found", "updated_count": 0}
             
             # Group by strain and get lineage information
-            strain_groups = classic_df.groupby('Product Strain')
+            strain_groups = classic_df.groupby('Product Strain', observed=False)
             updated_count = 0
             
             from .product_database import ProductDatabase

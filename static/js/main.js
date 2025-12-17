@@ -12349,9 +12349,24 @@ const TagManager = {
             this.updateUploadUI(`✅ ${file.name} ready!`, 'File processed successfully', 'success');
             
             // Load tags instantly using fast_load=1 and bypass cache to get fresh data
-            // Try multiple times with minimal delays for instant response
+            // Try a fast path, then fall back to the standard loader quickly if it lags
             let tagsLoaded = false;
-            const maxRetries = 3;  // Reduced retries for faster response
+            const maxRetries = 2;  // Keep one retry for transient failures
+            const fastLoadTimeoutMs = 90000; // Allow slower backend without multiple timeouts
+            let standardFetchStarted = false;
+
+            const startStandardTagFetch = async () => {
+                if (tagsLoaded || standardFetchStarted) return;
+                standardFetchStarted = true;
+                verboseLog('🔄 Switching to standard tag fetch fallback...');
+                try {
+                    await this.fetchAndUpdateAvailableTags();
+                    tagsLoaded = true;
+                    verboseLog('✅ Tags loaded via standard fallback');
+                } catch (fallbackError) {
+                    console.error('⚠️ Standard tag loading via fallback failed:', fallbackError);
+                }
+            };
 
             for (let attempt = 0; attempt < maxRetries; attempt++) {
                 let tagsTimeout = null;
@@ -12373,9 +12388,9 @@ const TagManager = {
                     // PERFORMANCE: Longer timeout for PythonAnywhere (network latency + processing time)
                     tagsTimeout = setTimeout(() => {
                         if (tagsController && !tagsController.signal.aborted) {
-                            tagsController.abort(new DOMException('Request timeout after 30s', 'TimeoutError'));
+                            tagsController.abort(new DOMException('Request timeout after 90s', 'TimeoutError'));
                         }
-                    }, 30000); // 30s timeout for PythonAnywhere - backend is fast but network can be slow
+                    }, fastLoadTimeoutMs);
 
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
                     let tagsResponse;
@@ -12491,6 +12506,14 @@ const TagManager = {
                                 fileInfoElement.textContent = `✅ ${fileName} ready!`;
                             }
                             return; // Success - tags loaded instantly!
+                        } else {
+                            verboseLog('ℹ️ Fast load returned no tags yet - falling back to standard fetch');
+                            if (tagsTimeout) {
+                                clearTimeout(tagsTimeout);
+                                tagsTimeout = null;
+                            }
+                            await startStandardTagFetch();
+                            return;
                         }
                     }
                 } catch (tagsError) {
@@ -12513,51 +12536,18 @@ const TagManager = {
                     // Silently handle errors - retry without showing notifications (splash is still visible)
                     const isTimeout = tagsError.name === 'AbortError' || tagsError.message?.includes('aborted');
                     
-                    // CRITICAL FIX: If it's just a timeout/abort and not the last attempt, silently retry
-                    if (isTimeout && attempt < maxRetries - 1) {
-                        continue; // Silent retry for timeouts
-                    }
-
-                    if (attempt === maxRetries - 1) {
-                        // Last attempt failed - try using the standard tag loading method instead of reloading
-                        console.warn('⚠️ Failed to load tags after all retries, trying standard method:', tagsError);
-
-                        // Clear safety timeout
+                    // If timeout/abort or we're on the last attempt, jump to the robust standard fetch
+                    if (isTimeout || attempt === maxRetries - 1) {
+                        console.warn(`⚠️ Fast tag load failed (attempt ${attempt + 1}) - starting standard fetch`, tagsError);
                         if (splashTimeout) {
                             clearTimeout(splashTimeout);
                         }
-
-                        // CRITICAL: Hide splash before trying fallback
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-
-                        // CRITICAL FIX: Reset fetching flag to allow fallback to proceed
-                        this._fetchingAvailableTags = false;
-                        // Use the existing fetchAndUpdateAvailableTags which has better error handling
-                        // This avoids unnecessary page reloads that cause glitches
-                        try {
-                            await this.fetchAndUpdateAvailableTags();
-                            tagsLoaded = true;
-                            verboseLog('✅ Tags loaded using standard method');
-                            
-                            // CRITICAL FIX: Ensure filters are rendered after fallback tag loading
-                            if (this.renderActiveFilters) {
-                                this.renderActiveFilters();
-                                verboseLog('✅ Filters rendered after fallback tag loading');
-                            }
-                        } catch (fallbackError) {
-                            console.error('⚠️ Standard tag loading also failed:', fallbackError);
-                            // Show error without reloading - let user manually retry
-                            this.updateUploadUI('Could not load tags automatically. Please refresh the page to try again.', 'error');
-                            if (typeof showToast === 'function') {
-                                showToast('error', 'Tag loading failed. Please refresh the page manually.');
-                            }
-                        }
+                        await startStandardTagFetch();
                         return;
                     }
-                    // Continue to next retry
-                    verboseLog(`⚠️ Attempt ${attempt + 1} failed, retrying...`);
+
+                    // Otherwise retry the fast path once more
+                    verboseLog(`⚠️ Attempt ${attempt + 1} failed, retrying fast path...`);
                 }
             }
             
