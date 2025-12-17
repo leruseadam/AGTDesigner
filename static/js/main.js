@@ -10598,6 +10598,12 @@ const TagManager = {
             // Always use DOCX generation
             const apiEndpoint = '/api/generate';
 
+            // CRITICAL FIX: Set generation timestamp BEFORE making the request
+            // This prevents any race conditions where tags might be cleared during generation
+            this._lastTagSelectionTime = Date.now();
+            this._lastGenerationTime = Date.now();
+            verboseLog('🔒 Generation started - protecting selected tags from being cleared');
+            
             const response = await fetch(apiEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -10611,6 +10617,11 @@ const TagManager = {
                 const error = await response.json();
                 throw new Error(error.error || 'Failed to generate labels');
             }
+            
+            // CRITICAL FIX: Update timestamp again when we get successful response
+            this._lastTagSelectionTime = Date.now();
+            this._lastGenerationTime = Date.now();
+            
             const blob = await response.blob();
             
             // Extract filename from Content-Disposition header
