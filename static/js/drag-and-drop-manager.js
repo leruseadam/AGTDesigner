@@ -883,65 +883,33 @@ class DragAndDropManager {
             
             // Use TagManager's move functions
             if (this.sourceContainerId === 'availableTags' && this.targetContainerId === 'selectedTags') {
-                // Moving from available to selected
-                console.log('📤 Calling moveToSelected for tag:', tagName);
-                if (window.TagManager && window.TagManager.moveToSelected) {
-                    // Verify checkbox is still in availableTags and checked
-                    const checkedInAvailable = Array.from(document.querySelectorAll('#availableTags input[type="checkbox"].tag-checkbox:checked'))
-                        .map(cb => cb.value);
-                    console.log('🔍 Checked checkboxes in availableTags:', checkedInAvailable);
-                    
-                    if (checkedInAvailable.includes(tagName)) {
-                        // Call moveToSelected which will handle the move
-                        window.TagManager.moveToSelected().then(() => {
-                            verifyTagAfterMove();
-                        }).catch(err => {
-                            console.error('Error in moveToSelected:', err);
-                            verifyTagAfterMove();
-                        });
-                    } else {
-                        console.error('❌ Tag checkbox not found in availableTags - using direct API call');
-                        this.moveTagDirectly(tagName, 'to_selected').then(() => {
-                            verifyTagAfterMove();
-                        });
+                // Moving from available to selected (drag-driven) - bypass checkbox checks
+                console.log('📤 Drag move to selected for tag:', tagName);
+                this.moveTagDirectly(tagName, 'to_selected').then(() => {
+                    // Ensure state is updated immediately
+                    if (window.TagManager && window.TagManager.state) {
+                        if (!window.TagManager.state.persistentSelectedTags.includes(tagName)) {
+                            window.TagManager.state.persistentSelectedTags.push(tagName);
+                        }
+                        const tagObj = window.TagManager.state.tags.find(t => t['Product Name*'] === tagName) ||
+                                       window.TagManager.state.originalTags.find(t => t['Product Name*'] === tagName) ||
+                                       { 'Product Name*': tagName, displayName: tagName, lineage: 'MIXED' };
+                        window.TagManager.updateSelectedTags([tagObj, ...window.TagManager.getSelectedTagObjects()]);
                     }
-                } else {
-                    console.error('TagManager.moveToSelected not available - using direct API call');
-                    // Fallback: directly call the API
-                    this.moveTagDirectly(tagName, 'to_selected').then(() => {
-                        verifyTagAfterMove();
-                    });
-                }
+                    verifyTagAfterMove();
+                });
             } else if (this.sourceContainerId === 'selectedTags' && this.targetContainerId === 'availableTags') {
-                // Moving from selected to available
-                console.log('📥 Calling moveToAvailable for tag:', tagName);
-                if (window.TagManager && window.TagManager.moveToAvailable) {
-                    // Verify checkbox is still in selectedTags and checked
-                    const checkedInSelected = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"].tag-checkbox:checked'))
-                        .map(cb => cb.value);
-                    console.log('🔍 Checked checkboxes in selectedTags:', checkedInSelected);
-                    
-                    if (checkedInSelected.includes(tagName)) {
-                        // Call moveToAvailable which will handle the move
-                        window.TagManager.moveToAvailable().then(() => {
-                            verifyTagAfterMove();
-                        }).catch(err => {
-                            console.error('Error in moveToAvailable:', err);
-                            verifyTagAfterMove();
-                        });
-                    } else {
-                        console.error('❌ Tag checkbox not found in selectedTags - using direct API call');
-                        this.moveTagDirectly(tagName, 'to_available').then(() => {
-                            verifyTagAfterMove();
-                        });
+                // Moving from selected back to available (drag-driven) - bypass checkbox checks
+                console.log('📥 Drag move to available for tag:', tagName);
+                this.moveTagDirectly(tagName, 'to_available').then(() => {
+                    if (window.TagManager && window.TagManager.state) {
+                        const idx = window.TagManager.state.persistentSelectedTags.indexOf(tagName);
+                        if (idx > -1) window.TagManager.state.persistentSelectedTags.splice(idx, 1);
+                        const remaining = window.TagManager.getSelectedTagObjects();
+                        window.TagManager.updateSelectedTags(remaining);
                     }
-                } else {
-                    console.error('TagManager.moveToAvailable not available - using direct API call');
-                    // Fallback: directly call the API
-                    this.moveTagDirectly(tagName, 'to_available').then(() => {
-                        verifyTagAfterMove();
-                    });
-                }
+                    verifyTagAfterMove();
+                });
             } else {
                 console.error('❌ Invalid cross-list drag - source:', this.sourceContainerId, 'target:', this.targetContainerId);
             }
@@ -1446,6 +1414,8 @@ class DragAndDropManager {
         // Listen for events that might trigger a full tag update,
         // which would require re-initializing the drag and drop manager
         document.addEventListener('updateSelectedTags', () => {
+            // Safety: if a drag was in progress, reset it so checkboxes aren't blocked
+            this.resetDragState();
             this.isUpdatingTags = true;
             // Only log in debug mode
             if (window.DEBUG_DRAG_DROP) {

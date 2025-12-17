@@ -2,8 +2,13 @@
 const isWindows = navigator.platform.toLowerCase().includes('win') ||
                  navigator.userAgent.toLowerCase().includes('windows');
 
-// Centralized debug logging toggle
-const TAG_MANAGER_DEBUG_ENABLED = Boolean(
+// Fast reload mode: set localStorage.setItem('fastReload', 'true') to suppress
+// heavy logging and some re-inits during refresh.
+const FAST_RELOAD_MODE = window.localStorage?.getItem('fastReload') === 'true';
+window.FAST_RELOAD_MODE = FAST_RELOAD_MODE;
+
+// Centralized debug logging toggle (disabled when fast reload is on)
+const TAG_MANAGER_DEBUG_ENABLED = !FAST_RELOAD_MODE && Boolean(
     window.localStorage?.getItem('tagManagerDebug') === 'true' ||
     window.sessionStorage?.getItem('tagManagerDebug') === 'true' ||
     window.TAG_MANAGER_DEBUG === true
@@ -7948,11 +7953,35 @@ const TagManager = {
         document.dispatchEvent(new CustomEvent('updateSelectedTagsComplete'));
         
         // Also directly reinitialize drag and drop to ensure it's working
-        if (window.dragAndDropManager) {
+        if (!FAST_RELOAD_MODE && window.dragAndDropManager) {
             setTimeout(() => {
                 verboseLog('Reinitializing drag and drop after updateSelectedTags');
                 window.dragAndDropManager.reinitializeTagDragAndDrop();
             }, 100);
+        }
+
+        // Safety net: if the selected list ended up empty but we still have persistent selections,
+        // immediately rebuild from persistentSelectedTags (prevents disappearing selections).
+        if (!this._isRestoringSelectedTags) {
+            this._isRestoringSelectedTags = true;
+            setTimeout(() => {
+                try {
+                    const selectedContainer = document.getElementById('selectedTags');
+                    const renderedRows = selectedContainer ? selectedContainer.querySelectorAll('.tag-row').length : 0;
+                    if (renderedRows === 0 && this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+                        verboseLog('⚠️ Selected list empty but persistent selections exist, restoring from persistentSelectedTags');
+                        const fallbackTags = this.state.persistentSelectedTags.map(name =>
+                            this._tagLookupMap?.get(name) ||
+                            this.state.tags.find(t => t['Product Name*'] === name) ||
+                            this.state.originalTags.find(t => t['Product Name*'] === name) || 
+                            { 'Product Name*': name, displayName: name, lineage: 'MIXED' }
+                        ).filter(Boolean);
+                        this.updateSelectedTags(fallbackTags);
+                    }
+                } finally {
+                    this._isRestoringSelectedTags = false;
+                }
+            }, 0);
         }
     },
 
