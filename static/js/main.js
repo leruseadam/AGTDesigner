@@ -9041,6 +9041,13 @@ const TagManager = {
                 return true; // Return success to avoid error handling
             }
             
+            // CRITICAL FIX: Prevent clearing tags right after generation (within last 10 seconds)
+            // Generation doesn't clear backend selected tags, so don't fetch and overwrite local selections
+            if (this._lastGenerationTime && (now - this._lastGenerationTime) < 10000) {
+                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent generation detected (within 10s), preserving current selections');
+                return true; // Return success to preserve current selections
+            }
+            
             // CRITICAL FIX: Preserve local selections before fetching from backend
             // This prevents selections from disappearing if backend hasn't saved them yet
             const localSelections = [...this.state.persistentSelectedTags];
@@ -9080,17 +9087,23 @@ const TagManager = {
             // CRITICAL FIX: Trust backend as source of truth on page load
             // Only merge if we have recent local changes (within last 2 seconds)
             const hasRecentLocalChanges = this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000;
+            const hasRecentGeneration = this._lastGenerationTime && (now - this._lastGenerationTime) < 10000;
 
             let finalSelections;
             let finalTagObjects;
 
-            if (hasRecentLocalChanges && localSelections.length > 0) {
-                // Merge recent local changes with backend to prevent losing selections
+            if ((hasRecentLocalChanges || hasRecentGeneration) && localSelections.length > 0) {
+                // Merge recent local changes/generation with backend to prevent losing selections
                 const backendTagNames = selectedTags.map(tag => tag['Product Name*']);
                 finalSelections = [...new Set([...localSelections, ...backendTagNames])];
-                verboseLog('Merged selections (recent local + backend):', finalSelections);
+                verboseLog('Merged selections (recent local/generation + backend):', finalSelections);
+            } else if (localSelections.length > 0 && selectedTags.length === 0) {
+                // CRITICAL FIX: If backend is empty but we have local selections, preserve local selections
+                // This prevents clearing tags after generation when backend hasn't saved them yet
+                finalSelections = localSelections;
+                verboseLog('Backend empty but local selections exist - preserving local selections:', finalSelections);
             } else {
-                // Trust backend completely on page reload
+                // Trust backend completely on page reload (only if backend has data)
                 finalSelections = selectedTags.map(tag => tag['Product Name*']);
                 verboseLog('Using backend selections as source of truth:', finalSelections);
             }
@@ -10565,6 +10578,12 @@ const TagManager = {
             a.click();
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
+            
+            // CRITICAL FIX: Mark that we just generated tags to prevent them from being cleared
+            // This prevents fetchAndUpdateSelectedTags from clearing selections after generation
+            this._lastTagSelectionTime = Date.now();
+            this._lastGenerationTime = Date.now();
+            verboseLog('✅ Generation complete - preserving selected tags');
         } catch (error) {
             console.error('Error generating labels:', error);
         } finally {
