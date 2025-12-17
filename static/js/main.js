@@ -8068,7 +8068,7 @@ const TagManager = {
         // immediately rebuild from persistentSelectedTags (prevents disappearing selections).
         if (!this._isRestoringSelectedTags) {
             this._isRestoringSelectedTags = true;
-            setTimeout(() => {
+            const restoreIfNeeded = () => {
                 try {
                     const selectedContainer = document.getElementById('selectedTags');
                     const renderedRows = selectedContainer ? selectedContainer.querySelectorAll('.tag-row').length : 0;
@@ -8080,12 +8080,35 @@ const TagManager = {
                             this.state.originalTags.find(t => t['Product Name*'] === name) || 
                             { 'Product Name*': name, displayName: name, lineage: 'MIXED' }
                         ).filter(Boolean);
-                        this.updateSelectedTags(fallbackTags);
+                        if (fallbackTags.length > 0) {
+                            this.updateSelectedTags(fallbackTags);
+                        }
                     }
-                } finally {
-                    this._isRestoringSelectedTags = false;
+                } catch (e) {
+                    console.warn('Error in restore check:', e);
                 }
-            }, 0);
+            };
+            
+            // Check immediately
+            setTimeout(restoreIfNeeded, 0);
+            
+            // CRITICAL FIX: If we just generated, check multiple times to catch any delayed clearing
+            const now = Date.now();
+            const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000;
+            if (recentlyGenerated) {
+                // Check at multiple intervals after generation
+                setTimeout(restoreIfNeeded, 200);
+                setTimeout(restoreIfNeeded, 500);
+                setTimeout(restoreIfNeeded, 1000);
+                setTimeout(restoreIfNeeded, 2000);
+                setTimeout(() => {
+                    this._isRestoringSelectedTags = false;
+                }, 2500);
+            } else {
+                setTimeout(() => {
+                    this._isRestoringSelectedTags = false;
+                }, 100);
+            }
         }
     },
 
@@ -10655,11 +10678,39 @@ const TagManager = {
             if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
                 const selectedTagObjects = this.getSelectedTagObjects();
                 if (selectedTagObjects.length > 0) {
-                    // Use setTimeout to ensure this happens after any other pending updates
+                    // Use multiple timeouts to ensure tags stay visible even if something clears them
                     setTimeout(() => {
                         this.updateSelectedTags(selectedTagObjects);
-                        verboseLog('✅ Refreshed selected tags display after generation');
+                        verboseLog('✅ Refreshed selected tags display after generation (100ms)');
                     }, 100);
+                    
+                    setTimeout(() => {
+                        // Double-check tags are still visible
+                        const container = document.getElementById('selectedTags');
+                        const renderedRows = container ? container.querySelectorAll('.tag-row').length : 0;
+                        if (renderedRows === 0 && this.state.persistentSelectedTags.length > 0) {
+                            verboseLog('⚠️ Tags disappeared after generation, restoring...');
+                            const restoreTags = this.getSelectedTagObjects();
+                            if (restoreTags.length > 0) {
+                                this.updateSelectedTags(restoreTags);
+                                verboseLog('✅ Restored selected tags display');
+                            }
+                        }
+                    }, 500);
+                    
+                    setTimeout(() => {
+                        // Final check and restore if needed
+                        const container = document.getElementById('selectedTags');
+                        const renderedRows = container ? container.querySelectorAll('.tag-row').length : 0;
+                        if (renderedRows === 0 && this.state.persistentSelectedTags.length > 0) {
+                            verboseLog('⚠️ Tags still missing after generation, final restore...');
+                            const restoreTags = this.getSelectedTagObjects();
+                            if (restoreTags.length > 0) {
+                                this.updateSelectedTags(restoreTags);
+                                verboseLog('✅ Final restore of selected tags display');
+                            }
+                        }
+                    }, 1000);
                 }
             }
         } catch (error) {
