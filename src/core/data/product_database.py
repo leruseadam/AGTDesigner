@@ -200,6 +200,161 @@ class ProductDatabase:
             'connection_reuses': 0,
             'connection_creates': 0
         }
+        
+        # Corruption recovery flag to prevent infinite loops
+        self._corruption_recovery_attempted = False
+        self._corruption_recovery_lock = threading.Lock()
+    
+    def _is_corruption_error(self, error: Exception) -> bool:
+        """Check if an error indicates database corruption."""
+        error_str = str(error).lower()
+        corruption_indicators = [
+            'database disk image is malformed',
+            'database is corrupted',
+            'file is encrypted or is not a database',
+            'unable to open database file',
+            'sqlite3.databaseerror'
+        ]
+        return any(indicator in error_str for indicator in corruption_indicators)
+    
+    def _attempt_database_recovery(self) -> bool:
+        """Attempt to recover a corrupted database.
+        
+        Returns:
+            True if recovery was successful, False otherwise
+        """
+        with self._corruption_recovery_lock:
+            if self._corruption_recovery_attempted:
+                # Already attempted recovery, don't try again
+                return False
+            
+            self._corruption_recovery_attempted = True
+        
+        db_path = Path(self.db_path)
+        
+        if not db_path.exists():
+            logger.warning(f"Database file does not exist: {self.db_path}")
+            return False
+        
+        logger.error(f"⚠️  Database corruption detected: {self.db_path}")
+        logger.info("Attempting automatic database recovery...")
+        
+        try:
+            # Create backup of corrupted database
+            from datetime import datetime
+            backup_path = db_path.parent / f"{db_path.stem}_corrupted_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            try:
+                import shutil
+                shutil.copy2(db_path, backup_path)
+                logger.info(f"✓ Backup created: {backup_path.name}")
+            except Exception as backup_error:
+                logger.warning(f"Could not create backup: {backup_error}")
+            
+            # Method 1: Try to dump and restore
+            logger.info("Method 1: Attempting dump and restore...")
+            try:
+                dump_file = db_path.parent / f"{db_path.stem}_dump.sql"
+                recovered_db = db_path.parent / f"{db_path.stem}_recovered.db"
+                
+                # Try to dump the database (may fail if severely corrupted)
+                try:
+                    old_conn = sqlite3.connect(str(db_path))
+                    with open(dump_file, 'w') as f:
+                        for line in old_conn.iterdump():
+                            f.write(f"{line}\n")
+                    old_conn.close()
+                except Exception as dump_error:
+                    logger.warning(f"Cannot dump corrupted database: {dump_error}")
+                    raise  # Re-raise to skip to Method 2
+                
+                # Create new database from dump
+                if recovered_db.exists():
+                    recovered_db.unlink()
+                
+                new_conn = sqlite3.connect(str(recovered_db))
+                with open(dump_file, 'r') as f:
+                    new_conn.executescript(f.read())
+                new_conn.close()
+                
+                # Verify recovered database
+                verify_conn = sqlite3.connect(str(recovered_db))
+                cursor = verify_conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+                table_count = cursor.fetchone()[0]
+                verify_conn.close()
+                
+                if table_count > 0:
+                    # Replace corrupted database with recovered one
+                    db_path.unlink()
+                    recovered_db.rename(db_path)
+                    dump_file.unlink()
+                    
+                    logger.info(f"✅ Database successfully recovered! ({table_count} tables)")
+                    self._corruption_recovery_attempted = False  # Reset for future use
+                    return True
+                else:
+                    logger.warning("Recovered database has no tables, trying method 2...")
+                    recovered_db.unlink()
+                    dump_file.unlink()
+            except Exception as e:
+                logger.warning(f"Method 1 failed: {e}")
+            
+            # Method 2: Try integrity check and partial recovery
+            logger.info("Method 2: Attempting integrity check...")
+            try:
+                # Try to connect - may fail if severely corrupted
+                try:
+                    old_conn = sqlite3.connect(str(db_path))
+                except Exception as conn_error:
+                    logger.warning(f"Cannot connect to corrupted database for integrity check: {conn_error}")
+                    raise  # Skip to Method 3
+                
+                cursor = old_conn.cursor()
+                
+                # Run integrity check
+                cursor.execute("PRAGMA integrity_check")
+                result = cursor.fetchone()
+                
+                if result and result[0] == 'ok':
+                    logger.info("Integrity check passed, database may be recoverable")
+                    old_conn.close()
+                    # Reset flag since integrity check passed
+                    self._corruption_recovery_attempted = False
+                    return True
+                else:
+                    logger.warning(f"Integrity check failed: {result}")
+                    old_conn.close()
+            except Exception as e:
+                logger.warning(f"Integrity check failed: {e}")
+            
+            # Method 3: Create fresh database (last resort)
+            logger.warning("All recovery methods failed. Creating fresh database...")
+            try:
+                # Move corrupted database to backup location if not already done
+                if not backup_path.exists():
+                    db_path.rename(backup_path)
+                else:
+                    db_path.unlink()
+                
+                # Create new empty database file
+                new_conn = sqlite3.connect(str(db_path))
+                new_conn.close()
+                
+                logger.warning(f"⚠️  Fresh database created. Original backed up to: {backup_path.name}")
+                logger.warning("⚠️  You will need to re-upload your Excel file to populate the database.")
+                
+                # Reset initialization flag so database can be reinitialized
+                self._initialized = False
+                self._corruption_recovery_attempted = False
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to create fresh database: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Database recovery failed: {e}")
+            return False
     
     def _get_connection(self):
         """Get a database connection from pool, with enhanced connection management."""
@@ -218,13 +373,28 @@ class ProductDatabase:
                     self._timing_stats['connection_reuses'] += 1
                     return conn
                 except (sqlite3.Error, sqlite3.DatabaseError, sqlite3.OperationalError) as e:
-                    # Connection is dead or database is locked, remove it and create new one
-                    logging.warning(f"Connection validation failed for thread {thread_id}: {e}, creating new connection")
-                    try:
-                        conn.close()
-                    except:
-                        pass
-                    del self._connection_pool[thread_id]
+                    # Check if this is a corruption error
+                    if self._is_corruption_error(e):
+                        logging.error(f"Database corruption detected during connection validation: {e}")
+                        try:
+                            conn.close()
+                        except:
+                            pass
+                        del self._connection_pool[thread_id]
+                        # Attempt recovery
+                        if self._attempt_database_recovery():
+                            # Recovery successful, will create new connection below
+                            pass
+                        else:
+                            raise
+                    else:
+                        # Connection is dead or database is locked, remove it and create new one
+                        logging.warning(f"Connection validation failed for thread {thread_id}: {e}, creating new connection")
+                        try:
+                            conn.close()
+                        except:
+                            pass
+                        del self._connection_pool[thread_id]
 
             # Create new connection with optimized settings
             max_retries = 3
@@ -272,7 +442,22 @@ class ProductDatabase:
 
                     return conn
 
-                except (sqlite3.Error, sqlite3.OperationalError) as e:
+                except (sqlite3.Error, sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+                    # Check if this is a corruption error
+                    if self._is_corruption_error(e):
+                        logging.error(f"Database corruption detected: {e}")
+                        # Attempt recovery once
+                        if self._attempt_database_recovery():
+                            # Recovery successful, try connecting again
+                            logging.info("Database recovery successful, retrying connection...")
+                            # Reset retry counter to give recovery a chance
+                            attempt = -1  # Will be incremented to 0 in next iteration
+                            continue
+                        else:
+                            # Recovery failed, raise the error
+                            logging.error("Database recovery failed")
+                            raise
+                    
                     if attempt < max_retries - 1:
                         logging.warning(f"Connection attempt {attempt + 1} failed: {e}, retrying...")
                         import time
@@ -495,8 +680,22 @@ class ProductDatabase:
                 logger.info(f"Product database initialized successfully in {elapsed:.3f}s")
                 
             except Exception as e:
-                logger.error(f"Error initializing database: {e}")
-                raise
+                # Check if this is a corruption error
+                if self._is_corruption_error(e):
+                    logger.error(f"Database corruption detected during initialization: {e}")
+                    if self._attempt_database_recovery():
+                        # Recovery successful, try initializing again
+                        logger.info("Database recovery successful, retrying initialization...")
+                        # Reset initialization flag
+                        self._initialized = False
+                        # Recursively call init_database (with protection against infinite loops)
+                        return self.init_database()
+                    else:
+                        logger.error("Database recovery failed during initialization")
+                        raise
+                else:
+                    logger.error(f"Error initializing database: {e}")
+                    raise
     
     def _migrate_database_schema_safe(self, cursor, conn):
         """Safely migrate database schema only if necessary."""
