@@ -8740,9 +8740,11 @@ def get_available_tags():
                 cache_key = get_session_cache_key('available_tags')
                 cached_tags = cache.get(cache_key)
                 if cached_tags:
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
+                    safe_cached_tags = make_json_safe(aligned_cached_tags)
                     return jsonify({
-                        'tags': cached_tags,
-                        'total_count': len(cached_tags),
+                        'tags': safe_cached_tags,
+                        'total_count': len(safe_cached_tags),
                         'source': 'rate-limited-cache'
                     })
         
