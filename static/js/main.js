@@ -6844,11 +6844,11 @@ const TagManager = {
         // These were only for debugging and causing issues when called from lineage updates
 
         // CRITICAL FIX: Block any clearing of tags if generation is in progress or just completed
-        const now = Date.now();
+        const checkTime = Date.now();
         const isGenerating = this.isGenerating === true;
-        const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000; // 30 seconds
+        const recentlyGeneratedCheck = this._lastGenerationTime && (checkTime - this._lastGenerationTime) < 30000; // 30 seconds
         
-        if ((isGenerating || recentlyGenerated) && (!tags || tags.length === 0) && this.state.persistentSelectedTags.length > 0) {
+        if ((isGenerating || recentlyGeneratedCheck) && (!tags || tags.length === 0) && this.state.persistentSelectedTags.length > 0) {
             verboseLog('🚫 BLOCKED: Prevented clearing selected tags during/after generation');
             // Force re-render with current selections instead
             const currentTags = this.state.persistentSelectedTags
@@ -6879,10 +6879,10 @@ const TagManager = {
         // This prevents selections from being cleared when updateSelectedTags([]) is called
         if (tags.length === 0 && this.state.persistentSelectedTags.length > 0) {
             // CRITICAL FIX: If we just generated tags, NEVER clear them (extended protection)
-            const now = Date.now();
-            const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000; // 30 seconds
+            const emptyCheckTime = Date.now();
+            const recentlyGeneratedEmpty = this._lastGenerationTime && (emptyCheckTime - this._lastGenerationTime) < 30000; // 30 seconds
             
-            if (recentlyGenerated) {
+            if (recentlyGeneratedEmpty) {
                 verboseLog('🚫 BLOCKED: Attempted to clear selected tags right after generation - preserving selections');
                 // Force re-render with current selections
                 const currentTags = this.state.persistentSelectedTags
@@ -7101,6 +7101,30 @@ const TagManager = {
                     </div>
                 `;
                 this.updateTagCount('selected', 0);
+                return;
+            }
+        }
+        
+        // CRITICAL FIX: Block clearing container if we just generated and have persistent selections
+        const clearCheckTime = Date.now();
+        const recentlyGeneratedClear = this._lastGenerationTime && (clearCheckTime - this._lastGenerationTime) < 30000;
+        const hasPersistentSelections = this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0;
+        
+        if (recentlyGeneratedClear && hasPersistentSelections && (!tags || tags.length === 0)) {
+            verboseLog('🚫 BLOCKED: Prevented clearing selected tags container right after generation');
+            // Don't clear - restore with current selections instead
+            const restoreTags = this.state.persistentSelectedTags
+                .map(tagName => this._tagLookupMap?.get(tagName) ||
+                               this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                               this.state.originalTags.find(t => t['Product Name*'] === tagName) ||
+                               { 'Product Name*': tagName, displayName: tagName, lineage: 'MIXED' })
+                .filter(Boolean);
+            if (restoreTags.length > 0) {
+                tags = restoreTags;
+                this._forceSelectedTagsUpdate = true;
+            } else {
+                // Can't proceed with empty tags after generation
+                verboseLog('⚠️ Cannot restore tags after generation - aborting update');
                 return;
             }
         }
