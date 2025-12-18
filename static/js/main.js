@@ -829,6 +829,14 @@ const AppLoadingSplash = {
     show() {
         this.isVisible = true;
         this.currentStep = 0;
+        // Emergency kill-switch: never let the splash sit indefinitely
+        if (this._emergencyTimer) {
+            clearTimeout(this._emergencyTimer);
+        }
+        this._emergencyTimer = setTimeout(() => {
+            console.log('⚡ Emergency hide splash - 5 second timeout');
+            this.emergencyHide();
+        }, 5000); // Reduced from 7000 to 5000 for faster recovery
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -4867,12 +4875,6 @@ const TagManager = {
         checkbox.checked = this.state._selectedTagsSet?.has(displayName) || false;
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = (e) => {
-            // Always re-enable clickability in case drag logic left flags behind
-            e.target.disabled = false;
-            e.target.style.pointerEvents = 'auto';
-            e.target.removeAttribute('data-reordering');
-            e.target.removeAttribute('data-drag-disabled');
-            
             // Prevent event handling during drag operations
             if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
                 return;
@@ -4920,10 +4922,6 @@ const TagManager = {
                         const availableCheckbox = availableContainer.querySelector(`input[data-tag-name="${displayName}"]`);
                         if (availableCheckbox && availableCheckbox.checked) {
                             availableCheckbox.checked = false;
-                            availableCheckbox.disabled = false;
-                            availableCheckbox.style.pointerEvents = 'auto';
-                            availableCheckbox.removeAttribute('data-drag-disabled');
-                            availableCheckbox.removeAttribute('data-reordering');
                         }
                     }
                 });
@@ -6846,11 +6844,11 @@ const TagManager = {
         // These were only for debugging and causing issues when called from lineage updates
 
         // CRITICAL FIX: Block any clearing of tags if generation is in progress or just completed
-        const checkTime = Date.now();
+        const now = Date.now();
         const isGenerating = this.isGenerating === true;
-        const recentlyGeneratedCheck = this._lastGenerationTime && (checkTime - this._lastGenerationTime) < 30000; // 30 seconds
+        const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000; // 30 seconds
         
-        if ((isGenerating || recentlyGeneratedCheck) && (!tags || tags.length === 0) && this.state.persistentSelectedTags.length > 0) {
+        if ((isGenerating || recentlyGenerated) && (!tags || tags.length === 0) && this.state.persistentSelectedTags.length > 0) {
             verboseLog('🚫 BLOCKED: Prevented clearing selected tags during/after generation');
             // Force re-render with current selections instead
             const currentTags = this.state.persistentSelectedTags
@@ -6876,35 +6874,15 @@ const TagManager = {
             console.warn('updateSelectedTags called with invalid tags:', tags);
             tags = [];
         }
-
-        // CRITICAL FIX: If some persistent selections are missing from incoming tags, restore them
-        // This prevents selected tags from disappearing when render/update is incomplete
-        if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
-            const incomingNames = new Set(tags.map(t => t && (t['Product Name*'] || t.ProductName || t.displayName)).filter(Boolean));
-            const missing = this.state.persistentSelectedTags.filter(name => !incomingNames.has(name));
-            if (missing.length > 0) {
-                const restored = missing.map(tagName =>
-                    this._tagLookupMap?.get(tagName) ||
-                    this.state.tags.find(t => t['Product Name*'] === tagName) ||
-                    this.state.originalTags.find(t => t['Product Name*'] === tagName) ||
-                    { 'Product Name*': tagName, displayName: tagName, lineage: 'MIXED' }
-                ).filter(Boolean);
-                if (restored.length > 0) {
-                    tags = [...restored, ...tags];
-                    this._forceSelectedTagsUpdate = true;
-                    verboseLog(`✅ Restored ${restored.length} missing selected tags to prevent disappearance`);
-                }
-            }
-        }
         
         // CRITICAL FIX: If called with empty array but we have persistentSelectedTags, preserve them
         // This prevents selections from being cleared when updateSelectedTags([]) is called
         if (tags.length === 0 && this.state.persistentSelectedTags.length > 0) {
             // CRITICAL FIX: If we just generated tags, NEVER clear them (extended protection)
-            const emptyCheckTime = Date.now();
-            const recentlyGeneratedEmpty = this._lastGenerationTime && (emptyCheckTime - this._lastGenerationTime) < 30000; // 30 seconds
+            const now = Date.now();
+            const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000; // 30 seconds
             
-            if (recentlyGeneratedEmpty) {
+            if (recentlyGenerated) {
                 verboseLog('🚫 BLOCKED: Attempted to clear selected tags right after generation - preserving selections');
                 // Force re-render with current selections
                 const currentTags = this.state.persistentSelectedTags
@@ -7123,30 +7101,6 @@ const TagManager = {
                     </div>
                 `;
                 this.updateTagCount('selected', 0);
-                return;
-            }
-        }
-        
-        // CRITICAL FIX: Block clearing container if we just generated and have persistent selections
-        const clearCheckTime = Date.now();
-        const recentlyGeneratedClear = this._lastGenerationTime && (clearCheckTime - this._lastGenerationTime) < 30000;
-        const hasPersistentSelections = this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0;
-        
-        if (recentlyGeneratedClear && hasPersistentSelections && (!tags || tags.length === 0)) {
-            verboseLog('🚫 BLOCKED: Prevented clearing selected tags container right after generation');
-            // Don't clear - restore with current selections instead
-            const restoreTags = this.state.persistentSelectedTags
-                .map(tagName => this._tagLookupMap?.get(tagName) ||
-                               this.state.tags.find(t => t['Product Name*'] === tagName) ||
-                               this.state.originalTags.find(t => t['Product Name*'] === tagName) ||
-                               { 'Product Name*': tagName, displayName: tagName, lineage: 'MIXED' })
-                .filter(Boolean);
-            if (restoreTags.length > 0) {
-                tags = restoreTags;
-                this._forceSelectedTagsUpdate = true;
-            } else {
-                // Can't proceed with empty tags after generation
-                verboseLog('⚠️ Cannot restore tags after generation - aborting update');
                 return;
             }
         }
@@ -8114,7 +8068,7 @@ const TagManager = {
         // immediately rebuild from persistentSelectedTags (prevents disappearing selections).
         if (!this._isRestoringSelectedTags) {
             this._isRestoringSelectedTags = true;
-            const restoreIfNeeded = () => {
+            setTimeout(() => {
                 try {
                     const selectedContainer = document.getElementById('selectedTags');
                     const renderedRows = selectedContainer ? selectedContainer.querySelectorAll('.tag-row').length : 0;
@@ -8126,32 +8080,12 @@ const TagManager = {
                             this.state.originalTags.find(t => t['Product Name*'] === name) || 
                             { 'Product Name*': name, displayName: name, lineage: 'MIXED' }
                         ).filter(Boolean);
-                        if (fallbackTags.length > 0) {
-                            this.updateSelectedTags(fallbackTags);
-                        }
+                        this.updateSelectedTags(fallbackTags);
                     }
-                } catch (e) {
-                    console.warn('Error in restore check:', e);
+                } finally {
+                    this._isRestoringSelectedTags = false;
                 }
-            };
-            
-            // Check immediately
-            restoreIfNeeded(); // Call immediately, no setTimeout delay
-            
-            // CRITICAL FIX: If we just generated, check once more after a short delay
-            const now = Date.now();
-            const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000;
-            if (recentlyGenerated) {
-                // Single backup check after generation (reduced from multiple checks)
-                setTimeout(restoreIfNeeded, 150);
-                setTimeout(() => {
-                    this._isRestoringSelectedTags = false;
-                }, 300);
-            } else {
-                setTimeout(() => {
-                    this._isRestoringSelectedTags = false;
-                }, 50); // Reduced delay
-            }
+            }, 0);
         }
     },
 
@@ -8431,21 +8365,17 @@ const TagManager = {
             // keep the existing inventory visible so it does not disappear while new tags load.
             const availableTagsContainer = document.getElementById('availableTags');
             const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
-            const isColdStart = !hasExistingTags;
-            if (isColdStart) {
-                this._initialFetchInProgress = true;
-                this.showActionSplash('Loading tags from server...');
-            }
             
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
                 safetyTimeout = setTimeout(() => {
-                    console.warn('⚠️ Safety timeout: Keeping loading spinner visible (no tags yet)');
-                    // Keep splash visible; don't hide when still empty
-                    if (this.showActionSplash) {
-                        this.showActionSplash('Still loading tags...');
+                    console.warn('⚠️ Safety timeout: Hiding loading spinner');
+                    // Just hide the splash, don't show error message
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
                     }
+                    // Don't show error message - let the app continue working
                 }, 60000); // 60 seconds - very generous timeout
             }
             
@@ -8645,11 +8575,8 @@ const TagManager = {
                 const cachedTags = this.hydrateAvailableTagsFromCache();
                 if (cachedTags) {
                     verboseLog('✅ Using cached tags as final fallback after failed fetch');
-                    this._initialFetchInProgress = false;
-                    if (this.hideActionSplash) this.hideActionSplash();
                     return true;
                 }
-                this._initialFetchInProgress = false;
                 throw lastError || new Error('Failed to fetch tags after retries. Please try refreshing the page or uploading the file again.');
             }
             verboseLog('Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count } : null);
@@ -9236,13 +9163,7 @@ const TagManager = {
             }
 
             // Update persistentSelectedTags with final selections
-            // CRITICAL: Never clear persistent selections if backend returns empty but we already have selections
-            if (finalSelections.length === 0 && this.state.persistentSelectedTags.length > 0) {
-                verboseLog('🚫 Backend selected tags empty; preserving existing persistent selections');
-                finalSelections = [...this.state.persistentSelectedTags];
-            } else {
-                this.state.persistentSelectedTags = finalSelections;
-            }
+            this.state.persistentSelectedTags = finalSelections;
             // Save to localStorage for persistence
             this.saveSelectedTagsToStorage();
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
@@ -9262,7 +9183,6 @@ const TagManager = {
 
             verboseLog('Final tag objects:', finalTagObjects.length);
             this.updateSelectedTags(finalTagObjects);
-            this._initialFetchInProgress = false;
             
             // Ensure drag and drop is working after fetching tags
             if (window.dragAndDropManager && finalTagObjects.length > 0) {
@@ -10669,22 +10589,15 @@ const TagManager = {
             const templateType = document.getElementById('templateSelect')?.value || 'horizontal';
             const scaleFactor = parseFloat(document.getElementById('scaleInput')?.value) || 1.0;
 
-            // CRITICAL FIX: Set generation timestamp BEFORE any UI updates
-            // This prevents any race conditions where tags might be cleared during generation
-            this._lastTagSelectionTime = Date.now();
-            this._lastGenerationTime = Date.now();
-            verboseLog('🔒 Generation started - protecting selected tags from being cleared');
-
-            // Show enhanced generation splash (non-blocking)
+            // Show enhanced generation splash
             this.showEnhancedGenerationSplash(checkedTags.length, templateType);
 
-            // Disable button and show loading spinner (non-blocking)
+            // Disable button and show loading spinner
             generateBtn.disabled = true;
             generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
-            
-            // Always use DOCX generation - start request immediately
+            // Always use DOCX generation
             const apiEndpoint = '/api/generate';
-            
+
             const response = await fetch(apiEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -10698,11 +10611,6 @@ const TagManager = {
                 const error = await response.json();
                 throw new Error(error.error || 'Failed to generate labels');
             }
-            
-            // CRITICAL FIX: Update timestamp again when we get successful response
-            this._lastTagSelectionTime = Date.now();
-            this._lastGenerationTime = Date.now();
-            
             const blob = await response.blob();
             
             // Extract filename from Content-Disposition header
@@ -10731,27 +10639,16 @@ const TagManager = {
             this._lastGenerationTime = Date.now();
             verboseLog('✅ Generation complete - preserving selected tags');
             
-            // CRITICAL FIX: Explicitly refresh selected tags display immediately (no delay)
+            // CRITICAL FIX: Explicitly refresh selected tags display to ensure they remain visible
             // This prevents any race conditions where other code might clear them
             if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
                 const selectedTagObjects = this.getSelectedTagObjects();
                 if (selectedTagObjects.length > 0) {
-                    // Refresh immediately - no delay needed
-                    this.updateSelectedTags(selectedTagObjects);
-                    verboseLog('✅ Refreshed selected tags display after generation');
-                    
-                    // Single backup check after a short delay (reduced from multiple checks)
+                    // Use setTimeout to ensure this happens after any other pending updates
                     setTimeout(() => {
-                        const container = document.getElementById('selectedTags');
-                        const renderedRows = container ? container.querySelectorAll('.tag-row').length : 0;
-                        if (renderedRows === 0 && this.state.persistentSelectedTags.length > 0) {
-                            verboseLog('⚠️ Tags disappeared after generation, restoring...');
-                            const restoreTags = this.getSelectedTagObjects();
-                            if (restoreTags.length > 0) {
-                                this.updateSelectedTags(restoreTags);
-                            }
-                        }
-                    }, 200); // Reduced from 500ms
+                        this.updateSelectedTags(selectedTagObjects);
+                        verboseLog('✅ Refreshed selected tags display after generation');
+                    }, 100);
                 }
             }
         } catch (error) {
@@ -10773,7 +10670,7 @@ const TagManager = {
             this.isGenerating = false; // Release generation lock
             console.timeEnd('debouncedGenerate');
         }
-    }, 300), // Reduced debounce delay for faster generation (was 2000ms)
+    }, 2000), // 2-second debounce delay
 
     updateTagColor(tag, color) {
         // Find the tag element by product name since that's how they're identified
@@ -11861,10 +11758,6 @@ const TagManager = {
     },
 
     hideActionSplash() {
-        // If we're in an initial fetch with no tags yet, keep the splash visible
-        if (this._initialFetchInProgress && (!this.state || !this.state.tags || this.state.tags.length === 0)) {
-            return;
-        }
         const splash = document.getElementById('actionSplash');
         if (splash) {
             splash.style.display = 'none';

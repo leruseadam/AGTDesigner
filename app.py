@@ -6777,8 +6777,6 @@ def _align_tags_with_db_lineage(tags, store_name):
     """
     Ensure tags shown in the UI use the latest lineage from the database.
     Returns a shallow-copied list so cached tag objects are not mutated.
-    CRITICAL: This function ALWAYS overrides Excel lineage with database lineage.
-    Uses the same method as _enrich_tags_with_database_values for consistency.
     """
     if not tags or not isinstance(tags, list):
         return tags
@@ -6786,7 +6784,6 @@ def _align_tags_with_db_lineage(tags, store_name):
     try:
         product_db = get_product_database(store_name)
         if not product_db:
-            logging.debug("No product database available for lineage alignment")
             return tags
         
         # Copy tags so we don't mutate cached objects
@@ -6797,55 +6794,45 @@ def _align_tags_with_db_lineage(tags, store_name):
         if not product_names:
             return aligned_tags
         
-        # CRITICAL FIX: Use get_products_by_names (same as _enrich_tags_with_database_values)
-        # This ensures consistent normalization and matching
-        db_records = product_db.get_products_by_names(product_names)
-        if not db_records:
-            logging.debug(f"No database records found for {len(product_names)} products")
+        lineage_map = {}
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        chunk_size = 400
+        for start in range(0, len(product_names), chunk_size):
+            chunk = product_names[start:start + chunk_size]
+            placeholders = ','.join(['?' for _ in chunk])
+            cursor.execute(f'''
+                SELECT "Product Name*", "Lineage", "canonical_lineage"
+                FROM products
+                WHERE LOWER("Product Name*") IN ({placeholders})
+            ''', [name.lower() for name in chunk])
+            for row in cursor.fetchall():
+                db_name = row[0]
+                db_lineage = row[1] or row[2]
+                if db_name and db_lineage:
+                    lineage_map[db_name.lower().strip()] = str(db_lineage).strip().upper()
+        
+        if not lineage_map:
             return aligned_tags
         
-        # Create lookup map using normalized names (same as _enrich_tags_with_database_values)
-        db_lookup = {}
-        for db_record in db_records:
-            product_name = db_record.get('Product Name*', '')
-            if product_name:
-                normalized_name = product_db._normalize_product_name(product_name)
-                db_lookup[normalized_name] = db_record
-        
-        # CRITICAL FIX: ALWAYS override Excel lineage with database lineage
-        # This ensures database is the source of truth, not Excel
-        enriched_count = 0
+        # Apply lineage to tags
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
             name = tag.get('Product Name*')
             if not name:
                 continue
-            
-            # Use same normalization as enrichment function
-            normalized_name = product_db._normalize_product_name(name)
-            db_record = db_lookup.get(normalized_name)
-            
-            if db_record:
-                # Get lineage from database (prefer Lineage field, fallback to canonical_lineage)
-                db_lineage = db_record.get('Lineage') or db_record.get('canonical_lineage')
-                if db_lineage:
-                    db_lineage_clean = str(db_lineage).strip().upper()
-                    # CRITICAL: Always override Excel lineage with database lineage
-                    tag['Lineage'] = db_lineage_clean
-                    tag['lineage'] = db_lineage_clean.lower()
-                    tag['canonical_lineage'] = db_lineage_clean
-                    tag['currentLineage'] = db_lineage_clean
-                    enriched_count += 1
-        
-        if enriched_count > 0:
-            logging.info(f"✅ Aligned {enriched_count}/{len(aligned_tags)} tags with database lineage (overrode Excel lineage)")
+            db_lineage = lineage_map.get(str(name).lower().strip())
+            if db_lineage:
+                tag['Lineage'] = db_lineage
+                tag['lineage'] = db_lineage.lower()
+                tag['canonical_lineage'] = db_lineage
+                tag['currentLineage'] = db_lineage
         
         return aligned_tags
     except Exception as e:
         logging.warning(f"Lineage alignment failed: {e}")
-        import traceback
-        logging.debug(traceback.format_exc())
         return tags
 
 def _calculate_joint_ratio_for_record(db_record):
@@ -6989,12 +6976,15 @@ def clear_generation_cache():
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
     try:
-        # CRITICAL FIX: Get request data first before using selected_tags_from_request
-        data = request.get_json() or {}
-        selected_tags_from_request = data.get('selected_tags', [])
+        logging.info("=== GENERATE LABELS ACTION START ===")
+        logging.info(f"Generate labels request at {datetime.now().strftime('%H:%M:%S')}")
+        logging.info(f"Request method: {request.method}")
+        logging.info(f"Request URL: {request.url}")
+        logging.info(f"Request headers: {dict(request.headers)}")
         
-        # PERFORMANCE: Reduced verbose logging at start
-        logging.info(f"Generate labels request: {len(selected_tags_from_request) if selected_tags_from_request else 0} tags")
+        # TRACE: Check current store at start of generation
+        current_store_at_start = get_current_store_name()
+        logging.info(f"🔍 TRACE START: Current store = {current_store_at_start}")
         
         # Rate limiting for label generation
         client_ip = request.remote_addr
@@ -7004,8 +6994,9 @@ def generate_labels():
         
         # Add request deduplication using request fingerprint
         import hashlib
+        request_data = request.get_json() or {}
         request_fingerprint = hashlib.md5(
-            json.dumps(data, sort_keys=True).encode()
+            json.dumps(request_data, sort_keys=True).encode()
         ).hexdigest()
         
         # Check if this exact request is already being processed
@@ -7019,8 +7010,10 @@ def generate_labels():
         # Mark this request as being processed
         generate_labels._processing_requests.add(request_fingerprint)
         
+        data = request.get_json()
         template_type = data.get('template_type', 'vertical')
         scale_factor = float(data.get('scale_factor', 1.0))
+        selected_tags_from_request = data.get('selected_tags', [])
         file_path = data.get('file_path')
         filters = data.get('filters', None)
 
@@ -7475,82 +7468,48 @@ def generate_labels():
                             # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
                             # This ensures DOCX uses the same lineage shown in the UI
                             ui_lineage_map = {}
-                            # Also create normalized name map for better matching
-                            normalized_ui_lineage_map = {}
                             for tag in selected_tags_from_request:
                                 if isinstance(tag, dict):
                                     product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
                                     # Use canonical_lineage or currentLineage (what UI displays) as source of truth
                                     ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
                                     if product_name and ui_lineage:
-                                        name_str = str(product_name).strip()
-                                        lineage_str = str(ui_lineage).strip().upper()
-                                        ui_lineage_map[name_str] = lineage_str
-                                        # Also add normalized version for better matching
-                                        normalized_name = product_db._normalize_product_name(name_str) if product_db else name_str.lower()
-                                        normalized_ui_lineage_map[normalized_name] = lineage_str
-                                        logging.debug(f"UI Lineage Map: '{name_str}' (normalized: '{normalized_name}') -> '{lineage_str}'")
+                                        ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
                             
                             # Convert database records to the format expected by TemplateProcessor
                             records = []
                             for db_record in valid_db_records:
                                 product_name_for_record = db_record.get('Product Name*', '')
-                                # PERFORMANCE: Reduced logging - only log first record for debugging
-                                if len(records) == 0:
-                                    logging.debug(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
                                 
                                 # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                 processed_record = process_database_product_for_api(db_record)
                                 
                                 # CRITICAL FIX: Use UI lineage if available, otherwise use database lineage, then defaults
                                 # This ensures DOCX matches what's shown in the UI
-                                product_name_normalized = product_db._normalize_product_name(product_name_for_record) if product_db else product_name_for_record.lower()
-                                lineage_from_ui = ui_lineage_map.get(product_name_for_record.strip()) or normalized_ui_lineage_map.get(product_name_normalized)
-                                
+                                lineage_from_ui = ui_lineage_map.get(product_name_for_record.strip())
                                 if lineage_from_ui:
                                     docx_lineage = lineage_from_ui
                                     logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (matches UI display)")
                                 else:
-                                    # Try database lineage directly (query database, not just processed_record)
-                                    db_lineage = None
-                                    try:
-                                        if product_db:
-                                            db_lineage = product_db.get_product_lineage(product_name_for_record)
-                                            if not db_lineage:
-                                                # Try strain-level lineage
-                                                product_strain = processed_record.get('Product Strain', '')
-                                                if product_strain:
-                                                    strain_info = product_db.get_strain_info(product_strain)
-                                                    if strain_info:
-                                                        db_lineage = (
-                                                            strain_info.get('display_lineage') or
-                                                            strain_info.get('sovereign_lineage') or
-                                                            strain_info.get('canonical_lineage')
-                                                        )
-                                    except Exception as db_lookup_err:
-                                        logging.warning(f"Database lineage lookup failed for '{product_name_for_record}': {db_lookup_err}")
-                                    
-                                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                                        docx_lineage = str(db_lineage).strip().upper()
-                                        logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
-                                    else:
-                                        # Fallback: Check processed_record lineage (might have been set earlier)
-                                        docx_lineage = processed_record.get('Lineage') or processed_record.get('lineage') or processed_record.get('canonical_lineage')
-                                        if docx_lineage and str(docx_lineage).strip() not in ['', 'None', 'nan']:
-                                            docx_lineage = str(docx_lineage).strip().upper()
-                                            logging.info(f"✅ DOCX LINEAGE: Using processed record lineage '{docx_lineage}' for '{product_name_for_record}'")
+                                    # Try database lineage first
+                                    docx_lineage = processed_record.get('Lineage') or processed_record.get('lineage') or processed_record.get('canonical_lineage')
+                                    if not docx_lineage or str(docx_lineage).strip() in ['', 'None', 'nan']:
+                                        # No database lineage - use defaults based on product type (never Excel)
+                                        product_type = processed_record.get('Product Type*', '').lower()
+                                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                                        
+                                        if is_classic:
+                                            docx_lineage = 'HYBRID'
                                         else:
-                                            # No database lineage - use defaults based on product type (never Excel)
-                                            product_type = processed_record.get('Product Type*', '').lower()
-                                            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                                            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                                            
-                                            if is_classic:
-                                                docx_lineage = 'HYBRID'
-                                            else:
-                                                docx_lineage = 'MIXED'
-                                            
-                                            logging.warning(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name_for_record}' (checked UI, DB query, processed_record), using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type")
+                                            docx_lineage = 'MIXED'
+                                        
+                                        logging.info(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                                    else:
+                                        docx_lineage = str(docx_lineage).strip().upper()
+                                        logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
                                 
                                 # Map database fields to template fields (using correct field names from database)
                                 record = {
@@ -7619,13 +7578,59 @@ def generate_labels():
                                     'Quantity': processed_record.get('Quantity*', '1')
                                 }
                                 record = _normalize_weight_fields(record)
-                                # PERFORMANCE: Removed verbose debug prints that slow down generation
+                                print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
+                                print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
+                                print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
                                 records.append(record)
                         logging.info(f"✅ Generated {len(records)} records from database")
                         
-                        # PERFORMANCE: Skip individual lineage queries here - batch enrichment handles this later
-                        # This avoids N+1 query problem (was doing individual DB queries per record)
-                        # Batch enrichment at lines 8130+ handles all lineage updates efficiently
+                        # CRITICAL FIX: Override lineage from database if it has been updated
+                        logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database...")
+                        store_name = get_current_store_name()
+                        product_db = get_product_database(store_name)
+                        # Log which database path is being used for override
+                        override_db_path = getattr(product_db, 'db_path', 'Unknown')
+                        logging.info(f"🔄 LINEAGE OVERRIDE: Using database at {override_db_path} for store {store_name}")
+                        for record in records:
+                            product_name = record.get('Product Name*', record.get('ProductName', ''))
+                            if product_name:
+                                try:
+                                    # Get the most up-to-date lineage from the database
+                                    if product_db:
+                                        # Try to get lineage by product name first
+                                        db_lineage = product_db.get_product_lineage(product_name)
+                                        if db_lineage:
+                                            original_lineage = record.get('Lineage', '')
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            original_lineage_clean = str(original_lineage).strip().upper()
+                                            
+                                            # Always update to ensure database value is used
+                                            if db_lineage_clean != original_lineage_clean:
+                                                logging.info(f"LINEAGE OVERRIDE: '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                                record['Lineage'] = db_lineage_clean
+                                            else:
+                                                logging.debug(f"LINEAGE SKIP: '{product_name}' - Already matches database: '{original_lineage_clean}'")
+                                                # Still update to ensure consistency
+                                                record['Lineage'] = db_lineage_clean
+                                        else:
+                                            # Try to get lineage by strain name
+                                            product_strain = record.get('Product Strain', '')
+                                            if product_strain:
+                                                strain_info = product_db.get_strain_info(product_strain)
+                                                if strain_info and strain_info.get('canonical_lineage'):
+                                                    db_lineage = strain_info['canonical_lineage']
+                                                    original_lineage = record.get('Lineage', '')
+                                                    if str(db_lineage).strip() != str(original_lineage).strip():
+                                                        logging.info(f"LINEAGE OVERRIDE: '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                        record['Lineage'] = str(db_lineage).strip()
+                                                    else:
+                                                        logging.debug(f"LINEAGE SKIP: '{product_name}' - Strain lineage already matches: '{original_lineage}'")
+                                except Exception as e:
+                                    logging.warning(f"Error checking lineage override for '{product_name}': {e}")
+                        
+                        # NOTE: Removed Excel processor override - database lineage takes precedence
+                        # The old logic would incorrectly revert manual lineage changes back to the original Excel values.
+                        # Database lineage is now the authoritative source of truth after user updates.
                     else:
                         logging.warning("No database records found for selected tags, falling back to Excel data")
                         records = []
@@ -7659,31 +7664,26 @@ def generate_labels():
             records = excel_processor.get_selected_records(template_type)
             logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
             
-            # PERFORMANCE: Reduced verbose logging
+            # CRITICAL: Log lineage values from recipient records to verify DataFrame updates took effect
             if records:
-                logging.debug(f"Excel fallback: Generated {len(records)} records")
+                logging.info(f"🔍 LINEAGE VERIFICATION - First 5 records:")
+                for i, record in enumerate(records[:5]):
+                    product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                    lineage = record.get('Lineage', 'NOT_FOUND')
+                    logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
             
             # CRITICAL FIX: Apply UI lineage values first (what user sees in UI), then database override
             # This ensures DOCX matches what's displayed in the UI
             if records:
-                # Build UI lineage map from selected tags with normalized names for better matching
+                # Build UI lineage map from selected tags
                 ui_lineage_map = {}
-                normalized_ui_lineage_map = {}
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name) if store_name else None
                 for tag in selected_tags_from_request:
                     if isinstance(tag, dict):
                         product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
                         # Use canonical_lineage or currentLineage (what UI displays) as source of truth
                         ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
                         if product_name and ui_lineage:
-                            name_str = str(product_name).strip()
-                            lineage_str = str(ui_lineage).strip().upper()
-                            ui_lineage_map[name_str] = lineage_str
-                            # Also add normalized version for better matching
-                            normalized_name = product_db._normalize_product_name(name_str) if product_db else name_str.lower()
-                            normalized_ui_lineage_map[normalized_name] = lineage_str
-                            logging.debug(f"UI Lineage Map (Excel): '{name_str}' (normalized: '{normalized_name}') -> '{lineage_str}'")
+                            ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
                 
                 # Apply UI lineage values first
                 ui_lineage_applied = 0
@@ -7692,9 +7692,7 @@ def generate_labels():
                     if not product_name:
                         continue
                     
-                    # Try exact match first, then normalized match
-                    product_name_normalized = product_db._normalize_product_name(product_name) if product_db else product_name.lower()
-                    ui_lineage = ui_lineage_map.get(product_name.strip()) or normalized_ui_lineage_map.get(product_name_normalized)
+                    ui_lineage = ui_lineage_map.get(product_name.strip())
                     if ui_lineage:
                         original_lineage = record.get('Lineage', '')
                         if str(original_lineage).strip().upper() != ui_lineage:
@@ -7729,12 +7727,92 @@ def generate_labels():
                             if product_name.strip() in ui_lineage_map:
                                 continue
                             
-                            # PERFORMANCE: Batch enrichment handles this - skip individual queries
-                            # Individual queries here cause N+1 problem - batch enrichment is more efficient
-                            pass
+                            try:
+                                # GUARANTEED FIX: Use get_products_by_names for more reliable matching
+                                # This handles normalized names, case-insensitive matching, etc.
+                                db_records = product_db.get_products_by_names([product_name])
+                                db_lineage = None
+                                
+                                if db_records:
+                                    db_record = db_records[0]
+                                    # Get lineage from database (prioritize currentLineage/canonical_lineage)
+                                    db_lineage = (
+                                        db_record.get('currentLineage') or
+                                        db_record.get('canonical_lineage') or
+                                        db_record.get('Lineage')
+                                    )
+                                
+                                # Fallback to get_product_lineage if get_products_by_names didn't find it
+                                if not db_lineage:
+                                    db_lineage = product_db.get_product_lineage(product_name)
+                                
+                                if db_lineage:
+                                    original_lineage = record.get('Lineage', '')
+                                    db_lineage_clean = str(db_lineage).strip().upper()
+                                    original_lineage_clean = str(original_lineage).strip().upper()
+                                    
+                                    # GUARANTEED FIX: Always update with database lineage (database is source of truth)
+                                    record['Lineage'] = db_lineage_clean
+                                    record['currentLineage'] = db_lineage_clean
+                                    record['canonical_lineage'] = db_lineage_clean
+                                    record['lineage'] = db_lineage_clean.lower()
+                                    
+                                    # Only log if different
+                                    if db_lineage_clean != original_lineage_clean:
+                                        logging.info(f"🔄 GUARANTEED FIX (output): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                        lineage_overrides_applied += 1
+                                    else:
+                                        logging.debug(f"✅ GUARANTEED FIX (output): '{product_name}' - Lineage confirmed: '{db_lineage_clean}'")
+                                else:
+                                    # Try strain-level lookup as fallback
+                                    product_strain = record.get('Product Strain', '')
+                                    if product_strain and str(product_strain).strip():
+                                        strain_info = product_db.get_strain_info(str(product_strain).strip())
+                                        if strain_info and strain_info.get('canonical_lineage'):
+                                            db_lineage = strain_info['canonical_lineage']
+                                            original_lineage = record.get('Lineage', '')
+                                            db_lineage_clean = str(db_lineage).strip().upper()
+                                            original_lineage_clean = str(original_lineage).strip().upper()
+                                            
+                                            if db_lineage_clean != original_lineage_clean:
+                                                logging.info(f"LINEAGE OVERRIDE (strain): '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage_clean}'")
+                                                record['Lineage'] = db_lineage_clean
+                                                record['currentLineage'] = db_lineage_clean
+                                                record['canonical_lineage'] = db_lineage_clean
+                                                record['lineage'] = db_lineage_clean.lower()
+                                                lineage_overrides_applied += 1
+                                            else:
+                                                record['Lineage'] = db_lineage_clean
+                                                record['currentLineage'] = db_lineage_clean
+                                                record['canonical_lineage'] = db_lineage_clean
+                                                record['lineage'] = db_lineage_clean.lower()
+                                    else:
+                                        # No database lineage found - use defaults based on product type (never Excel)
+                                        product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
+                                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                                        
+                                        if is_classic:
+                                            default_lineage = 'HYBRID'
+                                        else:
+                                            default_lineage = 'MIXED'
+                                        
+                                        original_lineage = record.get('Lineage', '')
+                                        if str(original_lineage).strip().upper() != default_lineage:
+                                            logging.info(f"⚠️ NO DATABASE LINEAGE: '{product_name}' - Using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                                            record['Lineage'] = default_lineage
+                                            record['currentLineage'] = default_lineage
+                                            record['canonical_lineage'] = default_lineage
+                                            record['lineage'] = default_lineage.lower()
+                                            lineage_overrides_applied += 1
+                            except Exception as e:
+                                logging.warning(f"Error checking lineage override for product '{product_name}': {e}")
+                                continue
                         
-                        # PERFORMANCE: Reduced logging - batch enrichment handles lineage updates
-                        logging.debug(f"Lineage override: Processed {len(records)} records")
+                        if lineage_overrides_applied > 0:
+                            logging.info(f"✅ LINEAGE OVERRIDE: Applied {lineage_overrides_applied} database lineage updates to records")
+                        else:
+                            logging.debug("LINEAGE OVERRIDE: No lineage updates needed - all records match database")
                 except Exception as e:
                     logging.warning(f"Error during lineage override check: {e}")
                     logging.warning(traceback.format_exc())
@@ -7777,19 +7855,59 @@ def generate_labels():
                             }
                             record = _normalize_weight_fields(record)
                             records.append(record)
+                            logging.info(f"CRITICAL FIX: Created record for JSON matched product '{product_name}'")
                     
                     if records:
-                        logging.debug(f"Created {len(records)} records from JSON matched products")
-                        # PERFORMANCE: Batch enrichment handles lineage updates - skip individual queries here
-                        # Individual queries cause N+1 problem - batch enrichment is more efficient
+                        logging.info(f"CRITICAL FIX: Created {len(records)} records from JSON matched products")
+                        
+                        # Apply database lineage override to JSON matched records
+                        logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database for JSON matched products...")
+                        for record in records:
+                            product_name = record.get('Product Name*', record.get('ProductName', ''))
+                            if product_name:
+                                try:
+                                    store_name = get_current_store_name()
+                                    product_db = get_product_database(store_name)
+                                    if product_db:
+                                        # Try to get lineage by product name
+                                        db_lineage = product_db.get_product_lineage(product_name)
+                                        if db_lineage:
+                                            original_lineage = record.get('Lineage', '')
+                                            if str(db_lineage).strip() != str(original_lineage).strip():
+                                                logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                record['Lineage'] = str(db_lineage).strip()
+                                        else:
+                                            # Try to get lineage by strain name
+                                            product_strain = record.get('Product Strain', '')
+                                            if product_strain:
+                                                strain_info = product_db.get_strain_info(product_strain)
+                                                if strain_info and strain_info.get('canonical_lineage'):
+                                                    db_lineage = strain_info['canonical_lineage']
+                                                    original_lineage = record.get('Lineage', '')
+                                                    if str(db_lineage).strip() != str(original_lineage).strip():
+                                                        logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
+                                                        record['Lineage'] = str(db_lineage).strip()
+                                except Exception as e:
+                                    logging.warning(f"Error checking lineage override for JSON product '{product_name}': {e}")
             
-            # PERFORMANCE: Reduced logging - only log summary, not individual records
+            # CRITICAL FIX: Log lineage values for debugging
             if records:
-                logging.debug(f"Prepared {len(records)} records for generation")
+                for i, record in enumerate(records[:3]):  # Log first 3 records
+                    product_name = record.get('ProductName', 'Unknown')
+                    lineage = record.get('Lineage', 'NOT_FOUND')
+                    logging.info(f"LINEAGE DEBUG: Record {i+1} - Product: '{product_name}', Lineage: '{lineage}'")
+            logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
 
-        # PERFORMANCE: Reduced verbose logging - only log summary
+        # CRITICAL DEBUG: Log final record count and price data
+        logging.info(f"🔍 DEBUG: Final records count: {len(records) if records else 0}")
         if records:
-            logging.debug(f"Final records count: {len(records)}")
+            logging.info(f"🔍 DEBUG: Sample record names: {[r.get('ProductName', r.get('Product Name*', 'NO_NAME')) for r in records[:5]]}")
+            # Log price information for each record to diagnose missing prices
+            for i, record in enumerate(records):
+                product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                price = record.get('Price', 'NOT_FOUND')
+                price_star = record.get('Price*', 'NOT_FOUND')
+                logging.info(f"🔍 PRICE DEBUG Record {i+1}: '{product_name}' - Price={price}, Price*={price_star}")
         
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
@@ -7872,7 +7990,7 @@ def generate_labels():
         
         # Use the already imported TemplateProcessor and get_font_scheme
         font_scheme = get_font_scheme(template_type)
-        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor, store_name=store_name)
+        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor)
         
         # No need to pass preroll_session_id anymore - QR code uses static URL
         
@@ -7947,7 +8065,7 @@ def generate_labels():
                     return base
                 
                 applied = 0
-                # PERFORMANCE: Reduced logging - only log summary
+                logging.info(f"🔍 DOH OVERRIDE CHECK: Checking {len(records)} records against {len(overrides)} override(s)")
                 for rec in records:
                     name = rec.get('ProductName') or rec.get('Product Name*') or rec.get('product_name') or ''
                     if not name:
@@ -7965,39 +8083,45 @@ def generate_labels():
                     if full_norm in overrides:
                         matched_key = full_norm
                         matched_val = overrides[full_norm]
+                        logging.info(f"✅ DOH OVERRIDE MATCH (full): '{name}' → override key '{matched_key}' = '{matched_val}'")
                     # Strategy 2: Base name only (without vendor/weight suffix)
                     elif base_norm in overrides:
                         matched_key = base_norm
                         matched_val = overrides[base_norm]
+                        logging.info(f"✅ DOH OVERRIDE MATCH (base): '{name}' → base '{base_name_only}' → override key '{matched_key}' = '{matched_val}'")
                     # Strategy 3: Any override key that's a substring of the normalized name
                     else:
                         for ov_key, ov_val in overrides.items():
                             if ov_key in full_norm or full_norm in ov_key:
                                 matched_key = ov_key
                                 matched_val = ov_val
+                                logging.info(f"✅ DOH OVERRIDE MATCH (substring): '{name}' → override key '{matched_key}' = '{matched_val}'")
                                 break
                     
                     if matched_key and matched_val is not None:
                         # Update all DOH-related fields to ensure consistent downstream behavior
+                        old_doh = rec.get('DOH', 'N/A')
                         rec['DOH'] = matched_val
                         rec['DOH Compliant (Yes/No)'] = matched_val
                         rec['doh'] = matched_val
                         applied += 1
+                        logging.info(f"✅ DOH OVERRIDE APPLIED: '{name}' DOH changed from '{old_doh}' → '{matched_val}'")
+                    else:
+                        logging.debug(f"🔍 DOH OVERRIDE: No match for '{name}' (tried: full='{full_norm}', base='{base_norm}')")
                 
-                if applied > 0:
-                    logging.debug(f"DOH override: Applied {applied} override(s) to {len(records)} record(s)")
+                logging.info(f"✅ DOH OVERRIDE SUMMARY: Applied {applied} override(s) to {len(records)} record(s)")
         except Exception as ov_err:
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
             logging.error(f"DOH override error details: {traceback.format_exc()}")
 
+        # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
         # PERFORMANCE OPTIMIZATION: Batch query all lineages at once instead of N+1 queries
-        # Only enrich records that are missing lineage to avoid unnecessary work
         try:
             store_name = session.get('current_store')
-            if store_name and records:
+            if store_name:
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # Collect all product names and strains that need enrichment (only missing lineage)
+                    # Collect all product names and strains that need enrichment
                     products_to_enrich = []
                     strains_to_enrich = set()
                     enrichment_map = {}  # Maps record index to (product_name, strain_name)
@@ -8014,8 +8138,8 @@ def generate_labels():
                                 if product_strain:
                                     strains_to_enrich.add(product_strain)
                     
-                    # Only do batch queries if we have records to enrich
-                    if enrichment_map:
+                    if products_to_enrich or strains_to_enrich:
+                        # Batch query product lineages
                         product_lineage_map = {}
                         if products_to_enrich:
                             try:
@@ -8023,7 +8147,9 @@ def generate_labels():
                                 cursor = conn.cursor()
                                 # Use batch query with placeholders and case-insensitive matching
                                 placeholders = ','.join(['?'] * len(products_to_enrich))
+                                # Normalize product names for matching (lowercase, trimmed)
                                 normalized_products = [str(p).strip().lower() for p in products_to_enrich]
+                                # Create reverse lookup: normalized -> original
                                 normalized_to_original = {str(p).strip().lower(): p for p in products_to_enrich}
                                 
                                 batch_query = f'''
@@ -8033,9 +8159,11 @@ def generate_labels():
                                     ORDER BY id DESC
                                 '''
                                 cursor.execute(batch_query, normalized_products)
+                                # Build a map with original product names as keys
                                 for row in cursor.fetchall():
                                     pname, lineage = row
                                     if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                                        # Match back to original product name (case-preserved)
                                         pname_normalized = str(pname).strip().lower()
                                         if pname_normalized in normalized_to_original:
                                             original_name = normalized_to_original[pname_normalized]
@@ -8071,20 +8199,22 @@ def generate_labels():
                             record = records[idx]
                             db_lineage = None
                             
+                            # Try product-level lineage first
                             if product_name in product_lineage_map:
                                 db_lineage = product_lineage_map[product_name]
+                            # Fall back to strain-level lineage
                             elif product_strain and product_strain in strain_lineage_map:
                                 db_lineage = strain_lineage_map[product_strain]
                             
                             if db_lineage:
                                 record['Lineage'] = db_lineage
-                                record['lineage'] = db_lineage.lower()
+                                record['lineage'] = db_lineage
                                 enriched_count += 1
                         
                         if enriched_count > 0:
-                            logging.debug(f"Batch enriched {enriched_count} records with lineage")
+                            logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
         except Exception as enrich_err:
-            logging.warning(f"Lineage enrichment failed: {enrich_err}")
+            logging.error(f"Lineage enrichment failed: {enrich_err}")
         
         # Bail out early if no records made it this far (prevents NoneType errors downstream)
         if not records:
@@ -11534,23 +11664,9 @@ def update_lineage():
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
 
-        # CRITICAL FIX: Clear caches and set timestamp to force fresh lineage alignment
-        # This ensures UI immediately shows database lineage, not stale Excel lineage
-        try:
-            clear_available_tags_cache(reason="single_lineage_update")
-            session['lineage_update_timestamp'] = time.time()
-            session.modified = True
-            logging.info("✅ Cleared caches and set lineage_update_timestamp after single lineage update")
-            
-            # Also clear Excel processor cache if available
-            excel_processor = get_excel_processor()
-            if excel_processor and hasattr(excel_processor, '_available_tags_cache'):
-                excel_processor._available_tags_cache.clear()
-                logging.info("✅ Cleared Excel processor tag cache")
-        except Exception as cache_clear_err:
-            logging.warning(f"Could not clear caches: {cache_clear_err}")
-
         # Step 4: Verify the update actually worked - CRITICAL for persistence
+        import time
+
         # PERFORMANCE FIX: Single verification instead of multiple attempts
         verified_lineage = None
         try:
@@ -11992,15 +12108,6 @@ def batch_update_lineage():
         session['lineage_update_timestamp'] = time.time()
         session.modified = True
         logging.info(f"✅ Set lineage_update_timestamp in session to force fresh lineage alignment after batch update")
-        
-        # CRITICAL FIX: Clear Excel processor cache to force fresh database lookup
-        # This ensures Excel lineage doesn't override database lineage after updates
-        try:
-            if excel_processor and hasattr(excel_processor, '_available_tags_cache'):
-                excel_processor._available_tags_cache.clear()
-                logging.info("✅ Cleared Excel processor tag cache to force database lineage refresh")
-        except Exception as cache_clear_err:
-            logging.warning(f"Could not clear Excel processor cache: {cache_clear_err}")
         
         return jsonify({
             'success': True,
@@ -16321,7 +16428,7 @@ def json_inventory():
         logging.info(f"Creating TemplateProcessor with type: {template_type}")
         logging.info(f"Template path: {template_path}")
         
-        processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor, store_name=session.get('current_store'))
+        processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor)
         
         # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
         if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
