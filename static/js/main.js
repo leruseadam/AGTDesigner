@@ -829,14 +829,6 @@ const AppLoadingSplash = {
     show() {
         this.isVisible = true;
         this.currentStep = 0;
-        // Emergency kill-switch: never let the splash sit indefinitely
-        if (this._emergencyTimer) {
-            clearTimeout(this._emergencyTimer);
-        }
-        this._emergencyTimer = setTimeout(() => {
-            console.log('⚡ Emergency hide splash - 5 second timeout');
-            this.emergencyHide();
-        }, 5000); // Reduced from 7000 to 5000 for faster recovery
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -8114,24 +8106,21 @@ const TagManager = {
             };
             
             // Check immediately
-            setTimeout(restoreIfNeeded, 0);
+            restoreIfNeeded(); // Call immediately, no setTimeout delay
             
-            // CRITICAL FIX: If we just generated, check multiple times to catch any delayed clearing
+            // CRITICAL FIX: If we just generated, check once more after a short delay
             const now = Date.now();
             const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000;
             if (recentlyGenerated) {
-                // Check at multiple intervals after generation
-                setTimeout(restoreIfNeeded, 200);
-                setTimeout(restoreIfNeeded, 500);
-                setTimeout(restoreIfNeeded, 1000);
-                setTimeout(restoreIfNeeded, 2000);
+                // Single backup check after generation (reduced from multiple checks)
+                setTimeout(restoreIfNeeded, 150);
                 setTimeout(() => {
                     this._isRestoringSelectedTags = false;
-                }, 2500);
+                }, 300);
             } else {
                 setTimeout(() => {
                     this._isRestoringSelectedTags = false;
-                }, 100);
+                }, 50); // Reduced delay
             }
         }
     },
@@ -8412,17 +8401,21 @@ const TagManager = {
             // keep the existing inventory visible so it does not disappear while new tags load.
             const availableTagsContainer = document.getElementById('availableTags');
             const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
+            const isColdStart = !hasExistingTags;
+            if (isColdStart) {
+                this._initialFetchInProgress = true;
+                this.showActionSplash('Loading tags from server...');
+            }
             
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
                 safetyTimeout = setTimeout(() => {
-                    console.warn('⚠️ Safety timeout: Hiding loading spinner');
-                    // Just hide the splash, don't show error message
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
+                    console.warn('⚠️ Safety timeout: Keeping loading spinner visible (no tags yet)');
+                    // Keep splash visible; don't hide when still empty
+                    if (this.showActionSplash) {
+                        this.showActionSplash('Still loading tags...');
                     }
-                    // Don't show error message - let the app continue working
                 }, 60000); // 60 seconds - very generous timeout
             }
             
@@ -8622,8 +8615,11 @@ const TagManager = {
                 const cachedTags = this.hydrateAvailableTagsFromCache();
                 if (cachedTags) {
                     verboseLog('✅ Using cached tags as final fallback after failed fetch');
+                    this._initialFetchInProgress = false;
+                    if (this.hideActionSplash) this.hideActionSplash();
                     return true;
                 }
+                this._initialFetchInProgress = false;
                 throw lastError || new Error('Failed to fetch tags after retries. Please try refreshing the page or uploading the file again.');
             }
             verboseLog('Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count } : null);
@@ -9230,6 +9226,7 @@ const TagManager = {
 
             verboseLog('Final tag objects:', finalTagObjects.length);
             this.updateSelectedTags(finalTagObjects);
+            this._initialFetchInProgress = false;
             
             // Ensure drag and drop is working after fetching tags
             if (window.dragAndDropManager && finalTagObjects.length > 0) {
@@ -10636,20 +10633,21 @@ const TagManager = {
             const templateType = document.getElementById('templateSelect')?.value || 'horizontal';
             const scaleFactor = parseFloat(document.getElementById('scaleInput')?.value) || 1.0;
 
-            // Show enhanced generation splash
-            this.showEnhancedGenerationSplash(checkedTags.length, templateType);
-
-            // Disable button and show loading spinner
-            generateBtn.disabled = true;
-            generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
-            // Always use DOCX generation
-            const apiEndpoint = '/api/generate';
-
-            // CRITICAL FIX: Set generation timestamp BEFORE making the request
+            // CRITICAL FIX: Set generation timestamp BEFORE any UI updates
             // This prevents any race conditions where tags might be cleared during generation
             this._lastTagSelectionTime = Date.now();
             this._lastGenerationTime = Date.now();
             verboseLog('🔒 Generation started - protecting selected tags from being cleared');
+
+            // Show enhanced generation splash (non-blocking)
+            this.showEnhancedGenerationSplash(checkedTags.length, templateType);
+
+            // Disable button and show loading spinner (non-blocking)
+            generateBtn.disabled = true;
+            generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
+            
+            // Always use DOCX generation - start request immediately
+            const apiEndpoint = '/api/generate';
             
             const response = await fetch(apiEndpoint, {
                 method: 'POST',
@@ -10697,19 +10695,17 @@ const TagManager = {
             this._lastGenerationTime = Date.now();
             verboseLog('✅ Generation complete - preserving selected tags');
             
-            // CRITICAL FIX: Explicitly refresh selected tags display to ensure they remain visible
+            // CRITICAL FIX: Explicitly refresh selected tags display immediately (no delay)
             // This prevents any race conditions where other code might clear them
             if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
                 const selectedTagObjects = this.getSelectedTagObjects();
                 if (selectedTagObjects.length > 0) {
-                    // Use multiple timeouts to ensure tags stay visible even if something clears them
-                    setTimeout(() => {
-                        this.updateSelectedTags(selectedTagObjects);
-                        verboseLog('✅ Refreshed selected tags display after generation (100ms)');
-                    }, 100);
+                    // Refresh immediately - no delay needed
+                    this.updateSelectedTags(selectedTagObjects);
+                    verboseLog('✅ Refreshed selected tags display after generation');
                     
+                    // Single backup check after a short delay (reduced from multiple checks)
                     setTimeout(() => {
-                        // Double-check tags are still visible
                         const container = document.getElementById('selectedTags');
                         const renderedRows = container ? container.querySelectorAll('.tag-row').length : 0;
                         if (renderedRows === 0 && this.state.persistentSelectedTags.length > 0) {
@@ -10717,24 +10713,9 @@ const TagManager = {
                             const restoreTags = this.getSelectedTagObjects();
                             if (restoreTags.length > 0) {
                                 this.updateSelectedTags(restoreTags);
-                                verboseLog('✅ Restored selected tags display');
                             }
                         }
-                    }, 500);
-                    
-                    setTimeout(() => {
-                        // Final check and restore if needed
-                        const container = document.getElementById('selectedTags');
-                        const renderedRows = container ? container.querySelectorAll('.tag-row').length : 0;
-                        if (renderedRows === 0 && this.state.persistentSelectedTags.length > 0) {
-                            verboseLog('⚠️ Tags still missing after generation, final restore...');
-                            const restoreTags = this.getSelectedTagObjects();
-                            if (restoreTags.length > 0) {
-                                this.updateSelectedTags(restoreTags);
-                                verboseLog('✅ Final restore of selected tags display');
-                            }
-                        }
-                    }, 1000);
+                    }, 200); // Reduced from 500ms
                 }
             }
         } catch (error) {
@@ -10756,7 +10737,7 @@ const TagManager = {
             this.isGenerating = false; // Release generation lock
             console.timeEnd('debouncedGenerate');
         }
-    }, 2000), // 2-second debounce delay
+    }, 300), // Reduced debounce delay for faster generation (was 2000ms)
 
     updateTagColor(tag, color) {
         // Find the tag element by product name since that's how they're identified
@@ -11844,6 +11825,10 @@ const TagManager = {
     },
 
     hideActionSplash() {
+        // If we're in an initial fetch with no tags yet, keep the splash visible
+        if (this._initialFetchInProgress && (!this.state || !this.state.tags || this.state.tags.length === 0)) {
+            return;
+        }
         const splash = document.getElementById('actionSplash');
         if (splash) {
             splash.style.display = 'none';
