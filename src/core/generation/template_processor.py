@@ -1298,69 +1298,104 @@ class TemplateProcessor:
             try:
                 from app import get_product_database, get_current_store_name
                 store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    # Collect all product names and strains from chunk
-                    product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
-                    product_names = [n for n in product_names if n]
-                    strains = set()
-                    for r in chunk:
-                        strain = r.get('Product Strain', '')
-                        if strain:
-                            strains.add(strain)
-                    
-                    if product_names:
+                if not store_name:
+                    self.logger.debug("No store name available, skipping batch lineage pre-load")
+                else:
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        # Ensure database is initialized before querying
                         try:
-                            conn = product_db._get_connection()
-                            cursor = conn.cursor()
-                            placeholders = ','.join(['?'] * len(product_names))
-                            # Batch query for product-level lineage
-                            batch_lineage_query = f'''
-                                SELECT "Product Name*", "Lineage"
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND "Lineage" IS NOT NULL
-                                AND "Lineage" != ""
-                            '''
-                            cursor.execute(batch_lineage_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, lineage = row_result
-                                if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(lineage).strip().upper()
-                            
-                            # Batch query for strain-level lineage if needed
-                            if strains:
-                                strain_list = list(strains)
-                                # Normalize strain names for database query
-                                normalized_strains = []
-                                strain_name_map = {}  # Map normalized -> original for lookup
-                                for strain in strain_list:
-                                    # Use the same normalization method as ProductDatabase
-                                    normalized = product_db._normalize_strain_name(strain) if hasattr(product_db, '_normalize_strain_name') else strain.lower().strip()
-                                    normalized_strains.append(normalized)
-                                    strain_name_map[normalized] = strain
+                            product_db.init_database()
+                        except Exception as init_err:
+                            self.logger.warning(f"Database initialization failed, skipping batch lineage: {init_err}")
+                            product_db = None
+                    
+                    if product_db:
+                        # Collect all product names and strains from chunk
+                        product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
+                        product_names = [n for n in product_names if n]
+                        strains = set()
+                        for r in chunk:
+                            strain = r.get('Product Strain', '')
+                            if strain:
+                                strains.add(strain)
+                        
+                        if product_names:
+                            try:
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
                                 
-                                if normalized_strains:
-                                    strain_placeholders = ','.join(['?'] * len(normalized_strains))
-                                    # Query for strain lineage - use columns that exist in strains table
-                                    batch_strain_query = f'''
-                                        SELECT normalized_name, strain_name,
-                                               COALESCE(sovereign_lineage, canonical_lineage) as lineage
-                                        FROM strains
-                                        WHERE normalized_name IN ({strain_placeholders})
-                                        AND (sovereign_lineage IS NOT NULL OR canonical_lineage IS NOT NULL)
+                                # Check if products table exists before querying
+                                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                                if not cursor.fetchone():
+                                    self.logger.debug("Products table does not exist, skipping batch lineage query")
+                                else:
+                                    placeholders = ','.join(['?'] * len(product_names))
+                                    # Batch query for product-level lineage
+                                    batch_lineage_query = f'''
+                                        SELECT "Product Name*", "Lineage"
+                                        FROM products
+                                        WHERE "Product Name*" IN ({placeholders})
+                                        AND "Lineage" IS NOT NULL
+                                        AND "Lineage" != ""
                                     '''
-                                    cursor.execute(batch_strain_query, normalized_strains)
+                                    cursor.execute(batch_lineage_query, product_names)
                                     for row_result in cursor.fetchall():
-                                        normalized_name, strain_name_db, lineage = row_result
+                                        pname, lineage = row_result
                                         if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                            # Map back to original strain name from chunk
-                                            original_strain = strain_name_map.get(normalized_name, strain_name_db)
-                                            strain_lineage_cache[original_strain] = str(lineage).strip().upper()
-                        except Exception as batch_lineage_err:
-                            self.logger.warning(f"Batch lineage query failed: {batch_lineage_err}")
+                                            product_lineage_cache[pname] = str(lineage).strip().upper()
+                                
+                                # Batch query for strain-level lineage if needed
+                                if strains:
+                                    # Check if strains table exists before querying
+                                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
+                                    if not cursor.fetchone():
+                                        self.logger.debug("Strains table does not exist, skipping batch strain lineage query")
+                                    else:
+                                        strain_list = list(strains)
+                                        # Normalize strain names for database query
+                                        normalized_strains = []
+                                        strain_name_map = {}  # Map normalized -> original for lookup
+                                        for strain in strain_list:
+                                            # Use the same normalization method as ProductDatabase
+                                            if hasattr(product_db, '_normalize_strain_name'):
+                                                try:
+                                                    normalized = product_db._normalize_strain_name(strain)
+                                                except Exception:
+                                                    normalized = strain.lower().strip()
+                                            else:
+                                                normalized = strain.lower().strip()
+                                            normalized_strains.append(normalized)
+                                            strain_name_map[normalized] = strain
+                                        
+                                        if normalized_strains:
+                                            try:
+                                                strain_placeholders = ','.join(['?'] * len(normalized_strains))
+                                                # Query for strain lineage - use columns that exist in strains table
+                                                batch_strain_query = f'''
+                                                    SELECT normalized_name, strain_name,
+                                                           COALESCE(sovereign_lineage, canonical_lineage) as lineage
+                                                    FROM strains
+                                                    WHERE normalized_name IN ({strain_placeholders})
+                                                    AND (sovereign_lineage IS NOT NULL OR canonical_lineage IS NOT NULL)
+                                                '''
+                                                cursor.execute(batch_strain_query, normalized_strains)
+                                                for row_result in cursor.fetchall():
+                                                    normalized_name, strain_name_db, lineage = row_result
+                                                    if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                                        # Map back to original strain name from chunk
+                                                        original_strain = strain_name_map.get(normalized_name, strain_name_db)
+                                                        strain_lineage_cache[original_strain] = str(lineage).strip().upper()
+                                            except Exception as strain_query_err:
+                                                self.logger.debug(f"Strain lineage batch query failed (non-critical): {strain_query_err}")
+                            except Exception as batch_lineage_err:
+                                self.logger.warning(f"Batch lineage query failed: {batch_lineage_err}")
+                                import traceback
+                                self.logger.debug(traceback.format_exc())
             except Exception as e:
                 self.logger.warning(f"Failed to pre-load lineage data: {e}")
+                import traceback
+                self.logger.debug(traceback.format_exc())
             
             # Build context for each record in the chunk
             context = {}
