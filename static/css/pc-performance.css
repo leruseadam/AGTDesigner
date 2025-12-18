@@ -1,7 +1,8 @@
 /* PC Performance Optimizations - Remove expensive styling from filter dropdowns */
 
 /* Ultra-smooth rendering optimizations for PC */
-* {
+/* CRITICAL FIX: Exclude body and html from translateZ to prevent flashing conflicts with scaleAppToFit */
+*:not(body):not(html) {
     /* Enable hardware acceleration for smoother rendering */
     -webkit-transform: translateZ(0);
     -moz-transform: translateZ(0);
@@ -9,6 +10,12 @@
     transform: translateZ(0);
     
     /* Optimize rendering performance */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Apply font smoothing to body/html without transform */
+body, html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
@@ -239,7 +246,8 @@ select:not(#templateSelect):not(#templateSelectModal) option {
 }
 
 /* Disable all transitions globally for smooth performance on PC */
-* {
+/* CRITICAL FIX: Exclude body/html from transition disabling to prevent flashing */
+*:not(body):not(html) {
     animation-duration: 0s !important;
     animation-delay: 0s !important;
     transition-duration: 0s !important;

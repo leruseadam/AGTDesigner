@@ -1209,14 +1209,15 @@ document.addEventListener('DOMContentLoaded', function() {
     isScaling = true;
 
     // Temporarily reset transform to measure full, natural page size
+    // CRITICAL FIX: Use getComputedStyle to get actual values, then reset with !important
     const prevTransformMain = main.style.transform;
     const prevTransformBody = page.style.transform;
     const prevWidthBody = page.style.width;
     const prevHeightBody = page.style.height;
-    main.style.transform = 'none';
-    page.style.transform = 'none';
-    page.style.width = '';
-    page.style.height = '';
+    main.style.setProperty('transform', 'none', 'important');
+    page.style.setProperty('transform', 'none', 'important');
+    page.style.setProperty('width', '', 'important');
+    page.style.setProperty('height', '', 'important');
 
     // Compute a visual bounding box of visible, non-fixed children within main content
     const container = main;
@@ -1252,10 +1253,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const vh = window.innerHeight;
 
     if (!contentWidth || !contentHeight || !vw || !vh) {
-      main.style.transform = prevTransformMain;
-      page.style.transform = prevTransformBody;
-      page.style.width = prevWidthBody;
-      page.style.height = prevHeightBody;
+      if (prevTransformMain) main.style.setProperty('transform', prevTransformMain, 'important');
+      else main.style.removeProperty('transform');
+      if (prevTransformBody) page.style.setProperty('transform', prevTransformBody, 'important');
+      else page.style.removeProperty('transform');
+      if (prevWidthBody) page.style.setProperty('width', prevWidthBody, 'important');
+      else page.style.removeProperty('width');
+      if (prevHeightBody) page.style.setProperty('height', prevHeightBody, 'important');
+      else page.style.removeProperty('height');
       isScaling = false;
       return;
     }
@@ -1265,11 +1270,14 @@ document.addEventListener('DOMContentLoaded', function() {
     scale = Math.min(scale, 1);
 
     // Apply to body with width/height compensation so layout reflows to fit
+    // CRITICAL FIX: Use !important to override pc-performance.css translateZ conflicts
     const applyScaleToBody = (s) => {
-      page.style.transform = `scale(${s})`;
-      page.style.transformOrigin = 'top left';
-      page.style.width = `${(100 / s).toFixed(4)}%`;
-      page.style.height = `${(100 / s).toFixed(4)}%`;
+      page.style.setProperty('transform', `scale(${s})`, 'important');
+      page.style.setProperty('-webkit-transform', `scale(${s})`, 'important');
+      page.style.setProperty('transform-origin', 'top left', 'important');
+      page.style.setProperty('-webkit-transform-origin', 'top left', 'important');
+      page.style.setProperty('width', `${(100 / s).toFixed(4)}%`, 'important');
+      page.style.setProperty('height', `${(100 / s).toFixed(4)}%`, 'important');
     };
 
     let appliedScale = scale;
@@ -1294,10 +1302,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Only update if scale actually changed to prevent unnecessary re-renders
     if (lastAppliedScale !== null && Math.abs(lastAppliedScale - appliedScale) < 0.001) {
-      main.style.transform = prevTransformMain;
-      page.style.transform = prevTransformBody;
-      page.style.width = prevWidthBody;
-      page.style.height = prevHeightBody;
+      if (prevTransformMain) main.style.setProperty('transform', prevTransformMain, 'important');
+      else main.style.removeProperty('transform');
+      if (prevTransformBody) page.style.setProperty('transform', prevTransformBody, 'important');
+      else page.style.removeProperty('transform');
+      if (prevWidthBody) page.style.setProperty('width', prevWidthBody, 'important');
+      else page.style.removeProperty('width');
+      if (prevHeightBody) page.style.setProperty('height', prevHeightBody, 'important');
+      else page.style.removeProperty('height');
       isScaling = false;
       return;
     }
@@ -1354,35 +1366,48 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 100);
   });
 
-  // CRITICAL FIX: Throttle resize events to prevent rapid flashing
+  // CRITICAL FIX: Aggressive throttling to prevent rapid flashing
   let resizeTimer;
   let lastResizeTime = 0;
+  let resizeTimeoutId = null;
+  
   window.addEventListener('resize', () => {
     const now = Date.now();
-    // Throttle to max once per 150ms
-    if (now - lastResizeTime < 150) {
+    // Aggressive throttle to max once per 300ms to prevent flashing
+    if (now - lastResizeTime < 300) {
+      // Cancel pending calls
+      if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
       cancelAnimationFrame(resizeTimer);
-      resizeTimer = requestAnimationFrame(() => {
+      // Schedule a single delayed call
+      resizeTimeoutId = setTimeout(() => {
         if (scaleTimeout) clearTimeout(scaleTimeout);
         scaleTimeout = setTimeout(() => {
           scaleAppToFit();
-        }, 150);
-      });
+        }, 200);
+        resizeTimeoutId = null;
+      }, 300);
       return;
     }
     lastResizeTime = now;
+    // Cancel any pending calls
+    if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
     cancelAnimationFrame(resizeTimer);
     if (scaleTimeout) clearTimeout(scaleTimeout);
+    // Use longer delay to prevent rapid re-renders
     scaleTimeout = setTimeout(() => {
       scaleAppToFit();
-    }, 150);
+    }, 300);
   });
   
   window.addEventListener('orientationchange', () => {
+    // Cancel all pending calls
+    if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
     if (scaleTimeout) clearTimeout(scaleTimeout);
+    cancelAnimationFrame(resizeTimer);
+    // Longer delay for orientation change to prevent flashing
     scaleTimeout = setTimeout(() => {
       scaleAppToFit();
-    }, 300); // Longer delay for orientation change
+    }, 500);
   });
 })();
 
