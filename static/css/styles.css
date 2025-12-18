@@ -35,16 +35,16 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin-top: 1rem !important;
-  margin-bottom: 1rem !important;
+  margin-top: 0.5rem !important; /* Reduced to match spacing between control sections */
+  margin-bottom: 0.5rem !important;
   padding-bottom: 0.5rem !important;
   justify-content: center !important;
 }
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin-top: 1.25rem !important;
-    margin-bottom: 1.25rem !important;
+    margin-top: 0.5rem !important; /* Reduced to match spacing between control sections */
+    margin-bottom: 0.5rem !important;
   }
 }
 
@@ -861,7 +861,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: 1rem !important; /* Equal spacing to center button in section */
+  margin-top: 0.5rem !important; /* Reduced to match spacing between control sections */
 }
  
 .control-section {
@@ -889,7 +889,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important; /* Remove transform to match other buttons spacing */
   bottom: auto !important;
-  margin: 1rem 0.5rem 1rem 0.5rem !important; /* Equal top and bottom margins to center button */
+  margin: 0.5rem 0.5rem 0.5rem 0.5rem !important; /* Reduced top/bottom margins to match section spacing */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2965,7 +2965,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important; /* Remove transform to match other buttons spacing */
     bottom: auto !important;
-    margin: 1.25rem 0.5rem 1.25rem 0.5rem !important; /* Equal top and bottom margins to center button */
+    margin: 0.5rem 0.5rem 0.5rem 0.5rem !important; /* Reduced top/bottom margins to match section spacing */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7878,7 +7878,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important; /* Remove transform to match other buttons spacing */
     bottom: auto !important;
-    margin: 1.25rem 0.5rem 1.25rem 0.5rem !important; /* Equal top and bottom margins to center button */
+    margin: 0.5rem 0.5rem 0.5rem 0.5rem !important; /* Reduced top/bottom margins to match section spacing */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;

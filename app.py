@@ -10591,7 +10591,8 @@ def get_available_tags():
                                             logging.info(f"Main database query with strain join returned {len(rows)} rows")
                                         except Exception as join_err:
                                             logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
-                                            query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC LIMIT 20000'
+                                            # REMOVED LIMIT: Allow all products to be fetched (was limiting to 20000)
+                                            query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC'
                                             main_cursor.execute(query)
                                             rows = main_cursor.fetchall()
                                             columns = columns_to_query + ['preferred_lineage']
@@ -10641,23 +10642,22 @@ def get_available_tags():
                             
                                 # PERFORMANCE: Use simpler query without strain join for faster loading
                                 # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
-                                # OPTIMIZATION: Reduce limit and skip expensive join initially
+                                # REMOVED LIMIT: Allow all products to be fetched (was limiting to 2000, causing missing products)
                                 lineage_query_join_by_name = f'''
                                     SELECT {quoted_columns}, 
                                            COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                     FROM products p
                                     LEFT JOIN strains s ON p.strain_id = s.id
                                     ORDER BY p.id DESC
-                                    LIMIT 2000
                                 '''
                             
                                 # Fallback query if strains table/join fails - use this first for speed
+                                # REMOVED LIMIT: Allow all products to be fetched
                                 lineage_query_fallback = f'''
                                     SELECT {quoted_columns}, 
                                            p."Lineage" AS preferred_lineage
                                     FROM products p
                                     ORDER BY p.id DESC
-                                    LIMIT 2000
                                 '''
                             
                                 # PERFORMANCE: Use simpler fallback query first (no join) for faster loading
@@ -17612,9 +17612,10 @@ def get_available_tags_lite():
                 if hasattr(excel_processor, '_skip_enrichment'):
                     excel_processor._skip_enrichment = False
                 
-                # Limit to first 1000 tags to reduce memory usage
-                if len(excel_tags) > 1000:
-                    excel_tags = excel_tags[:1000]
+                # REMOVED LIMIT: Allow all Excel tags to be displayed (was limiting to 1000, causing missing products)
+                # Performance optimization: If memory becomes an issue, consider pagination instead of truncation
+                # if len(excel_tags) > 1000:
+                #     excel_tags = excel_tags[:1000]
                 
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ Lite tags returned {len(excel_tags)} tags ({elapsed:.1f}ms)")
@@ -17623,7 +17624,7 @@ def get_available_tags_lite():
                     'tags': excel_tags,
                     'total_count': len(excel_tags),
                     'source': 'excel-lite',
-                    'limited': len(excel_tags) == 1000
+                    'limited': False  # Removed limit - all products are now shown
                 })
             except Exception as e:
                 logging.error(f"Excel processor error in lite mode: {e}")
