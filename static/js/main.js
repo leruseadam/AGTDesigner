@@ -6322,9 +6322,73 @@ const TagManager = {
                 });
             }
 
-            // CRITICAL FIX: Don't refresh available tags - just update the UI directly
-            // This prevents the available tags list from being wiped when lineage changes
-            verboseLog('✅ Lineage updated successfully - skipping full refresh to preserve available tags');
+            // CRITICAL FIX: Update all instances of this tag to show new lineage
+            // This ensures lineage changes are visible immediately and persist through re-renders
+            setTimeout(() => {
+                // Update the tag lookup map with new lineage
+                if (this._tagLookupMap) {
+                    const tagInMap = this._tagLookupMap.get(tagName);
+                    if (tagInMap) {
+                        tagInMap.lineage = verifiedLineage;
+                        tagInMap.Lineage = verifiedLineage;
+                        tagInMap.currentLineage = verifiedLineage;
+                        tagInMap.canonical_lineage = verifiedLineage;
+                    }
+                }
+                
+                // CRITICAL FIX: Update all tag elements in the DOM to show new lineage
+                // Find all instances using multiple selectors to catch all cases
+                const selectors = [
+                    `[data-tag-name="${CSS.escape(tagName)}"]`,
+                    `.tag-checkbox[value="${CSS.escape(tagName)}"]`,
+                    `.tag-row[data-product-name="${CSS.escape(tagName)}"]`
+                ];
+                
+                selectors.forEach(selector => {
+                    try {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach(element => {
+                            const tagItem = element.closest('.tag-item') || element.closest('.tag-row') || element;
+                            if (tagItem) {
+                                // Update data-lineage attribute
+                                tagItem.dataset.lineage = verifiedLineage.toUpperCase();
+                                
+                                // Update lineage dropdown if it exists
+                                const lineageSelect = tagItem.querySelector('.lineage-dropdown');
+                                if (lineageSelect) {
+                                    if (lineageSelect.value !== verifiedLineage) {
+                                        lineageSelect._isProgrammaticUpdate = true;
+                                        lineageSelect.value = verifiedLineage;
+                                        lineageSelect._isProgrammaticUpdate = false;
+                                    }
+                                }
+                                
+                                // Update tag color
+                                const tag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagName) ||
+                                           this.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagName);
+                                if (tag) {
+                                    this.forceTagColorUpdate(tag, verifiedLineage);
+                                }
+                            }
+                        });
+                    } catch (e) {
+                        // Ignore selector errors
+                    }
+                });
+                
+                // CRITICAL FIX: Force refresh available tags display to ensure lineage is visible
+                // This re-renders tags with updated lineage from state
+                if (typeof this.efficientlyUpdateAvailableTagsDisplay === 'function') {
+                    this.efficientlyUpdateAvailableTagsDisplay();
+                    verboseLog('✅ Refreshed available tags display to show updated lineage');
+                } else if (typeof this._updateAvailableTags === 'function' && this.state.tags.length > 0) {
+                    // Fallback: re-render available tags with current state
+                    this._updateAvailableTags(this.state.tags, null);
+                    verboseLog('✅ Re-rendered available tags to show updated lineage');
+                }
+            }, 100);
+            
+            verboseLog('✅ Lineage updated successfully - refreshed display to show changes');
 
         } catch (error) {
             // Clear timeout if it's still set
