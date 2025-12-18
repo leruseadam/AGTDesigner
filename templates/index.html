@@ -554,17 +554,15 @@
     }
     
     function checkStoreRequired(onStoreConfirmed) {
-      // CRITICAL FIX: If store was already confirmed, still call callback to initialize TagManager
-      // This ensures TagManager.init() runs after page reload
-      if (window.storeConfirmed || sessionStorage.getItem('store_just_selected') === 'true') {
-        console.log('✅ Store already confirmed in this session');
-        const storeName = sessionStorage.getItem('selected_store') || 'AGT_Bothell';
-        updateCurrentStoreDisplay(storeName);
-        updateStoreStatus(`Store: ${storeName.replace(/_/g, ' ')}`, 'active');
-        
-        // CRITICAL FIX: Still call callback to initialize TagManager
+      // CRITICAL FIX: Don't check again if store was already confirmed
+      // This prevents the modal from reappearing after uploads or page reloads
+      // SIMPLE FIX: If store was just confirmed in this session, skip the check
+      // This prevents modal from showing twice after selecting a store
+      if (window.storeConfirmed) {
+        console.log('✅ Store already confirmed in this session, skipping check');
+        // CRITICAL FIX: Even if store is already confirmed, still call the callback to ensure TagManager initializes
         if (typeof onStoreConfirmed === 'function') {
-          console.log('🔄 Store already confirmed - calling initialization callback...');
+          console.log('🔄 Store already confirmed - calling callback to ensure TagManager initializes');
           setTimeout(() => {
             try {
               onStoreConfirmed();
@@ -721,6 +719,40 @@
             } else {
               console.warn('⚠️ No onStoreConfirmed callback provided - TagManager may not initialize');
             }
+            
+            // CRITICAL FIX: Also trigger TagManager initialization directly if callback didn't work
+            // This ensures TagManager initializes even if the callback path fails
+            setTimeout(() => {
+              if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
+                console.log('🔄 Store confirmed - directly initializing TagManager...');
+                try {
+                  // Check if store modal is no longer blocking
+                  if (window.STORE_MODAL_BLOCKING === false || window.STORE_MODAL_BLOCKING === undefined) {
+                    window.TagManager.init();
+                    console.log('✅ TagManager initialized successfully after store selection');
+                  } else {
+                    console.log('⏳ Store modal still blocking, will retry initialization...');
+                    // Retry after a short delay
+                    setTimeout(() => {
+                      if (window.TagManager && typeof window.TagManager.init === 'function') {
+                        window.TagManager.init();
+                        console.log('✅ TagManager initialized on retry');
+                      }
+                    }, 500);
+                  }
+                } catch (initError) {
+                  console.error('❌ Error directly initializing TagManager:', initError);
+                }
+              } else if (!window.TagManager) {
+                console.warn('⚠️ TagManager not available yet after store selection - will retry');
+                // Retry initialization after TagManager loads
+                setTimeout(() => {
+                  if (window.initializeTagManagerSafely && typeof window.initializeTagManagerSafely === 'function') {
+                    window.initializeTagManagerSafely();
+                  }
+                }, 1000);
+              }
+            }, 300);
           } else {
             // NO STORE - Show modal
             console.log('⚠️ NO STORE - Showing modal');
@@ -7465,13 +7497,6 @@
     window.tagManagerInitAttempts = 0;
     window.MAX_TAG_MANAGER_INIT_ATTEMPTS = 50; // 5 seconds max (50 * 100ms)
     
-    // CRITICAL FIX: Restore storeConfirmed flag from sessionStorage on page load
-    // This ensures TagManager initializes after page reload following store selection
-    if (sessionStorage.getItem('store_just_selected') === 'true' || sessionStorage.getItem('selected_store')) {
-      window.storeConfirmed = true;
-      console.log('✅ Restored storeConfirmed flag from sessionStorage');
-    }
-    
     function waitForTagManagerAndInit() {
       window.tagManagerInitAttempts = (window.tagManagerInitAttempts || 0) + 1;
       
@@ -7586,26 +7611,44 @@
               window._storeCheckTimeout = null;
             }
             
+            // CRITICAL FIX: Ensure STORE_MODAL_BLOCKING is cleared before initialization
+            window.STORE_MODAL_BLOCKING = false;
+            
             proceedWithInitialization();
           });
         }, 100);
       }
       
       function proceedWithInitialization() {
+        // CRITICAL FIX: Ensure STORE_MODAL_BLOCKING is cleared
+        window.STORE_MODAL_BLOCKING = false;
+        
         if (window.TagManager && typeof window.TagManager.init === 'function') {
-          TagManager.init();
-          
-          // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
-          // Give it a moment for init to complete
-          setTimeout(() => {
-            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-              console.log('🔄 TagManager initialized - retrying file upload initialization...');
-              window.fileUploadInitAttempts = 0; // Reset counter
-              setTimeout(window.initializeFileUpload, 200);
-            }
-          }, 500);
+          console.log('🚀 Calling TagManager.init()...');
+          try {
+            TagManager.init();
+            console.log('✅ TagManager.init() called successfully');
+            
+            // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
+            // Give it a moment for init to complete
+            setTimeout(() => {
+              if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+                console.log('🔄 TagManager initialized - retrying file upload initialization...');
+                window.fileUploadInitAttempts = 0; // Reset counter
+                setTimeout(window.initializeFileUpload, 200);
+              }
+            }, 500);
+          } catch (initError) {
+            console.error('❌ Error calling TagManager.init():', initError);
+            console.error('Stack trace:', initError.stack);
+          }
         } else {
           console.error('❌ TagManager.init is not available');
+          console.error('TagManager exists:', !!window.TagManager);
+          if (window.TagManager) {
+            console.error('TagManager.init type:', typeof window.TagManager.init);
+            console.error('TagManager keys:', Object.keys(window.TagManager).slice(0, 20));
+          }
         }
       }
     }
