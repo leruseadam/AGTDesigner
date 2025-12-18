@@ -35,16 +35,16 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin-top: 0.25rem !important;
-  margin-bottom: 1.5rem !important;
+  margin-top: 1rem !important;
+  margin-bottom: 1rem !important;
   padding-bottom: 0.5rem !important;
   justify-content: center !important;
 }
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin-top: 0.5rem !important;
-    margin-bottom: 1.75rem !important;
+    margin-top: 1.25rem !important;
+    margin-bottom: 1.25rem !important;
   }
 }
 
@@ -861,7 +861,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: 0.1rem !important; /* Reduced to move button up */
+  margin-top: 1rem !important; /* Equal spacing to center button in section */
 }
  
 .control-section {
@@ -877,12 +877,19 @@ body.modal-open #mainContent.store-selection-disabled,
   gap: 0.50rem !important;
 }
 
+/* Reduce gap between Undo/Redo group and Clear button */
+.controls-buttons-container {
+  display: grid !important;
+  gap: 0.5rem !important; /* Reduced from gap-3 (1rem) to match spacing between Undo/Redo */
+  width: 100% !important;
+}
+
 .help-button-container {
   position: relative !important;
   left: auto !important;
   transform: none !important; /* Remove transform to match other buttons spacing */
   bottom: auto !important;
-  margin: 0.25rem 0.5rem 1.5rem 0.5rem !important; /* Reduced top margin to move button up */
+  margin: 1rem 0.5rem 1rem 0.5rem !important; /* Equal top and bottom margins to center button */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2958,7 +2965,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important; /* Remove transform to match other buttons spacing */
     bottom: auto !important;
-    margin: 0.5rem 0.5rem 1.75rem 0.5rem !important; /* Reduced top margin to move button up */
+    margin: 1.25rem 0.5rem 1.25rem 0.5rem !important; /* Equal top and bottom margins to center button */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7871,7 +7878,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important; /* Remove transform to match other buttons spacing */
     bottom: auto !important;
-    margin: 0.5rem 0.5rem 1.75rem 0.5rem !important; /* Reduced top margin to move button up */
+    margin: 1.25rem 0.5rem 1.25rem 0.5rem !important; /* Equal top and bottom margins to center button */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;

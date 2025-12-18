@@ -3133,12 +3133,31 @@ def upload_file():
                                 product_db = get_product_database(store_name)
 
                                 if product_db and hasattr(product_db, 'store_excel_data'):
-                                    logging.info(f"[BACKGROUND] Storing {row_count} products in database...")
+                                    logging.info(f"[BACKGROUND] Storing {row_count} products in database for store: {store_name}...")
+                                    logging.info(f"[BACKGROUND] Database path: {product_db.db_path}")
                                     result = product_db.store_excel_data(processor.df, file_path)
                                     db_elapsed = (time.time() - db_start) * 1000
-                                    logging.info(f"[BACKGROUND] Database storage result: {result} ({db_elapsed:.0f}ms)")
+                                    
+                                    # Enhanced logging with detailed results
+                                    stored = result.get('stored', 0)
+                                    updated = result.get('updated', 0)
+                                    errors = result.get('errors', 0)
+                                    excluded = result.get('excluded_json_matches', 0)
+                                    
+                                    logging.info(f"[BACKGROUND] ✅ Database storage complete ({db_elapsed:.0f}ms)")
+                                    logging.info(f"[BACKGROUND]    Stored: {stored}, Updated: {updated}, Errors: {errors}, Excluded: {excluded}")
+                                    
+                                    if errors > 0:
+                                        logging.error(f"[BACKGROUND] ⚠️ Database storage had {errors} errors - check logs above for details")
+                                    if stored == 0 and updated == 0 and row_count > 0:
+                                        logging.warning(f"[BACKGROUND] ⚠️ No products were stored/updated despite {row_count} rows in Excel file")
+                                        logging.warning(f"[BACKGROUND]    This might indicate a sync issue - check product validation logic")
+                                else:
+                                    logging.error(f"[BACKGROUND] ❌ Cannot store products: product_db={product_db}, has_method={hasattr(product_db, 'store_excel_data') if product_db else False}")
                             except Exception as db_error:
-                                logging.warning(f"[BACKGROUND] Database storage failed: {db_error}")
+                                logging.error(f"[BACKGROUND] ❌ Database storage failed: {db_error}")
+                                import traceback
+                                logging.error(f"[BACKGROUND] Traceback: {traceback.format_exc()}")
 
                             logging.info("[BACKGROUND] ✅ Excel processor cache cleared")
 
@@ -3306,12 +3325,31 @@ def upload_file():
                                 db_start = time.time()
                                 product_db = get_product_database(selected_store)
                                 if product_db and hasattr(product_db, 'store_excel_data'):
-                                    logging.info(f"[LOCAL-BACKGROUND] Storing {row_count} products in database...")
+                                    logging.info(f"[LOCAL-BACKGROUND] Storing {row_count} products in database for store: {selected_store}...")
+                                    logging.info(f"[LOCAL-BACKGROUND] Database path: {product_db.db_path}")
                                     result = product_db.store_excel_data(processor.df, file_path)
                                     db_elapsed = (time.time() - db_start) * 1000
-                                    logging.info(f"[LOCAL-BACKGROUND] Database storage result: {result} ({db_elapsed:.0f}ms)")
+                                    
+                                    # Enhanced logging with detailed results
+                                    stored = result.get('stored', 0)
+                                    updated = result.get('updated', 0)
+                                    errors = result.get('errors', 0)
+                                    excluded = result.get('excluded_json_matches', 0)
+                                    
+                                    logging.info(f"[LOCAL-BACKGROUND] ✅ Database storage complete ({db_elapsed:.0f}ms)")
+                                    logging.info(f"[LOCAL-BACKGROUND]    Stored: {stored}, Updated: {updated}, Errors: {errors}, Excluded: {excluded}")
+                                    
+                                    if errors > 0:
+                                        logging.error(f"[LOCAL-BACKGROUND] ⚠️ Database storage had {errors} errors - check logs above for details")
+                                    if stored == 0 and updated == 0 and row_count > 0:
+                                        logging.warning(f"[LOCAL-BACKGROUND] ⚠️ No products were stored/updated despite {row_count} rows in Excel file")
+                                        logging.warning(f"[LOCAL-BACKGROUND]    This might indicate a sync issue - check product validation logic")
+                                else:
+                                    logging.error(f"[LOCAL-BACKGROUND] ❌ Cannot store products: product_db={product_db}, has_method={hasattr(product_db, 'store_excel_data') if product_db else False}")
                             except Exception as db_error:
-                                logging.warning(f"[LOCAL-BACKGROUND] Database storage failed: {db_error}")
+                                logging.error(f"[LOCAL-BACKGROUND] ❌ Database storage failed: {db_error}")
+                                import traceback
+                                logging.error(f"[LOCAL-BACKGROUND] Traceback: {traceback.format_exc()}")
                         else:
                             logging.error("[LOCAL-BACKGROUND] File load returned False")
                             # Signal completion even on error so we don't wait forever
@@ -7444,6 +7482,7 @@ def generate_labels():
                         logging.warning(f"Could not check database count: {db_check_error}")
                         has_database = False
                     
+                    db_records = []  # Initialize to ensure it's always defined
                     if has_database:
                         # ENHANCED: Replace JSON matched tags with database data
                         logging.info(f"Original valid_selected_tags: {valid_selected_tags}")
@@ -7452,9 +7491,28 @@ def generate_labels():
                         
                         # Get products from database using the enhanced tags
                         logging.info(f"Looking up products for enhanced tags: {enhanced_tags}")
-                        db_records = product_db.get_products_by_names(enhanced_tags)
-                        logging.info(f"Found {len(db_records)} database records")
-                    if db_records:
+                        logging.info(f"Database path: {getattr(product_db, 'db_path', 'Unknown')}")
+                        logging.info(f"Store name: {store_name}")
+                        
+                        try:
+                            db_records = product_db.get_products_by_names(enhanced_tags)
+                            logging.info(f"Found {len(db_records) if db_records else 0} database records")
+                            
+                            # Log sample of what was found
+                            if db_records and len(db_records) > 0:
+                                sample_record = db_records[0]
+                                logging.info(f"Sample database record keys: {list(sample_record.keys())[:10]}")
+                                logging.info(f"Sample record - Product Name: '{sample_record.get('Product Name*', 'MISSING')}', Lineage: '{sample_record.get('Lineage', 'MISSING')}', Price: '{sample_record.get('Price', 'MISSING')}'")
+                            else:
+                                logging.warning(f"⚠️ Database lookup returned empty results for {len(enhanced_tags)} tags")
+                                logging.warning(f"⚠️ Enhanced tags were: {enhanced_tags[:5]}...")
+                        except Exception as db_lookup_error:
+                            logging.error(f"❌ Error looking up database records: {db_lookup_error}")
+                            logging.error(f"❌ Traceback: {traceback.format_exc()}")
+                            db_records = []
+                        
+                        # CRITICAL FIX: Check if db_records is not None and not empty
+                        if db_records and len(db_records) > 0:
                         # Filter out products with None or empty ProductName
                         valid_db_records = [record for record in db_records if record.get('Product Name*') and record.get('Product Name*') != 'None']
                         logging.info(f"Filtered {len(db_records)} database records to {len(valid_db_records)} valid records")
@@ -7493,8 +7551,21 @@ def generate_labels():
                                     docx_lineage = lineage_from_ui
                                     logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (matches UI display)")
                                 else:
-                                    # Try database lineage first
-                                    docx_lineage = processed_record.get('Lineage') or processed_record.get('lineage') or processed_record.get('canonical_lineage')
+                                    # Try database lineage first - check all possible lineage fields
+                                    docx_lineage = (
+                                        processed_record.get('Lineage') or 
+                                        processed_record.get('lineage') or 
+                                        processed_record.get('canonical_lineage') or
+                                        processed_record.get('currentLineage') or
+                                        processed_record.get('sovereign_lineage') or
+                                        db_record.get('Lineage') or
+                                        db_record.get('lineage') or
+                                        db_record.get('canonical_lineage') or
+                                        db_record.get('currentLineage') or
+                                        db_record.get('sovereign_lineage')
+                                    )
+                                    logging.info(f"🔍 LINEAGE CHECK: Product '{product_name_for_record}' - Processed record lineage fields: Lineage='{processed_record.get('Lineage')}', canonical_lineage='{processed_record.get('canonical_lineage')}', currentLineage='{processed_record.get('currentLineage')}'")
+                                    logging.info(f"🔍 LINEAGE CHECK: DB record lineage fields: Lineage='{db_record.get('Lineage')}', canonical_lineage='{db_record.get('canonical_lineage')}', currentLineage='{db_record.get('currentLineage')}'")
                                     if not docx_lineage or str(docx_lineage).strip() in ['', 'None', 'nan']:
                                         # No database lineage - use defaults based on product type (never Excel)
                                         product_type = processed_record.get('Product Type*', '').lower()
@@ -7511,6 +7582,11 @@ def generate_labels():
                                         docx_lineage = str(docx_lineage).strip().upper()
                                         logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
                                 
+                                # Extract price with logging
+                                extracted_price = _extract_price_from_database_product(processed_record)
+                                formatted_price = _format_price_value(extracted_price)
+                                logging.info(f"💰 PRICE EXTRACTION: Product '{product_name_for_record}' - Raw: '{extracted_price}', Formatted: '{formatted_price}'")
+                                
                                 # Map database fields to template fields (using correct field names from database)
                                 record = {
                                     'Product Name*': processed_record.get('Product Name*', ''),
@@ -7522,9 +7598,9 @@ def generate_labels():
                                     'Vendor': processed_record.get('Vendor/Supplier*', ''),
                                     'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                     'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                    'Price': _format_price_value(_extract_price_from_database_product(processed_record)),  # Extract and format price
-                                    'Price*': _format_price_value(_extract_price_from_database_product(processed_record)),  # Also set Price* for generation compatibility
-                                    'Price* (Tier Name for Bulk)': _format_price_value(_extract_price_from_database_product(processed_record)),  # Set all price field variations
+                                    'Price': formatted_price,  # Use extracted and formatted price
+                                    'Price*': formatted_price,  # Also set Price* for generation compatibility
+                                    'Price* (Tier Name for Bulk)': formatted_price,  # Set all price field variations
                                     'DOH': processed_record.get('DOH', ''),
                                     'DOH Compliant (Yes/No)': processed_record.get('DOH Compliant (Yes/No)', processed_record.get('DOH', '')),
                                     'Ratio': processed_record.get('Ratio', ''),
@@ -7582,7 +7658,11 @@ def generate_labels():
                                 print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
                                 print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
                                 records.append(record)
-                        logging.info(f"✅ Generated {len(records)} records from database")
+                            logging.info(f"✅ Generated {len(records)} records from database")
+                        else:
+                            logging.warning(f"⚠️ Database returned empty or None records for {len(enhanced_tags)} tags")
+                            logging.warning(f"⚠️ Falling back to Excel data")
+                            records = []  # Clear records to trigger Excel fallback
                         
                         # CRITICAL FIX: Override lineage from database if it has been updated
                         logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database...")
@@ -7642,9 +7722,11 @@ def generate_labels():
                 records = []
         # Fallback to Excel data if database didn't provide records
         if not records and has_excel_data:
-            logging.info("🔍 Fallback: Using Excel data for record generation")
+            logging.warning("⚠️ FALLBACK TO EXCEL DATA: Database records not available, using Excel data")
+            logging.warning(f"⚠️ This means database lineage, price, and other fields may be missing!")
             logging.info(f"🔍 Excel processor has {len(excel_processor.df)} rows")
             logging.info(f"🔍 Selected tags for Excel fallback: {valid_selected_tags}")
+            logging.info(f"🔍 Database was available: {has_database}, db_records found: {len(db_records) if db_records else 0}")
             
             # CRITICAL FIX: Ensure selected tags are set on Excel processor
             if valid_selected_tags:
@@ -7664,13 +7746,69 @@ def generate_labels():
             records = excel_processor.get_selected_records(template_type)
             logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
             
+            # CRITICAL FIX: Enrich Excel records with database data (lineage, price, etc.)
+            if records and has_database:
+                logging.info("🔄 Enriching Excel records with database data...")
+                try:
+                    store_name = get_current_store_name() or 'AGT_Bothell'
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        enriched_count = 0
+                        for record in records:
+                            product_name = record.get('ProductName', record.get('Product Name*', ''))
+                            if not product_name:
+                                continue
+                            
+                            # Get database record for this product
+                            db_products = product_db.get_products_by_names([product_name])
+                            if db_products and len(db_products) > 0:
+                                db_product = db_products[0]
+                                processed_db = process_database_product_for_api(db_product)
+                                
+                                # CRITICAL: Override Excel data with database data
+                                # Lineage
+                                db_lineage = (
+                                    processed_db.get('Lineage') or 
+                                    processed_db.get('canonical_lineage') or
+                                    processed_db.get('currentLineage') or
+                                    db_product.get('Lineage') or
+                                    db_product.get('canonical_lineage') or
+                                    db_product.get('currentLineage')
+                                )
+                                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                    record['Lineage'] = str(db_lineage).strip().upper()
+                                    enriched_count += 1
+                                    logging.info(f"✅ Enriched '{product_name}' with database lineage: '{db_lineage}'")
+                                
+                                # Price
+                                db_price = _extract_price_from_database_product(processed_db)
+                                if db_price:
+                                    formatted_price = _format_price_value(db_price)
+                                    record['Price'] = formatted_price
+                                    record['Price*'] = formatted_price
+                                    record['Price* (Tier Name for Bulk)'] = formatted_price
+                                    logging.info(f"✅ Enriched '{product_name}' with database price: '{formatted_price}'")
+                                
+                                # Other database fields
+                                if processed_db.get('Product Brand'):
+                                    record['ProductBrand'] = processed_db.get('Product Brand')
+                                    record['Product Brand'] = processed_db.get('Product Brand')
+                                if processed_db.get('Product Strain'):
+                                    record['Product Strain'] = processed_db.get('Product Strain')
+                                    record['ProductStrain'] = processed_db.get('Product Strain')
+                                
+                        logging.info(f"✅ Enriched {enriched_count} Excel records with database data")
+                except Exception as enrich_error:
+                    logging.warning(f"⚠️ Error enriching Excel records with database data: {enrich_error}")
+            
             # CRITICAL: Log lineage values from recipient records to verify DataFrame updates took effect
             if records:
                 logging.info(f"🔍 LINEAGE VERIFICATION - First 5 records:")
                 for i, record in enumerate(records[:5]):
                     product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
                     lineage = record.get('Lineage', 'NOT_FOUND')
-                    logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}'")
+                    price = record.get('Price', 'NOT_FOUND')
+                    logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}', Price: '{price}'")
             
             # CRITICAL FIX: Apply UI lineage values first (what user sees in UI), then database override
             # This ensures DOCX matches what's displayed in the UI

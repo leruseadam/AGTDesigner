@@ -3041,6 +3041,12 @@ const TagManager = {
         checkboxes.forEach(checkbox => {
             const tagName = checkbox.value;
             if (tagName) {
+                // CRITICAL FIX: Don't modify checkbox if it was recently checked by user
+                // This prevents race conditions on initial load
+                if (checkbox.hasAttribute('data-recently-checked')) {
+                    return; // Skip this checkbox - user just checked it
+                }
+                
                 // Check both exact match and case-insensitive match
                 const isSelected = this.state.persistentSelectedTags.includes(tagName) || 
                                   persistentSet.has(tagName.toLowerCase());
@@ -4871,8 +4877,15 @@ const TagManager = {
         
         // Use the cleaned display name for the checkbox value
         checkbox.value = displayName;
+        
+        // CRITICAL FIX: Ensure _selectedTagsSet is initialized before checking checkbox state
+        if (!this.state._selectedTagsSet) {
+            this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
+        }
+        
         // PERFORMANCE: Use Set for O(1) lookup instead of array.includes() - O(n)
-        checkbox.checked = this.state._selectedTagsSet?.has(displayName) || false;
+        checkbox.checked = this.state._selectedTagsSet.has(displayName);
+        
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = (e) => {
             // Prevent event handling during drag operations
@@ -4883,21 +4896,25 @@ const TagManager = {
             // Ensure the checkbox state is properly updated
             const isChecked = e.target.checked;
             
+            // CRITICAL FIX: Ensure _selectedTagsSet exists before using it
+            if (!this.state._selectedTagsSet) {
+                this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
+            }
+            
             // PERFORMANCE: Use Set for O(1) lookups and updates instead of array operations
             if (isChecked) {
-                if (!this.state._selectedTagsSet?.has(displayName)) {
+                if (!this.state._selectedTagsSet.has(displayName)) {
                     this.state.persistentSelectedTags.push(displayName);
-                    if (!this.state._selectedTagsSet) {
-                        this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags);
-                    } else {
-                        this.state._selectedTagsSet.add(displayName);
-                    }
+                    this.state._selectedTagsSet.add(displayName);
+                    // CRITICAL FIX: Mark checkbox as recently checked to prevent race conditions
+                    checkbox.setAttribute('data-recently-checked', 'true');
+                    setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 1000);
                 }
             } else {
                 const index = this.state.persistentSelectedTags.indexOf(displayName);
                 if (index > -1) {
                     this.state.persistentSelectedTags.splice(index, 1);
-                    this.state._selectedTagsSet?.delete(displayName);
+                    this.state._selectedTagsSet.delete(displayName);
                 }
             }
             
@@ -8728,6 +8745,10 @@ const TagManager = {
             this.state.tags = [...stateTagsWithDbLineage];
             this.state.originalTags = [...stateTagsWithDbLineage]; // Store original tags for validation
             this.state.hydratedFromCache = false;
+            // CRITICAL FIX: Ensure _selectedTagsSet is initialized when tags are loaded
+            if (!this.state._selectedTagsSet) {
+                this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
+            }
             this.saveAvailableTagsToCache(tags);
             
             // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
@@ -9864,13 +9885,14 @@ const TagManager = {
     // Initialize with empty state to prevent undefined errors
     initializeEmptyState() {
         verboseLog('Initializing empty state...');
-        
+
         // Initialize with empty arrays to prevent undefined errors
         this.state.tags = [];
         this.state.originalTags = [];
         this.state.selectedTags = new Set();
         this.state.persistentSelectedTags = []; // Changed from Set to Array to preserve order
-        
+        this.state._selectedTagsSet = new Set(); // CRITICAL: Initialize Set for checkbox state management
+
         // Clear any persistent storage
         if (window.localStorage) {
             localStorage.removeItem('selectedTags');
