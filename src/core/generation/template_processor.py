@@ -1421,18 +1421,17 @@ class TemplateProcessor:
                 # Check timeout before lineage colors
                 if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
                     self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                else:
-                    # Apply lineage colors last to ensure they are not overwritten
-                    apply_lineage_colors(rendered_doc)
+                    return rendered_doc
+                
+                # Apply lineage colors last to ensure they are not overwritten
+                apply_lineage_colors(rendered_doc)
+                
+                # Apply final marker cleanup for all templates
+                self._final_marker_cleanup(rendered_doc)
+                
             except Exception as processing_error:
                 self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
                 # Continue processing without post-processing features
-            finally:
-                # Always attempt final marker cleanup even if post-processing failed
-                try:
-                    self._final_marker_cleanup(rendered_doc)
-                except Exception as cleanup_error:
-                    self.logger.error(f"FINAL MARKER CLEANUP FAILED: {cleanup_error}")
             
             # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
             # Cell widths already standardized
