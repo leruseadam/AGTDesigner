@@ -1291,6 +1291,77 @@ class TemplateProcessor:
             except Exception as e:
                 self.logger.warning(f"Failed to pre-load brand data: {e}")
             
+            # OPTIMIZATION: Pre-load all lineage data in batch to avoid N+1 queries
+            # This reduces 100+ queries for 100 products to just 2-3 queries total
+            product_lineage_cache = {}
+            strain_lineage_cache = {}
+            try:
+                from app import get_product_database, get_current_store_name
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # Collect all product names and strains from chunk
+                    product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
+                    product_names = [n for n in product_names if n]
+                    strains = set()
+                    for r in chunk:
+                        strain = r.get('Product Strain', '')
+                        if strain:
+                            strains.add(strain)
+                    
+                    if product_names:
+                        try:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            placeholders = ','.join(['?'] * len(product_names))
+                            # Batch query for product-level lineage
+                            batch_lineage_query = f'''
+                                SELECT "Product Name*", "Lineage"
+                                FROM products
+                                WHERE "Product Name*" IN ({placeholders})
+                                AND "Lineage" IS NOT NULL
+                                AND "Lineage" != ""
+                            '''
+                            cursor.execute(batch_lineage_query, product_names)
+                            for row_result in cursor.fetchall():
+                                pname, lineage = row_result
+                                if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                    product_lineage_cache[pname] = str(lineage).strip().upper()
+                            
+                            # Batch query for strain-level lineage if needed
+                            if strains:
+                                strain_list = list(strains)
+                                # Normalize strain names for database query
+                                normalized_strains = []
+                                strain_name_map = {}  # Map normalized -> original for lookup
+                                for strain in strain_list:
+                                    # Use the same normalization method as ProductDatabase
+                                    normalized = product_db._normalize_strain_name(strain) if hasattr(product_db, '_normalize_strain_name') else strain.lower().strip()
+                                    normalized_strains.append(normalized)
+                                    strain_name_map[normalized] = strain
+                                
+                                if normalized_strains:
+                                    strain_placeholders = ','.join(['?'] * len(normalized_strains))
+                                    # Query for strain lineage - use columns that exist in strains table
+                                    batch_strain_query = f'''
+                                        SELECT normalized_name, strain_name,
+                                               COALESCE(sovereign_lineage, canonical_lineage) as lineage
+                                        FROM strains
+                                        WHERE normalized_name IN ({strain_placeholders})
+                                        AND (sovereign_lineage IS NOT NULL OR canonical_lineage IS NOT NULL)
+                                    '''
+                                    cursor.execute(batch_strain_query, normalized_strains)
+                                    for row_result in cursor.fetchall():
+                                        normalized_name, strain_name_db, lineage = row_result
+                                        if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                            # Map back to original strain name from chunk
+                                            original_strain = strain_name_map.get(normalized_name, strain_name_db)
+                                            strain_lineage_cache[original_strain] = str(lineage).strip().upper()
+                        except Exception as batch_lineage_err:
+                            self.logger.warning(f"Batch lineage query failed: {batch_lineage_err}")
+            except Exception as e:
+                self.logger.warning(f"Failed to pre-load lineage data: {e}")
+            
             # Build context for each record in the chunk
             context = {}
             
@@ -1313,8 +1384,8 @@ class TemplateProcessor:
                 if self.template_type == 'inventory':
                     label_context = self._build_inventory_context(record)
                 else:
-                    # Pass brand cache to avoid N+1 queries
-                    label_context = self._build_label_context(record, doc, product_brand_cache)
+                    # Pass brand and lineage caches to avoid N+1 queries
+                    label_context = self._build_label_context(record, doc, product_brand_cache, product_lineage_cache, strain_lineage_cache)
                 context[f'Label{i+1}'] = label_context
                 # Debug logging to check field values and order
                 product_name = record.get('ProductName', 'Unknown')
@@ -1577,15 +1648,19 @@ class TemplateProcessor:
             'QR': '',
         }
     
-    def _build_label_context(self, record, doc, product_brand_cache=None):
+    def _build_label_context(self, record, doc, product_brand_cache=None, product_lineage_cache=None, strain_lineage_cache=None):
         """Ultra-optimized label context building for maximum performance."""
         # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
             product_brand_cache = {}
-        # CRITICAL FIX: Log lineage value received in template processor
+        if product_lineage_cache is None:
+            product_lineage_cache = {}
+        if strain_lineage_cache is None:
+            strain_lineage_cache = {}
+        # CRITICAL FIX: Log lineage value received in template processor (debug only)
         lineage_value = record.get('Lineage', 'NOT_FOUND')
         product_name = record.get('ProductName', 'Unknown')
-        self.logger.info(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
+        self.logger.debug(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
         
         # Fast dictionary copy
         label_context = dict(record)
@@ -1664,53 +1739,47 @@ class TemplateProcessor:
         # CRITICAL FIX: ALWAYS prioritize database lineage over Excel lineage for DOCX output
         # Database lineage is the source of truth, not Excel lineage
         # This ensures DOCX output uses database lineage values, not Excel lineage
+        # PERFORMANCE OPTIMIZATION: Use pre-loaded lineage cache instead of individual queries
         try:
             product_name = record.get('ProductName', record.get('Product Name*', ''))
             excel_lineage = label_context.get('Lineage', '') or record.get('Lineage', '')
             
             # CRITICAL: Always check database FIRST - database lineage always takes priority
             if product_name:
-                from app import get_product_database, get_current_store_name
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    # FIRST: Check product-level lineage (preserves user changes)
-                    db_lineage = product_db.get_product_lineage(product_name)
+                # PERFORMANCE FIX: Use cached lineage data instead of querying database
+                db_lineage = None
+                
+                # FIRST: Check product-level lineage from cache (preserves user changes)
+                if product_name in product_lineage_cache:
+                    db_lineage = product_lineage_cache[product_name]
+                
+                # If no product-level lineage, check strain-level lineage from cache
+                if not db_lineage:
+                    product_strain = record.get('Product Strain', '')
+                    if product_strain and product_strain in strain_lineage_cache:
+                        db_lineage = strain_lineage_cache[product_strain]
+                
+                # CRITICAL: Always use database lineage if available, never Excel
+                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                    db_lineage_upper = str(db_lineage).strip().upper()
+                    # Always override Excel lineage with database lineage
+                    if excel_lineage and str(excel_lineage).strip().upper() != db_lineage_upper:
+                        # Database lineage differs from Excel - use database
+                        self.logger.info(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
+                    label_context['Lineage'] = db_lineage_upper
+                else:
+                    # No DB lineage - use defaults based on product type (never Excel)
+                    product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
+                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
                     
-                    # If no product-level lineage, check strain-level lineage
-                    if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
-                        product_strain = record.get('Product Strain', '')
-                        if product_strain:
-                            strain_info = product_db.get_strain_info(product_strain)
-                            if strain_info:
-                                db_lineage = (
-                                    strain_info.get('display_lineage') or
-                                    strain_info.get('sovereign_lineage') or
-                                    strain_info.get('canonical_lineage') or
-                                    None
-                                )
-                    
-                    # CRITICAL: Always use database lineage if available, never Excel
-                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                        db_lineage_upper = str(db_lineage).strip().upper()
-                        # Always override Excel lineage with database lineage
-                        if excel_lineage and str(excel_lineage).strip().upper() != db_lineage_upper:
-                            # Database lineage differs from Excel - use database
-                            self.logger.info(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
-                        label_context['Lineage'] = db_lineage_upper
+                    if is_classic:
+                        default_lineage = 'HYBRID'
                     else:
-                        # No DB lineage - use defaults based on product type (never Excel)
-                        product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
-                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                        
-                        if is_classic:
-                            default_lineage = 'HYBRID'
-                        else:
-                            default_lineage = 'MIXED'
-                        
-                        self.logger.info(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
-                        label_context['Lineage'] = default_lineage
+                        default_lineage = 'MIXED'
+                    
+                    self.logger.info(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                    label_context['Lineage'] = default_lineage
         except Exception as e:
             self.logger.warning(f"Could not check database lineage for DOCX output: {e}")
             # On error, use defaults based on product type (never Excel)

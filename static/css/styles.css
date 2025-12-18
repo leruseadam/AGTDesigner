@@ -35,7 +35,7 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin-top: 1.5rem !important;
+  margin-top: 0.25rem !important;
   margin-bottom: 1.5rem !important;
   padding-bottom: 0.5rem !important;
   justify-content: center !important;
@@ -43,7 +43,7 @@
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin-top: 1.75rem !important;
+    margin-top: 0.5rem !important;
     margin-bottom: 1.75rem !important;
   }
 }
@@ -861,7 +861,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: 0.25rem !important; /* Same spacing as other buttons */
+  margin-top: 0.1rem !important; /* Reduced to move button up */
 }
  
 .control-section {
@@ -882,7 +882,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important; /* Remove transform to match other buttons spacing */
   bottom: auto !important;
-  margin: 1.5rem 0.5rem 1.5rem 0.5rem !important; /* Equal top and bottom margins */
+  margin: 0.25rem 0.5rem 1.5rem 0.5rem !important; /* Reduced top margin to move button up */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2958,7 +2958,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important; /* Remove transform to match other buttons spacing */
     bottom: auto !important;
-    margin: 1.5rem 0.5rem 1.5rem 0.5rem !important; /* Equal top and bottom margins */
+    margin: 0.5rem 0.5rem 1.75rem 0.5rem !important; /* Reduced top margin to move button up */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7871,7 +7871,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important; /* Remove transform to match other buttons spacing */
     bottom: auto !important;
-    margin: 1.5rem 0.5rem 1.5rem 0.5rem !important; /* Equal top and bottom margins */
+    margin: 0.5rem 0.5rem 1.75rem 0.5rem !important; /* Reduced top margin to move button up */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
