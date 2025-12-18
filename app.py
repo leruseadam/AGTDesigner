@@ -7513,152 +7513,152 @@ def generate_labels():
                         
                         # CRITICAL FIX: Check if db_records is not None and not empty
                         if db_records and len(db_records) > 0:
-                        # Filter out products with None or empty ProductName
-                        valid_db_records = [record for record in db_records if record.get('Product Name*') and record.get('Product Name*') != 'None']
-                        logging.info(f"Filtered {len(db_records)} database records to {len(valid_db_records)} valid records")
-                        
-                        if not valid_db_records:
-                            # CRITICAL FIX: When database is empty, fall back to Excel data
-                            logging.warning("⚠️ Database returned 0 valid records - falling back to Excel data")
-                            logging.info(f"Switching to Excel data for {len(valid_selected_tags)} tags")
-                            has_database = False  # Force Excel fallback
-                        else:
-                            # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
-                            # This ensures DOCX uses the same lineage shown in the UI
-                            ui_lineage_map = {}
-                            for tag in selected_tags_from_request:
-                                if isinstance(tag, dict):
-                                    product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
-                                    # Use canonical_lineage or currentLineage (what UI displays) as source of truth
-                                    ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
-                                    if product_name and ui_lineage:
-                                        ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
+                            # Filter out products with None or empty ProductName
+                            valid_db_records = [record for record in db_records if record.get('Product Name*') and record.get('Product Name*') != 'None']
+                            logging.info(f"Filtered {len(db_records)} database records to {len(valid_db_records)} valid records")
                             
-                            # Convert database records to the format expected by TemplateProcessor
-                            records = []
-                            for db_record in valid_db_records:
-                                product_name_for_record = db_record.get('Product Name*', '')
-                                logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
-                                logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
+                            if not valid_db_records:
+                                # CRITICAL FIX: When database is empty, fall back to Excel data
+                                logging.warning("⚠️ Database returned 0 valid records - falling back to Excel data")
+                                logging.info(f"Switching to Excel data for {len(valid_selected_tags)} tags")
+                                has_database = False  # Force Excel fallback
+                            else:
+                                # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
+                                # This ensures DOCX uses the same lineage shown in the UI
+                                ui_lineage_map = {}
+                                for tag in selected_tags_from_request:
+                                    if isinstance(tag, dict):
+                                        product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
+                                        # Use canonical_lineage or currentLineage (what UI displays) as source of truth
+                                        ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
+                                        if product_name and ui_lineage:
+                                            ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
                                 
-                                # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
-                                processed_record = process_database_product_for_api(db_record)
-                                
-                                # CRITICAL FIX: Use UI lineage if available, otherwise use database lineage, then defaults
-                                # This ensures DOCX matches what's shown in the UI
-                                lineage_from_ui = ui_lineage_map.get(product_name_for_record.strip())
-                                if lineage_from_ui:
-                                    docx_lineage = lineage_from_ui
-                                    logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (matches UI display)")
-                                else:
-                                    # Try database lineage first - check all possible lineage fields
-                                    docx_lineage = (
-                                        processed_record.get('Lineage') or 
-                                        processed_record.get('lineage') or 
-                                        processed_record.get('canonical_lineage') or
-                                        processed_record.get('currentLineage') or
-                                        processed_record.get('sovereign_lineage') or
-                                        db_record.get('Lineage') or
-                                        db_record.get('lineage') or
-                                        db_record.get('canonical_lineage') or
-                                        db_record.get('currentLineage') or
-                                        db_record.get('sovereign_lineage')
-                                    )
-                                    logging.info(f"🔍 LINEAGE CHECK: Product '{product_name_for_record}' - Processed record lineage fields: Lineage='{processed_record.get('Lineage')}', canonical_lineage='{processed_record.get('canonical_lineage')}', currentLineage='{processed_record.get('currentLineage')}'")
-                                    logging.info(f"🔍 LINEAGE CHECK: DB record lineage fields: Lineage='{db_record.get('Lineage')}', canonical_lineage='{db_record.get('canonical_lineage')}', currentLineage='{db_record.get('currentLineage')}'")
-                                    if not docx_lineage or str(docx_lineage).strip() in ['', 'None', 'nan']:
-                                        # No database lineage - use defaults based on product type (never Excel)
-                                        product_type = processed_record.get('Product Type*', '').lower()
-                                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                                        
-                                        if is_classic:
-                                            docx_lineage = 'HYBRID'
-                                        else:
-                                            docx_lineage = 'MIXED'
-                                        
-                                        logging.info(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                                # Convert database records to the format expected by TemplateProcessor
+                                records = []
+                                for db_record in valid_db_records:
+                                    product_name_for_record = db_record.get('Product Name*', '')
+                                    logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                    logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
+                                    
+                                    # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
+                                    processed_record = process_database_product_for_api(db_record)
+                                    
+                                    # CRITICAL FIX: Use UI lineage if available, otherwise use database lineage, then defaults
+                                    # This ensures DOCX matches what's shown in the UI
+                                    lineage_from_ui = ui_lineage_map.get(product_name_for_record.strip())
+                                    if lineage_from_ui:
+                                        docx_lineage = lineage_from_ui
+                                        logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (matches UI display)")
                                     else:
-                                        docx_lineage = str(docx_lineage).strip().upper()
-                                        logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
-                                
-                                # Extract price with logging
-                                extracted_price = _extract_price_from_database_product(processed_record)
-                                formatted_price = _format_price_value(extracted_price)
-                                logging.info(f"💰 PRICE EXTRACTION: Product '{product_name_for_record}' - Raw: '{extracted_price}', Formatted: '{formatted_price}'")
-                                
-                                # Map database fields to template fields (using correct field names from database)
-                                record = {
-                                    'Product Name*': processed_record.get('Product Name*', ''),
-                                    'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
-                                    'ProductType': processed_record.get('Product Type*', ''),
-                                    'Lineage': docx_lineage,
-                                    'ProductBrand': processed_record.get('Product Brand', ''),
-                                    'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
-                                    'Vendor': processed_record.get('Vendor/Supplier*', ''),
-                                    'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
-                                    'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
-                                    'Price': formatted_price,  # Use extracted and formatted price
-                                    'Price*': formatted_price,  # Also set Price* for generation compatibility
-                                    'Price* (Tier Name for Bulk)': formatted_price,  # Set all price field variations
-                                    'DOH': processed_record.get('DOH', ''),
-                                    'DOH Compliant (Yes/No)': processed_record.get('DOH Compliant (Yes/No)', processed_record.get('DOH', '')),
-                                    'Ratio': processed_record.get('Ratio', ''),
-                                    'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
-                                    'Units': processed_record.get('Units', 'g'),  # Default units if missing
-                                    'WeightUnits': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
-                                    'CombinedWeight': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
-                                    # CRITICAL FIX: Use processed DescAndWeight from process_database_product_for_api
-                                    'Description': processed_record.get('DescAndWeight', processed_record.get('Product Name*', '')),  # Use processed DescAndWeight
-                                    'DescAndWeight': processed_record.get('DescAndWeight', f"{processed_record.get('Product Name*', '')} - {processed_record.get('CombinedWeight', '1g')}"),  # Use processed DescAndWeight
-                                    'THC test result': processed_record.get('THC test result', ''),
-                                    'CBD test result': processed_record.get('CBD test result', ''),
-                                    'Test result unit (% or mg)': processed_record.get('Test result unit (% or mg)', '%'),  # Default to % if missing
-                                    'Quantity*': processed_record.get('Quantity*', '1'),  # Default quantity if missing
-                                    'Concentrate Type': processed_record.get('Concentrate Type', ''),  # Correct field name
-                                    'JointRatio': _calculate_joint_ratio_for_record(processed_record),
-                                    'Ratio_or_THC_CBD': processed_record.get('Ratio_or_THC_CBD', ''),
-                                    'State': processed_record.get('State', 'active'),  # Default state if missing
-                                    'Is Sample? (yes/no)': processed_record.get('Is Sample? (yes/no)', 'no'),  # Default sample status
-                                    'Is MJ product?(yes/no)': processed_record.get('Is MJ product?(yes/no)', 'yes'),  # Default MJ product status
-                                    'Discountable? (yes/no)': processed_record.get('Discountable? (yes/no)', 'yes'),  # Default discountable status
-                                    'Room*': processed_record.get('Room*', 'Default'),  # Default room if missing
-                                    'Batch Number': processed_record.get('Batch Number', ''),  # Correct field name
-                                    'Lot Number': processed_record.get('Lot Number', ''),  # Correct field name
-                                    'Barcode*': processed_record.get('Barcode*', ''),  # Correct field name
-                                    'Medical Only (Yes/No)': processed_record.get('Medical Only (Yes/No)', ''),  # Correct field name
-                                    'Med Price': processed_record.get('Med Price', ''),  # Correct field name
-                                    'Expiration Date(YYYY-MM-DD)': processed_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
-                                    'Is Archived? (yes/no)': processed_record.get('Is Archived? (yes/no)', 'no'),  # Default archived status
-                                    'THC Per Serving': processed_record.get('THC Per Serving', ''),  # Correct field name
-                                    'Allergens': processed_record.get('Allergens', ''),  # Correct field name
-                                    'Solvent': processed_record.get('Solvent', ''),  # Correct field name
-                                    'Accepted Date': processed_record.get('Accepted Date', ''),  # Correct field name
-                                    'Internal Product Identifier': processed_record.get('Internal Product Identifier', ''),  # Correct field name
-                                    'Product Tags (comma separated)': processed_record.get('Product Tags (comma separated)', ''),  # Correct field name
-                                    'Image URL': processed_record.get('Image URL', ''),  # Correct field name
-                                    'Ingredients': processed_record.get('Ingredients', ''),  # Correct field name
-                                    'Description_Complexity': processed_record.get('Description_Complexity', ''),  # Correct field name
-                                    'Total THC': processed_record.get('Total THC', ''),
-                                    'THCA': processed_record.get('THCA', ''),
-                                    'CBDA': processed_record.get('CBDA', ''),
-                                    'CBN': processed_record.get('CBN', ''),
-                                    # Add missing fields for template processor compatibility
-                                    'THC': processed_record.get('THC', ''),
-                                    'CBD': processed_record.get('CBD', ''),
-                                    'AI': processed_record.get('Total THC', ''),  # Map Total THC to AI field for template processor
-                                    'AJ': processed_record.get('THCA', ''),  # Map THCA to AJ field for template processor
-                                    'AK': processed_record.get('CBDA', ''),  # Map CBDA to AK field for template processor
-                                    'Quantity Received*': processed_record.get('Quantity Received*', ''),
-                                    'Barcode': processed_record.get('Barcode*', ''),
-                                    'Quantity': processed_record.get('Quantity*', '1')
-                                }
-                                record = _normalize_weight_fields(record)
-                                print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
-                                print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
-                                print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
-                                records.append(record)
-                            logging.info(f"✅ Generated {len(records)} records from database")
+                                        # Try database lineage first - check all possible lineage fields
+                                        docx_lineage = (
+                                            processed_record.get('Lineage') or 
+                                            processed_record.get('lineage') or 
+                                            processed_record.get('canonical_lineage') or
+                                            processed_record.get('currentLineage') or
+                                            processed_record.get('sovereign_lineage') or
+                                            db_record.get('Lineage') or
+                                            db_record.get('lineage') or
+                                            db_record.get('canonical_lineage') or
+                                            db_record.get('currentLineage') or
+                                            db_record.get('sovereign_lineage')
+                                        )
+                                        logging.info(f"🔍 LINEAGE CHECK: Product '{product_name_for_record}' - Processed record lineage fields: Lineage='{processed_record.get('Lineage')}', canonical_lineage='{processed_record.get('canonical_lineage')}', currentLineage='{processed_record.get('currentLineage')}'")
+                                        logging.info(f"🔍 LINEAGE CHECK: DB record lineage fields: Lineage='{db_record.get('Lineage')}', canonical_lineage='{db_record.get('canonical_lineage')}', currentLineage='{db_record.get('currentLineage')}'")
+                                        if not docx_lineage or str(docx_lineage).strip() in ['', 'None', 'nan']:
+                                            # No database lineage - use defaults based on product type (never Excel)
+                                            product_type = processed_record.get('Product Type*', '').lower()
+                                            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                                            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                                            
+                                            if is_classic:
+                                                docx_lineage = 'HYBRID'
+                                            else:
+                                                docx_lineage = 'MIXED'
+                                            
+                                            logging.info(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                                        else:
+                                            docx_lineage = str(docx_lineage).strip().upper()
+                                            logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
+                                    
+                                    # Extract price with logging
+                                    extracted_price = _extract_price_from_database_product(processed_record)
+                                    formatted_price = _format_price_value(extracted_price)
+                                    logging.info(f"💰 PRICE EXTRACTION: Product '{product_name_for_record}' - Raw: '{extracted_price}', Formatted: '{formatted_price}'")
+                                    
+                                    # Map database fields to template fields (using correct field names from database)
+                                    record = {
+                                        'Product Name*': processed_record.get('Product Name*', ''),
+                                        'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
+                                        'ProductType': processed_record.get('Product Type*', ''),
+                                        'Lineage': docx_lineage,
+                                        'ProductBrand': processed_record.get('Product Brand', ''),
+                                        'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
+                                        'Vendor': processed_record.get('Vendor/Supplier*', ''),
+                                        'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
+                                        'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
+                                        'Price': formatted_price,  # Use extracted and formatted price
+                                        'Price*': formatted_price,  # Also set Price* for generation compatibility
+                                        'Price* (Tier Name for Bulk)': formatted_price,  # Set all price field variations
+                                        'DOH': processed_record.get('DOH', ''),
+                                        'DOH Compliant (Yes/No)': processed_record.get('DOH Compliant (Yes/No)', processed_record.get('DOH', '')),
+                                        'Ratio': processed_record.get('Ratio', ''),
+                                        'Weight*': processed_record.get('Weight*', '1'),  # Default weight if missing
+                                        'Units': processed_record.get('Units', 'g'),  # Default units if missing
+                                        'WeightUnits': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
+                                        'CombinedWeight': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
+                                        # CRITICAL FIX: Use processed DescAndWeight from process_database_product_for_api
+                                        'Description': processed_record.get('DescAndWeight', processed_record.get('Product Name*', '')),  # Use processed DescAndWeight
+                                        'DescAndWeight': processed_record.get('DescAndWeight', f"{processed_record.get('Product Name*', '')} - {processed_record.get('CombinedWeight', '1g')}"),  # Use processed DescAndWeight
+                                        'THC test result': processed_record.get('THC test result', ''),
+                                        'CBD test result': processed_record.get('CBD test result', ''),
+                                        'Test result unit (% or mg)': processed_record.get('Test result unit (% or mg)', '%'),  # Default to % if missing
+                                        'Quantity*': processed_record.get('Quantity*', '1'),  # Default quantity if missing
+                                        'Concentrate Type': processed_record.get('Concentrate Type', ''),  # Correct field name
+                                        'JointRatio': _calculate_joint_ratio_for_record(processed_record),
+                                        'Ratio_or_THC_CBD': processed_record.get('Ratio_or_THC_CBD', ''),
+                                        'State': processed_record.get('State', 'active'),  # Default state if missing
+                                        'Is Sample? (yes/no)': processed_record.get('Is Sample? (yes/no)', 'no'),  # Default sample status
+                                        'Is MJ product?(yes/no)': processed_record.get('Is MJ product?(yes/no)', 'yes'),  # Default MJ product status
+                                        'Discountable? (yes/no)': processed_record.get('Discountable? (yes/no)', 'yes'),  # Default discountable status
+                                        'Room*': processed_record.get('Room*', 'Default'),  # Default room if missing
+                                        'Batch Number': processed_record.get('Batch Number', ''),  # Correct field name
+                                        'Lot Number': processed_record.get('Lot Number', ''),  # Correct field name
+                                        'Barcode*': processed_record.get('Barcode*', ''),  # Correct field name
+                                        'Medical Only (Yes/No)': processed_record.get('Medical Only (Yes/No)', ''),  # Correct field name
+                                        'Med Price': processed_record.get('Med Price', ''),  # Correct field name
+                                        'Expiration Date(YYYY-MM-DD)': processed_record.get('Expiration Date(YYYY-MM-DD)', ''),  # Correct field name
+                                        'Is Archived? (yes/no)': processed_record.get('Is Archived? (yes/no)', 'no'),  # Default archived status
+                                        'THC Per Serving': processed_record.get('THC Per Serving', ''),  # Correct field name
+                                        'Allergens': processed_record.get('Allergens', ''),  # Correct field name
+                                        'Solvent': processed_record.get('Solvent', ''),  # Correct field name
+                                        'Accepted Date': processed_record.get('Accepted Date', ''),  # Correct field name
+                                        'Internal Product Identifier': processed_record.get('Internal Product Identifier', ''),  # Correct field name
+                                        'Product Tags (comma separated)': processed_record.get('Product Tags (comma separated)', ''),  # Correct field name
+                                        'Image URL': processed_record.get('Image URL', ''),  # Correct field name
+                                        'Ingredients': processed_record.get('Ingredients', ''),  # Correct field name
+                                        'Description_Complexity': processed_record.get('Description_Complexity', ''),  # Correct field name
+                                        'Total THC': processed_record.get('Total THC', ''),
+                                        'THCA': processed_record.get('THCA', ''),
+                                        'CBDA': processed_record.get('CBDA', ''),
+                                        'CBN': processed_record.get('CBN', ''),
+                                        # Add missing fields for template processor compatibility
+                                        'THC': processed_record.get('THC', ''),
+                                        'CBD': processed_record.get('CBD', ''),
+                                        'AI': processed_record.get('Total THC', ''),  # Map Total THC to AI field for template processor
+                                        'AJ': processed_record.get('THCA', ''),  # Map THCA to AJ field for template processor
+                                        'AK': processed_record.get('CBDA', ''),  # Map CBDA to AK field for template processor
+                                        'Quantity Received*': processed_record.get('Quantity Received*', ''),
+                                        'Barcode': processed_record.get('Barcode*', ''),
+                                        'Quantity': processed_record.get('Quantity*', '1')
+                                    }
+                                    record = _normalize_weight_fields(record)
+                                    print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
+                                    print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
+                                    print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
+                                    records.append(record)
+                                logging.info(f"✅ Generated {len(records)} records from database")
                         else:
                             logging.warning(f"⚠️ Database returned empty or None records for {len(enhanced_tags)} tags")
                             logging.warning(f"⚠️ Falling back to Excel data")
