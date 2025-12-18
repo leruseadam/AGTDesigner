@@ -6989,6 +6989,10 @@ def clear_generation_cache():
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
     try:
+        # CRITICAL FIX: Get request data first before using selected_tags_from_request
+        data = request.get_json() or {}
+        selected_tags_from_request = data.get('selected_tags', [])
+        
         # PERFORMANCE: Reduced verbose logging at start
         logging.info(f"Generate labels request: {len(selected_tags_from_request) if selected_tags_from_request else 0} tags")
         
@@ -7000,9 +7004,8 @@ def generate_labels():
         
         # Add request deduplication using request fingerprint
         import hashlib
-        request_data = request.get_json() or {}
         request_fingerprint = hashlib.md5(
-            json.dumps(request_data, sort_keys=True).encode()
+            json.dumps(data, sort_keys=True).encode()
         ).hexdigest()
         
         # Check if this exact request is already being processed
@@ -7016,10 +7019,8 @@ def generate_labels():
         # Mark this request as being processed
         generate_labels._processing_requests.add(request_fingerprint)
         
-        data = request.get_json()
         template_type = data.get('template_type', 'vertical')
         scale_factor = float(data.get('scale_factor', 1.0))
-        selected_tags_from_request = data.get('selected_tags', [])
         file_path = data.get('file_path')
         filters = data.get('filters', None)
 

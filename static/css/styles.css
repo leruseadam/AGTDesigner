@@ -861,7 +861,12 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: 0.25rem !important; /* Same spacing as other buttons */
+  margin-top: 1rem !important; /* Spacing after control section */
+  margin-bottom: 1rem !important; /* Spacing before next section */
+}
+
+.control-panel > .help-button-container + .control-section {
+  margin-top: 1rem !important; /* Spacing after help button */
 }
  
 .control-section {
