@@ -7097,14 +7097,20 @@ const TagManager = {
             }
         }
         
-        // CRITICAL FIX: Block clearing container if we just generated and have persistent selections
-        const clearCheckTime = Date.now();
-        const recentlyGeneratedClear = this._lastGenerationTime && (clearCheckTime - this._lastGenerationTime) < 30000;
+        // CRITICAL FIX: Block clearing container if we have persistent selections but tags array is empty/mismatched
+        // This prevents the list from disappearing when checkbox selection triggers updateSelectedTags with empty tags
         const hasPersistentSelections = this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0;
         
-        if (recentlyGeneratedClear && hasPersistentSelections && (!tags || tags.length === 0)) {
-            verboseLog('🚫 BLOCKED: Prevented clearing selected tags container right after generation');
-            // Don't clear - restore with current selections instead
+        // Check if tags array doesn't match persistent selections (common when checkbox triggers update)
+        const tagsNames = tags.map(t => t['Product Name*']).filter(Boolean);
+        const persistentNames = [...this.state.persistentSelectedTags];
+        const tagsMatchPersistent = tagsNames.length === persistentNames.length && 
+                                    tagsNames.every(name => persistentNames.includes(name));
+        
+        // If we have persistent selections but tags array is empty or doesn't match, restore from persistent
+        if (hasPersistentSelections && (!tags || tags.length === 0 || !tagsMatchPersistent)) {
+            verboseLog('🚫 BLOCKED: Prevented clearing selected tags - restoring from persistent selections');
+            // Restore tags from persistent selections
             const restoreTags = this.state.persistentSelectedTags
                 .map(tagName => this._tagLookupMap?.get(tagName) ||
                                this.state.tags.find(t => t['Product Name*'] === tagName) ||
@@ -7114,18 +7120,34 @@ const TagManager = {
             if (restoreTags.length > 0) {
                 tags = restoreTags;
                 this._forceSelectedTagsUpdate = true;
-            } else {
-                // Can't proceed with empty tags after generation
-                verboseLog('⚠️ Cannot restore tags after generation - aborting update');
-                return;
+            } else if (hasPersistentSelections) {
+                // Even if we can't find tag objects, create placeholders to prevent list from disappearing
+                tags = this.state.persistentSelectedTags.map(name => ({
+                    'Product Name*': name,
+                    displayName: name,
+                    lineage: 'MIXED'
+                }));
+                this._forceSelectedTagsUpdate = true;
             }
         }
         
         // Store the select all containers before clearing
         const selectAllSelectedContainer = container.querySelector('.select-all-container');
         
-        // Clear existing content but preserve the select all container
-        container.innerHTML = '';
+        // CRITICAL FIX: Only clear container if we have valid tags to render
+        // If tags are still empty after restoration attempts, don't clear - preserve existing DOM
+        if (tags && tags.length > 0) {
+            // Clear existing content but preserve the select all container
+            container.innerHTML = '';
+        } else if (hasPersistentSelections) {
+            // Don't clear - we have persistent selections but couldn't find tag objects
+            // This prevents the list from disappearing during checkbox operations
+            verboseLog('🚫 BLOCKED: Skipping container clear - preserving existing tags to prevent disappearance');
+            return;
+        } else {
+            // No persistent selections and no tags - safe to clear
+            container.innerHTML = '';
+        }
         
         // Re-add the select all container if it existed
         if (selectAllSelectedContainer) {

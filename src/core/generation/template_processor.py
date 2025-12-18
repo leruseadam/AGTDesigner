@@ -1414,8 +1414,16 @@ class TemplateProcessor:
             # Chunk processed
             
             # FINAL MARKER CLEANUP: Remove any lingering *_START and *_END markers AFTER font sizing has been applied
-            # This cleanup should only remove markers that weren't processed by the font sizing system
-            marker_pattern = re.compile(r'\b\w+_(START|END)\b')
+            # CRITICAL FIX: Use more comprehensive patterns to catch all marker variations
+            marker_pattern = re.compile(r'\b[A-Z0-9_]+_(START|END)\b')
+            # Also match markers that might be concatenated: DESC_START, PRICE_START, etc.
+            specific_markers = [
+                'DESC_START', 'DESC_END', 'PRICE_START', 'PRICE_END',
+                'LINEAGE_START', 'LINEAGE_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
+                'WEIGHTUNITS_START', 'WEIGHTUNITS_END', 'RATIO_START', 'RATIO_END',
+                'THC_CBD_START', 'THC_CBD_END', 'PRODUCTNAME_START', 'PRODUCTNAME_END',
+                'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END', 'JOINT_RATIO_START', 'JOINT_RATIO_END'
+            ]
             prefix_pattern = re.compile(r'^(?:[A-Z0-9_]+_)+')
             
             # Clean in tables
@@ -1450,10 +1458,46 @@ class TemplateProcessor:
                                             # CRITICAL FIX: Always clean markers regardless of font sizing processing
                                             # This ensures DESC_START, DESC_END, PRICE_START, PRICE_END are always removed
                                             for run in para.runs:
-                                                if marker_pattern.search(run.text):
-                                                    run.text = marker_pattern.sub('', run.text)
-                                                if prefix_pattern.search(run.text):
-                                                    run.text = prefix_pattern.sub('', run.text)
+                                                original_text = run.text
+                                                if not original_text:
+                                                    continue
+                                                
+                                                # First, extract content from wrapped markers
+                                                cleaned = original_text
+                                                
+                                                # Extract DESC_START...DESC_END content
+                                                desc_match = re.search(r'DESC_START(.+?)DESC_END', cleaned, re.IGNORECASE | re.DOTALL)
+                                                if desc_match:
+                                                    cleaned = re.sub(r'DESC_START.*?DESC_END', desc_match.group(1), cleaned, flags=re.IGNORECASE | re.DOTALL)
+                                                
+                                                # Extract PRICE_START...PRICE_END content
+                                                price_match = re.search(r'PRICE_START(.+?)PRICE_END', cleaned, re.IGNORECASE | re.DOTALL)
+                                                if price_match:
+                                                    cleaned = re.sub(r'PRICE_START.*?PRICE_END', price_match.group(1), cleaned, flags=re.IGNORECASE | re.DOTALL)
+                                                
+                                                # Remove all specific markers (exact matches)
+                                                for marker in specific_markers:
+                                                    cleaned = cleaned.replace(marker, '')
+                                                    cleaned = re.sub(re.escape(marker), '', cleaned, flags=re.IGNORECASE)
+                                                
+                                                # Remove using regex patterns
+                                                if marker_pattern.search(cleaned):
+                                                    cleaned = marker_pattern.sub('', cleaned)
+                                                if prefix_pattern.search(cleaned):
+                                                    cleaned = prefix_pattern.sub('', cleaned)
+                                                
+                                                # Remove partial markers like RICE_END from PRICE_END
+                                                cleaned = re.sub(r'RICE_END', '', cleaned, flags=re.IGNORECASE)
+                                                cleaned = re.sub(r'P\s*RICE_END', '', cleaned, flags=re.IGNORECASE)
+                                                
+                                                # Clean whitespace
+                                                cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                                                
+                                                run.text = cleaned
+                                                
+                                                # Log if we removed markers
+                                                if original_text != cleaned and any(m in original_text for m in specific_markers):
+                                                    self.logger.debug(f"Removed markers from text: '{original_text[:50]}...' -> '{cleaned[:50]}...'")
                                     except Exception as cell_error:
                                         self.logger.warning(f"Skipping cell due to error during marker cleanup: {cell_error}")
                                         continue
@@ -1483,10 +1527,46 @@ class TemplateProcessor:
                 # (Removed was_processed check)
                 if True:
                     for run in para.runs:
-                        if marker_pattern.search(run.text):
-                            run.text = marker_pattern.sub('', run.text)
-                        if prefix_pattern.search(run.text):
-                            run.text = prefix_pattern.sub('', run.text)
+                        original_text = run.text
+                        if not original_text:
+                            continue
+                        
+                        # First, extract content from wrapped markers
+                        cleaned = original_text
+                        
+                        # Extract DESC_START...DESC_END content
+                        desc_match = re.search(r'DESC_START(.+?)DESC_END', cleaned, re.IGNORECASE | re.DOTALL)
+                        if desc_match:
+                            cleaned = re.sub(r'DESC_START.*?DESC_END', desc_match.group(1), cleaned, flags=re.IGNORECASE | re.DOTALL)
+                        
+                        # Extract PRICE_START...PRICE_END content
+                        price_match = re.search(r'PRICE_START(.+?)PRICE_END', cleaned, re.IGNORECASE | re.DOTALL)
+                        if price_match:
+                            cleaned = re.sub(r'PRICE_START.*?PRICE_END', price_match.group(1), cleaned, flags=re.IGNORECASE | re.DOTALL)
+                        
+                        # Remove all specific markers (exact matches)
+                        for marker in specific_markers:
+                            cleaned = cleaned.replace(marker, '')
+                            cleaned = re.sub(re.escape(marker), '', cleaned, flags=re.IGNORECASE)
+                        
+                        # Remove using regex patterns
+                        if marker_pattern.search(cleaned):
+                            cleaned = marker_pattern.sub('', cleaned)
+                        if prefix_pattern.search(cleaned):
+                            cleaned = prefix_pattern.sub('', cleaned)
+                        
+                        # Remove partial markers like RICE_END from PRICE_END
+                        cleaned = re.sub(r'RICE_END', '', cleaned, flags=re.IGNORECASE)
+                        cleaned = re.sub(r'P\s*RICE_END', '', cleaned, flags=re.IGNORECASE)
+                        
+                        # Clean whitespace
+                        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                        
+                        run.text = cleaned
+                        
+                        # Log if we removed markers
+                        if original_text != cleaned and any(m in original_text for m in specific_markers):
+                            self.logger.debug(f"Removed markers from paragraph text: '{original_text[:50]}...' -> '{cleaned[:50]}...'")
             
             # FINAL STEP: Clean up any remaining concatenated lineage+brand content for classic types
             try:
@@ -1505,6 +1585,14 @@ class TemplateProcessor:
                 self._ensure_lineage_centering_for_nonclassic_types(rendered_doc)
             except Exception as e:
                 self.logger.warning(f"Final lineage centering fix failed: {e}")
+            
+            # CRITICAL FIX: Final aggressive marker cleanup pass right before returning
+            # This ensures NO markers remain in the final output
+            try:
+                self._final_marker_cleanup(rendered_doc)
+                self.logger.info("✅ Final marker cleanup pass completed before returning document")
+            except Exception as final_cleanup_err:
+                self.logger.warning(f"Final marker cleanup failed: {final_cleanup_err}")
             
             return rendered_doc
             
@@ -3831,162 +3919,131 @@ class TemplateProcessor:
     def _final_marker_cleanup(self, doc):
         """
         Final marker cleanup to ensure ALL markers are stripped from the final output.
-        This method runs after all other processing to catch any remaining markers.
+        CRITICAL FIX: Use exact string matching first, then regex patterns for comprehensive removal.
         """
         try:
-            # Enhanced patterns to catch all marker variations
+            # CRITICAL FIX: List of ALL possible markers to remove (exact matches first for reliability)
+            exact_markers = [
+                'DESC_START', 'DESC_END', 'PRICE_START', 'PRICE_END',
+                'LINEAGE_START', 'LINEAGE_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
+                'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
+                'WEIGHTUNITS_START', 'WEIGHTUNITS_END', 'RATIO_START', 'RATIO_END',
+                'THC_CBD_START', 'THC_CBD_END', 'PRODUCTNAME_START', 'PRODUCTNAME_END',
+                'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END', 'JOINT_RATIO_START', 'JOINT_RATIO_END',
+                'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END', 'PRODUCTTYPE_START', 'PRODUCTTYPE_END',
+                'THC_START', 'THC_END', 'CBD_START', 'CBD_END',
+                # Handle partial markers that might appear
+                'RICE_END',  # Partial PRICE_END
+                'P RICE_END',  # Split PRICE_END
+                'PRICE_EN',  # Truncated PRICE_END
+                'PRICE_',  # Partial PRICE_START/END
+            ]
+            
+            # Enhanced regex patterns to catch all marker variations
             marker_patterns = [
-                r'\b\w+_(START|END)\b',           # Standard markers like PRODUCTBRAND_START
-                r'\b\w+_START\b',                 # START markers specifically
-                r'\b\w+_END\b',                   # END markers specifically
-                r'PRODUCTBRAND_START\s*',         # PRODUCTBRAND_START with optional spaces
-                r'\s*PRODUCTBRAND_END\b',         # PRODUCTBRAND_END with optional spaces
-                r'PRODUCTBRAND_CENTER_START\s*',  # PRODUCTBRAND_CENTER_START with optional spaces
-                r'\s*PRODUCTBRAND_CENTER_END\b',  # PRODUCTBRAND_CENTER_END with optional spaces
-                r'PRODUCTSTRAIN_START\s*',        # PRODUCTSTRAIN_START with optional spaces
-                r'\s*PRODUCTSTRAIN_END\b',        # PRODUCTSTRAIN_END with optional spaces
-                r'LINEAGE_START\s*',              # LINEAGE_START with optional spaces
-                r'\s*LINEAGE_END\b',              # LINEAGE_END with optional spaces
-                r'PRODUCTVENDOR_START\s*',        # PRODUCTVENDOR_START with optional spaces
-                r'\s*PRODUCTVENDOR_END\b',        # PRODUCTVENDOR_END with optional spaces
-                r'THC_CBD_START\s*',              # THC_CBD_START with optional spaces
-                r'\s*THC_CBD_END\b',              # THC_CBD_END with optional spaces
-                r'RATIO_START\s*',                # RATIO_START with optional spaces
-                r'\s*RATIO_END\b',                # RATIO_END with optional spaces
-                r'WEIGHTUNITS_START\s*',          # WEIGHTUNITS_START with optional spaces
-                r'\s*WEIGHTUNITS_END\b',          # WEIGHTUNITS_END with optional spaces
-                r'PRICE_START\s*',                # PRICE_START with optional spaces
-                r'\s*PRICE_END\b',                # PRICE_END with optional spaces
-                r'DESC_START\s*',                 # DESC_START with optional spaces
-                r'\s*DESC_END\b',                 # DESC_END with optional spaces
-                r'\bPRODUCTBRAND\b',              # Standalone PRODUCTBRAND
-                r'\bPRODUCTSTRAIN\b',             # Standalone PRODUCTSTRAIN
-                r'\bLINEAGE\b',                   # Standalone LINEAGE
-                r'\bPRODUCTVENDOR\b',             # Standalone PRODUCTVENDOR
-                r'\bTHC_CBD\b',                   # Standalone THC_CBD
-                # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
-                r'\bWEIGHTUNITS\b',               # Standalone WEIGHTUNITS
-                r'\bPRICE\b',                     # Standalone PRICE
-                r'\bDESC\b',                      # Standalone DESC
+                r'\b[A-Z0-9_]+_(START|END)\b',   # Any marker pattern
+                r'\b[A-Z0-9_]+_START\b',          # START markers
+                r'\b[A-Z0-9_]+_END\b',            # END markers
+                r'[A-Z0-9_]+_START',              # START without word boundary
+                r'[A-Z0-9_]+_END',                # END without word boundary
+                r'_START',                        # Just _START
+                r'_END',                          # Just _END
             ]
             
             def clean_text(text):
-                """Clean text by removing all marker patterns while preserving lineage content."""
+                """Clean text by removing all marker patterns while preserving content."""
+                if not text:
+                    return text
+                    
                 original_text = text
                 cleaned = text
                 
-                # CRITICAL FIX: Handle lineage markers specially to preserve content
-                # Extract lineage content before removing markers
-                lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE)
+                # CRITICAL FIX: First, extract content from wrapped markers before removing markers
+                # Handle DESC_START...DESC_END
+                desc_match = re.search(r'DESC_START(.+?)DESC_END', cleaned, re.IGNORECASE | re.DOTALL)
+                if desc_match:
+                    desc_content = desc_match.group(1)
+                    cleaned = re.sub(r'DESC_START.*?DESC_END', desc_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+                
+                # Handle PRICE_START...PRICE_END
+                price_match = re.search(r'PRICE_START(.+?)PRICE_END', cleaned, re.IGNORECASE | re.DOTALL)
+                if price_match:
+                    price_content = price_match.group(1)
+                    cleaned = re.sub(r'PRICE_START.*?PRICE_END', price_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+                
+                # Handle LINEAGE_START...LINEAGE_END
+                lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE | re.DOTALL)
                 if lineage_match:
                     lineage_content = lineage_match.group(1)
-                    # Replace the full lineage marker pattern with just the content
-                    cleaned = re.sub(r'LINEAGE_START(.+?)LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE)
+                    cleaned = re.sub(r'LINEAGE_START.*?LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
                 
-                # CRITICAL FIX: Handle product brand markers specially to preserve content
-                # Extract product brand content before removing markers (handle both PRODUCTBRAND and PRODUCTBRAND_CENTER)
-                brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE)
+                # Handle PRODUCTBRAND_START...PRODUCTBRAND_END
+                brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE | re.DOTALL)
                 if brand_match:
                     brand_content = brand_match.group(1)
-                    # Now that Product Strain is separate, brand content is just the brand name
-                    # No need to extract brand name from combined content
-                    
-                    # Replace the full product brand marker pattern with just the brand content
-                    cleaned = re.sub(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_content, cleaned, flags=re.IGNORECASE)
+                    cleaned = re.sub(r'PRODUCTBRAND(?:_CENTER)?_START.*?PRODUCTBRAND(?:_CENTER)?_END', brand_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
                 
-                # CRITICAL FIX: Handle product strain markers specially to preserve content
-                # Extract product strain content before removing markers
-                strain_match = re.search(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', cleaned, re.IGNORECASE)
+                # Handle PRODUCTSTRAIN_START...PRODUCTSTRAIN_END
+                strain_match = re.search(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', cleaned, re.IGNORECASE | re.DOTALL)
                 if strain_match:
                     strain_content = strain_match.group(1)
-                    # Replace the full product strain marker pattern with just the content
-                    cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
+                    cleaned = re.sub(r'PRODUCTSTRAIN_START.*?PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
                 
-                # Remove other marker patterns
+                # CRITICAL FIX: Remove exact markers first (most reliable)
+                for marker in exact_markers:
+                    cleaned = cleaned.replace(marker, '')
+                    # Also try case-insensitive
+                    cleaned = re.sub(re.escape(marker), '', cleaned, flags=re.IGNORECASE)
+                
+                # Then remove using regex patterns
                 for pattern in marker_patterns:
                     cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
                 
-                # CRITICAL FIX: Remove partial marker remnants like "bis" from "PRODUCTBRAND_END"
+                # CRITICAL FIX: Remove partial marker remnants
                 partial_remnants = [
-                    r'\bbis\b',                    # "bis" from PRODUCTBRAND_END
-                    r'PRODUCTBRAND_END',           # PRODUCTBRAND_END remnants (specific first)
-                    r'PRODUCTBRAND_',              # PRODUCTBRAND_ remnants (specific first)
-                    r'BRAND_',                     # BRAND_ remnants without word boundaries
-                    r'\bBRAND_\b',                 # BRAND_ remnants (but not standalone BRAND)
-                    r'\bSTART\b',                  # Any remaining START
-                    r'\bEND\b',                    # Any remaining END
-                    r'\bPRODUCT\b',                # Any remaining PRODUCT
-                    # REMOVED: r'\bBRAND\b' - Don't remove BRAND as it's part of brand names
-                    r'\bSTRAIN\b',                 # Any remaining STRAIN
-                    r'\bVENDOR\b',                 # Any remaining VENDOR
-                    # REMOVED: r'\bLINEAGE\b' - Don't remove LINEAGE as it might be part of content
-                    # REMOVED: r'\bCBD\b' - Don't remove CBD as it's part of lineage content like "CBD Blend"
-                    
-                    # CRITICAL FIX: Handle corrupted marker text patterns
-                    r'PRODUCTSTRR_STARTCONSTELL',  # Corrupted PRODUCTBRAND_CENTER_START + CONSTELLATION
-                    r'PRODUCTSTRR_',               # Corrupted PRODUCTBRAND_ patterns
-                    r'STARTCONSTELL',              # Corrupted START + CONSTELLATION
-                    r'CONSTELLATION\$\s*',         # CONSTELLATION$ remnants
-                    r'\$.*',                       # Any $ symbol remnants (like VICE$Star)
-                    
-                    r'\bTHC\b',                    # Any remaining THC
-                    # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
-                    r'\bWEIGHT\b',                 # Any remaining WEIGHT
-                    r'\bUNITS\b',                  # Any remaining UNITS
-                    r'\bPRICE\b',                  # Any remaining PRICE
-                    r'\bDESC\b',                   # Any remaining DESC
-                    r'\bTART\b',                   # "TART" from THC_CBD_START
-                    r'\bTADT\b',                   # "TADT" from THC_CBD_START
-                    r'\bTUC\b',                    # "TUC" from THC_CBD_START
-                    # CRITICAL FIX: Remove overly broad single character patterns that break words like "RAY'S"
-                    # r'\bS\b',                      # REMOVED: This was removing 'S' from "RAY'S"
-                    # r'\bC\b',                      # REMOVED: This could break legitimate words
-                    # r'\bD\b',                      # REMOVED: This could break legitimate words
+                    r'RICE_END',                   # Partial PRICE_END
+                    r'P\s*RICE_END',              # Split PRICE_END
+                    r'PRICE_EN\b',                # Truncated PRICE_END
+                    r'\bSTART\b',                 # Any remaining START
+                    r'\bEND\b',                   # Any remaining END
                 ]
                 
                 for remnant in partial_remnants:
                     cleaned = re.sub(remnant, '', cleaned, flags=re.IGNORECASE)
-
-                # Remove stray CENTER tokens left behind by split PRODUCTBRAND_CENTER markers.
-                # This specifically catches runs that only contain the marker fragment.
-                if cleaned.strip().upper() == 'CENTER':
-                    original_upper = original_text.upper()
-                    if ('PRODUCTBRAND' in original_upper) or (original_text.strip().upper() in {'CENTER', 'CENTER_', '_CENTER'}):
-                        cleaned = ''
                 
-                # Clean up any double spaces, leading/trailing spaces
-                # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning whitespace
-                # First, temporarily replace non-breaking hyphens with a placeholder
-                cleaned = cleaned.replace('\u2011', '___NONBREAKING_HYPHEN___')
-                # Then clean up whitespace
+                # Clean up whitespace
                 cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-                # Finally, restore non-breaking hyphens
-                cleaned = cleaned.replace('___NONBREAKING_HYPHEN___', '\u2011')
+                
                 return cleaned
             
-            # Clean markers in all tables
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                original_text = run.text
-                                cleaned_text = clean_text(original_text)
-                                if cleaned_text != original_text:
-                                    run.text = cleaned_text
+            # Clean markers in all tables (multiple passes to catch all cases)
+            for _ in range(3):  # Run 3 times to catch nested/split markers
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    original_text = run.text
+                                    cleaned_text = clean_text(original_text)
+                                    if cleaned_text != original_text:
+                                        run.text = cleaned_text
+                                        self.logger.debug(f"Removed markers: '{original_text[:50]}...' -> '{cleaned_text[:50]}...'")
             
-            # Clean markers in paragraphs outside tables
-            for paragraph in doc.paragraphs:
-                for run in paragraph.runs:
-                    original_text = run.text
-                    cleaned_text = clean_text(original_text)
-                    if cleaned_text != original_text:
-                        run.text = cleaned_text
+            # Clean markers in paragraphs outside tables (multiple passes)
+            for _ in range(3):
+                for paragraph in doc.paragraphs:
+                    for run in paragraph.runs:
+                        original_text = run.text
+                        cleaned_text = clean_text(original_text)
+                        if cleaned_text != original_text:
+                            run.text = cleaned_text
+                            self.logger.debug(f"Removed markers from paragraph: '{original_text[:50]}...' -> '{cleaned_text[:50]}...'")
             
             # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content
             self._final_lineage_cleanup(doc)
             
             # Enhanced final marker cleanup completed
+            self.logger.info("✅ Final marker cleanup completed - all markers should be removed")
             
         except Exception as e:
             self.logger.warning(f"Error in enhanced final marker cleanup: {e}")
