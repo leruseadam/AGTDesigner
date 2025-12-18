@@ -141,8 +141,6 @@ class TemplateProcessor:
         self.logger = logging.getLogger(__name__)  # Initialize logger first
         # Persist store name so lineage/db lookups use the correct database
         self.store_name = store_name
-        # Cache database metadata to avoid repeated stat calls
-        self._db_info_cache = None
 
     def _get_store_name(self):
         """Return the store name for DB lookups, falling back to current session store."""
@@ -153,43 +151,6 @@ class TemplateProcessor:
             return get_current_store_name()
         except Exception:
             return None
-
-    def _get_database_info(self):
-        """Return database metadata (store, filename, path, modified) for template stamping."""
-        if self._db_info_cache is not None:
-            return self._db_info_cache
-        store_name = self._get_store_name()
-        info = {
-            'DatabaseStore': store_name or '',
-            'DatabaseFile': '',
-            'DatabasePath': '',
-            'DatabaseModified': '',
-            'DatabaseInfo': ''
-        }
-        try:
-            from app import get_product_database
-            product_db = get_product_database(store_name)
-            db_path = getattr(product_db, 'db_path', None)
-            if db_path and os.path.exists(db_path):
-                info['DatabasePath'] = db_path
-                info['DatabaseFile'] = os.path.basename(db_path)
-                try:
-                    from datetime import datetime
-                    mtime = os.path.getmtime(db_path)
-                    info['DatabaseModified'] = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
-                except Exception:
-                    info['DatabaseModified'] = ''
-                store_display = store_name or getattr(product_db, '_store_name', '') or ''
-                info_parts = [
-                    f"Store: {store_display}" if store_display else None,
-                    f"DB: {info['DatabaseFile']}" if info['DatabaseFile'] else None,
-                    f"Updated: {info['DatabaseModified']}" if info['DatabaseModified'] else None,
-                ]
-                info['DatabaseInfo'] = " | ".join([p for p in info_parts if p])
-        except Exception as e:
-            self.logger.debug(f"Database info unavailable: {e}")
-        self._db_info_cache = info
-        return info
         
         # CRITICAL FIX: Adjust scale factor for double template 12-label expansion
         # When the double template expands to 12 labels, cells become smaller, so we need to adjust the scale factor
@@ -1599,12 +1560,6 @@ class TemplateProcessor:
             'DescAndWeight': '',
             'JointRatio': '',
             'ProductType': '',
-            # Database metadata for template stamping
-            'DatabaseStore': '',
-            'DatabaseFile': '',
-            'DatabasePath': '',
-            'DatabaseModified': '',
-            'DatabaseInfo': '',
             # Marker fields for template processing
             'ProductStrain_START': 'PRODUCTSTRAIN_START',
             'ProductStrain_END': 'PRODUCTSTRAIN_END',
@@ -1646,10 +1601,6 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
-        # Stamp database metadata so DOCX output shows the source database
-        db_info = self._get_database_info()
-        if db_info:
-            label_context.update(db_info)
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
