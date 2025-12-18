@@ -4892,6 +4892,8 @@ const TagManager = {
                     } else {
                         this.state._selectedTagsSet.add(displayName);
                     }
+                    // CRITICAL FIX: Mark selection time to prevent fetchAndUpdateSelectedTags from clearing selections
+                    this._lastTagSelectionTime = Date.now();
                 }
             } else {
                 const index = this.state.persistentSelectedTags.indexOf(displayName);
@@ -4932,57 +4934,55 @@ const TagManager = {
                 // CRITICAL: Do NOT trigger any filter updates or available tags re-render
                 return; // Exit immediately to prevent any further processing
             } else {
-                // For selection, defer full rebuild
-                setTimeout(() => {
-                    // CRITICAL FIX: Use fallback lookup if tag not in _tagLookupMap
-                    // This prevents tags from disappearing on first selection
-                    const selectedTagObjects = this.state.persistentSelectedTags
-                        .map(name => {
-                            // Try lookup map first
-                            let tag = this._tagLookupMap?.get(name);
-                            if (tag) return tag;
-                            
-                            // Fallback to state.tags
-                            tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
-                            if (tag) return tag;
-                            
-                            // Fallback to originalTags
-                            tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
-                            if (tag) return tag;
-                            
-                            // If still not found, log warning but don't filter out - preserve selection
-                            console.warn(`Tag '${name}' not found in lookup maps, but preserving selection`);
-                            return null;
-                        })
-                        .filter(Boolean);
-                    
-                    // Only update if we have valid tag objects
-                    if (selectedTagObjects.length > 0) {
-                        this.updateSelectedTags(selectedTagObjects);
-                    } else {
-                        // If no valid objects but we have persistent selections, rebuild lookup map
-                        console.warn('No valid tag objects found, rebuilding lookup map');
-                        // Rebuild the lookup map
-                        this._tagLookupMap = new Map();
-                        this.state.tags.forEach(t => {
-                            if (t && t['Product Name*']) {
-                                this._tagLookupMap.set(t['Product Name*'], t);
-                            }
-                        });
-                        this.state.originalTags.forEach(t => {
-                            if (t && t['Product Name*'] && !this._tagLookupMap.has(t['Product Name*'])) {
-                                this._tagLookupMap.set(t['Product Name*'], t);
-                            }
-                        });
-                        // Retry with rebuilt map
-                        const retryTagObjects = this.state.persistentSelectedTags
-                            .map(name => this._tagLookupMap?.get(name))
-                            .filter(Boolean);
-                        if (retryTagObjects.length > 0) {
-                            this.updateSelectedTags(retryTagObjects);
+                // For selection, update immediately to prevent disappearing
+                // CRITICAL FIX: Use fallback lookup if tag not in _tagLookupMap
+                // This prevents tags from disappearing on first selection
+                const selectedTagObjects = this.state.persistentSelectedTags
+                    .map(name => {
+                        // Try lookup map first
+                        let tag = this._tagLookupMap?.get(name);
+                        if (tag) return tag;
+                        
+                        // Fallback to state.tags
+                        tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                        if (tag) return tag;
+                        
+                        // Fallback to originalTags
+                        tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                        if (tag) return tag;
+                        
+                        // If still not found, create placeholder to prevent disappearing
+                        verboseLog(`Tag '${name}' not found in lookup maps, creating placeholder`);
+                        return { 'Product Name*': name, displayName: name, lineage: 'MIXED' };
+                    })
+                    .filter(Boolean);
+                
+                // CRITICAL FIX: Update immediately to prevent fetchAndUpdateSelectedTags from clearing
+                if (selectedTagObjects.length > 0) {
+                    this.updateSelectedTags(selectedTagObjects);
+                } else if (this.state.persistentSelectedTags.length > 0) {
+                    // If no valid objects but we have persistent selections, rebuild lookup map
+                    console.warn('No valid tag objects found, rebuilding lookup map');
+                    // Rebuild the lookup map
+                    this._tagLookupMap = new Map();
+                    this.state.tags.forEach(t => {
+                        if (t && t['Product Name*']) {
+                            this._tagLookupMap.set(t['Product Name*'], t);
                         }
+                    });
+                    this.state.originalTags.forEach(t => {
+                        if (t && t['Product Name*'] && !this._tagLookupMap.has(t['Product Name*'])) {
+                            this._tagLookupMap.set(t['Product Name*'], t);
+                        }
+                    });
+                    // Retry with rebuilt map
+                    const retryTagObjects = this.state.persistentSelectedTags
+                        .map(name => this._tagLookupMap?.get(name) || { 'Product Name*': name, displayName: name, lineage: 'MIXED' })
+                        .filter(Boolean);
+                    if (retryTagObjects.length > 0) {
+                        this.updateSelectedTags(retryTagObjects);
                     }
-                }, 0);
+                }
                 
                 // Defer state saving to avoid blocking UI
                 setTimeout(() => this.saveSelectionState('checkbox_selection'), 50);
@@ -9087,12 +9087,22 @@ const TagManager = {
         try {
             verboseLog('Fetching selected tags...');
             
-            // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 2 seconds)
+            // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 5 seconds)
             // This prevents tags from disappearing right after selection on initial load
             const now = Date.now();
-            if (this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000) {
-                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent tag selection detected (within 2s)');
+            if (this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 5000) {
+                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent tag selection detected (within 5s)');
                 return true; // Return success to avoid error handling
+            }
+            
+            // CRITICAL FIX: Track initial load time to prevent clearing selections made right after page load
+            if (!this._initialLoadTime) {
+                this._initialLoadTime = Date.now();
+            }
+            const isInitialLoadPeriod = (now - this._initialLoadTime) < 10000; // First 10 seconds after load
+            if (isInitialLoadPeriod && this.state.persistentSelectedTags.length > 0) {
+                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - initial load period with local selections');
+                return true; // Preserve selections during initial load period
             }
             
             // CRITICAL FIX: Prevent clearing tags right after generation (within last 30 seconds)
@@ -9139,21 +9149,26 @@ const TagManager = {
             verboseLog(`Fetched ${selectedTags.length} selected tags from backend:`, selectedTags.map(tag => tag['Product Name*']));
 
             // CRITICAL FIX: Trust backend as source of truth on page load
-            // Only merge if we have recent local changes (within last 2 seconds)
-            const hasRecentLocalChanges = this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000;
+            // Only merge if we have recent local changes (within last 5 seconds to catch selections right after load)
+            const hasRecentLocalChanges = this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 5000;
             const hasRecentGeneration = this._lastGenerationTime && (now - this._lastGenerationTime) < 10000;
+            // CRITICAL FIX: Track initial load time to prevent clearing selections made right after page load
+            if (!this._initialLoadTime) {
+                this._initialLoadTime = Date.now();
+            }
+            const isInitialLoadPeriod = (now - this._initialLoadTime) < 10000; // First 10 seconds after load
 
             let finalSelections;
             let finalTagObjects;
 
-            if ((hasRecentLocalChanges || hasRecentGeneration) && localSelections.length > 0) {
-                // Merge recent local changes/generation with backend to prevent losing selections
+            if ((hasRecentLocalChanges || hasRecentGeneration || (isInitialLoadPeriod && localSelections.length > 0)) && localSelections.length > 0) {
+                // Merge recent local changes/generation/initial-load selections with backend to prevent losing selections
                 const backendTagNames = selectedTags.map(tag => tag['Product Name*']);
                 finalSelections = [...new Set([...localSelections, ...backendTagNames])];
-                verboseLog('Merged selections (recent local/generation + backend):', finalSelections);
+                verboseLog('Merged selections (recent local/generation/initial-load + backend):', finalSelections);
             } else if (localSelections.length > 0 && selectedTags.length === 0) {
                 // CRITICAL FIX: If backend is empty but we have local selections, preserve local selections
-                // This prevents clearing tags after generation when backend hasn't saved them yet
+                // This prevents clearing tags after generation or right after initial load when backend hasn't saved them yet
                 finalSelections = localSelections;
                 verboseLog('Backend empty but local selections exist - preserving local selections:', finalSelections);
             } else {
