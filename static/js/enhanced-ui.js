@@ -1193,10 +1193,20 @@ document.addEventListener('DOMContentLoaded', function() {
     return Math.min(scale, Math.max(normalized, minScale));
   }
 
+  // CRITICAL FIX: Prevent rapid re-renders causing flashing
+  let isScaling = false;
+  let lastAppliedScale = null;
+  let scaleTimeout = null;
+
   function scaleAppToFit() {
+    // Prevent multiple simultaneous calls
+    if (isScaling) return;
+    
     const main = document.getElementById('mainContent');
     const page = document.body;
     if (!main || !page) return;
+
+    isScaling = true;
 
     // Temporarily reset transform to measure full, natural page size
     const prevTransformMain = main.style.transform;
@@ -1246,6 +1256,7 @@ document.addEventListener('DOMContentLoaded', function() {
       page.style.transform = prevTransformBody;
       page.style.width = prevWidthBody;
       page.style.height = prevHeightBody;
+      isScaling = false;
       return;
     }
 
@@ -1281,12 +1292,29 @@ document.addEventListener('DOMContentLoaded', function() {
       applyScaleToBody(appliedScale);
     }
 
+    // Only update if scale actually changed to prevent unnecessary re-renders
+    if (lastAppliedScale !== null && Math.abs(lastAppliedScale - appliedScale) < 0.001) {
+      main.style.transform = prevTransformMain;
+      page.style.transform = prevTransformBody;
+      page.style.width = prevWidthBody;
+      page.style.height = prevHeightBody;
+      isScaling = false;
+      return;
+    }
+
+    lastAppliedScale = appliedScale;
+
     // Hide scrollbars for a cleaner fit
     document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
 
     // Expose current scale for quick verification in DevTools
     document.documentElement.setAttribute('data-app-scale', String(appliedScale));
+    
+    // Reset flag after a short delay to allow rendering to complete
+    setTimeout(() => {
+      isScaling = false;
+    }, 50);
   }
 
   // Expose for other scripts
@@ -1297,10 +1325,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const main = document.getElementById('mainContent');
     if (!main) return;
 
+    let tryApplyAttempts = 0;
+    const maxAttempts = 10; // Prevent infinite loop
+    
     const tryApply = () => {
+      if (tryApplyAttempts >= maxAttempts) return; // Stop after max attempts
+      tryApplyAttempts++;
+      
       const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
       if (visible) {
-        requestAnimationFrame(scaleAppToFit);
+        // Use setTimeout with debounce instead of immediate requestAnimationFrame
+        if (scaleTimeout) clearTimeout(scaleTimeout);
+        scaleTimeout = setTimeout(() => {
+          scaleAppToFit();
+        }, 100);
       } else {
         setTimeout(tryApply, 200);
       }
@@ -1308,19 +1346,44 @@ document.addEventListener('DOMContentLoaded', function() {
     tryApply();
   });
 
-  // Ensure after full load (fonts/images) we re-calc
+  // Ensure after full load (fonts/images) we re-calc - CRITICAL FIX: Only call once
   window.addEventListener('load', () => {
-    requestAnimationFrame(scaleAppToFit);
-    setTimeout(scaleAppToFit, 0);
-    setTimeout(scaleAppToFit, 250);
+    if (scaleTimeout) clearTimeout(scaleTimeout);
+    scaleTimeout = setTimeout(() => {
+      scaleAppToFit();
+    }, 100);
   });
 
+  // CRITICAL FIX: Throttle resize events to prevent rapid flashing
   let resizeTimer;
+  let lastResizeTime = 0;
   window.addEventListener('resize', () => {
+    const now = Date.now();
+    // Throttle to max once per 150ms
+    if (now - lastResizeTime < 150) {
+      cancelAnimationFrame(resizeTimer);
+      resizeTimer = requestAnimationFrame(() => {
+        if (scaleTimeout) clearTimeout(scaleTimeout);
+        scaleTimeout = setTimeout(() => {
+          scaleAppToFit();
+        }, 150);
+      });
+      return;
+    }
+    lastResizeTime = now;
     cancelAnimationFrame(resizeTimer);
-    resizeTimer = requestAnimationFrame(scaleAppToFit);
+    if (scaleTimeout) clearTimeout(scaleTimeout);
+    scaleTimeout = setTimeout(() => {
+      scaleAppToFit();
+    }, 150);
   });
-  window.addEventListener('orientationchange', () => setTimeout(scaleAppToFit, 0));
+  
+  window.addEventListener('orientationchange', () => {
+    if (scaleTimeout) clearTimeout(scaleTimeout);
+    scaleTimeout = setTimeout(() => {
+      scaleAppToFit();
+    }, 300); // Longer delay for orientation change
+  });
 })();
 
 // Expose manual control in console

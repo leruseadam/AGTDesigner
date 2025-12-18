@@ -35,15 +35,18 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin-top: 0.5rem !important; /* Reduced to match spacing between control sections */
+  margin-top: 0.5rem !important; /* Match spacing between control sections */
   margin-bottom: 0.5rem !important;
-  padding-bottom: 0.5rem !important;
+  padding: 0.5rem 0 !important; /* Consistent padding */
+  display: flex !important;
   justify-content: center !important;
+  align-items: center !important;
+  width: 100% !important;
 }
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin-top: 0.5rem !important; /* Reduced to match spacing between control sections */
+    margin-top: 0.5rem !important;
     margin-bottom: 0.5rem !important;
   }
 }
@@ -890,22 +893,26 @@ body.modal-open #mainContent.store-selection-disabled,
   margin-bottom: 0 !important; /* Remove any extra margin */
 }
 
+/* Consolidated help button container styling */
 .help-button-container {
   position: relative !important;
   left: auto !important;
-  transform: none !important; /* Remove transform to match other buttons spacing */
+  transform: none !important;
   bottom: auto !important;
-  margin: 0.5rem 0.5rem 0.5rem 0.5rem !important; /* Reduced top/bottom margins to match section spacing */
+  margin: 0.5rem 0 !important; /* Consistent vertical margins */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 0.6rem 0.75rem !important;
+  padding: 0.5rem 0 !important; /* Consistent padding */
   z-index: 1 !important;
 }
 
 .help-button-container .big-glow-help-btn {
   margin: 0 !important; /* Remove margins - spacing handled by container */
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 :root {
     --primary-gradient: linear-gradient(135deg, #ff8fab 0%, #a084e8 100%);
@@ -2969,15 +2976,15 @@ body.modal-open #mainContent.store-selection-disabled,
   .help-button-container {
     position: relative !important;
     left: auto !important;
-    transform: none !important; /* Remove transform to match other buttons spacing */
+    transform: none !important;
     bottom: auto !important;
-    margin: 0.5rem 0.5rem 0.5rem 0.5rem !important; /* Reduced top/bottom margins to match section spacing */
+    margin: 0.5rem 0 !important; /* Consistent vertical margins */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
     z-index: 1 !important;
-    padding: 0.6rem 0.75rem !important;
+    padding: 0.5rem 0 !important; /* Consistent padding */
   }
   
   .help-button-container .big-glow-help-btn {
@@ -7882,14 +7889,14 @@ body.modal-open #mainContent.store-selection-disabled,
   .help-button-container {
     position: relative !important;
     left: auto !important;
-    transform: none !important; /* Remove transform to match other buttons spacing */
+    transform: none !important;
     bottom: auto !important;
-    margin: 0.5rem 0.5rem 0.5rem 0.5rem !important; /* Reduced top/bottom margins to match section spacing */
+    margin: 0.5rem 0 !important; /* Consistent vertical margins */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.6rem 0.75rem !important;
+    padding: 0.5rem 0 !important; /* Consistent padding */
     z-index: 1 !important;
   }
   
