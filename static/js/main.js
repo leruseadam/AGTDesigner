@@ -9236,7 +9236,13 @@ const TagManager = {
             }
 
             // Update persistentSelectedTags with final selections
-            this.state.persistentSelectedTags = finalSelections;
+            // CRITICAL: Never clear persistent selections if backend returns empty but we already have selections
+            if (finalSelections.length === 0 && this.state.persistentSelectedTags.length > 0) {
+                verboseLog('🚫 Backend selected tags empty; preserving existing persistent selections');
+                finalSelections = [...this.state.persistentSelectedTags];
+            } else {
+                this.state.persistentSelectedTags = finalSelections;
+            }
             // Save to localStorage for persistence
             this.saveSelectedTagsToStorage();
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
