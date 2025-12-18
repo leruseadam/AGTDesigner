@@ -8052,13 +8052,15 @@ def generate_labels():
         # Log the number of records passed to the template processor
         logging.info(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
 
-        # For horizontal/vertical/double templates, ensure all records are processed (no chunking)
+        # For horizontal/vertical/double templates, keep chunking modest to avoid huge single render
         if template_type in ['horizontal', 'vertical', 'double']:
+            # Use a reasonable upper bound to prevent multi-minute single-chunk renders on the server
+            safe_chunk = 120  # balances performance and memory; was unbounded before
             if hasattr(processor, 'CHUNK_SIZE_LIMIT'):
-                processor.CHUNK_SIZE_LIMIT = max(len(records), 1000)  # Remove chunking limit
+                processor.CHUNK_SIZE_LIMIT = safe_chunk
             if hasattr(processor, 'chunk_size'):
-                processor.chunk_size = max(len(records), 1000)
-            logging.info(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
+                processor.chunk_size = safe_chunk
+            logging.info(f"🔍 LABEL RENDER: Using chunk size {safe_chunk} for template '{template_type}' (was unbounded)")
 
         # Apply DOH session overrides just before generation to guarantee latest UI choice wins
         try:
