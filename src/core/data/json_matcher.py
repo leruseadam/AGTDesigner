@@ -4485,14 +4485,13 @@ class JSONMatcher:
             except Exception as e:
                 logging.warning(f"Error searching for similar product costs: {e}")
             
-            # Strategy 4: Default cost
-            cost = "$16.25"
-            logging.info(f"💵 Using default cost '{cost}' for '{product_name}'")
-            return cost
+            # Strategy 4: No default cost - return empty to indicate missing price
+            logging.info(f"💵 No price found for '{product_name}' - returning empty")
+            return ""
             
         except Exception as e:
             logging.warning(f"Error in intelligent cost matching: {e}")
-            return "$16.25"  # Safe fallback
+            return ""  # No fallback price - return empty to indicate missing price
     
     def _debug_price_sources(self, json_item, inferred_data, product_name):
         """Debug method to log all available price sources."""

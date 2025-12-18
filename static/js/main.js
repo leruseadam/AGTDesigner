@@ -3019,19 +3019,54 @@ const TagManager = {
         }
     },
 
+    // CRITICAL FIX: Ensure all checkboxes are enabled and clickable
+    _ensureCheckboxesEnabled() {
+        const allCheckboxes = document.querySelectorAll('.tag-checkbox');
+        allCheckboxes.forEach(checkbox => {
+            checkbox.style.pointerEvents = 'auto';
+            checkbox.removeAttribute('data-drag-disabled');
+            checkbox.removeAttribute('data-reordering');
+            // Ensure checkbox is not disabled
+            if (checkbox.disabled) {
+                checkbox.disabled = false;
+            }
+        });
+        verboseLog(`✅ Ensured ${allCheckboxes.length} checkboxes are enabled`);
+    },
+
     // CRITICAL FIX: Restore checkbox states after re-render to preserve selections made during initial load
     _restoreCheckboxStates() {
+        // CRITICAL FIX: Always ensure checkboxes are enabled before restoring states
+        this._ensureCheckboxesEnabled();
+        
         if (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0) {
             return;
         }
-        
+
         const availableTagsContainer = document.getElementById('availableTags');
         if (!availableTagsContainer) {
             return;
         }
         
+        // CRITICAL FIX: Ensure _selectedTagsSet is synced before restoring checkboxes
+        if (!this.state._selectedTagsSet) {
+            this.state._selectedTagsSet = new Set();
+        }
+        // Sync Set with persistentSelectedTags to ensure consistency
+        const currentSet = new Set(this.state.persistentSelectedTags);
+        const setNeedsUpdate = this.state.persistentSelectedTags.length !== this.state._selectedTagsSet.size ||
+                               !this.state.persistentSelectedTags.every(name => this.state._selectedTagsSet.has(name));
+        if (setNeedsUpdate) {
+            this.state._selectedTagsSet = currentSet;
+        }
+        
         // CRITICAL FIX: Use case-insensitive matching to handle any case differences
         const persistentSet = new Set(this.state.persistentSelectedTags.map(name => name.toLowerCase()));
+        
+        // CRITICAL FIX: Don't restore if we just generated (within last 5 seconds)
+        // This prevents clearing checkboxes immediately after generation
+        const now = Date.now();
+        const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 5000;
         
         // Restore checkbox states based on persistentSelectedTags
         const checkboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
@@ -3042,9 +3077,22 @@ const TagManager = {
             const tagName = checkbox.value;
             if (tagName) {
                 // CRITICAL FIX: Don't modify checkbox if it was recently checked by user
-                // This prevents race conditions on initial load
+                // This prevents race conditions on initial load and after generation
                 if (checkbox.hasAttribute('data-recently-checked')) {
                     return; // Skip this checkbox - user just checked it
+                }
+                
+                // CRITICAL FIX: After generation, only restore checked state, never uncheck
+                // This prevents the first checkbox from disappearing after generation
+                if (recentlyGenerated && checkbox.checked) {
+                    // If checkbox is already checked after generation, ensure it stays checked
+                    const isSelected = this.state.persistentSelectedTags.includes(tagName) || 
+                                      persistentSet.has(tagName.toLowerCase());
+                    if (isSelected && !checkbox.checked) {
+                        checkbox.checked = true;
+                        restoredCount++;
+                    }
+                    return; // Don't uncheck anything after generation
                 }
                 
                 // Check both exact match and case-insensitive match
@@ -4888,10 +4936,22 @@ const TagManager = {
         
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = (e) => {
-            // Prevent event handling during drag operations
-            if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
-                return;
+            // CRITICAL FIX: Always allow checkbox clicks - clear drag attributes if they exist
+            // This prevents checkboxes from being permanently disabled after drag operations
+            if (e.target.hasAttribute('data-reordering')) {
+                e.target.removeAttribute('data-reordering');
+                console.log('🔧 Cleared data-reordering attribute from checkbox:', displayName);
             }
+            if (e.target.hasAttribute('data-drag-disabled')) {
+                e.target.removeAttribute('data-drag-disabled');
+                e.target.style.pointerEvents = 'auto';
+                console.log('🔧 Cleared data-drag-disabled attribute from checkbox:', displayName);
+            }
+            
+            // CRITICAL FIX: Ensure checkbox is enabled even if drag state was set
+            e.target.style.pointerEvents = 'auto';
+            e.target.removeAttribute('data-reordering');
+            e.target.removeAttribute('data-drag-disabled');
             
             // Ensure the checkbox state is properly updated
             const isChecked = e.target.checked;
@@ -5012,10 +5072,26 @@ const TagManager = {
         // Bind change handler for both available and selected tags
         checkbox.addEventListener('change', handleCheckboxChange);
         
+        // CRITICAL FIX: Add click handler as fallback to ensure checkboxes always respond
+        // This prevents checkboxes from being unresponsive after drag operations or tag updates
+        checkbox.addEventListener('click', (e) => {
+            // Clear any drag attributes that might block the checkbox
+            if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
+                e.target.removeAttribute('data-reordering');
+                e.target.removeAttribute('data-drag-disabled');
+                e.target.style.pointerEvents = 'auto';
+                console.log('🔧 Click handler cleared drag attributes from checkbox:', displayName);
+            }
+            // Ensure checkbox is enabled
+            e.target.disabled = false;
+            e.target.style.pointerEvents = 'auto';
+        });
+        
         // Ensure the checkbox is not disabled by drag-and-drop manager
         checkbox.style.pointerEvents = 'auto';
         checkbox.removeAttribute('data-drag-disabled');
         checkbox.removeAttribute('data-reordering');
+        checkbox.disabled = false;
         
         // Store the checkbox state in a data attribute for debugging
         checkbox.setAttribute('data-tag-name', displayName);
@@ -8319,31 +8395,38 @@ const TagManager = {
     },
 
     async fetchAndUpdateAvailableTags() {
-        // CRITICAL FIX: Prevent multiple simultaneous calls to avoid restarts
-        // But allow clearSelected to force a refresh by waiting briefly
+        // CRITICAL FIX: Reset stuck flag if it's been set for too long
         if (this._fetchingAvailableTags) {
-            console.log('⏸️ Tag fetch already in progress, waiting for completion...');
-            // Wait up to 2 seconds for in-progress fetch to complete
-            let waitCount = 0;
-            while (this._fetchingAvailableTags && waitCount < 20) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                waitCount++;
-            }
-            // If still in progress after waiting, skip to prevent hang
-            if (this._fetchingAvailableTags) {
-                console.log('⏸️ Tag fetch still in progress after wait, skipping duplicate call');
-                // CRITICAL FIX: Force hide splash if we're stuck waiting
-                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                    console.log('⚡ Force hiding splash - tag fetch stuck');
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
+            const fetchStartTime = this._fetchingAvailableTagsStartTime || Date.now();
+            const stuckDuration = Date.now() - fetchStartTime;
+            if (stuckDuration > 30000) {
+                console.warn('⚠️ _fetchingAvailableTags stuck for 30+ seconds, resetting flag');
+                this._fetchingAvailableTags = false;
+            } else {
+                console.log('⏸️ Tag fetch already in progress, waiting for completion...');
+                // Wait up to 2 seconds for in-progress fetch to complete
+                let waitCount = 0;
+                while (this._fetchingAvailableTags && waitCount < 20) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    waitCount++;
                 }
-                return false;
+                // If still in progress after waiting, skip to prevent hang
+                if (this._fetchingAvailableTags) {
+                    console.log('⏸️ Tag fetch still in progress after wait, skipping duplicate call');
+                    // CRITICAL FIX: Force hide splash if we're stuck waiting
+                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                        console.log('⚡ Force hiding splash - tag fetch stuck');
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                    return false;
+                }
             }
         }
         
         // Set flag to prevent concurrent calls
         this._fetchingAvailableTags = true;
+        this._fetchingAvailableTagsStartTime = Date.now();
         // Track background-processing retries (reset on success)
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
@@ -9547,6 +9630,16 @@ const TagManager = {
                 this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
             }
             
+            // CRITICAL FIX: Still fetch fresh data in background to ensure tags are up-to-date
+            // This prevents stale cache from preventing tag loading
+            setTimeout(() => {
+                if (!this._checkingExistingData) {
+                    this.checkForExistingData().catch(err => {
+                        console.warn('Background refresh after cache load failed (non-critical):', err);
+                    });
+                }
+            }, 1000);
+            
             // Continue with rest of initialization (filters, etc.) but skip splash
             this._continueInitWithoutSplash();
             return;
@@ -9569,10 +9662,30 @@ const TagManager = {
         this.checkForExistingData().then(() => {
             this.state.initialized = true;
             this._initializing = false;
+            
+            // CRITICAL FIX: Verify tags actually loaded, retry if not
+            setTimeout(() => {
+                const hasTags = this.state.tags && this.state.tags.length > 0;
+                const hasRenderedTags = document.getElementById('availableTags')?.querySelectorAll('.tag-item').length > 0;
+                if (!hasTags && !hasRenderedTags) {
+                    console.warn('⚠️ Tags not loaded after checkForExistingData, attempting direct fetch...');
+                    this.fetchAndUpdateAvailableTags().catch(e => {
+                        console.error('Direct fetch after checkForExistingData failed:', e);
+                    });
+                }
+            }, 2000);
         }).catch(err => {
             console.error('Error during initialization:', err);
-            this.state.initialized = true;
-            this._initializing = false;
+            // CRITICAL FIX: Still try to fetch tags even if checkForExistingData fails
+            console.log('🔄 Initialization failed, attempting direct tag fetch as fallback...');
+            this.fetchAndUpdateAvailableTags().then(() => {
+                this.state.initialized = true;
+                this._initializing = false;
+            }).catch(fetchErr => {
+                console.error('Fallback fetch also failed:', fetchErr);
+                this.state.initialized = true;
+                this._initializing = false;
+            });
         });
         
         // GUARANTEED FIX: Restore filters from localStorage on page load
@@ -9929,29 +10042,62 @@ const TagManager = {
             return;
         }
         
-        // CRITICAL FIX: Prevent multiple simultaneous calls that could freeze the browser
+        // CRITICAL FIX: Reset stuck flag after 30 seconds to prevent permanent blocking
         if (this._checkingExistingData) {
-            console.warn('⚠️ checkForExistingData already in progress, skipping to prevent browser freeze...');
-            return;
+            const checkStartTime = this._checkingExistingDataStartTime || Date.now();
+            const stuckDuration = Date.now() - checkStartTime;
+            if (stuckDuration > 30000) {
+                console.warn('⚠️ checkForExistingData stuck for 30+ seconds, resetting flag');
+                this._checkingExistingData = false;
+            } else {
+                console.warn('⚠️ checkForExistingData already in progress, skipping to prevent browser freeze...');
+                return;
+            }
         }
         
-        // CRITICAL FIX: Prevent infinite retry loops - if we've exceeded max attempts, stop
-        const ABSOLUTE_MAX_ATTEMPTS = 5;
+        // CRITICAL FIX: Reset attempt counter on page refresh to allow fresh retries
+        // Only enforce max attempts within the same session, not across page refreshes
+        const pageLoadTime = performance.timing?.navigationStart || Date.now();
+        const timeSincePageLoad = Date.now() - pageLoadTime;
+        if (timeSincePageLoad < 5000) {
+            // Fresh page load - reset attempt counter
+            this.state.initialDataAttempts = 0;
+        }
+        
+        const ABSOLUTE_MAX_ATTEMPTS = 10; // Increased from 5 to allow more retries
         if ((this.state.initialDataAttempts || 0) >= ABSOLUTE_MAX_ATTEMPTS) {
-            console.error(`❌ STOPPING checkForExistingData - max attempts (${ABSOLUTE_MAX_ATTEMPTS}) exceeded to prevent browser freeze`);
-            this._checkingExistingData = false;
-            return;
+            console.error(`❌ STOPPING checkForExistingData - max attempts (${ABSOLUTE_MAX_ATTEMPTS}) exceeded`);
+            // CRITICAL FIX: Still try direct fetch as last resort instead of giving up completely
+            console.log('🔄 Last resort: Attempting direct tag fetch...');
+            try {
+                await this.fetchAndUpdateAvailableTags();
+                this._checkingExistingData = false;
+                return;
+            } catch (err) {
+                console.error('Last resort fetch failed:', err);
+                this._checkingExistingData = false;
+                return;
+            }
         }
         
-        // CRITICAL FIX: If we already have tags from cache, skip this to prevent clearing them
-        // BUT: Allow reload if explicitly triggered by upload (check timestamp)
+        // CRITICAL FIX: Always try to fetch fresh data, even if cache exists
+        // Cache is just for instant display, but we should still refresh in background
         const recentUpload = this._lastUploadTime && (Date.now() - this._lastUploadTime) < 5000;
-        if (!recentUpload && this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0) {
-            verboseLog('✅ Tags already loaded from cache, skipping checkForExistingData to prevent clearing');
+        const hasCachedTags = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
+        
+        // If we have cached tags but no recent upload, still fetch fresh data in background
+        // but don't clear existing tags
+        if (!recentUpload && hasCachedTags) {
+            verboseLog('✅ Tags loaded from cache, fetching fresh data in background...');
+            // Still fetch fresh data but don't block UI
+            this.fetchAndUpdateAvailableTags().catch(err => {
+                console.warn('Background refresh failed (non-critical):', err);
+            });
             return;
         }
         
         this._checkingExistingData = true;
+        this._checkingExistingDataStartTime = Date.now();
 
         verboseLog('=== CHECK FOR EXISTING DATA FUNCTION CALLED ===');
         verboseLog('Checking for existing data...');
@@ -10400,6 +10546,22 @@ const TagManager = {
                 AppLoadingSplash.updateProgress(100, 'Ready to upload files');
             }
             
+            // CRITICAL FIX: Try fallback fetch before giving up completely
+            console.log('🔄 Error occurred, attempting fallback tag fetch...');
+            let fallbackSucceeded = false;
+            try {
+                const fallbackResult = await this.fetchAndUpdateAvailableTags();
+                if (fallbackResult) {
+                    console.log('✅ Fallback fetch succeeded');
+                    fallbackSucceeded = true;
+                    this._checkingExistingData = false;
+                    clearTimeout(splashSafetyTimeout);
+                    return;
+                }
+            } catch (fallbackError) {
+                console.error('Fallback fetch also failed:', fallbackError);
+            }
+            
             // Complete splash loading on error
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
@@ -10410,28 +10572,43 @@ const TagManager = {
                 this.hideActionSplash();
             }
             
-            // Show upload prompt in Current Inventory on error/timeout
-            const availableTagsContainer = document.getElementById('availableTags');
-            if (availableTagsContainer) {
-                availableTagsContainer.innerHTML = `
-                    <div class="text-center py-5">
-                        <div class="upload-prompt">
-                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                            <h5 class="text-muted">No product data loaded</h5>
-                            <p class="text-muted">Upload an Excel file to get started</p>
-                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                <i class="fas fa-upload me-2"></i>Upload Excel File
-                            </button>
+            // Show upload prompt in Current Inventory on error/timeout (only if fallback failed)
+            if (!fallbackSucceeded) {
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                    availableTagsContainer.innerHTML = `
+                        <div class="text-center py-5">
+                            <div class="upload-prompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No product data loaded</h5>
+                                <p class="text-muted">Upload an Excel file to get started</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-upload me-2"></i>Upload Excel File
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                `;
+                    `;
+                }
+                
+                // FIXED: Initialize empty state instead of loading test data
+                this.initializeEmptyState();
             }
             
-            // FIXED: Initialize empty state instead of loading test data
-            this.initializeEmptyState();
             this._checkingExistingData = false;
             this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
             return;
+        } finally {
+            // CRITICAL FIX: Always reset checking flag in finally block to prevent stuck state
+            // This ensures the flag is reset even if an unexpected error occurs
+            setTimeout(() => {
+                if (this._checkingExistingData) {
+                    const checkDuration = Date.now() - (this._checkingExistingDataStartTime || Date.now());
+                    if (checkDuration > 60000) {
+                        console.warn('⚠️ checkForExistingData took longer than 60 seconds, forcing reset');
+                        this._checkingExistingData = false;
+                    }
+                }
+            }, 100);
         }
     },
 
@@ -10661,6 +10838,16 @@ const TagManager = {
             this._lastGenerationTime = Date.now();
             verboseLog('✅ Generation complete - preserving selected tags');
             
+            // CRITICAL FIX: Sync _selectedTagsSet with persistentSelectedTags before any updates
+            // This ensures checkbox states are properly maintained after generation
+            if (!this.state._selectedTagsSet) {
+                this.state._selectedTagsSet = new Set();
+            }
+            this.state._selectedTagsSet.clear();
+            this.state.persistentSelectedTags.forEach(name => {
+                this.state._selectedTagsSet.add(name);
+            });
+            
             // CRITICAL FIX: Explicitly refresh selected tags display to ensure they remain visible
             // This prevents any race conditions where other code might clear them
             if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
@@ -10669,6 +10856,15 @@ const TagManager = {
                     // Use setTimeout to ensure this happens after any other pending updates
                     setTimeout(() => {
                         this.updateSelectedTags(selectedTagObjects);
+                        // CRITICAL FIX: Ensure all checkboxes are enabled after generation
+                        this._ensureCheckboxesEnabled();
+                        // CRITICAL FIX: Restore checkbox states after updating selected tags
+                        // This ensures available tag checkboxes match persistentSelectedTags
+                        setTimeout(() => {
+                            this._restoreCheckboxStates();
+                            // Double-check that checkboxes are still enabled after restore
+                            this._ensureCheckboxesEnabled();
+                        }, 50);
                         verboseLog('✅ Refreshed selected tags display after generation');
                     }, 100);
                 }
@@ -14447,9 +14643,97 @@ document.addEventListener('DOMContentLoaded', function() {
     // Show splash screen immediately (but don't load tags yet - wait for store selection)
     AppLoadingSplash.show();
     AppLoadingSplash.updateProgress(10, 'Initializing application...');
-    
+
     // DO NOT call TagManager.init() here - it will be called after store selection
     // in templates/index.html via checkStoreRequired() callback
+    
+    // CRITICAL FIX: Add safeguard to ensure tags always load after page refresh
+    // Check after 5 seconds if tags are loaded, and retry if not
+    setTimeout(() => {
+        if (window.TagManager && window.TagManager.state) {
+            const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
+            const isInitialized = window.TagManager.state.initialized;
+            const isChecking = window.TagManager._checkingExistingData;
+            
+            if (!hasTags && isInitialized && !isChecking) {
+                console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds, attempting retry...');
+                // Reset flags to allow retry
+                window.TagManager._checkingExistingData = false;
+                window.TagManager.state.initialDataAttempts = 0;
+                // Try to load tags
+                if (typeof window.TagManager.checkForExistingData === 'function') {
+                    window.TagManager.checkForExistingData().catch(err => {
+                        console.error('Safeguard retry failed:', err);
+                        // Last resort: try direct fetch
+                        if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+                            window.TagManager.fetchAndUpdateAvailableTags().catch(e => {
+                                console.error('Safeguard direct fetch also failed:', e);
+                            });
+                        }
+                    });
+                }
+            }
+        }
+    }, 5000);
+    
+    // Additional safeguard after 10 seconds
+    setTimeout(() => {
+        if (window.TagManager && window.TagManager.state) {
+            const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
+            const availableContainer = document.getElementById('availableTags');
+            const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
+            
+            if (!hasTags && !hasRenderedTags) {
+                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds - forcing direct fetch');
+                // Force reset all flags
+                window.TagManager._checkingExistingData = false;
+                window.TagManager._fetchingAvailableTags = false;
+                window.TagManager.state.initialDataAttempts = 0;
+                // Force direct fetch
+                if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+                    window.TagManager.fetchAndUpdateAvailableTags().catch(e => {
+                        console.error('Critical safeguard fetch failed:', e);
+                    });
+                }
+            }
+        }
+    }, 10000);
+    
+    // CRITICAL FIX: Reset stuck flags when page becomes visible (user switches tabs)
+    // This prevents flags from being stuck if user switches tabs during loading
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && window.TagManager) {
+            // Check if flags are stuck
+            const checkingStuck = window.TagManager._checkingExistingData;
+            const checkingStartTime = window.TagManager._checkingExistingDataStartTime || Date.now();
+            const checkingDuration = Date.now() - checkingStartTime;
+            
+            const fetchingStuck = window.TagManager._fetchingAvailableTags;
+            const fetchingStartTime = window.TagManager._fetchingAvailableTagsStartTime || Date.now();
+            const fetchingDuration = Date.now() - fetchingStartTime;
+            
+            if (checkingStuck && checkingDuration > 30000) {
+                console.warn('⚠️ Resetting stuck _checkingExistingData flag on visibility change');
+                window.TagManager._checkingExistingData = false;
+            }
+            
+            if (fetchingStuck && fetchingDuration > 30000) {
+                console.warn('⚠️ Resetting stuck _fetchingAvailableTags flag on visibility change');
+                window.TagManager._fetchingAvailableTags = false;
+            }
+            
+            // If tags aren't loaded and flags are reset, try loading again
+            const hasTags = window.TagManager.state?.tags && window.TagManager.state.tags.length > 0;
+            if (!hasTags && !checkingStuck && !fetchingStuck) {
+                console.log('🔄 Page visible and no tags loaded, attempting to load tags...');
+                if (typeof window.TagManager.checkForExistingData === 'function') {
+                    window.TagManager.checkForExistingData().catch(e => {
+                        console.error('Visibility change retry failed:', e);
+                    });
+                }
+            }
+        }
+    });
     
     // Ensure proper scrolling behavior (safe to call even if TagManager not fully initialized)
     if (window.TagManager && typeof TagManager.ensureProperScrolling === 'function') {

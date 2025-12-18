@@ -884,6 +884,12 @@ body.modal-open #mainContent.store-selection-disabled,
   width: 100% !important;
 }
 
+/* CRITICAL FIX: Override gap-3 on the inner Undo/Redo group to match container gap */
+.controls-buttons-container > .d-grid.gap-3 {
+  gap: 0.5rem !important; /* Match the container gap instead of gap-3 (1rem) */
+  margin-bottom: 0 !important; /* Remove any extra margin */
+}
+
 .help-button-container {
   position: relative !important;
   left: auto !important;

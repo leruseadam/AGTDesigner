@@ -1713,8 +1713,9 @@ def create_app():
     app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB max file size
     app.config['TESTING'] = False
     app.config['SESSION_REFRESH_EACH_REQUEST'] = False  # Don't refresh session on every request
-    # Ensure store/session persistence lasts long enough on PythonAnywhere
-    default_session_seconds = 21600 if PYTHONANYWHERE_OPTIMIZATION else 7200  # 6h PA, 2h local
+    # CRITICAL FIX: Ensure store/session persistence lasts long enough - increased for upload persistence
+    # Increased session lifetime to ensure uploads persist through page reloads
+    default_session_seconds = 21600 if PYTHONANYWHERE_OPTIMIZATION else 21600  # 6 hours for both (increased from 2h local)
     current_lifetime = app.config.get('PERMANENT_SESSION_LIFETIME', default_session_seconds)
     if isinstance(current_lifetime, timedelta):
         current_seconds = current_lifetime.total_seconds()
@@ -1722,6 +1723,7 @@ def create_app():
         current_seconds = int(current_lifetime) if current_lifetime else 0
     session_seconds = max(current_seconds, default_session_seconds)
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=session_seconds)
+    logging.info(f"✅ Session lifetime set to {session_seconds/3600:.1f} hours for upload persistence")
     
     # Session configuration to prevent cookie size issues
     app.config['SESSION_COOKIE_SECURE'] = False  # Allow HTTP in development
@@ -2284,6 +2286,32 @@ def get_session_excel_processor():
             session_store = session.get('file_store', '')
             # Store context removed - using single database
 
+            # CRITICAL FIX: If session doesn't have file_path, try to restore from persistent file
+            if not session_file_path:
+                try:
+                    import json
+                    uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+                    persistence_file = os.path.join(uploads_dir, '.last_upload.json')
+                    if os.path.exists(persistence_file):
+                        with open(persistence_file, 'r') as f:
+                            last_upload = json.load(f)
+                        persisted_file_path = last_upload.get('file_path')
+                        persisted_store = last_upload.get('store')
+                        current_store = get_current_store_name() if has_store_selection() else None
+                        
+                        # Only restore if file exists and store matches (or no store selected)
+                        if persisted_file_path and os.path.exists(persisted_file_path):
+                            if not current_store or persisted_store == current_store:
+                                session_file_path = persisted_file_path
+                                session['file_path'] = persisted_file_path
+                                session['uploaded_filename'] = last_upload.get('filename', '')
+                                session['upload_timestamp'] = last_upload.get('timestamp', 0)
+                                session['file_store'] = persisted_store
+                                session.modified = True
+                                logging.info(f"✅ Restored upload from persistent file in get_session_excel_processor: {session_file_path}")
+                except Exception as restore_err:
+                    logging.warning(f"Could not restore upload from persistent file: {restore_err}")
+
             if session_file_path and os.path.exists(session_file_path):
                 # CRITICAL: Load the session file into the new processor instance
                 logging.info(f"📂 Loading session file: {session_file_path}")
@@ -2301,6 +2329,21 @@ def get_session_excel_processor():
                     logging.error(traceback.format_exc())
             elif session_file_path:
                 logging.warning(f"Session uploaded file does not exist: {session_file_path}")
+                # CRITICAL FIX: Don't clear session data immediately - try persistent file first
+                # Only clear if persistent file also doesn't exist
+                try:
+                    import json
+                    uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+                    persistence_file = os.path.join(uploads_dir, '.last_upload.json')
+                    if os.path.exists(persistence_file):
+                        with open(persistence_file, 'r') as f:
+                            last_upload = json.load(f)
+                        if last_upload.get('file_path') == session_file_path:
+                            # Persistent file also references missing file - clear both
+                            os.remove(persistence_file)
+                            logging.info(f"Removed persistent file referencing missing upload: {session_file_path}")
+                except Exception:
+                    pass
                 # Clear invalid session data
                 session.pop('file_path', None)
                 session.pop('uploaded_filename', None)
@@ -2701,13 +2744,43 @@ def index():
         # CRITICAL FIX: Don't clear uploaded file from session on page refresh
         # This was causing uploads to disappear when users refreshed the page
         uploaded_file = session.get('file_path', None)  # Keep the file path instead of removing it
+        
+        # CRITICAL FIX: If session doesn't have file_path, try to restore from persistent file
+        if not uploaded_file:
+            try:
+                import json
+                uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+                persistence_file = os.path.join(uploads_dir, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    with open(persistence_file, 'r') as f:
+                        last_upload = json.load(f)
+                    persisted_file_path = last_upload.get('file_path')
+                    persisted_store = last_upload.get('store')
+                    current_store = get_current_store_name() if has_store_selection() else None
+                    
+                    # Only restore if file exists and store matches (or no store selected)
+                    if persisted_file_path and os.path.exists(persisted_file_path):
+                        if not current_store or persisted_store == current_store:
+                            uploaded_file = persisted_file_path
+                            session['file_path'] = persisted_file_path
+                            session['uploaded_filename'] = last_upload.get('filename', '')
+                            session['upload_timestamp'] = last_upload.get('timestamp', 0)
+                            session['file_store'] = persisted_store
+                            session.modified = True
+                            logging.info(f"✅ Restored upload from persistent file: {uploaded_file}")
+                        else:
+                            logging.info(f"⚠️ Persistent file exists but store mismatch: {persisted_store} != {current_store}")
+            except Exception as restore_err:
+                logging.warning(f"Could not restore upload from persistent file: {restore_err}")
+        
         if uploaded_file:
             logging.info(f"Preserving uploaded file in session: {uploaded_file}")
         # Don't clear selected_tags - they should persist across page loads
         
         # Store selection will be handled by frontend JavaScript using localStorage
         
-        # Only remove uploaded files if they're old (more than 1 hour) or failed to process
+        # CRITICAL FIX: Increase retention time - only remove files that are very old (24 hours) or failed
+        # This ensures uploads persist through normal page reloads
         if uploaded_file:
             try:
                 from src.core.data.excel_processor import get_default_upload_file
@@ -2723,12 +2796,13 @@ def index():
                     filename = session.get('uploaded_filename', '')
                     status = processing_status.get(filename, 'unknown')
                     
-                    # Only remove if file is old OR processing failed
-                    # CRITICAL FIX: Increase retention to 2 hours to match session lifetime
+                    # CRITICAL FIX: Only remove if file is very old (24 hours) OR processing failed
+                    # This ensures uploads persist through normal page reloads and browser sessions
+                    # Session lifetime is 2-6 hours, but files should persist longer for user convenience
                     should_remove = (
-                        file_age > 7200 or  # More than 2 hours old (matches session lifetime)
+                        file_age > 86400 or  # More than 24 hours old (very old files)
                         status.startswith('error:') or  # Processing failed
-                        (upload_timestamp > 0 and time.time() - upload_timestamp > 7200)  # Upload session expired (2 hours)
+                        (upload_timestamp > 0 and time.time() - upload_timestamp > 86400)  # Upload session expired (24 hours)
                     )
                     
                     if should_remove:
@@ -2981,6 +3055,7 @@ def upload_file():
         session['file_path'] = file_path
         session['uploaded_filename'] = file.filename
         session['upload_timestamp'] = timestamp
+        session['file_store'] = selected_store  # Store which store this file belongs to
         session.modified = True
         
         # CRITICAL: Force session save immediately
@@ -2990,6 +3065,22 @@ def upload_file():
                 flask_session.save()
         except:
             pass
+        
+        # CRITICAL: Also save to a persistent location to survive session issues
+        try:
+            import json
+            # Use the same uploads_dir that was used to save the file
+            persistence_file = os.path.join(uploads_dir, '.last_upload.json')
+            with open(persistence_file, 'w') as f:
+                json.dump({
+                    'file_path': file_path,
+                    'filename': file.filename,
+                    'timestamp': timestamp,
+                    'store': selected_store
+                }, f)
+            logging.info(f"✅ Saved upload info to persistent file: {persistence_file}")
+        except Exception as persist_err:
+            logging.warning(f"Could not save persistent upload info: {persist_err}")
         
         logging.info(f"✅ Session updated and saved: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
         logging.info(f"✅ Session data: {dict(session)}")
@@ -10416,14 +10507,16 @@ def get_available_tags():
                                                     default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                                     current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
                                                     
-                                                    # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
-                                                    if current_lineage == 'THC':
-                                                        current_lineage = 'MIXED'
-                                                    
-                                                    # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID
+                                                    # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID immediately
+                                                    # For classic types, convert both THC and MIXED to HYBRID
                                                     # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
-                                                    if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
-                                                        current_lineage = 'HYBRID'
+                                                    if is_classic_type:
+                                                        if current_lineage == 'THC' or current_lineage == 'MIXED':
+                                                            current_lineage = 'HYBRID'
+                                                    else:
+                                                        # For non-classic types, "THC" is an abbreviation for "MIXED"
+                                                        if current_lineage == 'THC':
+                                                            current_lineage = 'MIXED'
                                                     
                                                     # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
                                                     # Even if one exists, ensure both are set to the same value
@@ -10442,14 +10535,16 @@ def get_available_tags():
                                                 default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                                 current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
                                                 
-                                                # CRITICAL: "THC" is an abbreviation for "MIXED" - convert it first
-                                                if current_lineage == 'THC':
-                                                    current_lineage = 'MIXED'
-                                                
-                                                # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID
+                                                # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID immediately
+                                                # For classic types, convert both THC and MIXED to HYBRID
                                                 # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
-                                                if is_classic_type and (current_lineage == 'MIXED' or current_lineage == 'THC'):
-                                                    current_lineage = 'HYBRID'
+                                                if is_classic_type:
+                                                    if current_lineage == 'THC' or current_lineage == 'MIXED':
+                                                        current_lineage = 'HYBRID'
+                                                else:
+                                                    # For non-classic types, "THC" is an abbreviation for "MIXED"
+                                                    if current_lineage == 'THC':
+                                                        current_lineage = 'MIXED'
                                                 if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
                                                     if current_lineage:
                                                         tag['currentLineage'] = current_lineage
@@ -14260,6 +14355,22 @@ def database_health():
                 count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
                 table_counts[table_name] = count
             
+            # Get total products count (no limit - show all products)
+            total_products = table_counts.get('products', 0)
+            
+            # Get total strains count
+            total_strains = table_counts.get('strains', 0)
+            
+            # Get products added in last 24 hours
+            try:
+                products_last_24h = conn.execute('''
+                    SELECT COUNT(*) FROM products 
+                    WHERE datetime(last_seen_date) >= datetime('now', '-1 day')
+                ''').fetchone()[0]
+            except Exception:
+                # Fallback if last_seen_date column doesn't exist or has issues
+                products_last_24h = 0
+            
             # Check for orphaned records
             orphaned_count = conn.execute('''
                 SELECT COUNT(*) FROM products p
@@ -14270,9 +14381,11 @@ def database_health():
             # Calculate health score
             health_score = 100
             issues = []
+            status = 'healthy'
             
             if is_corrupted:
                 health_score -= 50
+                status = 'critical'
                 issues.append({
                     'type': 'Critical',
                     'severity': 'danger',
@@ -14281,6 +14394,8 @@ def database_health():
             
             if orphaned_count > 0:
                 health_score -= 10
+                if status == 'healthy':
+                    status = 'warning'
                 issues.append({
                     'type': 'Warning',
                     'severity': 'warning',
@@ -14289,13 +14404,24 @@ def database_health():
             
             if db_size_mb > 100:  # Large database
                 health_score -= 5
+                if status == 'healthy':
+                    status = 'warning'
                 issues.append({
                     'type': 'Info',
                     'severity': 'info',
                     'message': f'Database size is {db_size_mb}MB (consider optimization)'
                 })
             
+            # Get memory usage
+            try:
+                import psutil
+                process = psutil.Process()
+                memory_usage_mb = process.memory_info().rss / (1024 * 1024)
+            except Exception:
+                memory_usage_mb = 0
+            
             return jsonify({
+                'status': status,
                 'health_score': max(health_score, 0),
                 'database_size_mb': db_size_mb,
                 'is_corrupted': is_corrupted,
@@ -14306,7 +14432,15 @@ def database_health():
                 'data_integrity': 95 if not is_corrupted else 45,
                 'performance_score': 88,
                 'storage_efficiency': 92,
-                'cache_hit_rate': 87
+                'cache_hit_rate': 87,
+                # CRITICAL FIX: Add metrics field that frontend expects
+                'metrics': {
+                    'total_products': total_products,
+                    'total_strains': total_strains,
+                    'products_last_24h': products_last_24h,
+                    'database_size_mb': db_size_mb,
+                    'memory_usage_mb': memory_usage_mb
+                }
             })
     except Exception as e:
         logging.error(f"Error checking database health: {str(e)}")
