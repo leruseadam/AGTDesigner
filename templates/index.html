@@ -554,12 +554,25 @@
     }
     
     function checkStoreRequired(onStoreConfirmed) {
-      // CRITICAL FIX: Don't check again if store was already confirmed
-      // This prevents the modal from reappearing after uploads or page reloads
-      // SIMPLE FIX: If store was just confirmed in this session, skip the check
-      // This prevents modal from showing twice after selecting a store
-      if (window.storeConfirmed) {
-        console.log('✅ Store already confirmed in this session, skipping check');
+      // CRITICAL FIX: If store was already confirmed, still call callback to initialize TagManager
+      // This ensures TagManager.init() runs after page reload
+      if (window.storeConfirmed || sessionStorage.getItem('store_just_selected') === 'true') {
+        console.log('✅ Store already confirmed in this session');
+        const storeName = sessionStorage.getItem('selected_store') || 'AGT_Bothell';
+        updateCurrentStoreDisplay(storeName);
+        updateStoreStatus(`Store: ${storeName.replace(/_/g, ' ')}`, 'active');
+        
+        // CRITICAL FIX: Still call callback to initialize TagManager
+        if (typeof onStoreConfirmed === 'function') {
+          console.log('🔄 Store already confirmed - calling initialization callback...');
+          setTimeout(() => {
+            try {
+              onStoreConfirmed();
+            } catch (initError) {
+              console.error('❌ Error in onStoreConfirmed callback:', initError);
+            }
+          }, 100);
+        }
         return;
       }
 
@@ -7451,6 +7464,13 @@
     // Make these globally accessible so store selection handler can restart the wait
     window.tagManagerInitAttempts = 0;
     window.MAX_TAG_MANAGER_INIT_ATTEMPTS = 50; // 5 seconds max (50 * 100ms)
+    
+    // CRITICAL FIX: Restore storeConfirmed flag from sessionStorage on page load
+    // This ensures TagManager initializes after page reload following store selection
+    if (sessionStorage.getItem('store_just_selected') === 'true' || sessionStorage.getItem('selected_store')) {
+      window.storeConfirmed = true;
+      console.log('✅ Restored storeConfirmed flag from sessionStorage');
+    }
     
     function waitForTagManagerAndInit() {
       window.tagManagerInitAttempts = (window.tagManagerInitAttempts || 0) + 1;
