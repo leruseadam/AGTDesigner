@@ -6876,6 +6876,26 @@ const TagManager = {
             console.warn('updateSelectedTags called with invalid tags:', tags);
             tags = [];
         }
+
+        // CRITICAL FIX: If some persistent selections are missing from incoming tags, restore them
+        // This prevents selected tags from disappearing when render/update is incomplete
+        if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
+            const incomingNames = new Set(tags.map(t => t && (t['Product Name*'] || t.ProductName || t.displayName)).filter(Boolean));
+            const missing = this.state.persistentSelectedTags.filter(name => !incomingNames.has(name));
+            if (missing.length > 0) {
+                const restored = missing.map(tagName =>
+                    this._tagLookupMap?.get(tagName) ||
+                    this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                    this.state.originalTags.find(t => t['Product Name*'] === tagName) ||
+                    { 'Product Name*': tagName, displayName: tagName, lineage: 'MIXED' }
+                ).filter(Boolean);
+                if (restored.length > 0) {
+                    tags = [...restored, ...tags];
+                    this._forceSelectedTagsUpdate = true;
+                    verboseLog(`✅ Restored ${restored.length} missing selected tags to prevent disappearance`);
+                }
+            }
+        }
         
         // CRITICAL FIX: If called with empty array but we have persistentSelectedTags, preserve them
         // This prevents selections from being cleared when updateSelectedTags([]) is called
