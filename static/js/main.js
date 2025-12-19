@@ -1070,6 +1070,42 @@ const TagManager = {
         }
     },
     
+    // CRITICAL FIX: Get normalized cache key that ignores timestamp differences
+    // This allows cache to persist even when filename timestamp changes
+    getNormalizedCacheKey() {
+        try {
+            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                window.currentStore || 'default';
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
+                'nofile';
+            
+            if (file === 'nofile' || !file) {
+                return null; // Don't create normalized key for nofile
+            }
+            
+            // Normalize store
+            const normalizedStore = String(store).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
+            
+            // Remove timestamp from filename for normalized key
+            // Pattern: "A Greener Today-Bothell_inventory_12-18-2025_5_04 PM.xlsx" -> "A Greener Today-Bothell_inventory_12-18-2025"
+            const removeTimestamp = (filename) => {
+                // Remove .xlsx extension first
+                let withoutExt = filename.replace(/\.xlsx?$/i, '');
+                // Remove timestamp pattern at end: _HH_MM AM/PM or _HH_MM_AM/PM
+                withoutExt = withoutExt.replace(/_\d{1,2}_\d{2}\s*(AM|PM)$/i, '');
+                return withoutExt.trim();
+            };
+            
+            const normalizedFile = removeTimestamp(String(file).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-'));
+            
+            const normalizedKey = `agt_available_tags_${normalizedStore}_${normalizedFile}`;
+            return normalizedKey;
+        } catch (error) {
+            console.warn('Failed to build normalized cache key:', error);
+            return null;
+        }
+    },
+    
     // CRITICAL FIX: Try multiple cache key variations to handle formatting differences
     tryMultipleCacheKeys() {
         try {
@@ -1078,9 +1114,34 @@ const TagManager = {
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
             
+            // Normalize store and file for matching
+            const normalizeForMatching = (str) => {
+                return str
+                    .trim()
+                    .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+                    .replace(/\s*-\s*/g, '-') // Normalize " - " or " -" or "- " to "-"
+                    .toLowerCase();
+            };
+            
+            const normalizedStore = normalizeForMatching(store);
+            const normalizedFile = normalizeForMatching(file);
+            
+            // Extract base filename without timestamp for fuzzy matching
+            // Pattern: "A Greener Today-Bothell_inventory_12-18-2025_5_04 PM.xlsx" -> "A Greener Today-Bothell_inventory"
+            const extractBaseFilename = (filename) => {
+                // Remove timestamp patterns like "_5_04 PM" or "_4_24 PM" before .xlsx
+                const withoutExt = filename.replace(/\.xlsx?$/i, '');
+                // Remove timestamp pattern at end: _HH_MM AM/PM or _HH_MM_AM/PM
+                const base = withoutExt.replace(/_\d{1,2}_\d{2}\s*(AM|PM)$/i, '');
+                return base.trim();
+            };
+            
+            const baseFilename = extractBaseFilename(file);
+            const normalizedBaseFilename = normalizeForMatching(baseFilename);
+            
             // Try multiple key variations
             const variations = [
-                `agt_available_tags_${store}_${file}`, // Original
+                `agt_available_tags_${store}_${file}`, // Original exact match
                 `agt_available_tags_${store.trim()}_${file.trim()}`, // Trimmed
                 `agt_available_tags_${store.replace(/\s+/g, ' ')}_${file.replace(/\s+/g, ' ')}`, // Normalized spaces
                 `agt_available_tags_${store.replace(/\s*-\s*/g, '-')}_${file.replace(/\s*-\s*/g, '-')}`, // Normalized hyphens
@@ -1108,7 +1169,30 @@ const TagManager = {
                 }
             }
             
-            console.log('❌ No cache found in any variation');
+            // CRITICAL FIX: If no exact match, try fuzzy matching by base filename
+            // This handles cases where timestamp in filename differs but it's the same file
+            console.log('🔄 Trying fuzzy match by base filename...');
+            for (const cacheKey of allCacheKeys) {
+                // Extract store and file from cache key: "agt_available_tags_STORE_FILENAME"
+                const match = cacheKey.match(/^agt_available_tags_(.+?)_(.+)$/);
+                if (match) {
+                    const [, cachedStore, cachedFile] = match;
+                    const cachedBaseFilename = extractBaseFilename(cachedFile);
+                    const normalizedCachedBase = normalizeForMatching(cachedBaseFilename);
+                    const normalizedCachedStore = normalizeForMatching(cachedStore);
+                    
+                    // Match if store matches and base filename matches (ignoring timestamp)
+                    if (normalizedCachedStore === normalizedStore && normalizedCachedBase === normalizedBaseFilename) {
+                        console.log(`✅ Found cache with fuzzy match: ${cacheKey} (base filename matches)`);
+                        const raw = sessionStorage.getItem(cacheKey);
+                        if (raw) {
+                            return { key: cacheKey, raw };
+                        }
+                    }
+                }
+            }
+            
+            console.log('❌ No cache found in any variation or fuzzy match');
             return null;
         } catch (error) {
             console.warn('Failed to try multiple cache keys:', error);
@@ -1135,9 +1219,21 @@ const TagManager = {
             const cacheKey = this.getAvailableTagsCacheKey();
             let raw = sessionStorage.getItem(cacheKey);
             
-            // CRITICAL FIX: If exact key not found, try multiple variations
+            // CRITICAL FIX: If exact key not found, try normalized key first (ignores timestamp)
             if (!raw) {
                 console.log('❌ No cached data found for exact key:', cacheKey);
+                const normalizedKey = this.getNormalizedCacheKey();
+                if (normalizedKey && normalizedKey !== cacheKey) {
+                    console.log('🔄 Trying normalized cache key (ignores timestamp):', normalizedKey);
+                    raw = sessionStorage.getItem(normalizedKey);
+                    if (raw) {
+                        console.log(`✅ Found cache with normalized key: ${normalizedKey}`);
+                    }
+                }
+            }
+            
+            // CRITICAL FIX: If still not found, try multiple variations
+            if (!raw) {
                 console.log('🔄 Trying cache key variations...');
                 const fallbackResult = this.tryMultipleCacheKeys();
                 if (fallbackResult) {
@@ -1192,6 +1288,14 @@ const TagManager = {
                 tags
             };
             const cacheKey = this.getAvailableTagsCacheKey();
+            
+            // CRITICAL FIX: Also save with a normalized key that ignores timestamp differences
+            // This allows cache to be found even if filename timestamp changes
+            const normalizedKey = this.getNormalizedCacheKey();
+            if (normalizedKey && normalizedKey !== cacheKey) {
+                console.log(`💾 Saving cache with normalized key: ${normalizedKey}`);
+                sessionStorage.setItem(normalizedKey, JSON.stringify(payload));
+            }
             
             // Verify tags have database lineage before caching
             const sampleTag = tags[0];
