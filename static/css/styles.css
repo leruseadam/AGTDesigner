@@ -896,11 +896,18 @@ body.modal-open #mainContent.store-selection-disabled,
   padding-bottom: 0 !important; /* Remove any padding */
 }
 
-/* Ensure Clear button matches Undo/Redo button height */
-.controls-buttons-container > #clear-filters-btn {
+/* Ensure Clear button matches Undo/Redo button height - HIGH SPECIFICITY */
+.controls-buttons-container > #clear-filters-btn.btn-control,
+.controls-buttons-container > #clear-filters-btn.btn-glass.btn-control,
+#clear-filters-btn.btn-control.btn-color-red {
   margin-top: 0 !important;
   padding: 0.5rem 0.4rem !important; /* Match undo/redo padding */
   min-height: 42px !important; /* Match undo/redo height */
+  height: auto !important; /* Allow natural height */
+  line-height: 1.5 !important; /* Ensure proper line height */
+  display: flex !important; /* Ensure flex display */
+  align-items: center !important; /* Center content vertically */
+  justify-content: center !important; /* Center content horizontally */
 }
 
 /* Consolidated help button container styling */
@@ -3250,6 +3257,8 @@ body.modal-open #mainContent.store-selection-disabled,
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(251, 146, 60, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    padding: 0.5rem 0.4rem !important; /* Ensure consistent padding */
+    min-height: 42px !important; /* Ensure consistent height */
   }
   .control-panel .btn-control.btn-color-orange:hover,
   .control-panel .btn-glass.btn-control.btn-color-orange:hover,
@@ -3275,6 +3284,12 @@ body.modal-open #mainContent.store-selection-disabled,
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(239, 68, 68, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    padding: 0.5rem 0.4rem !important; /* Ensure consistent padding with Undo/Redo */
+    min-height: 42px !important; /* Ensure consistent height with Undo/Redo */
+    height: auto !important; /* Allow natural height */
+    display: flex !important; /* Ensure flex display */
+    align-items: center !important; /* Center content vertically */
+    justify-content: center !important; /* Center content horizontally */
   }
   .control-panel .btn-control.btn-color-red:hover,
   .control-panel .btn-glass.btn-control.btn-color-red:hover,
@@ -3285,6 +3300,20 @@ body.modal-open #mainContent.store-selection-disabled,
     border-color: rgba(239, 68, 68, 1) !important;
     color: #ffffff !important;
     box-shadow: 0 4px 20px rgba(239, 68, 68, 0.6), 0 0 20px rgba(239, 68, 68, 0.5) !important;
+  }
+  
+  /* CRITICAL FIX: Ensure Clear button has same height as Undo/Redo - placed after all other rules */
+  .controls-buttons-container > #clear-filters-btn.btn-control.btn-color-red,
+  .controls-buttons-container > #clear-filters-btn.btn-glass.btn-control.btn-color-red,
+  #clear-filters-btn.btn-control.btn-color-red.btn-glass {
+    padding: 0.5rem 0.4rem !important; /* Match undo/redo padding exactly */
+    min-height: 42px !important; /* Match undo/redo height exactly */
+    height: auto !important; /* Allow natural height */
+    line-height: 1.5 !important; /* Ensure proper line height */
+    display: flex !important; /* Ensure flex display */
+    align-items: center !important; /* Center content vertically */
+    justify-content: center !important; /* Center content horizontally */
+    box-sizing: border-box !important; /* Include padding in height calculation */
   }
   
   /* Export Data - Green/Teal (Export/Download) - VIBRANT */
