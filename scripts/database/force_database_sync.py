@@ -15,12 +15,20 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Add src to path
-sys.path.insert(0, os.path.dirname(__file__))
+# Add project root to path so we can import app
+script_dir = Path(__file__).parent
+project_root = script_dir.parent.parent
+sys.path.insert(0, str(project_root))
 
 def find_latest_excel():
     """Find the most recent Excel upload."""
-    uploads_dir = Path(__file__).parent / 'uploads'
+    # Look in project root uploads directory, not scripts/database/uploads
+    uploads_dir = project_root / 'uploads'
+    
+    if not uploads_dir.exists():
+        logger.error(f"Uploads directory not found: {uploads_dir}")
+        logger.error("Make sure you're running this from the project root")
+        return None
     
     # Find all Excel files (excluding the product_database folder)
     excel_files = []
@@ -29,7 +37,8 @@ def find_latest_excel():
             excel_files.append(file)
     
     if not excel_files:
-        logger.error("No Excel files found in uploads directory")
+        logger.error(f"No Excel files found in uploads directory: {uploads_dir}")
+        logger.info("Upload your Excel file through the web interface first")
         return None
     
     # Sort by modification time
@@ -41,15 +50,6 @@ def find_latest_excel():
     
     return latest
 
-def sync_database_from_excel(excel_path):
-    """Sync database from Excel file."""
-    
-    logger.info("="*80)
-    logger.info("FORCE DATABASE SYNC FROM EXCEL")
-    logger.info("="*80)
-    logger.info(f"Excel file: {excel_path}")
-    logger.info("")
-    
 def _load_excel_all_sheets(excel_path):
     """Load every sheet in the workbook and concatenate them."""
     logger.info(f"Loading Excel file: {excel_path.name}")
@@ -65,16 +65,24 @@ def _load_excel_all_sheets(excel_path):
     logger.info(f"  Total rows after concat: {len(df)}")
     return df
 
-
+def sync_database_from_excel(excel_path):
+    """Sync database from Excel file."""
+    
+    logger.info("="*80)
+    logger.info("FORCE DATABASE SYNC FROM EXCEL")
+    logger.info("="*80)
+    logger.info(f"Excel file: {excel_path}")
+    logger.info("")
+    
     # Load Excel file
     logger.info("Loading Excel file...")
     df = _load_excel_all_sheets(excel_path)
     logger.info(f"Loaded {len(df)} rows from Excel")
     logger.info("")
     
-    # Get product database
+    # Get product database for Bothell store
     from src.core.data.product_database import get_product_database
-    product_db = get_product_database()
+    product_db = get_product_database('AGT_Bothell')
     
     logger.info("Starting database sync...")
     logger.info("")
@@ -117,8 +125,14 @@ def check_database_integration():
     
     logger.info("Checking database integration status...")
     
-    from app import get_excel_processor
-    processor = get_excel_processor()
+    try:
+        from app import get_excel_processor
+        processor = get_excel_processor()
+    except ImportError as e:
+        logger.warning(f"  ⚠ Cannot import app module: {e}")
+        logger.warning("  Run this script from the project root directory")
+        logger.info("")
+        return
     
     if hasattr(processor, '_use_product_database'):
         status = processor._use_product_database
@@ -140,8 +154,14 @@ def enable_database_integration():
     
     logger.info("Enabling database integration...")
     
-    from app import get_excel_processor
-    processor = get_excel_processor()
+    try:
+        from app import get_excel_processor
+        processor = get_excel_processor()
+    except ImportError as e:
+        logger.error(f"  ✗ Cannot import app module: {e}")
+        logger.error("  Run this script from the project root directory")
+        logger.info("")
+        return
     
     if hasattr(processor, 'enable_product_db_integration'):
         processor.enable_product_db_integration(True)
