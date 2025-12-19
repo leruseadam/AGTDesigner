@@ -35,9 +35,9 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin-top: 0.25rem !important; /* Reduced top margin */
-  margin-bottom: 0.5rem !important;
-  padding: 0.5rem 0 !important; /* Consistent padding */
+  margin-top: 0.1rem !important; /* Reduced top margin */
+  margin-bottom: 2rem !important; /* Increased bottom margin for proper spacing from edge */
+  padding: 0.25rem 0 !important; /* Reduced padding */
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
@@ -46,8 +46,8 @@
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin-top: 0.25rem !important; /* Reduced top margin */
-    margin-bottom: 0.5rem !important;
+    margin-top: 0.1rem !important; /* Reduced top margin */
+    margin-bottom: 2rem !important; /* Increased bottom margin for proper spacing from edge */
   }
 }
 
@@ -477,7 +477,8 @@ p, span, div {
   -ms-user-select: none;
   user-select: none;
   /* Optimize rendering */
-  will-change: opacity, transform;
+  /* PERFORMANCE FIX: Removed will-change to prevent flashing during rapid updates */
+  /* will-change: opacity, transform; */
   /* Allow browser to skip rendering off-screen content */
   content-visibility: auto;
   contain-intrinsic-size: 44px 320px;
@@ -497,14 +498,49 @@ p, span, div {
   contain: layout style;
   /* Smooth state changes */
   transition: all 0.1s ease;
-  /* Optimize rendering */
-  will-change: transform, opacity;
+  /* PERFORMANCE FIX: Removed will-change to prevent unnecessary repaints */
+  /* will-change causes repaints even when not animating */
 }
 
 /* Prevent rapid style changes from causing flashing */
 .tag-item[style*="display: none"],
 .tag-item[style*="display: block"] {
   transition: opacity 0.1s ease;
+}
+
+/* PERFORMANCE FIX: Prevent flashing during rapid DOM updates */
+.tag-list-container,
+#availableTagsList,
+#selectedTagsList {
+  /* Use contain to isolate rendering and prevent repaints */
+  contain: layout style paint;
+  /* Prevent layout shifts during updates */
+  transform: translateZ(0);
+  /* Disable transitions during rapid updates */
+  transition: none;
+  /* PERFORMANCE FIX: Use GPU acceleration without will-change */
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* PERFORMANCE FIX: Optimize tag items to prevent layout thrashing */
+.tag-item {
+  contain: layout style;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Re-enable transitions when not updating rapidly */
+.tag-list-container:not(.updating),
+#availableTagsList:not(.updating),
+#selectedTagsList:not(.updating) {
+  transition: opacity 0.2s ease;
+}
+
+/* Prevent repaints during rapid updates */
+.tag-item.updating {
+  transition: none !important;
+  will-change: auto !important;
 }
 
 /* JSON Match Modal specific improvements for readability */
@@ -604,6 +640,7 @@ img, video, canvas, svg {
 }
 
 /* Exception for lava lamp canvas - needs to be full screen */
+/* PERFORMANCE FIX: Optimize canvas rendering to prevent flickering */
 #lava-lamp-canvas {
   display: block !important;
   position: fixed !important;
@@ -619,6 +656,11 @@ img, video, canvas, svg {
   /* Fix for fullscreen canvas */
   box-sizing: border-box !important;
   overflow: hidden !important;
+  /* PERFORMANCE FIX: Use GPU acceleration without will-change */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  /* Prevent repaints during animation */
+  will-change: auto;
 }
 
 /* Override ANY canvas rules that might interfere */
@@ -868,7 +910,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: 0.25rem !important; /* Reduced top margin */
+  margin-top: 0.1rem !important; /* Reduced top margin */
 }
  
 .control-section {
@@ -903,12 +945,12 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: 0.25rem 0 0.5rem 0 !important; /* Reduced top margin, keep bottom */
+  margin: 0.1rem 0 2rem 0 !important; /* Reduced top, increased bottom margin for proper spacing */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 0.5rem 0 !important; /* Consistent padding */
+  padding: 0.25rem 0 !important; /* Reduced padding */
   z-index: 1 !important;
 }
 
@@ -2594,7 +2636,7 @@ body.modal-open #mainContent.store-selection-disabled,
     line-height: 1.4;
     /* Ensure proper layout recalculation */
     transform: translateZ(0);
-    will-change: height;
+    /* PERFORMANCE FIX: Removed will-change: height to prevent flashing during rapid updates */
   }
   /* Ensure glass-card containers can expand properly */
   .glass-card.d-flex.flex-column {
@@ -2982,13 +3024,13 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.25rem 0 0.5rem 0 !important; /* Reduced top margin, keep bottom */
+    margin: 0.1rem 0 2rem 0 !important; /* Reduced top, increased bottom margin for proper spacing */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
     z-index: 1 !important;
-    padding: 0.5rem 0 !important; /* Consistent padding */
+    padding: 0.25rem 0 !important; /* Reduced padding */
   }
   
   .help-button-container .big-glow-help-btn {
@@ -7895,12 +7937,12 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.25rem 0 0.5rem 0 !important; /* Reduced top margin, keep bottom */
+    margin: 0.1rem 0 2rem 0 !important; /* Reduced top, increased bottom margin for proper spacing */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.5rem 0 !important; /* Consistent padding */
+    padding: 0.25rem 0 !important; /* Reduced padding */
     z-index: 1 !important;
   }
   
@@ -9567,7 +9609,7 @@ body.modal-open #mainContent.store-selection-disabled,
     position: relative;
     z-index: 10003 !important;
     transform: translateZ(0);
-    will-change: transform;
+    /* PERFORMANCE FIX: Removed will-change to prevent flashing - modals don't update frequently */
   }
 
   /* Collapsible functionality styles */
@@ -9678,7 +9720,7 @@ body.modal-open #mainContent.store-selection-disabled,
     overflow-y: auto !important;
     /* Force layout recalculation */
     transform: translateZ(0);
-    will-change: height;
+    /* PERFORMANCE FIX: Removed will-change: height to prevent flashing */
   }
   
   /* Ensure vendor sections maintain proper flow */
@@ -9690,7 +9732,7 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-bottom: 8px !important;
     /* Force layout recalculation */
     transform: translateZ(0);
-    will-change: height;
+    /* PERFORMANCE FIX: Removed will-change: height to prevent flashing */
   }
   
   /* Ensure brand sections maintain proper flow */
@@ -9702,7 +9744,7 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-bottom: 8px !important;
     /* Force layout recalculation */
     transform: translateZ(0);
-    will-change: height;
+    /* PERFORMANCE FIX: Removed will-change: height to prevent flashing */
   }
   
   /* Ensure product type sections maintain proper flow */
@@ -9714,7 +9756,7 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-bottom: 8px !important;
     /* Force layout recalculation */
     transform: translateZ(0);
-    will-change: height;
+    /* PERFORMANCE FIX: Removed will-change: height to prevent flashing */
   }
   
   /* Ensure weight sections maintain proper flow */
@@ -9726,7 +9768,7 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-bottom: 8px !important;
     /* Force layout recalculation */
     transform: translateZ(0);
-    will-change: height;
+    /* PERFORMANCE FIX: Removed will-change: height to prevent flashing */
   }
      /* Force vendor headers to stay on top */
    .vendor-header {

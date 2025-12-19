@@ -966,8 +966,10 @@ window.pollUploadStatus = function pollUploadStatus(filename) {
           return; // Stop polling
         }
         
-        // Continue polling frequently for faster response
-        setTimeout(poll, 500);
+        // PERFORMANCE FIX: Increased polling interval to prevent flashing
+        // Use adaptive polling: faster initially, slower if taking longer
+        const pollInterval = pollCount < 10 ? 1500 : 2500; // 1.5s for first 10 polls, then 2.5s
+        setTimeout(poll, pollInterval);
       } else if (data.status === 'not_found') {
         // File not found in processing status - check if it exists
         console.warn(`File not found in processing status: ${filename}`);
@@ -1004,8 +1006,10 @@ window.pollUploadStatus = function pollUploadStatus(filename) {
           return; // Stop polling
         }
         
-        // Continue polling frequently for faster response
-        setTimeout(poll, 500);
+        // PERFORMANCE FIX: Increased polling interval to prevent flashing
+        // Use adaptive polling: faster initially, slower if taking longer
+        const pollInterval = pollCount < 10 ? 1500 : 2500; // 1.5s for first 10 polls, then 2.5s
+        setTimeout(poll, pollInterval);
       }
     } catch (error) {
       console.error(`Error polling upload status for ${filename}:`, error);
