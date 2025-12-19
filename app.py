@@ -15988,9 +15988,18 @@ def upload_product_database():
             # CRITICAL FIX: Implement proper database import from Excel
             logging.info(f"Starting database import from {db_file_path}")
             
-            # Read the Excel file
+            # Read the Excel file and support multi-sheet workbooks
             import pandas as pd
-            df = pd.read_excel(db_file_path)
+            loaded_excel = pd.read_excel(db_file_path, sheet_name=None)
+            if isinstance(loaded_excel, dict):
+                sheet_names = list(loaded_excel.keys())
+                df = pd.concat(loaded_excel.values(), ignore_index=True)
+                sheets_count = len(sheet_names)
+                logging.info(f"Excel file loaded from {sheets_count} sheets: {sheet_names}")
+            else:
+                df = loaded_excel
+                logging.info("Excel file loaded from single sheet")
+            df = df.reset_index(drop=True)
             logging.info(f"Excel file loaded: {len(df)} rows, {len(df.columns)} columns")
             
             # Clear existing data
