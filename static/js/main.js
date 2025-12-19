@@ -1237,14 +1237,18 @@ const TagManager = {
         
         // CRITICAL FIX: On page reload, check if we recently updated lineage
         // If so, skip cache to ensure we get fresh lineage data from database
+        // BUT: Only skip if update was VERY recent (30 seconds) to avoid unnecessary reloads
         const recentLineageUpdate = sessionStorage.getItem('lastLineageUpdateTime');
         if (recentLineageUpdate) {
             const timeSinceUpdate = Date.now() - parseInt(recentLineageUpdate, 10);
-            // If lineage was updated within last 2 minutes, skip cache to get fresh data
-            if (timeSinceUpdate < 120000) {
-                console.log('🔄 Recent lineage update detected, skipping cache to fetch fresh data...');
+            // Only skip cache if lineage was updated within last 30 seconds (reduced from 2 minutes)
+            if (timeSinceUpdate < 30000) {
+                console.log('🔄 Very recent lineage update detected (within 30s), skipping cache to fetch fresh data...');
                 sessionStorage.removeItem('lastLineageUpdateTime'); // Clear after use
                 return false; // Force fresh fetch
+            } else {
+                // Clear stale timestamp to prevent future unnecessary checks
+                sessionStorage.removeItem('lastLineageUpdateTime');
             }
         }
         
@@ -3168,6 +3172,16 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 const isInSelected = e.target.closest('#selectedTags') !== null;
                 
+                // CRITICAL FIX: Save state BEFORE making changes for proper undo functionality
+                const previousState = {
+                    selected_tag_names: [...(this.state.persistentSelectedTags || [])],
+                    available_tag_names: (this.state.tags || [])
+                        .filter(tag => tag && !(this.state.persistentSelectedTags || []).includes(tag['Product Name*']))
+                        .map(tag => tag['Product Name*']),
+                    action_type: 'checkbox_change',
+                    timestamp: new Date().toISOString()
+                };
+                
                 // Ensure _selectedTagsSet exists
                 if (!this.state._selectedTagsSet) {
                     this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
@@ -3192,12 +3206,27 @@ const TagManager = {
                 // Update the regular selectedTags set to match persistent ones
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
+                // CRITICAL FIX: Save the PREVIOUS state to undo stack immediately
+                if (!this.state.localUndoStack) {
+                    this.state.localUndoStack = [];
+                }
+                this.state.localUndoStack.push(previousState);
+                // Limit local undo stack size
+                if (this.state.localUndoStack.length > 5) {
+                    this.state.localUndoStack = this.state.localUndoStack.slice(-5);
+                }
+                // Clear redo stack when making a new selection
+                if (this.state.redoSnapshotStack) {
+                    this.state.redoSnapshotStack = [];
+                }
+                verboseLog(`💾 Saved previous state for undo - Stack size: ${this.state.localUndoStack.length}, Previous selected: ${previousState.selected_tag_names.length}`);
+                
                 // Update selected tags display
                 const selectedTagObjects = this.getSelectedTagObjects();
                 this.updateSelectedTags(selectedTagObjects);
                 
-                // Save state for undo
-                this.saveSelectionStateForUndo('checkbox_change');
+                // Also save to backend (non-blocking)
+                setTimeout(() => this.saveSelectionState('checkbox_change'), 50);
             };
             
             // Add click handler as fallback
@@ -5222,6 +5251,17 @@ const TagManager = {
                 this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
             }
             
+            // CRITICAL FIX: Save state BEFORE making changes for proper undo functionality
+            // Capture the current state before modifying it
+            const previousState = {
+                selected_tag_names: [...this.state.persistentSelectedTags],
+                available_tag_names: (this.state.tags || [])
+                    .filter(tag => tag && !this.state.persistentSelectedTags.includes(tag['Product Name*']))
+                    .map(tag => tag['Product Name*']),
+                action_type: 'checkbox_selection',
+                timestamp: new Date().toISOString()
+            };
+            
             // PERFORMANCE: Use Set for O(1) lookups and updates instead of array operations
             if (isChecked) {
                 if (!this.state._selectedTagsSet.has(displayName)) {
@@ -5241,6 +5281,21 @@ const TagManager = {
             
             // Update the regular selectedTags set to match persistent ones
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+            
+            // CRITICAL FIX: Save the PREVIOUS state to undo stack immediately
+            if (!this.state.localUndoStack) {
+                this.state.localUndoStack = [];
+            }
+            this.state.localUndoStack.push(previousState);
+            // Limit local undo stack size
+            if (this.state.localUndoStack.length > 5) {
+                this.state.localUndoStack = this.state.localUndoStack.slice(-5);
+            }
+            // Clear redo stack when making a new selection
+            if (this.state.redoSnapshotStack) {
+                this.state.redoSnapshotStack = [];
+            }
+            verboseLog(`💾 Saved previous state for undo - Stack size: ${this.state.localUndoStack.length}, Previous selected: ${previousState.selected_tag_names.length}`);
             
             // PERFORMANCE: For deselection, use immediate DOM manipulation instead of full rebuild
             if (!isChecked && isForSelectedTags) {
@@ -5322,7 +5377,7 @@ const TagManager = {
                     }
                 }, 0);
                 
-                // Defer state saving to avoid blocking UI
+                // State already saved above, just sync with backend
                 setTimeout(() => this.saveSelectionState('checkbox_selection'), 50);
             }
         };
@@ -9978,15 +10033,32 @@ const TagManager = {
                 this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
             }
             
-            // CRITICAL FIX: Still fetch fresh data in background to ensure tags are up-to-date
-            // This prevents stale cache from preventing tag loading
-            setTimeout(() => {
-                if (!this._checkingExistingData) {
-                    this.checkForExistingData().catch(err => {
-                        console.warn('Background refresh after cache load failed (non-critical):', err);
-                    });
+            // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
+            // This prevents unnecessary reloads on every page refresh
+            try {
+                const cacheKey = this.getAvailableTagsCacheKey();
+                const cachedData = sessionStorage.getItem(cacheKey);
+                if (cachedData) {
+                    const payload = JSON.parse(cachedData);
+                    const cacheAge = Date.now() - (payload.timestamp || 0);
+                    const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+                    
+                    if (cacheAge > CACHE_MAX_AGE) {
+                        console.log(`🔄 Cache is ${Math.round(cacheAge / 1000)}s old, refreshing in background...`);
+                        setTimeout(() => {
+                            if (!this._checkingExistingData && !this.state.initialized) {
+                                this.checkForExistingData().catch(err => {
+                                    console.warn('Background refresh after cache load failed (non-critical):', err);
+                                });
+                            }
+                        }, 2000); // Increased delay to avoid interfering with cache load
+                    } else {
+                        console.log(`✅ Cache is fresh (${Math.round(cacheAge / 1000)}s old), skipping background refresh`);
+                    }
                 }
-            }, 1000);
+            } catch (e) {
+                console.warn('Could not check cache age:', e);
+            }
             
             // Continue with rest of initialization (filters, etc.) but skip splash
             this._continueInitWithoutSplash();

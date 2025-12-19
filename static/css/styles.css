@@ -896,10 +896,11 @@ body.modal-open #mainContent.store-selection-disabled,
   padding-bottom: 0 !important; /* Remove any padding */
 }
 
-/* Ensure Clear button has no extra top margin */
+/* Ensure Clear button matches Undo/Redo button height */
 .controls-buttons-container > #clear-filters-btn {
   margin-top: 0 !important;
-  padding-top: 0 !important;
+  padding: 0.5rem 0.4rem !important; /* Match undo/redo padding */
+  min-height: 42px !important; /* Match undo/redo height */
 }
 
 /* Consolidated help button container styling */
