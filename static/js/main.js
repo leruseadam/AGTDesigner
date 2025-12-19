@@ -3238,10 +3238,6 @@ const TagManager = {
         // CRITICAL FIX: Always ensure checkboxes are enabled before restoring states
         this._ensureCheckboxesEnabled();
         
-        if (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0) {
-            return;
-        }
-
         const availableTagsContainer = document.getElementById('availableTags');
         if (!availableTagsContainer) {
             return;
@@ -3252,15 +3248,18 @@ const TagManager = {
             this.state._selectedTagsSet = new Set();
         }
         // Sync Set with persistentSelectedTags to ensure consistency
-        const currentSet = new Set(this.state.persistentSelectedTags);
-        const setNeedsUpdate = this.state.persistentSelectedTags.length !== this.state._selectedTagsSet.size ||
-                               !this.state.persistentSelectedTags.every(name => this.state._selectedTagsSet.has(name));
+        const persistentSelectedTags = this.state.persistentSelectedTags || [];
+        const currentSet = new Set(persistentSelectedTags);
+        const setNeedsUpdate = persistentSelectedTags.length !== this.state._selectedTagsSet.size ||
+                               !persistentSelectedTags.every(name => this.state._selectedTagsSet.has(name));
         if (setNeedsUpdate) {
             this.state._selectedTagsSet = currentSet;
         }
         
         // CRITICAL FIX: Use case-insensitive matching to handle any case differences
-        const persistentSet = new Set(this.state.persistentSelectedTags.map(name => name.toLowerCase()));
+        // CRITICAL FIX: Always restore checkbox states, even if persistentSelectedTags is empty
+        // This ensures checkboxes are properly unchecked when undo/redo clears selections
+        const persistentSet = new Set(persistentSelectedTags.map(name => name.toLowerCase()));
         
         // CRITICAL FIX: Don't restore if we just generated (within last 5 seconds)
         // This prevents clearing checkboxes immediately after generation
@@ -11775,14 +11774,28 @@ const TagManager = {
             const lastSnapshot = this.state.localUndoStack.pop();
             const selectedNames = lastSnapshot.selected_tag_names || [];
 
+            // CRITICAL FIX: Update state first, then restore UI
             this.state.persistentSelectedTags = [...selectedNames];
             this.state.selectedTags = new Set(selectedNames);
+            
+            // CRITICAL FIX: Sync _selectedTagsSet to ensure consistency
+            if (!this.state._selectedTagsSet) {
+                this.state._selectedTagsSet = new Set();
+            }
+            this.state._selectedTagsSet = new Set(selectedNames);
 
             const selectedTagObjects = selectedNames.map(tagName =>
-                this.state.tags.find(t => t['Product Name*'] === tagName)
+                this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                this.state.originalTags.find(t => t['Product Name*'] === tagName)
             ).filter(Boolean);
+            
+            // CRITICAL FIX: Update selected tags display first, then restore checkbox states
             this.updateSelectedTags(selectedTagObjects);
-            this._restoreCheckboxStates();
+            
+            // CRITICAL FIX: Force restore checkbox states immediately after state update
+            setTimeout(() => {
+                this._restoreCheckboxStates();
+            }, 0);
             
             // CRITICAL FIX: Re-initialize checkbox event handlers after undo to ensure they work
             // After undo, checkboxes might have been recreated and lost their event handlers
@@ -11846,14 +11859,29 @@ const TagManager = {
             }
 
             const selectedNames = snapshotToRestore.selected_tag_names || [];
+            
+            // CRITICAL FIX: Update state first, then restore UI
             this.state.persistentSelectedTags = [...selectedNames];
             this.state.selectedTags = new Set(selectedNames);
+            
+            // CRITICAL FIX: Sync _selectedTagsSet to ensure consistency
+            if (!this.state._selectedTagsSet) {
+                this.state._selectedTagsSet = new Set();
+            }
+            this.state._selectedTagsSet = new Set(selectedNames);
 
             const selectedTagObjects = selectedNames.map(tagName =>
-                this.state.tags.find(t => t['Product Name*'] === tagName)
+                this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                this.state.originalTags.find(t => t['Product Name*'] === tagName)
             ).filter(Boolean);
+            
+            // CRITICAL FIX: Update selected tags display first, then restore checkbox states
             this.updateSelectedTags(selectedTagObjects);
-            this._restoreCheckboxStates();
+            
+            // CRITICAL FIX: Force restore checkbox states immediately after state update
+            setTimeout(() => {
+                this._restoreCheckboxStates();
+            }, 0);
             
             // CRITICAL FIX: Re-initialize checkbox event handlers after redo to ensure they work
             // After redo, checkboxes might have been recreated and lost their event handlers
