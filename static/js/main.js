@@ -3043,6 +3043,97 @@ const TagManager = {
         });
         verboseLog(`✅ Ensured ${allCheckboxes.length} checkboxes are enabled`);
     },
+    
+    // CRITICAL FIX: Re-initialize checkbox event handlers after undo/redo
+    // This ensures checkboxes work after being recreated during tag updates
+    _reinitializeCheckboxHandlers() {
+        const allCheckboxes = document.querySelectorAll('.tag-checkbox');
+        let reinitializedCount = 0;
+        
+        allCheckboxes.forEach(checkbox => {
+            const tagName = checkbox.value;
+            if (!tagName) return;
+            
+            // Check if checkbox already has a handler attached
+            if (checkbox._changeHandler) {
+                // Handler exists, just ensure it's still attached
+                return;
+            }
+            
+            // Find the tag object for this checkbox
+            const tag = this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                       this.state.originalTags.find(t => t['Product Name*'] === tagName);
+            
+            if (!tag) return;
+            
+            // Recreate the change handler (same as in createTagElement)
+            const handleCheckboxChange = (e) => {
+                e.stopPropagation();
+                const isChecked = e.target.checked;
+                const container = e.target.closest('#availableTags, #selectedTags');
+                const isInSelected = container && container.id === 'selectedTags';
+                
+                if (isChecked) {
+                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                        this.state.persistentSelectedTags.push(tagName);
+                    }
+                    this.state._selectedTagsSet.add(tagName);
+                    this.state.selectedTags.add(tagName);
+                    
+                    // Move to selected if in available
+                    if (!isInSelected) {
+                        this.moveTagToSelected(tagName);
+                    }
+                } else {
+                    // Remove from selected
+                    const index = this.state.persistentSelectedTags.indexOf(tagName);
+                    if (index > -1) {
+                        this.state.persistentSelectedTags.splice(index, 1);
+                    }
+                    this.state._selectedTagsSet.delete(tagName);
+                    this.state.selectedTags.delete(tagName);
+                    
+                    // Move to available if in selected
+                    if (isInSelected) {
+                        this.moveTagToAvailable(tagName);
+                    }
+                }
+                
+                // Update selected tags display
+                const selectedTagObjects = this.getSelectedTagObjects();
+                this.updateSelectedTags(selectedTagObjects);
+                
+                // Save state for undo
+                this.saveSelectionStateForUndo('checkbox_change');
+            };
+            
+            // Remove any existing handlers first
+            checkbox.removeEventListener('change', checkbox._changeHandler);
+            checkbox.removeEventListener('click', checkbox._clickHandler);
+            
+            // Attach new handlers
+            checkbox._changeHandler = handleCheckboxChange;
+            checkbox.addEventListener('change', handleCheckboxChange);
+            
+            // Add click handler as fallback
+            checkbox._clickHandler = (e) => {
+                if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
+                    e.target.removeAttribute('data-reordering');
+                    e.target.removeAttribute('data-drag-disabled');
+                    e.target.style.pointerEvents = 'auto';
+                }
+                e.target.disabled = false;
+                e.target.style.pointerEvents = 'auto';
+            };
+            checkbox.addEventListener('click', checkbox._clickHandler);
+            
+            reinitializedCount++;
+        });
+        
+        if (reinitializedCount > 0) {
+            verboseLog(`✅ Re-initialized ${reinitializedCount} checkbox event handlers`);
+        }
+    },
 
     // CRITICAL FIX: Restore checkbox states after re-render to preserve selections made during initial load
     _restoreCheckboxStates() {
@@ -11593,6 +11684,14 @@ const TagManager = {
             ).filter(Boolean);
             this.updateSelectedTags(selectedTagObjects);
             this._restoreCheckboxStates();
+            
+            // CRITICAL FIX: Re-initialize checkbox event handlers after undo to ensure they work
+            // After undo, checkboxes might have been recreated and lost their event handlers
+            setTimeout(() => {
+                this._ensureCheckboxesEnabled();
+                this._reinitializeCheckboxHandlers();
+            }, 100);
+            
             this.updateSelectAllCheckboxes();
 
             if (window.Toast) {
@@ -11656,6 +11755,14 @@ const TagManager = {
             ).filter(Boolean);
             this.updateSelectedTags(selectedTagObjects);
             this._restoreCheckboxStates();
+            
+            // CRITICAL FIX: Re-initialize checkbox event handlers after redo to ensure they work
+            // After redo, checkboxes might have been recreated and lost their event handlers
+            setTimeout(() => {
+                this._ensureCheckboxesEnabled();
+                this._reinitializeCheckboxHandlers();
+            }, 100);
+            
             this.updateSelectAllCheckboxes();
 
             if (window.Toast) {
