@@ -1889,11 +1889,11 @@ class TemplateProcessor:
                                 clean_weight = weight_units.replace('\n', '').strip()
                                 # Check if weight is already formatted with hyphen
                                 if clean_weight.startswith('\u2011') or clean_weight.startswith('-'):
-                                    # Weight already has hyphen, just append it
+                                    # Weight already has hyphen, just append it with space
                                     desc_and_weight = f"{group_display_name} {clean_weight}"
                                 else:
-                                    # Add non-breaking hyphen and space before weight
-                                    desc_and_weight = f"{group_display_name} \u2011\u00A0{clean_weight}"
+                                    # Add hyphen and space before weight
+                                    desc_and_weight = f"{group_display_name} - {clean_weight}"
                                 self.logger.info(f"PREROLL GROUP: Added weight to group name: '{desc_and_weight}' (group: '{group_display_name}', weight: '{clean_weight}', group_id: {group_id})")
                             else:
                                 # No weight available, use group name only
@@ -1963,8 +1963,13 @@ class TemplateProcessor:
                         if weight_units:
                             # Remove newline prefix if present, and strip whitespace
                             clean_weight = weight_units.replace('\n', '').strip()
-                            # Add non-breaking hyphen and weight to description (use \u2011 for non-breaking hyphen)
-                            desc_and_weight = f"{primary_text} \u2011\u00A0{clean_weight}"
+                            # Check if weight already has hyphen (from format_joint_ratio_pack)
+                            if clean_weight.startswith('\u2011') or clean_weight.startswith('-'):
+                                # Weight already has hyphen, just append it with space
+                                desc_and_weight = f"{primary_text} {clean_weight}"
+                            else:
+                                # Add hyphen and space before weight
+                                desc_and_weight = f"{primary_text} - {clean_weight}"
                             self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' with weight '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             # No weight available, use description only
@@ -6708,17 +6713,17 @@ class TemplateProcessor:
                     if count and count.isdigit():
                         count_int = int(count)
                         if count_int == 1:
-                            # For single units, just show the weight with non-breaking hyphen and non-breaking space
+                            # For single units, use non-breaking hyphen + non-breaking space (same rule as other templates)
                             formatted = f"\u2011\u00A0{amount}g"
                         else:
-                            # For multiple units, show the full pack format with non-breaking hyphen and non-breaking space
-                            # Use non-breaking hyphen to prevent "1g x 5 Pack" from breaking across lines
+                            # For multiple units, use non-breaking hyphen + non-breaking space (same rule as other templates)
+                            # CRITICAL FIX: Use non-breaking hyphen (\u2011) + non-breaking space (\u00A0) to prevent floating hyphen
                             formatted = f"\u2011\u00A0{amount}g\u00A0x\u00A0{count}\u00A0Pack"
                     else:
-                        # Only amount found (like "1g") - show just the weight with non-breaking hyphen and non-breaking space
+                        # Only amount found (like "1g") - use non-breaking hyphen + non-breaking space
                         formatted = f"\u2011\u00A0{amount}g"
                 except IndexError:
-                    # Only amount found (like "1g") - show just the weight with non-breaking hyphen and non-breaking space
+                    # Only amount found (like "1g") - use non-breaking hyphen + non-breaking space
                     formatted = f"\u2011\u00A0{amount}g"
                 return formatted
         

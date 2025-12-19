@@ -1197,202 +1197,128 @@ document.addEventListener('DOMContentLoaded', function() {
   let isScaling = false;
   let lastAppliedScale = null;
   let scaleTimeout = null;
-  let rafPending = false;
 
-  // Debounce timer for scaleAppToFit to prevent glitchiness after DOM updates
-  let scaleAppDebounceTimer = null;
-  let lastScaleCallTime = 0;
-  let isTagRendering = false; // Flag to prevent scaling during tag rendering
-  
-  // Expose function to disable/enable scaling during tag rendering
-  window.setTagRenderingState = function(rendering) {
-    isTagRendering = rendering;
-    if (rendering) {
-      // Clear any pending scale calls when rendering starts
-      if (scaleAppDebounceTimer) {
-        clearTimeout(scaleAppDebounceTimer);
-        scaleAppDebounceTimer = null;
-      }
-    }
-  };
-  
   function scaleAppToFit() {
-    // CRITICAL FIX: Don't scale during tag rendering to prevent glitchiness
-    if (isTagRendering) {
-      console.log('⏸️ Skipping scaleAppToFit - tags are rendering');
-      return;
-    }
-    
     // Prevent multiple simultaneous calls
-    if (isScaling || rafPending) return;
-    
-    const now = Date.now();
-    const timeSinceLastCall = now - lastScaleCallTime;
-    
-    // CRITICAL FIX: Debounce rapid calls (< 150ms apart) to prevent glitchiness during DOM updates
-    // But allow immediate execution if enough time has passed
-    if (scaleAppDebounceTimer || timeSinceLastCall < 150) {
-      if (scaleAppDebounceTimer) {
-        clearTimeout(scaleAppDebounceTimer);
-      }
-      scaleAppDebounceTimer = setTimeout(() => {
-        scaleAppDebounceTimer = null;
-        // Double-check rendering state before executing
-        if (isTagRendering) {
-          console.log('⏸️ Skipping debounced scaleAppToFit - tags still rendering');
-          return;
-        }
-        lastScaleCallTime = Date.now();
-        _executeScaleAppToFit();
-      }, 150); // 150ms debounce to batch rapid calls
-    } else {
-      // Enough time has passed, execute immediately
-      lastScaleCallTime = now;
-      _executeScaleAppToFit();
-    }
-  }
-  
-  function _executeScaleAppToFit() {
-    // Prevent multiple simultaneous calls
-    if (isScaling || rafPending) return;
+    if (isScaling) return;
     
     const main = document.getElementById('mainContent');
     const page = document.body;
     if (!main || !page) return;
 
-    // Use requestAnimationFrame to batch DOM reads/writes and prevent flashing
-    rafPending = true;
-    requestAnimationFrame(() => {
-      rafPending = false;
-      if (isScaling) return;
-      
-      isScaling = true;
+    isScaling = true;
 
-      // CRITICAL FIX: Calculate natural size WITHOUT resetting transforms to prevent flashing
-      // Get current transform scale if it exists
-      const currentScale = lastAppliedScale || 1;
-      const computedStyle = window.getComputedStyle(page);
-      const currentTransform = computedStyle.transform;
-      
-      // Parse current scale from transform matrix if it exists
-      let existingScale = 1;
-      if (currentTransform && currentTransform !== 'none') {
-        const matrix = currentTransform.match(/matrix\(([^)]+)\)/);
-        if (matrix) {
-          const values = matrix[1].split(',').map(v => parseFloat(v.trim()));
-          if (values.length >= 4) {
-            existingScale = Math.sqrt(values[0] * values[0] + values[1] * values[1]);
-          }
-        }
-      }
+    // Temporarily reset transform to measure full, natural page size
+    const prevTransformMain = main.style.transform;
+    const prevTransformBody = page.style.transform;
+    const prevWidthBody = page.style.width;
+    const prevHeightBody = page.style.height;
+    main.style.transform = 'none';
+    page.style.transform = 'none';
+    page.style.width = '';
+    page.style.height = '';
 
-      // Measure content size accounting for current scale
-      const container = main;
-      const visibleChildren = Array.from(container.querySelectorAll(':scope > *'))
-        .filter(el => el.offsetParent !== null && getComputedStyle(el).position !== 'fixed');
+    // Compute a visual bounding box of visible, non-fixed children within main content
+    const container = main;
+    const visibleChildren = Array.from(container.querySelectorAll(':scope > *'))
+      .filter(el => el.offsetParent !== null && getComputedStyle(el).position !== 'fixed');
 
-      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
-      visibleChildren.forEach(el => {
-        const r = el.getBoundingClientRect();
-        // Adjust for current scale to get natural size
-        const docLeft = (r.left + window.scrollX) / existingScale;
-        const docTop = (r.top + window.scrollY) / existingScale;
-        const docRight = (r.right + window.scrollX) / existingScale;
-        const docBottom = (r.bottom + window.scrollY) / existingScale;
-        left = Math.min(left, docLeft);
-        top = Math.min(top, docTop);
-        right = Math.max(right, docRight);
-        bottom = Math.max(bottom, docBottom);
-      });
-
-      // Fallback if nothing matched
-      if (!isFinite(left) || !isFinite(top) || !isFinite(right) || !isFinite(bottom)) {
-        const r = container.getBoundingClientRect();
-        left = (r.left + window.scrollX) / existingScale;
-        top = (r.top + window.scrollY) / existingScale;
-        right = (r.right + window.scrollX) / existingScale;
-        bottom = (r.bottom + window.scrollY) / existingScale;
-      }
-
-      const contentWidth = Math.max(1, right - left);
-      const contentHeight = Math.max(1, bottom - top);
-
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-
-      if (!contentWidth || !contentHeight || !vw || !vh) {
-        isScaling = false;
-        return;
-      }
-
-      let scale = Math.min(vw / contentWidth, vh / contentHeight);
-      if (!isFinite(scale) || scale <= 0) scale = 1;
-      scale = Math.min(scale, 1);
-
-      // Apply to body with width/height compensation so layout reflows to fit
-      // CRITICAL FIX: Use transform3d for better performance and prevent flashing
-      const applyScaleToBody = (s) => {
-        // Use transform3d to trigger hardware acceleration and prevent flashing
-        page.style.setProperty('transform', `scale3d(${s}, ${s}, 1)`, 'important');
-        page.style.setProperty('-webkit-transform', `scale3d(${s}, ${s}, 1)`, 'important');
-        page.style.setProperty('transform-origin', 'top left', 'important');
-        page.style.setProperty('-webkit-transform-origin', 'top left', 'important');
-        page.style.setProperty('width', `${(100 / s).toFixed(4)}%`, 'important');
-        page.style.setProperty('height', `${(100 / s).toFixed(4)}%`, 'important');
-        // Enable will-change for smoother transitions
-        page.style.setProperty('will-change', 'transform', 'important');
-      };
-
-      let appliedScale = scale;
-      const minScale = 0.6;
-      const step = 0.05;
-      
-      // Simplified calculation - apply scale directly without iterative loop
-      // This prevents multiple DOM writes that cause flashing
-      appliedScale = Math.max(minScale, Math.min(scale, 1));
-      const normalizedScale = normalizeLargeViewportScale(appliedScale, vw, vh, minScale);
-      appliedScale = normalizedScale;
-
-      // Only update if scale actually changed significantly to prevent unnecessary re-renders
-      if (lastAppliedScale !== null && Math.abs(lastAppliedScale - appliedScale) < 0.01) {
-        isScaling = false;
-        return;
-      }
-
-      lastAppliedScale = appliedScale;
-
-      // Apply scale in a single operation to prevent flashing
-      applyScaleToBody(appliedScale);
-
-      // Hide scrollbars for a cleaner fit
-      document.documentElement.style.overflow = 'hidden';
-      document.body.style.overflow = 'hidden';
-
-      // Expose current scale for quick verification in DevTools
-      document.documentElement.setAttribute('data-app-scale', String(appliedScale));
-      
-      // Reset flag after rendering completes
-      requestAnimationFrame(() => {
-        isScaling = false;
-        // Remove will-change after animation completes to free resources
-        page.style.setProperty('will-change', 'auto', 'important');
-      });
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    visibleChildren.forEach(el => {
+      const r = el.getBoundingClientRect();
+      const docLeft = r.left + window.scrollX;
+      const docTop = r.top + window.scrollY;
+      const docRight = r.right + window.scrollX;
+      const docBottom = r.bottom + window.scrollY;
+      left = Math.min(left, docLeft);
+      top = Math.min(top, docTop);
+      right = Math.max(right, docRight);
+      bottom = Math.max(bottom, docBottom);
     });
+
+    // Fallback if nothing matched
+    if (!isFinite(left) || !isFinite(top) || !isFinite(right) || !isFinite(bottom)) {
+      const r = container.getBoundingClientRect();
+      left = r.left + window.scrollX;
+      top = r.top + window.scrollY;
+      right = r.right + window.scrollX;
+      bottom = r.bottom + window.scrollY;
+    }
+
+    const contentWidth = Math.max(1, right - left);
+    const contentHeight = Math.max(1, bottom - top);
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    if (!contentWidth || !contentHeight || !vw || !vh) {
+      main.style.transform = prevTransformMain;
+      page.style.transform = prevTransformBody;
+      page.style.width = prevWidthBody;
+      page.style.height = prevHeightBody;
+      isScaling = false;
+      return;
+    }
+
+    let scale = Math.min(vw / contentWidth, vh / contentHeight);
+    if (!isFinite(scale) || scale <= 0) scale = 1;
+    scale = Math.min(scale, 1);
+
+    // Apply to body with width/height compensation so layout reflows to fit
+    const applyScaleToBody = (s) => {
+      page.style.transform = `scale(${s})`;
+      page.style.transformOrigin = 'top left';
+      page.style.width = `${(100 / s).toFixed(4)}%`;
+      page.style.height = `${(100 / s).toFixed(4)}%`;
+    };
+
+    let appliedScale = scale;
+    const minScale = 0.6;
+    const step = 0.05;
+    while (appliedScale >= minScale) {
+      applyScaleToBody(appliedScale);
+      const r = main.getBoundingClientRect();
+      if (r.width <= vw && r.height <= vh) break;
+      appliedScale = Math.max(minScale, +(appliedScale - step).toFixed(3));
+      if (appliedScale === minScale) {
+        applyScaleToBody(appliedScale);
+        break;
+      }
+    }
+
+    const normalizedScale = normalizeLargeViewportScale(appliedScale, vw, vh, minScale);
+    if (normalizedScale !== appliedScale) {
+      appliedScale = normalizedScale;
+      applyScaleToBody(appliedScale);
+    }
+
+    // Only update if scale actually changed to prevent unnecessary re-renders
+    if (lastAppliedScale !== null && Math.abs(lastAppliedScale - appliedScale) < 0.001) {
+      main.style.transform = prevTransformMain;
+      page.style.transform = prevTransformBody;
+      page.style.width = prevWidthBody;
+      page.style.height = prevHeightBody;
+      isScaling = false;
+      return;
+    }
+
+    lastAppliedScale = appliedScale;
+
+    // Hide scrollbars for a cleaner fit
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    // Expose current scale for quick verification in DevTools
+    document.documentElement.setAttribute('data-app-scale', String(appliedScale));
+    
+    // Reset flag after a short delay to allow rendering to complete
+    setTimeout(() => {
+      isScaling = false;
+    }, 50);
   }
 
   // Expose for other scripts
   window.scaleAppToFit = scaleAppToFit;
-  
-  // Expose debounced version for use after DOM-heavy operations
-  window.scaleAppToFitDebounced = function(delay = 300) {
-    if (scaleAppDebounceTimer) {
-      clearTimeout(scaleAppDebounceTimer);
-    }
-    scaleAppDebounceTimer = setTimeout(() => {
-      scaleAppDebounceTimer = null;
-      _executeScaleAppToFit();
-    }, delay);
-  };
 
   // Apply on ready (after content becomes visible), and on resize/orientation
   document.addEventListener('DOMContentLoaded', function() {
@@ -1408,11 +1334,11 @@ document.addEventListener('DOMContentLoaded', function() {
       
       const visible = main.offsetParent !== null || getComputedStyle(main).opacity !== '0';
       if (visible) {
-        // CRITICAL FIX: Longer delay on initial load to prevent flashing
+        // Use setTimeout with debounce instead of immediate requestAnimationFrame
         if (scaleTimeout) clearTimeout(scaleTimeout);
         scaleTimeout = setTimeout(() => {
           scaleAppToFit();
-        }, 300); // Increased from 100ms to 300ms
+        }, 100);
       } else {
         setTimeout(tryApply, 200);
       }
@@ -1423,55 +1349,40 @@ document.addEventListener('DOMContentLoaded', function() {
   // Ensure after full load (fonts/images) we re-calc - CRITICAL FIX: Only call once
   window.addEventListener('load', () => {
     if (scaleTimeout) clearTimeout(scaleTimeout);
-    // CRITICAL FIX: Longer delay after full load to prevent flashing
     scaleTimeout = setTimeout(() => {
       scaleAppToFit();
-    }, 400); // Increased from 100ms to 400ms
+    }, 100);
   });
 
-  // CRITICAL FIX: Aggressive throttling to prevent rapid flashing
+  // CRITICAL FIX: Throttle resize events to prevent rapid flashing
   let resizeTimer;
   let lastResizeTime = 0;
-  let resizeTimeoutId = null;
-  const RESIZE_THROTTLE_MS = 500; // Increased from 300ms to 500ms for better stability
-  
   window.addEventListener('resize', () => {
     const now = Date.now();
-    // Aggressive throttle to max once per RESIZE_THROTTLE_MS to prevent flashing
-    if (now - lastResizeTime < RESIZE_THROTTLE_MS) {
-      // Cancel pending calls
-      if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
+    // Throttle to max once per 150ms
+    if (now - lastResizeTime < 150) {
       cancelAnimationFrame(resizeTimer);
-      // Schedule a single delayed call
-      resizeTimeoutId = setTimeout(() => {
+      resizeTimer = requestAnimationFrame(() => {
         if (scaleTimeout) clearTimeout(scaleTimeout);
         scaleTimeout = setTimeout(() => {
           scaleAppToFit();
-        }, RESIZE_THROTTLE_MS);
-        resizeTimeoutId = null;
-      }, RESIZE_THROTTLE_MS);
+        }, 150);
+      });
       return;
     }
     lastResizeTime = now;
-    // Cancel any pending calls
-    if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
     cancelAnimationFrame(resizeTimer);
     if (scaleTimeout) clearTimeout(scaleTimeout);
-    // Use longer delay to prevent rapid re-renders
     scaleTimeout = setTimeout(() => {
       scaleAppToFit();
-    }, RESIZE_THROTTLE_MS);
+    }, 150);
   });
   
   window.addEventListener('orientationchange', () => {
-    // Cancel all pending calls
-    if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
     if (scaleTimeout) clearTimeout(scaleTimeout);
-    cancelAnimationFrame(resizeTimer);
-    // Longer delay for orientation change to prevent flashing
     scaleTimeout = setTimeout(() => {
       scaleAppToFit();
-    }, 800);
+    }, 300); // Longer delay for orientation change
   });
 })();
 
