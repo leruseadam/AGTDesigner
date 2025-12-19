@@ -1888,7 +1888,11 @@ class TemplateProcessor:
                                 # Remove newline prefix if present, and strip whitespace
                                 clean_weight = weight_units.replace('\n', '').strip()
                                 # Check if weight is already formatted with hyphen
-                                if clean_weight.startswith('\u2011') or clean_weight.startswith('-'):
+                                # Normalize non-breaking hyphen to regular hyphen for consistency
+                                if clean_weight.startswith('\u2011'):
+                                    # Replace non-breaking hyphen with regular hyphen
+                                    clean_weight = clean_weight.replace('\u2011', '-', 1).replace('\u00A0', ' ')
+                                if clean_weight.startswith('-'):
                                     # Weight already has hyphen, just append it with space
                                     desc_and_weight = f"{group_display_name} {clean_weight}"
                                 else:
@@ -1964,7 +1968,11 @@ class TemplateProcessor:
                             # Remove newline prefix if present, and strip whitespace
                             clean_weight = weight_units.replace('\n', '').strip()
                             # Check if weight already has hyphen (from format_joint_ratio_pack)
-                            if clean_weight.startswith('\u2011') or clean_weight.startswith('-'):
+                            # Normalize non-breaking hyphen to regular hyphen for consistency
+                            if clean_weight.startswith('\u2011'):
+                                # Replace non-breaking hyphen with regular hyphen
+                                clean_weight = clean_weight.replace('\u2011', '-', 1).replace('\u00A0', ' ')
+                            if clean_weight.startswith('-'):
                                 # Weight already has hyphen, just append it with space
                                 desc_and_weight = f"{primary_text} {clean_weight}"
                             else:
@@ -6713,18 +6721,18 @@ class TemplateProcessor:
                     if count and count.isdigit():
                         count_int = int(count)
                         if count_int == 1:
-                            # For single units, use non-breaking hyphen + non-breaking space (same rule as other templates)
-                            formatted = f"\u2011\u00A0{amount}g"
+                            # For single units, use regular hyphen with spaces (matching template format)
+                            formatted = f"- {amount}g"
                         else:
-                            # For multiple units, use non-breaking hyphen + non-breaking space (same rule as other templates)
-                            # CRITICAL FIX: Use non-breaking hyphen (\u2011) + non-breaking space (\u00A0) to prevent floating hyphen
-                            formatted = f"\u2011\u00A0{amount}g\u00A0x\u00A0{count}\u00A0Pack"
+                            # For multiple units, use regular hyphen with spaces (matching template format)
+                            # CRITICAL FIX: Use regular hyphen (-) with regular spaces to match template format
+                            formatted = f"- {amount}g x {count} Pack"
                     else:
-                        # Only amount found (like "1g") - use non-breaking hyphen + non-breaking space
-                        formatted = f"\u2011\u00A0{amount}g"
+                        # Only amount found (like "1g") - use regular hyphen with spaces
+                        formatted = f"- {amount}g"
                 except IndexError:
-                    # Only amount found (like "1g") - use non-breaking hyphen + non-breaking space
-                    formatted = f"\u2011\u00A0{amount}g"
+                    # Only amount found (like "1g") - use regular hyphen with spaces
+                    formatted = f"- {amount}g"
                 return formatted
         
         # If no pattern matches, return the original text
