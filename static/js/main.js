@@ -10429,19 +10429,20 @@ const TagManager = {
             }
         }
         
-        // CRITICAL FIX: Always try to fetch fresh data, even if cache exists
-        // Cache is just for instant display, but we should still refresh in background
+        // CRITICAL FIX: Check cache FIRST before fetching from server
+        // Only fetch from server if cache doesn't exist or is expired
         const recentUpload = this._lastUploadTime && (Date.now() - this._lastUploadTime) < 5000;
         const hasCachedTags = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
         
-        // If we have cached tags but no recent upload, still fetch fresh data in background
-        // but don't clear existing tags
-        if (!recentUpload && hasCachedTags) {
-            verboseLog('✅ Tags loaded from cache, fetching fresh data in background...');
-            // Still fetch fresh data but don't block UI
-            this.fetchAndUpdateAvailableTags().catch(err => {
-                console.warn('Background refresh failed (non-critical):', err);
-            });
+        // If we have cached tags and no recent upload, skip server fetch completely
+        if (hasCachedTags && !recentUpload) {
+            console.log('✅ Using cached tags, skipping server fetch to avoid unnecessary reload');
+            this._checkingExistingData = false;
+            // Still load selected tags and filters in background (non-blocking)
+            this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
+            if (this.fetchAndPopulateFilters) {
+                this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
+            }
             return;
         }
         

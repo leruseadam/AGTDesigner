@@ -884,14 +884,22 @@ body.modal-open #mainContent.store-selection-disabled,
 /* Reduce gap between Undo/Redo group and Clear button */
 .controls-buttons-container {
   display: grid !important;
-  gap: 0.5rem !important; /* Reduced from gap-3 (1rem) to match spacing between Undo/Redo */
+  gap: 0.15rem !important; /* Minimal gap between Redo and Clear button */
   width: 100% !important;
 }
 
 /* CRITICAL FIX: Override gap-3 on the inner Undo/Redo group to match container gap */
 .controls-buttons-container > .d-grid.gap-3 {
-  gap: 0.5rem !important; /* Match the container gap instead of gap-3 (1rem) */
+  gap: 0.5rem !important; /* Keep spacing between Undo and Redo */
   margin-bottom: 0 !important; /* Remove any extra margin */
+  margin-top: 0 !important; /* Remove any extra margin */
+  padding-bottom: 0 !important; /* Remove any padding */
+}
+
+/* Ensure Clear button has no extra top margin */
+.controls-buttons-container > #clear-filters-btn {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
 }
 
 /* Consolidated help button container styling */
