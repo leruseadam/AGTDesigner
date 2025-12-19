@@ -3679,19 +3679,8 @@ const TagManager = {
             availableTagsContainer.innerHTML = '';
             availableTagsContainer.appendChild(fragment);
             
-            // PERFORMANCE FIX: Remove updating class after DOM update to re-enable transitions
-            const removeUpdatingClass = () => {
-                if (availableTagsContainer) availableTagsContainer.classList.remove('updating');
-                const availableTagsList = document.getElementById('availableTagsList');
-                if (availableTagsList) availableTagsList.classList.remove('updating');
-                const tagListContainer = document.querySelector('.tag-list-container');
-                if (tagListContainer) tagListContainer.classList.remove('updating');
-            };
-            
             // PERFORMANCE FIX: Defer non-critical operations to next frame
             requestAnimationFrame(() => {
-                // Remove updating class after render
-                removeUpdatingClass();
                 // After tags are in DOM, restore scroll and initialize
                 this._restoreAvailableScrollPosition(savedScroll);
                 this.updateSelectAllCheckboxes();
@@ -3725,23 +3714,12 @@ const TagManager = {
                     updateSelectAllCheckboxState(section);
                 });
                 
-                        // Hide loading splash only after tags actually appear in DOM
-                        this._waitForTagsToAppear();
+                // Hide loading splash only after tags actually appear in DOM
+                this._waitForTagsToAppear();
             });
         });
         
         verboseLog('✅ Rendered', tags.length, 'JSON matched tags with HIERARCHY (same as Selected Tags)');
-        } catch (error) {
-            console.error('Error in _performUpdateAvailableTags:', error);
-            // Ensure updating class is removed even on error
-            const availableTagsContainer = document.getElementById('availableTags');
-            const availableTagsList = document.getElementById('availableTagsList');
-            const tagListContainer = document.querySelector('.tag-list-container');
-            if (availableTagsContainer) availableTagsContainer.classList.remove('updating');
-            if (availableTagsList) availableTagsList.classList.remove('updating');
-            if (tagListContainer) tagListContainer.classList.remove('updating');
-            throw error; // Re-throw to allow caller to handle
-        }
     },
 
     // Internal function that actually updates the available tags
@@ -3752,20 +3730,6 @@ const TagManager = {
     },
     
     _performUpdateAvailableTags(originalTags, filteredTags = null) {
-        // PERFORMANCE FIX: Add updating class to prevent flashing during rapid updates
-        const availableTagsContainer = document.getElementById('availableTags');
-        const availableTagsList = document.getElementById('availableTagsList');
-        const tagListContainer = document.querySelector('.tag-list-container');
-        const removeUpdatingClass = () => {
-            if (availableTagsContainer) availableTagsContainer.classList.remove('updating');
-            if (availableTagsList) availableTagsList.classList.remove('updating');
-            if (tagListContainer) tagListContainer.classList.remove('updating');
-        };
-        
-        if (availableTagsContainer) availableTagsContainer.classList.add('updating');
-        if (availableTagsList) availableTagsList.classList.add('updating');
-        if (tagListContainer) tagListContainer.classList.add('updating');
-        
         verboseLog('_updateAvailableTags called with:', {
             originalTagsLength: originalTags ? originalTags.length : 0,
             filteredTagsLength: filteredTags ? filteredTags.length : 0,
@@ -3773,20 +3737,11 @@ const TagManager = {
             hydratedFromCache: this.state.hydratedFromCache
         });
         
+        const availableTagsContainer = document.getElementById('availableTags');
         if (!availableTagsContainer) {
             console.error('Available tags container not found');
-            removeUpdatingClass(); // Ensure class is removed even on error
             return;
         }
-        
-        // PERFORMANCE FIX: Ensure updating class is removed even if errors occur
-        const removeUpdatingClass = () => {
-            if (availableTagsContainer) availableTagsContainer.classList.remove('updating');
-            if (availableTagsList) availableTagsList.classList.remove('updating');
-            if (tagListContainer) tagListContainer.classList.remove('updating');
-        };
-        
-        try {
         
         // CRITICAL FIX: Preserve checkbox selections from DOM before re-rendering
         // This prevents selections made during initial load from being lost
@@ -4062,12 +4017,6 @@ const TagManager = {
                         this._renderTagsInBatches(sortedSimple, tagList);
                         availableTagsContainer.innerHTML = '';
                         availableTagsContainer.appendChild(tagList);
-                        // PERFORMANCE FIX: Remove updating class after render
-                        if (availableTagsContainer) availableTagsContainer.classList.remove('updating');
-                        const availableTagsList = document.getElementById('availableTagsList');
-                        if (availableTagsList) availableTagsList.classList.remove('updating');
-                        const tagListContainer = document.querySelector('.tag-list-container');
-                        if (tagListContainer) tagListContainer.classList.remove('updating');
                         this._restoreCheckboxStates();
                         this._restoreAvailableScrollPosition(savedScroll);
                     }
@@ -4102,12 +4051,6 @@ const TagManager = {
                     // CRITICAL FIX: Replace container content immediately - don't wait for next frame
                     availableTagsContainer.innerHTML = '';
                     availableTagsContainer.appendChild(tagList);
-                    // PERFORMANCE FIX: Remove updating class after render
-                    if (availableTagsContainer) availableTagsContainer.classList.remove('updating');
-                    const availableTagsList = document.getElementById('availableTagsList');
-                    if (availableTagsList) availableTagsList.classList.remove('updating');
-                    const tagListContainer = document.querySelector('.tag-list-container');
-                    if (tagListContainer) tagListContainer.classList.remove('updating');
                         
                         // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
                         // Also restore persistentSelectedTags if it was accidentally cleared
@@ -4172,13 +4115,6 @@ const TagManager = {
                 // CRITICAL FIX: Append immediately instead of waiting for next frame
                 availableTagsContainer.innerHTML = '';
                 availableTagsContainer.appendChild(tagList);
-                
-                // PERFORMANCE FIX: Remove updating class after render
-                if (availableTagsContainer) availableTagsContainer.classList.remove('updating');
-                const availableTagsList = document.getElementById('availableTagsList');
-                if (availableTagsList) availableTagsList.classList.remove('updating');
-                const tagListContainer = document.querySelector('.tag-list-container');
-                if (tagListContainer) tagListContainer.classList.remove('updating');
                     
                     // CRITICAL FIX: Restore checkbox states after re-render
                     if (savedPersistentTags.length > 0 && (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0)) {
@@ -9576,20 +9512,6 @@ const TagManager = {
     async refreshTagLists(options = {}) {
         const { preserveFilters = true, force = true } = options;
         verboseLog('=== refreshTagLists START ===', { preserveFilters, force });
-
-        // PERFORMANCE FIX: Debounce rapid refresh calls to prevent flashing
-        const now = Date.now();
-        if (!this._lastRefreshTime) {
-            this._lastRefreshTime = 0;
-        }
-        const timeSinceLastRefresh = now - this._lastRefreshTime;
-        const minRefreshInterval = 1000; // Minimum 1 second between refreshes
-        
-        if (timeSinceLastRefresh < minRefreshInterval && !force) {
-            verboseLog(`Skipping refresh - only ${timeSinceLastRefresh}ms since last refresh`);
-            return [true, true, true]; // Return success without refreshing
-        }
-        this._lastRefreshTime = now;
 
         // Optionally preserve filters by skipping reset
         if (!preserveFilters) {

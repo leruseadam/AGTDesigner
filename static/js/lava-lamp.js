@@ -27,49 +27,42 @@
   // Show canvas as soon as WebGL context is available
   showCanvas();
 
-  // PERFORMANCE FIX: Debounce resize to prevent flickering
-  let resizeTimeout;
   function resize() {
-    // Clear any pending resize
-    if (resizeTimeout) {
-      clearTimeout(resizeTimeout);
-    }
+    // Get actual viewport dimensions
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const dpr = window.devicePixelRatio || 1;
     
-    // Debounce resize operations
-    resizeTimeout = setTimeout(() => {
-      // Get actual viewport dimensions
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const dpr = window.devicePixelRatio || 1;
-      
-      // PERFORMANCE FIX: Removed console.log calls that slow down rendering
-      
-      // Set CSS dimensions to fill viewport
-      canvas.style.position = 'fixed';
-      canvas.style.top = '0px';
-      canvas.style.left = '0px';
-      canvas.style.right = '0px';
-      canvas.style.bottom = '0px';
-      canvas.style.width = vw + 'px';
-      canvas.style.height = vh + 'px';
-      canvas.style.zIndex = '-1';
-      canvas.style.pointerEvents = 'none';
-      canvas.style.margin = '0';
-      canvas.style.padding = '0';
-      canvas.style.border = 'none';
-      canvas.style.display = 'block';
-      canvas.style.background = 'transparent';
-      
-      // Set canvas internal resolution to match display size with device pixel ratio
-      const displayWidth = Math.floor(vw * dpr);
-      const displayHeight = Math.floor(vh * dpr);
-      
-      canvas.width = displayWidth;
-      canvas.height = displayHeight;
-      
-      // Update WebGL viewport to match canvas resolution
-      gl.viewport(0, 0, displayWidth, displayHeight);
-    }, 100); // 100ms debounce to prevent flickering
+    console.log('Viewport:', vw, 'x', vh, 'DPR:', dpr);
+    
+    // Set CSS dimensions to fill viewport
+    canvas.style.position = 'fixed';
+    canvas.style.top = '0px';
+    canvas.style.left = '0px';
+    canvas.style.right = '0px';
+    canvas.style.bottom = '0px';
+    canvas.style.width = vw + 'px';
+    canvas.style.height = vh + 'px';
+    canvas.style.zIndex = '-1';
+    canvas.style.pointerEvents = 'none';
+    canvas.style.margin = '0';
+    canvas.style.padding = '0';
+    canvas.style.border = 'none';
+    canvas.style.display = 'block';
+    canvas.style.background = 'transparent';
+    
+    // Set canvas internal resolution to match display size with device pixel ratio
+    const displayWidth = Math.floor(vw * dpr);
+    const displayHeight = Math.floor(vh * dpr);
+    
+    canvas.width = displayWidth;
+    canvas.height = displayHeight;
+    
+    // Update WebGL viewport to match canvas resolution
+    gl.viewport(0, 0, displayWidth, displayHeight);
+    
+    console.log('Canvas CSS:', vw, 'x', vh);
+    console.log('Canvas internal:', displayWidth, 'x', displayHeight);
   }
   window.addEventListener('resize', resize);
   resize();
@@ -274,24 +267,8 @@
     });
   }
 
-  // PERFORMANCE FIX: Throttle animation to reduce CPU usage and prevent flickering
-  let lastFrameTime = 0;
-  const targetFPS = 30; // Reduce from 60fps to 30fps for better performance
-  const frameInterval = 1000 / targetFPS;
-  
   function animate() {
-    const currentTime = performance.now();
-    const elapsed = currentTime - lastFrameTime;
-    
-    // Skip frame if not enough time has passed (throttle to target FPS)
-    if (elapsed < frameInterval) {
-      requestAnimationFrame(animate);
-      return;
-    }
-    
-    lastFrameTime = currentTime - (elapsed % frameInterval);
-    
-    const t = currentTime * 0.001;
+    const t = performance.now() * 0.001;
     const dt = Math.min(0.016, t - (blobs[0].lastUpdate || t)); // Cap delta time
     
     gl.uniform1f(u_time, t);
