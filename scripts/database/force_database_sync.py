@@ -109,7 +109,17 @@ def sync_database_from_excel(excel_path):
     from src.core.data.product_database import get_product_database
     product_db = get_product_database('AGT_Bothell')
     
+    # CRITICAL: Clear existing database FIRST to ensure fresh start
+    logger.info("Clearing existing database...")
+    try:
+        product_db.clear_all_data()
+        logger.info("✅ Database cleared")
+    except Exception as e:
+        logger.warning(f"Could not clear database (may be empty): {e}")
+    
+    logger.info("")
     logger.info("Starting database sync...")
+    logger.info(f"Will import {len(df)} rows from Excel")
     logger.info("")
     
     # Store Excel data in database
@@ -121,12 +131,33 @@ def sync_database_from_excel(excel_path):
     logger.info(f"Results: {result}")
     logger.info("")
     
-    # Verify by checking some Constellation Moonshots
-    logger.info("Verifying Constellation Moonshots...")
-    
+    # CRITICAL: Verify final product count
+    logger.info("Verifying database...")
     import sqlite3
     conn = sqlite3.connect(product_db.db_path)
     cursor = conn.cursor()
+    
+    cursor.execute("SELECT COUNT(*) FROM products")
+    final_count = cursor.fetchone()[0]
+    
+    logger.info("")
+    logger.info("="*80)
+    logger.info(f"FINAL PRODUCT COUNT: {final_count}")
+    logger.info("="*80)
+    
+    if final_count >= 10000:
+        logger.info("✅ SUCCESS: Database has 10,000+ products!")
+    elif final_count >= 5000:
+        logger.warning(f"⚠️  WARNING: Only {final_count} products (expected 10,000+)")
+        logger.warning("   Some rows may have been filtered out (blank names, missing vendor, etc.)")
+    else:
+        logger.error(f"❌ ERROR: Only {final_count} products loaded!")
+        logger.error("   Check Excel file - may only have one sheet or missing data")
+    
+    logger.info("")
+    
+    # Verify by checking some Constellation Moonshots
+    logger.info("Sample verification (Constellation Moonshots)...")
     
     cursor.execute('''
         SELECT "Product Name*", "Weight*", "Units"
@@ -134,12 +165,16 @@ def sync_database_from_excel(excel_path):
         WHERE "Product Name*" LIKE '%Moonshot%'
         AND "Product Brand" = 'Constellation Cannabis'
         ORDER BY "Product Name*"
+        LIMIT 5
     ''')
     
     moonshots = cursor.fetchall()
     
-    for name, weight, units in moonshots:
-        logger.info(f"  {name}: {weight} {units or ''}")
+    if moonshots:
+        for name, weight, units in moonshots:
+            logger.info(f"  ✅ {name}: {weight} {units or ''}")
+    else:
+        logger.info("  (No Moonshots found - this is OK)")
     
     conn.close()
     
