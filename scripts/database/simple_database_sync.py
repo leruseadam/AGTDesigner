@@ -32,6 +32,21 @@ def normalize_product_name(name):
         return ""
     return str(name).strip().lower()
 
+def _load_excel_all_sheets(excel_path):
+    """Load every sheet from Excel file and concat into single DataFrame."""
+    print(f"🔎 Loading Excel file: {excel_path.name}")
+    loaded_excel = pd.read_excel(excel_path, sheet_name=None, engine='openpyxl')
+    if isinstance(loaded_excel, dict):
+        sheet_names = list(loaded_excel.keys())
+        df = pd.concat(loaded_excel.values(), ignore_index=True)
+        print(f"✅ Excel sheets loaded: {sheet_names}")
+    else:
+        df = loaded_excel
+        print("✅ Excel loaded from a single sheet")
+    df = df.reset_index(drop=True)
+    return df
+
+
 def sync_products_from_excel(excel_path, db_path):
     """Sync products from Excel to database."""
     
@@ -44,7 +59,7 @@ def sync_products_from_excel(excel_path, db_path):
     
     # Load Excel
     print("Loading Excel file...")
-    df = pd.read_excel(excel_path, engine='openpyxl')
+    df = _load_excel_all_sheets(excel_path)
     print(f"  Loaded {len(df)} rows")
     print()
     

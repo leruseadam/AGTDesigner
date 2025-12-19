@@ -50,9 +50,25 @@ def sync_database_from_excel(excel_path):
     logger.info(f"Excel file: {excel_path}")
     logger.info("")
     
+def _load_excel_all_sheets(excel_path):
+    """Load every sheet in the workbook and concatenate them."""
+    logger.info(f"Loading Excel file: {excel_path.name}")
+    loaded_excel = pd.read_excel(excel_path, sheet_name=None, engine='openpyxl')
+    if isinstance(loaded_excel, dict):
+        sheet_names = list(loaded_excel.keys())
+        df = pd.concat(loaded_excel.values(), ignore_index=True)
+        logger.info(f"✅ Excel sheets loaded: {sheet_names}")
+    else:
+        df = loaded_excel
+        logger.info("✅ Excel loaded from a single sheet")
+    df = df.reset_index(drop=True)
+    logger.info(f"  Total rows after concat: {len(df)}")
+    return df
+
+
     # Load Excel file
     logger.info("Loading Excel file...")
-    df = pd.read_excel(excel_path, engine='openpyxl')
+    df = _load_excel_all_sheets(excel_path)
     logger.info(f"Loaded {len(df)} rows from Excel")
     logger.info("")
     
