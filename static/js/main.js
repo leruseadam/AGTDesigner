@@ -3730,10 +3730,6 @@ const TagManager = {
     },
     
     _performUpdateAvailableTags(originalTags, filteredTags = null) {
-        // CRITICAL FIX: Preserve selected tags before updating - don't let them disappear
-        const preservedSelectedTags = [...this.state.persistentSelectedTags];
-        verboseLog('_performUpdateAvailableTags called - preserving selected tags:', preservedSelectedTags.length);
-        
         verboseLog('_updateAvailableTags called with:', {
             originalTagsLength: originalTags ? originalTags.length : 0,
             filteredTagsLength: filteredTags ? filteredTags.length : 0,
@@ -8463,9 +8459,6 @@ const TagManager = {
     },
 
     async fetchAndUpdateAvailableTags() {
-        // CRITICAL FIX: Set flag to prevent concurrent selected tags fetch
-        this._updatingAvailableTags = true;
-        try {
         // CRITICAL FIX: Reset stuck flag if it's been set for too long
         if (this._fetchingAvailableTags) {
             const fetchStartTime = this._fetchingAvailableTagsStartTime || Date.now();
@@ -9001,20 +8994,6 @@ const TagManager = {
             // CRITICAL FIX: Don't filter out selected tags - preserve them even if temporarily not in available tags
             // This prevents tags from disappearing during loading, updates, or when tags are temporarily unavailable
             // The validateSelectedTags function will handle cleanup of truly invalid tags later
-            
-            // CRITICAL FIX: Restore preserved selected tags if they were cleared during update
-            if (preservedSelectedTags.length > 0) {
-                // Merge preserved tags back into persistentSelectedTags (don't overwrite, merge)
-                const currentSet = new Set(this.state.persistentSelectedTags);
-                preservedSelectedTags.forEach(tagName => {
-                    if (!currentSet.has(tagName)) {
-                        this.state.persistentSelectedTags.push(tagName);
-                        currentSet.add(tagName);
-                    }
-                });
-                verboseLog(`Restored ${preservedSelectedTags.length} preserved selected tags after update`);
-            }
-            
             if (this.state.persistentSelectedTags.length > 0) {
                 // Don't filter here - preserve all selections
                 // Tags might be temporarily unavailable during updates but will come back
@@ -9142,10 +9121,9 @@ const TagManager = {
 
             return false;
         } finally {
-            // CRITICAL FIX: Always reset flags in finally block to ensure they're cleared even if error occurs
-            // This prevents the hangup issue where flags get stuck in true state
+            // CRITICAL FIX: Always reset flag in finally block to ensure it's cleared even if error occurs
+            // This prevents the hangup issue where the flag gets stuck in true state
             this._fetchingAvailableTags = false;
-            this._updatingAvailableTags = false; // CRITICAL: Clear flag to allow selected tags fetch to proceed
         }
     },
 
@@ -9277,44 +9255,25 @@ const TagManager = {
         try {
             verboseLog('Fetching selected tags...');
             
-            // CRITICAL FIX: Prevent concurrent operations that might clear tags
-            if (this._fetchingSelectedTags) {
-                verboseLog('⏸️ fetchAndUpdateSelectedTags already in progress, skipping duplicate call');
-                return true;
+            // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 2 seconds)
+            // This prevents tags from disappearing right after selection on initial load
+            const now = Date.now();
+            if (this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000) {
+                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent tag selection detected (within 2s)');
+                return true; // Return success to avoid error handling
             }
-            this._fetchingSelectedTags = true;
             
-            try {
-                // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 2 seconds)
-                // This prevents tags from disappearing right after selection on initial load
-                const now = Date.now();
-                if (this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000) {
-                    verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent tag selection detected (within 2s)');
-                    return true; // Return success to avoid error handling
-                }
-                
-                // CRITICAL FIX: Prevent clearing tags right after generation (within last 30 seconds)
-                // Generation doesn't clear backend selected tags, so don't fetch and overwrite local selections
-                if (this._lastGenerationTime && (now - this._lastGenerationTime) < 30000) {
-                    verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent generation detected (within 30s), preserving current selections');
-                    return true; // Return success to preserve current selections
-                }
-                
-                // CRITICAL FIX: Prevent fetching if tags are being updated (race condition protection)
-                if (this._updatingAvailableTags) {
-                    verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - tags are being updated, will retry after update completes');
-                    // Retry after a short delay
-                    setTimeout(() => {
-                        this._fetchingSelectedTags = false;
-                        this.fetchAndUpdateSelectedTags();
-                    }, 500);
-                    return true;
-                }
-                
-                // CRITICAL FIX: Preserve local selections before fetching from backend
-                // This prevents selections from disappearing if backend hasn't saved them yet
-                const localSelections = [...this.state.persistentSelectedTags];
-                verboseLog('Local selections before fetch:', localSelections);
+            // CRITICAL FIX: Prevent clearing tags right after generation (within last 30 seconds)
+            // Generation doesn't clear backend selected tags, so don't fetch and overwrite local selections
+            if (this._lastGenerationTime && (now - this._lastGenerationTime) < 30000) {
+                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent generation detected (within 30s), preserving current selections');
+                return true; // Return success to preserve current selections
+            }
+            
+            // CRITICAL FIX: Preserve local selections before fetching from backend
+            // This prevents selections from disappearing if backend hasn't saved them yet
+            const localSelections = [...this.state.persistentSelectedTags];
+            verboseLog('Local selections before fetch:', localSelections);
             
             const timestamp = Date.now();
             const response = await fetch(`/api/selected-tags?t=${timestamp}`);
@@ -9401,11 +9360,7 @@ const TagManager = {
                 }, 300);
             }
             
-                return true;
-            } finally {
-                // Always clear the flag, even if we return early
-                this._fetchingSelectedTags = false;
-            }
+            return true;
         } catch (error) {
             console.error('Error fetching selected tags:', error);
             // CRITICAL FIX: Don't clear selections on error - preserve local selections
@@ -9425,7 +9380,6 @@ const TagManager = {
                 // Only clear if we have no local selections
                 this.updateSelectedTags([]);
             }
-            this._fetchingSelectedTags = false;
             return false;
         }
     },
