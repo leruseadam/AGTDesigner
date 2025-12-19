@@ -1004,7 +1004,7 @@ const AppLoadingSplash = {
 // CRITICAL FIX: Expose TagManager to window immediately when defined
 // This allows other scripts to check for TagManager even before it's fully initialized
 const TagManager = {
-    CACHE_TTL_MS: 10 * 60 * 1000, // 10 minutes
+    CACHE_TTL_MS: 60 * 60 * 1000, // 60 minutes - increased for better persistence across page refreshes
     state: {
         selectedTags: new Set(),
         isClearing: false, // Flag to prevent multiple simultaneous clear operations
@@ -1055,12 +1055,64 @@ const TagManager = {
                 window.currentStore || 'default';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
-            const cacheKey = `agt_available_tags_${store}_${file}`;
-            console.log('🔑 Cache key generated:', cacheKey, '{ store:', store, 'file:', file, '}');
+            
+            // CRITICAL FIX: Normalize cache key to prevent mismatches
+            // Remove extra spaces, normalize hyphens, and ensure consistent formatting
+            const normalizedStore = String(store).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
+            const normalizedFile = String(file).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
+            
+            const cacheKey = `agt_available_tags_${normalizedStore}_${normalizedFile}`;
+            console.log('🔑 Cache key generated:', cacheKey, '{ store:', normalizedStore, 'file:', normalizedFile, '}');
             return cacheKey;
         } catch (error) {
             console.warn('Failed to build available-tags cache key:', error);
             return 'agt_available_tags_default';
+        }
+    },
+    
+    // CRITICAL FIX: Try multiple cache key variations to handle formatting differences
+    tryMultipleCacheKeys() {
+        try {
+            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                window.currentStore || 'default';
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
+                'nofile';
+            
+            // Try multiple key variations
+            const variations = [
+                `agt_available_tags_${store}_${file}`, // Original
+                `agt_available_tags_${store.trim()}_${file.trim()}`, // Trimmed
+                `agt_available_tags_${store.replace(/\s+/g, ' ')}_${file.replace(/\s+/g, ' ')}`, // Normalized spaces
+                `agt_available_tags_${store.replace(/\s*-\s*/g, '-')}_${file.replace(/\s*-\s*/g, '-')}`, // Normalized hyphens
+                `agt_available_tags_${store.replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-')}_${file.replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-')}` // Fully normalized
+            ];
+            
+            // Also list all available cache keys for debugging
+            const allCacheKeys = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                if (key && key.startsWith('agt_available_tags_')) {
+                    allCacheKeys.push(key);
+                }
+            }
+            if (allCacheKeys.length > 0) {
+                console.log('🔍 Available cache keys in sessionStorage:', allCacheKeys);
+            }
+            
+            // Try each variation
+            for (const key of variations) {
+                const raw = sessionStorage.getItem(key);
+                if (raw) {
+                    console.log(`✅ Found cache with variation key: ${key}`);
+                    return { key, raw };
+                }
+            }
+            
+            console.log('❌ No cache found in any variation');
+            return null;
+        } catch (error) {
+            console.warn('Failed to try multiple cache keys:', error);
+            return null;
         }
     },
 
@@ -1081,10 +1133,20 @@ const TagManager = {
             }
             
             const cacheKey = this.getAvailableTagsCacheKey();
-            const raw = sessionStorage.getItem(cacheKey);
+            let raw = sessionStorage.getItem(cacheKey);
+            
+            // CRITICAL FIX: If exact key not found, try multiple variations
             if (!raw) {
-                console.log('❌ No cached data found for key:', cacheKey);
-                return null;
+                console.log('❌ No cached data found for exact key:', cacheKey);
+                console.log('🔄 Trying cache key variations...');
+                const fallbackResult = this.tryMultipleCacheKeys();
+                if (fallbackResult) {
+                    raw = fallbackResult.raw;
+                    console.log(`✅ Found cache with fallback key: ${fallbackResult.key}`);
+                } else {
+                    console.log('❌ No cached data found in any variation');
+                    return null;
+                }
             }
             console.log('✅ Found cached data, parsing...');
             const payload = JSON.parse(raw);
@@ -3054,9 +3116,13 @@ const TagManager = {
             const tagName = checkbox.value;
             if (!tagName) return;
             
-            // Check if checkbox already has a handler attached
-            if (checkbox._changeHandler) {
-                // Handler exists, just ensure it's still attached
+            // Check if checkbox already has a handler attached and it's still connected
+            if (checkbox._changeHandler && checkbox.onchange) {
+                // Handler exists and is attached, just ensure checkbox is enabled
+                checkbox.style.pointerEvents = 'auto';
+                checkbox.disabled = false;
+                checkbox.removeAttribute('data-drag-disabled');
+                checkbox.removeAttribute('data-reordering');
                 return;
             }
             
@@ -3064,40 +3130,67 @@ const TagManager = {
             const tag = this.state.tags.find(t => t['Product Name*'] === tagName) ||
                        this.state.originalTags.find(t => t['Product Name*'] === tagName);
             
-            if (!tag) return;
+            if (!tag) {
+                // Tag not found, but still ensure checkbox is enabled
+                checkbox.style.pointerEvents = 'auto';
+                checkbox.disabled = false;
+                return;
+            }
             
-            // Recreate the change handler (same as in createTagElement)
+            // Ensure _selectedTagsSet exists
+            if (!this.state._selectedTagsSet) {
+                this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
+            }
+            
+            // Remove any existing handlers first to prevent duplicates
+            if (checkbox._changeHandler) {
+                checkbox.removeEventListener('change', checkbox._changeHandler);
+            }
+            if (checkbox._clickHandler) {
+                checkbox.removeEventListener('click', checkbox._clickHandler);
+            }
+            
+            // Recreate the change handler (same logic as in createTagElement)
             const handleCheckboxChange = (e) => {
-                e.stopPropagation();
+                // CRITICAL FIX: Always allow checkbox clicks - clear drag attributes if they exist
+                if (e.target.hasAttribute('data-reordering')) {
+                    e.target.removeAttribute('data-reordering');
+                }
+                if (e.target.hasAttribute('data-drag-disabled')) {
+                    e.target.removeAttribute('data-drag-disabled');
+                    e.target.style.pointerEvents = 'auto';
+                }
+                
+                e.target.style.pointerEvents = 'auto';
+                e.target.removeAttribute('data-reordering');
+                e.target.removeAttribute('data-drag-disabled');
+                
                 const isChecked = e.target.checked;
-                const container = e.target.closest('#availableTags, #selectedTags');
-                const isInSelected = container && container.id === 'selectedTags';
+                const isInSelected = e.target.closest('#selectedTags') !== null;
+                
+                // Ensure _selectedTagsSet exists
+                if (!this.state._selectedTagsSet) {
+                    this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
+                }
                 
                 if (isChecked) {
-                    if (!this.state.persistentSelectedTags.includes(tagName)) {
+                    if (!this.state._selectedTagsSet.has(tagName)) {
                         this.state.persistentSelectedTags.push(tagName);
-                    }
-                    this.state._selectedTagsSet.add(tagName);
-                    this.state.selectedTags.add(tagName);
-                    
-                    // Move to selected if in available
-                    if (!isInSelected) {
-                        this.moveTagToSelected(tagName);
+                        this.state._selectedTagsSet.add(tagName);
+                        // Mark checkbox as recently checked to prevent race conditions
+                        checkbox.setAttribute('data-recently-checked', 'true');
+                        setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 1000);
                     }
                 } else {
-                    // Remove from selected
                     const index = this.state.persistentSelectedTags.indexOf(tagName);
                     if (index > -1) {
                         this.state.persistentSelectedTags.splice(index, 1);
-                    }
-                    this.state._selectedTagsSet.delete(tagName);
-                    this.state.selectedTags.delete(tagName);
-                    
-                    // Move to available if in selected
-                    if (isInSelected) {
-                        this.moveTagToAvailable(tagName);
+                        this.state._selectedTagsSet.delete(tagName);
                     }
                 }
+                
+                // Update the regular selectedTags set to match persistent ones
+                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
                 // Update selected tags display
                 const selectedTagObjects = this.getSelectedTagObjects();
@@ -3107,16 +3200,8 @@ const TagManager = {
                 this.saveSelectionStateForUndo('checkbox_change');
             };
             
-            // Remove any existing handlers first
-            checkbox.removeEventListener('change', checkbox._changeHandler);
-            checkbox.removeEventListener('click', checkbox._clickHandler);
-            
-            // Attach new handlers
-            checkbox._changeHandler = handleCheckboxChange;
-            checkbox.addEventListener('change', handleCheckboxChange);
-            
             // Add click handler as fallback
-            checkbox._clickHandler = (e) => {
+            const handleCheckboxClick = (e) => {
                 if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
                     e.target.removeAttribute('data-reordering');
                     e.target.removeAttribute('data-drag-disabled');
@@ -3125,13 +3210,26 @@ const TagManager = {
                 e.target.disabled = false;
                 e.target.style.pointerEvents = 'auto';
             };
-            checkbox.addEventListener('click', checkbox._clickHandler);
+            
+            // Store handlers on checkbox for later reference
+            checkbox._changeHandler = handleCheckboxChange;
+            checkbox._clickHandler = handleCheckboxClick;
+            
+            // Attach handlers
+            checkbox.addEventListener('change', handleCheckboxChange);
+            checkbox.addEventListener('click', handleCheckboxClick);
+            
+            // Ensure checkbox is enabled
+            checkbox.style.pointerEvents = 'auto';
+            checkbox.disabled = false;
+            checkbox.removeAttribute('data-drag-disabled');
+            checkbox.removeAttribute('data-reordering');
             
             reinitializedCount++;
         });
         
         if (reinitializedCount > 0) {
-            verboseLog(`✅ Re-initialized ${reinitializedCount} checkbox event handlers`);
+            verboseLog(`✅ Re-initialized ${reinitializedCount} checkbox event handlers after undo/redo`);
         }
     },
 

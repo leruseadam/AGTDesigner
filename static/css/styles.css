@@ -35,9 +35,9 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin-top: 0.25rem !important; /* Reduced top margin */
-  margin-bottom: 0.5rem !important;
-  padding: 0.5rem 0 !important; /* Consistent padding */
+  margin-top: -2rem !important; /* Move button up significantly */
+  margin-bottom: 2rem !important; /* Explicit bottom margin */
+  padding: 0.5rem 0 2rem 0 !important; /* Add padding-bottom for visible space */
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
@@ -46,8 +46,9 @@
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin-top: 0.25rem !important; /* Reduced top margin */
-    margin-bottom: 0.5rem !important;
+    margin-top: -2rem !important; /* Move button up significantly */
+    margin-bottom: 2rem !important; /* Explicit bottom margin */
+    padding-bottom: 2rem !important; /* Ensure padding-bottom */
   }
 }
 
@@ -822,7 +823,7 @@ body.modal-open #mainContent.store-selection-disabled,
   height: var(--center-panel-height) !important;
   min-height: var(--center-panel-height) !important;
   /* Removed max-height to allow content to extend and scroll properly */
-  padding-bottom: 4rem !important; /* Extra bottom padding to ensure help button is never cut off */
+  padding-bottom: 3rem !important; /* Extra bottom padding to ensure help button margin is visible */
 }
 
 /* FORCE control-section to center its children, especially template select */
@@ -841,7 +842,7 @@ body.modal-open #mainContent.store-selection-disabled,
   flex-direction: column !important;
   align-items: center !important;
   width: 100% !important;
-  padding-bottom: 4rem !important; /* Gentle padding below controls */
+  padding-bottom: 3rem !important; /* Ensure help button margin is visible */
   position: relative !important;
 }
 
@@ -864,7 +865,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: 0.25rem !important; /* Reduced top margin */
+  margin-top: -2rem !important; /* Move button up significantly */
 }
  
 .control-section {
@@ -899,12 +900,13 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: 0.25rem 0 0.5rem 0 !important; /* Reduced top margin, keep bottom */
+  margin: -2rem 0 0 0 !important; /* Move button up */
+  margin-bottom: 2rem !important; /* Explicit bottom margin - separate declaration to ensure it applies */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 0.5rem 0 !important; /* Consistent padding */
+  padding: 0.5rem 0 2rem 0 !important; /* Add padding-bottom to create visible space */
   z-index: 1 !important;
 }
 
@@ -2978,13 +2980,14 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.25rem 0 0.5rem 0 !important; /* Reduced top margin, keep bottom */
+    margin: -2rem 0 0 0 !important; /* Move button up */
+    margin-bottom: 2rem !important; /* Explicit bottom margin */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
     z-index: 1 !important;
-    padding: 0.5rem 0 !important; /* Consistent padding */
+    padding: 0.5rem 0 2rem 0 !important; /* Add padding-bottom for visible space */
   }
   
   .help-button-container .big-glow-help-btn {
@@ -7891,12 +7894,13 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.25rem 0 0.5rem 0 !important; /* Reduced top margin, keep bottom */
+    margin: -2rem 0 0 0 !important; /* Move button up */
+    margin-bottom: 2rem !important; /* Explicit bottom margin */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.5rem 0 !important; /* Consistent padding */
+    padding: 0.5rem 0 2rem 0 !important; /* Add padding-bottom for visible space */
     z-index: 1 !important;
   }
   
