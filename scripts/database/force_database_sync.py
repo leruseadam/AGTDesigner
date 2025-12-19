@@ -153,9 +153,9 @@ def check_database_integration():
     try:
         from app import get_excel_processor
         processor = get_excel_processor()
-    except ImportError as e:
-        logger.warning(f"  ⚠ Cannot import app module: {e}")
-        logger.warning("  Run this script from the project root directory")
+    except Exception as e:
+        logger.warning(f"  ⚠ Cannot check integration status: {e}")
+        logger.warning("  This is optional - sync will still work")
         logger.info("")
         return
     
@@ -256,14 +256,43 @@ if __name__ == "__main__":
             print("  python force_database_sync.py enable      # Enable database integration")
             print("  python force_database_sync.py file <path> # Sync from specific file")
     else:
-        # Default: check status then sync
-        check_database_integration()
+        # Default: try to sync (skip app check if it fails)
+        logger.info("="*80)
+        logger.info("DATABASE SYNC TOOL")
+        logger.info("="*80)
+        logger.info("")
         
+        # Try to check integration status (optional)
+        try:
+            check_database_integration()
+        except Exception as e:
+            logger.warning(f"Skipping integration check: {e}")
+            logger.info("")
+        
+        # Find and sync Excel file
         excel_file = find_latest_excel()
         if excel_file:
-            response = input(f"\nSync database from {excel_file.name}? (yes/no): ")
+            logger.info("")
+            logger.info(f"Found Excel file: {excel_file.name}")
+            logger.info(f"Path: {excel_file.absolute()}")
+            logger.info("")
+            try:
+                response = input(f"Sync database from {excel_file.name}? (yes/no): ")
+            except (EOFError, KeyboardInterrupt):
+                # Non-interactive mode - just sync
+                logger.info("Non-interactive mode - syncing automatically...")
+                response = 'yes'
+            
             if response.lower() in ['yes', 'y']:
                 sync_database_from_excel(excel_file)
+            else:
+                logger.info("Sync cancelled")
+        else:
+            logger.info("")
+            logger.info("No Excel file found. Options:")
+            logger.info("  1. Run: python scripts/database/force_database_sync.py list")
+            logger.info("  2. Run: python scripts/database/force_database_sync.py file <path>")
+            logger.info("  3. Upload via web interface at https://www.agtpricetags.com")
         
         print("\n" + "="*80)
         print("TIP: Run 'python fix_database_weights.py' to normalize weights")
