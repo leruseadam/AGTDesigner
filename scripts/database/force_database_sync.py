@@ -22,12 +22,27 @@ sys.path.insert(0, str(project_root))
 
 def find_latest_excel():
     """Find the most recent Excel upload."""
-    # Look in project root uploads directory, not scripts/database/uploads
-    uploads_dir = project_root / 'uploads'
+    # Try multiple possible locations
+    possible_dirs = [
+        project_root / 'uploads',  # Standard location
+        Path.cwd() / 'uploads',     # Current working directory
+        Path.home() / 'AGTDesigner' / 'uploads',  # Home directory
+        Path('/home/adamcordova/AGTDesigner/uploads'),  # PythonAnywhere
+    ]
     
-    if not uploads_dir.exists():
-        logger.error(f"Uploads directory not found: {uploads_dir}")
-        logger.error("Make sure you're running this from the project root")
+    uploads_dir = None
+    for dir_path in possible_dirs:
+        if dir_path.exists():
+            uploads_dir = dir_path
+            logger.info(f"Found uploads directory: {uploads_dir}")
+            break
+    
+    if not uploads_dir:
+        logger.error("Could not find uploads directory in any of these locations:")
+        for dir_path in possible_dirs:
+            logger.error(f"  - {dir_path}")
+        logger.error("\nPlease specify the file path manually:")
+        logger.error("  python scripts/database/force_database_sync.py file <path/to/file.xlsx>")
         return None
     
     # Find all Excel files (excluding the product_database folder)
@@ -36,9 +51,19 @@ def find_latest_excel():
         if 'product_database' not in file.name.lower():
             excel_files.append(file)
     
+    # Also check for files with spaces in name (common pattern)
+    for pattern in ['**/*.xlsx', '**/*Bothell*.xlsx', '**/*inventory*.xlsx']:
+        for file in uploads_dir.glob(pattern):
+            if 'product_database' not in file.name.lower() and file not in excel_files:
+                excel_files.append(file)
+    
     if not excel_files:
         logger.error(f"No Excel files found in uploads directory: {uploads_dir}")
-        logger.info("Upload your Excel file through the web interface first")
+        logger.info(f"Directory contents: {list(uploads_dir.iterdir())[:10] if uploads_dir.exists() else 'N/A'}")
+        logger.info("\nOptions:")
+        logger.info("  1. Upload your Excel file through the web interface first")
+        logger.info("  2. Copy your Excel file to: " + str(uploads_dir))
+        logger.info("  3. Use: python scripts/database/force_database_sync.py file <path/to/file.xlsx>")
         return None
     
     # Sort by modification time
@@ -200,10 +225,33 @@ if __name__ == "__main__":
                 sync_database_from_excel(excel_path)
             else:
                 logger.error(f"File not found: {excel_path}")
+                logger.error(f"Current directory: {Path.cwd()}")
+                logger.error(f"Try absolute path: {Path.cwd() / excel_path}")
+        
+        elif command == 'list':
+            # List available Excel files
+            logger.info("Searching for Excel files...")
+            excel_file = find_latest_excel()
+            if excel_file:
+                logger.info(f"\n✅ Found Excel file: {excel_file}")
+                logger.info(f"   Path: {excel_file.absolute()}")
+                logger.info(f"   Size: {excel_file.stat().st_size / (1024*1024):.2f} MB")
+                logger.info(f"   Modified: {datetime.fromtimestamp(excel_file.stat().st_mtime)}")
+            else:
+                # Try to show what's in uploads directories
+                for dir_path in [project_root / 'uploads', Path.cwd() / 'uploads']:
+                    if dir_path.exists():
+                        logger.info(f"\nContents of {dir_path}:")
+                        for item in sorted(dir_path.iterdir()):
+                            if item.is_file():
+                                logger.info(f"  📄 {item.name} ({item.stat().st_size / 1024:.1f} KB)")
+                            elif item.is_dir():
+                                logger.info(f"  📁 {item.name}/")
         
         else:
             print("Usage:")
             print("  python force_database_sync.py sync        # Sync from latest Excel")
+            print("  python force_database_sync.py list        # List available Excel files")
             print("  python force_database_sync.py check       # Check integration status")
             print("  python force_database_sync.py enable      # Enable database integration")
             print("  python force_database_sync.py file <path> # Sync from specific file")
