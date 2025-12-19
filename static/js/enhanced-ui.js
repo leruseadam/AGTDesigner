@@ -1199,7 +1199,60 @@ document.addEventListener('DOMContentLoaded', function() {
   let scaleTimeout = null;
   let rafPending = false;
 
+  // Debounce timer for scaleAppToFit to prevent glitchiness after DOM updates
+  let scaleAppDebounceTimer = null;
+  let lastScaleCallTime = 0;
+  let isTagRendering = false; // Flag to prevent scaling during tag rendering
+  
+  // Expose function to disable/enable scaling during tag rendering
+  window.setTagRenderingState = function(rendering) {
+    isTagRendering = rendering;
+    if (rendering) {
+      // Clear any pending scale calls when rendering starts
+      if (scaleAppDebounceTimer) {
+        clearTimeout(scaleAppDebounceTimer);
+        scaleAppDebounceTimer = null;
+      }
+    }
+  };
+  
   function scaleAppToFit() {
+    // CRITICAL FIX: Don't scale during tag rendering to prevent glitchiness
+    if (isTagRendering) {
+      console.log('⏸️ Skipping scaleAppToFit - tags are rendering');
+      return;
+    }
+    
+    // Prevent multiple simultaneous calls
+    if (isScaling || rafPending) return;
+    
+    const now = Date.now();
+    const timeSinceLastCall = now - lastScaleCallTime;
+    
+    // CRITICAL FIX: Debounce rapid calls (< 150ms apart) to prevent glitchiness during DOM updates
+    // But allow immediate execution if enough time has passed
+    if (scaleAppDebounceTimer || timeSinceLastCall < 150) {
+      if (scaleAppDebounceTimer) {
+        clearTimeout(scaleAppDebounceTimer);
+      }
+      scaleAppDebounceTimer = setTimeout(() => {
+        scaleAppDebounceTimer = null;
+        // Double-check rendering state before executing
+        if (isTagRendering) {
+          console.log('⏸️ Skipping debounced scaleAppToFit - tags still rendering');
+          return;
+        }
+        lastScaleCallTime = Date.now();
+        _executeScaleAppToFit();
+      }, 150); // 150ms debounce to batch rapid calls
+    } else {
+      // Enough time has passed, execute immediately
+      lastScaleCallTime = now;
+      _executeScaleAppToFit();
+    }
+  }
+  
+  function _executeScaleAppToFit() {
     // Prevent multiple simultaneous calls
     if (isScaling || rafPending) return;
     
@@ -1329,6 +1382,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Expose for other scripts
   window.scaleAppToFit = scaleAppToFit;
+  
+  // Expose debounced version for use after DOM-heavy operations
+  window.scaleAppToFitDebounced = function(delay = 300) {
+    if (scaleAppDebounceTimer) {
+      clearTimeout(scaleAppDebounceTimer);
+    }
+    scaleAppDebounceTimer = setTimeout(() => {
+      scaleAppDebounceTimer = null;
+      _executeScaleAppToFit();
+    }, delay);
+  };
 
   // Apply on ready (after content becomes visible), and on resize/orientation
   document.addEventListener('DOMContentLoaded', function() {

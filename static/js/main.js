@@ -925,10 +925,20 @@ const AppLoadingSplash = {
             setTimeout(() => {
                 mainContent.classList.add('loaded');
                 mainContent.style.opacity = '1';
+                // CRITICAL FIX: Delay scaleAppToFit after splash hide to prevent glitchiness
+                // Use double RAF to ensure DOM is stable before applying transforms
                 if (window.scaleAppToFit) {
-                    try { window.scaleAppToFit(); } catch (e) { console.warn('scaleAppToFit error', e); }
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            try {
+                                window.scaleAppToFit();
+                            } catch (e) {
+                                console.warn('scaleAppToFit error', e);
+                            }
+                        });
+                    });
                 }
-            }, 100);
+            }, 200); // Increased delay to allow DOM to stabilize
         }
         
         verboseLog('Splash screen hidden');
@@ -3736,7 +3746,26 @@ const TagManager = {
             tags: filteredTags || originalTags,
             hydratedFromCache: this.state.hydratedFromCache
         });
+
+        // CRITICAL FIX: Disable scaling during tag rendering to prevent glitchiness
+        if (window.setTagRenderingState) {
+            window.setTagRenderingState(true);
+        }
         
+        // Re-enable scaling after rendering completes (will be called at end of function)
+        const reenableScaling = () => {
+            if (window.setTagRenderingState) {
+                // Delay re-enabling to ensure DOM is stable
+                setTimeout(() => {
+                    window.setTagRenderingState(false);
+                    // Trigger scale after rendering completes
+                    if (window.scaleAppToFitDebounced) {
+                        window.scaleAppToFitDebounced(300);
+                    }
+                }, 200);
+            }
+        };
+
         const availableTagsContainer = document.getElementById('availableTags');
         if (!availableTagsContainer) {
             console.error('Available tags container not found');
@@ -4019,6 +4048,17 @@ const TagManager = {
                         availableTagsContainer.appendChild(tagList);
                         this._restoreCheckboxStates();
                         this._restoreAvailableScrollPosition(savedScroll);
+                        
+                        // CRITICAL FIX: Re-enable scaling after rendering completes
+                        if (window.setTagRenderingState) {
+                            setTimeout(() => {
+                                window.setTagRenderingState(false);
+                                // Trigger scale after rendering completes
+                                if (window.scaleAppToFitDebounced) {
+                                    window.scaleAppToFitDebounced(300);
+                                }
+                            }, 200);
+                        }
                     }
                 }, 0);
                 return; // Exit early, rendering will continue in callback
@@ -4078,6 +4118,17 @@ const TagManager = {
                         
                         // Hide loading splash only after tags actually appear in DOM
                         this._waitForTagsToAppear();
+                        
+                        // CRITICAL FIX: Re-enable scaling after rendering completes
+                        if (window.setTagRenderingState) {
+                            setTimeout(() => {
+                                window.setTagRenderingState(false);
+                                // Trigger scale after rendering completes
+                                if (window.scaleAppToFitDebounced) {
+                                    window.scaleAppToFitDebounced(300);
+                                }
+                            }, 200);
+                        }
         }
         
         // CRITICAL FIX: Render organized tags in chunks to prevent UI freeze
@@ -4141,6 +4192,17 @@ const TagManager = {
                     
                     // Hide loading splash
                     this._waitForTagsToAppear();
+                    
+                    // CRITICAL FIX: Re-enable scaling after rendering completes
+                    if (window.setTagRenderingState) {
+                        setTimeout(() => {
+                            window.setTagRenderingState(false);
+                            // Trigger scale after rendering completes
+                            if (window.scaleAppToFitDebounced) {
+                                window.scaleAppToFitDebounced(300);
+                            }
+                        }, 200);
+                    }
             }
         };
         
@@ -4761,6 +4823,17 @@ const TagManager = {
                     this.updateSelectAllCheckboxes();
                     this._waitForTagsToAppear();
                     this.hideActionSplash();
+                    
+                    // CRITICAL FIX: Re-enable scaling after simplified rendering completes
+                    if (window.setTagRenderingState) {
+                        setTimeout(() => {
+                            window.setTagRenderingState(false);
+                            // Trigger scale after rendering completes
+                            if (window.scaleAppToFitDebounced) {
+                                window.scaleAppToFitDebounced(300);
+                            }
+                        }, 200);
+                    }
                 });
             }
         };
@@ -9566,6 +9639,29 @@ const TagManager = {
             this.updateSelectAllCheckboxes();
             this.updateGenerateButtonState();
             this.alignDisplayedLineagesWithTags();
+
+            // CRITICAL FIX: Delay scaleAppToFit after tag refresh to prevent glitchiness
+            // Wait for DOM to stabilize before applying transforms
+            if (window.scaleAppToFitDebounced) {
+                // Use debounced version with longer delay after tag refresh
+                window.scaleAppToFitDebounced(600); // 600ms delay to ensure DOM is fully stable
+            } else if (window.scaleAppToFit) {
+                // Fallback to regular version with delay
+                if (this._scaleAppTimeout) {
+                    clearTimeout(this._scaleAppTimeout);
+                }
+                this._scaleAppTimeout = setTimeout(() => {
+                    try {
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                window.scaleAppToFit();
+                            });
+                        });
+                    } catch (e) {
+                        console.warn('scaleAppToFit error after tag refresh:', e);
+                    }
+                }, 600);
+            }
 
             verboseLog('=== refreshTagLists END ===', results);
             return results;
