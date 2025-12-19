@@ -3199,6 +3199,25 @@ const TagManager = {
         }
     },
 
+    // CRITICAL FIX: Show/hide tag containers based on whether Excel file is uploaded
+    _updateTagContainersVisibility(show) {
+        try {
+            const availableContainer = document.getElementById('availableTagsContainer');
+            const selectedContainer = document.getElementById('selectedTagsContainer');
+            
+            if (availableContainer) {
+                availableContainer.style.display = show ? 'block' : 'none';
+            }
+            if (selectedContainer) {
+                selectedContainer.style.display = show ? 'block' : 'none';
+            }
+            
+            verboseLog(`✅ Tag containers ${show ? 'shown' : 'hidden'}`);
+        } catch (error) {
+            console.warn('Could not update tag containers visibility:', error);
+        }
+    },
+
     // CRITICAL FIX: Ensure all checkboxes are enabled and clickable
     _ensureCheckboxesEnabled() {
         const allCheckboxes = document.querySelectorAll('.tag-checkbox');
@@ -3320,9 +3339,12 @@ const TagManager = {
                     this.state.localUndoStack = this.state.localUndoStack.slice(-5);
                 }
                 // Clear redo stack when making a new selection
-                if (this.state.redoSnapshotStack) {
+                if (!this.state.redoSnapshotStack) {
+                    this.state.redoSnapshotStack = [];
+                } else {
                     this.state.redoSnapshotStack = [];
                 }
+                console.log(`💾 Saved previous state for undo (reinit) - Stack size: ${this.state.localUndoStack.length}, Previous selected: ${previousState.selected_tag_names.length}, Current selected: ${this.state.persistentSelectedTags.length}`);
                 verboseLog(`💾 Saved previous state for undo - Stack size: ${this.state.localUndoStack.length}, Previous selected: ${previousState.selected_tag_names.length}`);
                 
                 // Update selected tags display
@@ -4130,6 +4152,8 @@ const TagManager = {
         if (!tags || tags.length === 0) {
             verboseLog('No tags provided, showing empty state');
             availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
+            // Hide tag containers when no tags
+            this._updateTagContainersVisibility(false);
             // Hide splash if showing
             if (this.hideActionSplash) {
                 this.hideActionSplash();
@@ -4143,6 +4167,9 @@ const TagManager = {
             }
             return;
         }
+        
+        // Show tag containers when tags are available
+        this._updateTagContainersVisibility(true);
         
         // PERFORMANCE: Skip loading spinner entirely to prevent flickering
         // Instead, show tags immediately without intermediate loading state
@@ -11914,11 +11941,29 @@ const TagManager = {
     async undoMove() {
         try {
             console.log('🔙 Undoing most recent checkbox selection...');
+            
+            // CRITICAL FIX: Ensure undo stack exists
+            if (!this.state.localUndoStack) {
+                this.state.localUndoStack = [];
+            }
+            
+            console.log('🔍 Undo stack state:', {
+                hasStack: !!this.state.localUndoStack,
+                stackLength: this.state.localUndoStack.length,
+                currentSelected: this.state.persistentSelectedTags?.length || 0,
+                stackContents: this.state.localUndoStack.map(s => ({
+                    selectedCount: s.selected_tag_names?.length || 0,
+                    action: s.action_type
+                }))
+            });
 
             // Check if there's anything to undo
-            if (!this.state.localUndoStack || this.state.localUndoStack.length === 0) {
+            if (this.state.localUndoStack.length === 0) {
+                console.warn('⚠️ Undo stack is empty - nothing to undo');
                 if (window.Toast) {
                     Toast.show('info', 'Nothing to undo');
+                } else {
+                    alert('Nothing to undo');
                 }
                 return;
             }
@@ -11948,7 +11993,13 @@ const TagManager = {
 
             // Restore the last saved snapshot
             const lastSnapshot = this.state.localUndoStack.pop();
+            console.log('📦 Restoring snapshot:', {
+                selectedNames: lastSnapshot.selected_tag_names?.length || 0,
+                snapshot: lastSnapshot
+            });
+            
             const selectedNames = lastSnapshot.selected_tag_names || [];
+            console.log(`🔄 Restoring ${selectedNames.length} selected tags from undo stack`);
 
             // CRITICAL FIX: Update state first, then restore UI
             this.state.persistentSelectedTags = [...selectedNames];
@@ -11959,18 +12010,56 @@ const TagManager = {
                 this.state._selectedTagsSet = new Set();
             }
             this.state._selectedTagsSet = new Set(selectedNames);
+            
+            console.log('✅ State updated:', {
+                persistentSelectedTags: this.state.persistentSelectedTags.length,
+                selectedTags: this.state.selectedTags.size,
+                _selectedTagsSet: this.state._selectedTagsSet.size
+            });
 
             const selectedTagObjects = selectedNames.map(tagName =>
                 this.state.tags.find(t => t['Product Name*'] === tagName) ||
                 this.state.originalTags.find(t => t['Product Name*'] === tagName)
             ).filter(Boolean);
             
+            console.log(`📋 Found ${selectedTagObjects.length} tag objects to restore`);
+            
             // CRITICAL FIX: Update selected tags display first, then restore checkbox states
             this.updateSelectedTags(selectedTagObjects);
             
             // CRITICAL FIX: Force restore checkbox states immediately after state update
+            // Use double setTimeout to ensure DOM is fully updated
             setTimeout(() => {
+                console.log('🔄 Restoring checkbox states...');
                 this._restoreCheckboxStates();
+                
+                // CRITICAL FIX: Also uncheck checkboxes in available tags that shouldn't be checked
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                    const availableCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
+                    availableCheckboxes.forEach(checkbox => {
+                        const tagName = checkbox.value;
+                        const shouldBeChecked = selectedNames.includes(tagName);
+                        if (checkbox.checked !== shouldBeChecked) {
+                            checkbox.checked = shouldBeChecked;
+                        }
+                    });
+                }
+                
+                // CRITICAL FIX: Also sync selected tags checkboxes
+                const selectedTagsContainer = document.getElementById('selectedTags');
+                if (selectedTagsContainer) {
+                    const selectedCheckboxes = selectedTagsContainer.querySelectorAll('.tag-checkbox');
+                    selectedCheckboxes.forEach(checkbox => {
+                        const tagName = checkbox.value;
+                        const shouldBeChecked = selectedNames.includes(tagName);
+                        if (checkbox.checked !== shouldBeChecked) {
+                            checkbox.checked = shouldBeChecked;
+                        }
+                    });
+                }
+                
+                console.log('✅ Checkbox states restored');
             }, 0);
             
             // CRITICAL FIX: Re-initialize checkbox event handlers after undo to ensure they work
@@ -11978,9 +12067,17 @@ const TagManager = {
             setTimeout(() => {
                 this._ensureCheckboxesEnabled();
                 this._reinitializeCheckboxHandlers();
+                this.updateSelectAllCheckboxes();
+                
+                // Verify restoration worked
+                const currentSelectedCount = this.state.persistentSelectedTags.length;
+                const displayedSelectedCount = document.querySelectorAll('#selectedTags .tag-item').length;
+                console.log('✅ Undo complete:', {
+                    stateSelected: currentSelectedCount,
+                    displayedSelected: displayedSelectedCount,
+                    match: currentSelectedCount === displayedSelectedCount
+                });
             }, 100);
-            
-            this.updateSelectAllCheckboxes();
 
             if (window.Toast) {
                 Toast.show('success', `Undo: restored ${selectedNames.length} selection(s)`);
@@ -12001,11 +12098,19 @@ const TagManager = {
     async redoMove() {
         try {
             console.log('🔁 Redoing most recent undo...');
+            console.log('🔍 Redo stack state:', {
+                hasStack: !!this.state.redoSnapshotStack,
+                stackLength: this.state.redoSnapshotStack?.length || 0,
+                stackContents: this.state.redoSnapshotStack || []
+            });
 
             // Check if there's anything to redo
             if (!this.state.redoSnapshotStack || this.state.redoSnapshotStack.length === 0) {
+                console.warn('⚠️ Redo stack is empty - nothing to redo');
                 if (window.Toast) {
                     Toast.show('info', 'Nothing to redo');
+                } else {
+                    alert('Nothing to redo');
                 }
                 return;
             }
@@ -12026,6 +12131,11 @@ const TagManager = {
             });
 
             const snapshotToRestore = this.state.redoSnapshotStack.pop();
+            console.log('📦 Restoring snapshot from redo:', {
+                selectedNames: snapshotToRestore.selected_tag_names?.length || 0,
+                snapshot: snapshotToRestore
+            });
+            
             if (!this.state.localUndoStack) {
                 this.state.localUndoStack = [];
             }
@@ -12035,6 +12145,7 @@ const TagManager = {
             }
 
             const selectedNames = snapshotToRestore.selected_tag_names || [];
+            console.log(`🔄 Restoring ${selectedNames.length} selected tags from redo stack`);
             
             // CRITICAL FIX: Update state first, then restore UI
             this.state.persistentSelectedTags = [...selectedNames];
@@ -12045,18 +12156,55 @@ const TagManager = {
                 this.state._selectedTagsSet = new Set();
             }
             this.state._selectedTagsSet = new Set(selectedNames);
+            
+            console.log('✅ State updated:', {
+                persistentSelectedTags: this.state.persistentSelectedTags.length,
+                selectedTags: this.state.selectedTags.size,
+                _selectedTagsSet: this.state._selectedTagsSet.size
+            });
 
             const selectedTagObjects = selectedNames.map(tagName =>
                 this.state.tags.find(t => t['Product Name*'] === tagName) ||
                 this.state.originalTags.find(t => t['Product Name*'] === tagName)
             ).filter(Boolean);
             
+            console.log(`📋 Found ${selectedTagObjects.length} tag objects to restore`);
+            
             // CRITICAL FIX: Update selected tags display first, then restore checkbox states
             this.updateSelectedTags(selectedTagObjects);
             
             // CRITICAL FIX: Force restore checkbox states immediately after state update
             setTimeout(() => {
+                console.log('🔄 Restoring checkbox states...');
                 this._restoreCheckboxStates();
+                
+                // CRITICAL FIX: Also uncheck checkboxes in available tags that shouldn't be checked
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                    const availableCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
+                    availableCheckboxes.forEach(checkbox => {
+                        const tagName = checkbox.value;
+                        const shouldBeChecked = selectedNames.includes(tagName);
+                        if (checkbox.checked !== shouldBeChecked) {
+                            checkbox.checked = shouldBeChecked;
+                        }
+                    });
+                }
+                
+                // CRITICAL FIX: Also sync selected tags checkboxes
+                const selectedTagsContainer = document.getElementById('selectedTags');
+                if (selectedTagsContainer) {
+                    const selectedCheckboxes = selectedTagsContainer.querySelectorAll('.tag-checkbox');
+                    selectedCheckboxes.forEach(checkbox => {
+                        const tagName = checkbox.value;
+                        const shouldBeChecked = selectedNames.includes(tagName);
+                        if (checkbox.checked !== shouldBeChecked) {
+                            checkbox.checked = shouldBeChecked;
+                        }
+                    });
+                }
+                
+                console.log('✅ Checkbox states restored');
             }, 0);
             
             // CRITICAL FIX: Re-initialize checkbox event handlers after redo to ensure they work
@@ -12064,12 +12212,22 @@ const TagManager = {
             setTimeout(() => {
                 this._ensureCheckboxesEnabled();
                 this._reinitializeCheckboxHandlers();
+                this.updateSelectAllCheckboxes();
+                
+                // Verify restoration worked
+                const currentSelectedCount = this.state.persistentSelectedTags.length;
+                const displayedSelectedCount = document.querySelectorAll('#selectedTags .tag-item').length;
+                console.log('✅ Redo complete:', {
+                    stateSelected: currentSelectedCount,
+                    displayedSelected: displayedSelectedCount,
+                    match: currentSelectedCount === displayedSelectedCount
+                });
             }, 100);
-            
-            this.updateSelectAllCheckboxes();
 
             if (window.Toast) {
                 Toast.show('success', `Redo: restored ${selectedNames.length} selection(s)`);
+            } else {
+                console.log(`✅ Redo: restored ${selectedNames.length} selection(s)`);
             }
 
             verboseLog(`✅ Redo applied - restored ${selectedNames.length} selections`);
@@ -14387,6 +14545,9 @@ const TagManager = {
         if (selectedContainer) {
             selectedContainer.innerHTML = '';
         }
+        
+        // Hide tag containers when clearing UI state (will be shown again when new tags load)
+        this._updateTagContainersVisibility(false);
         
         // Clear search inputs
         const searchInputs = document.querySelectorAll('input[type="text"]');

@@ -35,9 +35,9 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin-top: -2rem !important; /* Move button up significantly */
-  margin-bottom: 2rem !important; /* Explicit bottom margin */
-  padding: 0.5rem 0 2rem 0 !important; /* Add padding-bottom for visible space */
+  margin-top: 0.75rem !important; /* Equal top margin */
+  margin-bottom: 0.75rem !important; /* Equal bottom margin */
+  padding: 0.5rem 0 !important; /* Consistent padding */
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
@@ -46,9 +46,9 @@
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin-top: -2rem !important; /* Move button up significantly */
-    margin-bottom: 2rem !important; /* Explicit bottom margin */
-    padding-bottom: 2rem !important; /* Ensure padding-bottom */
+    margin-top: 0.75rem !important; /* Equal top margin */
+    margin-bottom: 0.75rem !important; /* Equal bottom margin */
+    padding-bottom: 0 !important; /* Remove extra padding */
   }
 }
 
@@ -865,7 +865,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: -2rem !important; /* Move button up significantly */
+  margin-top: 0.75rem !important; /* Equal top margin */
 }
  
 .control-section {
@@ -916,13 +916,12 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: -2rem 0 0 0 !important; /* Move button up */
-  margin-bottom: 2rem !important; /* Explicit bottom margin - separate declaration to ensure it applies */
+  margin: 0.75rem 0 !important; /* Equal top and bottom margins */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 0.5rem 0 2rem 0 !important; /* Add padding-bottom to create visible space */
+  padding: 0.5rem 0 !important; /* Consistent padding */
   z-index: 1 !important;
 }
 
@@ -2996,14 +2995,13 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: -2rem 0 0 0 !important; /* Move button up */
-    margin-bottom: 2rem !important; /* Explicit bottom margin */
+    margin: 0.75rem 0 !important; /* Equal top and bottom margins */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
     z-index: 1 !important;
-    padding: 0.5rem 0 2rem 0 !important; /* Add padding-bottom for visible space */
+    padding: 0.5rem 0 !important; /* Consistent padding */
   }
   
   .help-button-container .big-glow-help-btn {
@@ -7947,13 +7945,12 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: -2rem 0 0 0 !important; /* Move button up */
-    margin-bottom: 2rem !important; /* Explicit bottom margin */
+    margin: 0.75rem 0 !important; /* Equal top and bottom margins */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.5rem 0 2rem 0 !important; /* Add padding-bottom for visible space */
+    padding: 0.5rem 0 !important; /* Consistent padding */
     z-index: 1 !important;
   }
   
