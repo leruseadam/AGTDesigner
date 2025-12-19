@@ -182,23 +182,6 @@ const performanceUtils = {
     }
 };
 
-/**
- * Create a timeout-aware AbortSignal for fetch operations.
- * Falls back to AbortController when AbortSignal.timeout is unavailable.
- */
-const createTimeoutSignal = (timeoutMs) => {
-    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
-        return AbortSignal.timeout(timeoutMs);
-    }
-    if (typeof AbortController === 'undefined') {
-        return null;
-    }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    controller.signal.addEventListener('abort', () => clearTimeout(timeoutId), { once: true });
-    return controller.signal;
-};
-
 // Global error handler to prevent window from exiting
 // Only log errors that are not syntax errors from cached/old files
 window.addEventListener('error', function(event) {
@@ -1236,12 +1219,9 @@ const TagManager = {
             // PERFORMANCE FIX: Use fast_load=1 to avoid expensive database queries on page reload
             // The cached lineage is already fresh enough for display purposes
             // Only use fast_load=0 if user explicitly requested lineage update
-            const fetchOptions = {};
-            const timeoutSignal = createTimeoutSignal(5000);
-            if (timeoutSignal) {
-                fetchOptions.signal = timeoutSignal;
-            }
-            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=1`, fetchOptions);
+            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=1`, {
+                signal: AbortSignal.timeout(5000) // 5 second timeout (reduced from 30s)
+            });
             if (lineageResponse.ok) {
                 const lineageData = await lineageResponse.json();
                 const freshTags = lineageData.tags || lineageData;
@@ -9033,8 +9013,6 @@ const TagManager = {
                     }
                 });
                 verboseLog(`Restored ${preservedSelectedTags.length} preserved selected tags after update`);
-                // Update selectedTags set to match
-                this.state.selectedTags = new Set(this.state.persistentSelectedTags);
             }
             
             if (this.state.persistentSelectedTags.length > 0) {
