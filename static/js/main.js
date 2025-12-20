@@ -2379,6 +2379,11 @@ const TagManager = {
 
     applyFilters(immediate = false) {
         verboseLog(`🔍 applyFilters() called (immediate: ${immediate})`);
+        
+        // CRITICAL FIX: Save filters to localStorage whenever they change
+        // This ensures filters persist after page refresh
+        this.saveFiltersToStorage();
+        
         // USER PREFERENCE: Scroll to top when filter is applied (don't preserve position)
         // Fast path: show all if no filters (Mac-like speed)
         const vendorFilter = document.getElementById('vendorFilter')?.value || '';
@@ -10158,8 +10163,29 @@ const TagManager = {
             this.state.initialized = true;
             this._initializing = false;
             
+            // CRITICAL FIX: Hide splash immediately when cache loaded for smooth experience
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            
             // Load selected tags and filters in background (non-blocking)
             this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
+            
+            // CRITICAL FIX: Restore filters from localStorage IMMEDIATELY before API call
+            // This prevents filters from disappearing on page refresh
+            const savedFilters = this.loadFiltersFromStorage();
+            if (savedFilters && Object.keys(savedFilters).length > 0) {
+                console.log('⚡ Restoring filters from localStorage:', savedFilters);
+                // Apply saved filters to dropdowns immediately
+                Object.entries(savedFilters).forEach(([key, value]) => {
+                    const filterElement = document.getElementById(`${key}Filter`);
+                    if (filterElement && value) {
+                        filterElement.value = value;
+                    }
+                });
+            }
+            
             if (this.fetchAndPopulateFilters) {
                 this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
             }
