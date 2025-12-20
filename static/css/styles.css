@@ -921,7 +921,7 @@ body.modal-open #mainContent.store-selection-disabled,
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 0.5rem 0 !important; /* Consistent padding */
+  padding: 0.75rem 0 !important; /* Equal top and bottom padding */
   z-index: 1 !important;
 }
 
@@ -3001,7 +3001,7 @@ body.modal-open #mainContent.store-selection-disabled,
     justify-content: center !important;
     align-items: center !important;
     z-index: 1 !important;
-    padding: 0.5rem 0 !important; /* Consistent padding */
+    padding: 0.75rem 0 !important; /* Equal top and bottom padding */
   }
   
   .help-button-container .big-glow-help-btn {
@@ -3036,7 +3036,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     margin-left: auto !important;
     margin-right: auto !important;
-    font-size: 0.85rem !important; /* Smaller font to fit better */
+    font-size: 1.1rem !important; /* Increased for better readability */
     padding-left: 24px !important; /* Equal padding accounting for arrow */
     padding-right: 24px !important; /* Equal padding accounting for arrow */
   }
@@ -3047,7 +3047,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important;
-    font-size: 0.75em !important; /* Smaller font to fit in dropdown */
+    font-size: 0.9em !important; /* Increased for better readability */
     padding: 6px 16px !important; /* Equal left/right padding for centering */
   }
   
@@ -6701,7 +6701,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     direction: ltr !important; /* Ensure left-to-right for proper centering */
     padding: 12px 45px 12px 45px !important; /* Symmetric padding to center text - arrow space accounted for on right */
-    font-size: 0.95em !important; /* Reduced from 1.1em for better PC UI */
+    font-size: 1.2em !important; /* Increased for better readability */
     font-weight: 700 !important;
     color: #e0d6f6 !important;
     background: rgba(34, 34, 51, 0.85) !important;
@@ -6739,7 +6739,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     margin-left: auto !important;
     margin-right: auto !important;
-    font-size: 0.85rem !important; /* Smaller font to fit better */
+    font-size: 1.1rem !important; /* Increased for better readability */
     padding-left: 24px !important; /* Equal padding accounting for arrow */
     padding-right: 24px !important; /* Equal padding accounting for arrow */
   /* Keep padding symmetric so text sits truly centered */
@@ -6754,7 +6754,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     direction: ltr !important;
     display: block !important;
-    font-size: 0.75em !important; /* Smaller font to fit in dropdown */
+    font-size: 0.9em !important; /* Increased for better readability */
     padding: 6px 16px !important; /* Equal left/right padding for centering */
   }
   
@@ -6767,7 +6767,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Adjust padding to visually center text - symmetric padding with arrow accounted for */
     padding-left: 24px !important; /* Equal padding accounting for arrow */
     padding-right: 24px !important; /* Equal padding accounting for arrow */
-    font-size: 0.85rem !important; /* Smaller font to fit better */
+    font-size: 1.1rem !important; /* Increased for better readability */
     direction: ltr !important;
     /* Ensure text appears centered visually */
     text-indent: 0 !important;
@@ -7950,7 +7950,7 @@ body.modal-open #mainContent.store-selection-disabled,
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 0.5rem 0 !important; /* Consistent padding */
+    padding: 0.75rem 0 !important; /* Equal top and bottom padding */
     z-index: 1 !important;
   }
   
