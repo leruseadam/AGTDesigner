@@ -1396,10 +1396,19 @@ const TagManager = {
     async _refreshLineageFromDatabase(tags) {
         const timestamp = Date.now();
         try {
-            // PERFORMANCE FIX: Use fast_load=1 to avoid expensive database queries on page reload
-            // The cached lineage is already fresh enough for display purposes
-            // Only use fast_load=0 if user explicitly requested lineage update
-            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=1`, {
+            // CRITICAL FIX: Check if lineage was recently updated
+            // If so, force database refresh instead of using fast_load
+            const lastLineageUpdate = localStorage.getItem('lastLineageUpdateTime');
+            const recentlyUpdated = lastLineageUpdate && (timestamp - parseInt(lastLineageUpdate)) < 300000; // 5 minutes
+            
+            // Use fast_load=0 if lineage was recently updated to ensure changes persist
+            const fastLoad = recentlyUpdated ? 0 : 1;
+            
+            if (recentlyUpdated) {
+                console.log('🔄 Recent lineage update detected - forcing database refresh');
+            }
+            
+            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=${fastLoad}`, {
                 signal: AbortSignal.timeout(5000) // 5 second timeout (reduced from 30s)
             });
             if (lineageResponse.ok) {
@@ -6666,8 +6675,11 @@ const TagManager = {
             // This ensures that on page reload, fresh lineage data is fetched from database
             if (responseData.db_updated > 0 || responseData.excel_updated > 0) {
                 this.clearAvailableTagsCache();
-                // Store timestamp of lineage update to skip cache on next page load
-                sessionStorage.setItem('lastLineageUpdateTime', Date.now().toString());
+                // CRITICAL FIX: Store timestamp in BOTH sessionStorage AND localStorage
+                // sessionStorage for current session, localStorage to persist across reloads
+                const updateTime = Date.now().toString();
+                sessionStorage.setItem('lastLineageUpdateTime', updateTime);
+                localStorage.setItem('lastLineageUpdateTime', updateTime);
                 console.log('🗑️ Cleared frontend cache after lineage update to ensure fresh data on reload');
             }
 
