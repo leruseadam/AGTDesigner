@@ -3226,6 +3226,12 @@ const TagManager = {
                 selectedContainer.style.display = show ? 'block' : 'none';
             }
             
+            // CRITICAL FIX: Also show/hide filter bar when tags are shown/hidden
+            const filterBar = document.querySelector('.filter-bar');
+            if (filterBar) {
+                filterBar.style.display = show ? '' : 'none';
+            }
+            
             verboseLog(`✅ Tag containers ${show ? 'shown' : 'hidden'}`);
         } catch (error) {
             console.warn('Could not update tag containers visibility:', error);
@@ -4165,7 +4171,42 @@ const TagManager = {
         
         if (!tags || tags.length === 0) {
             verboseLog('No tags provided, showing empty state');
-            availableTagsContainer.innerHTML = '<div class="tag-entry">No tags available</div>';
+            
+            // CRITICAL FIX: Check if no Excel file is uploaded and show proper empty state
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database';
+            
+            if (noFileUploaded) {
+                // Show helpful empty state with instructions
+                availableTagsContainer.innerHTML = `
+                    <div style="text-align: center; padding: 3rem 2rem; color: var(--text-secondary, #6c757d);">
+                        <div style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;">📁</div>
+                        <h3 style="color: var(--text-primary, #ffffff); margin-bottom: 1rem; font-size: 1.5rem;">No Excel File Uploaded</h3>
+                        <p style="font-size: 1.1rem; margin-bottom: 1.5rem; max-width: 500px; margin-left: auto; margin-right: auto;">
+                            Upload an Excel inventory file to get started with tag generation.
+                        </p>
+                        <p style="font-size: 0.95rem; opacity: 0.8;">
+                            Click the <strong>"Upload Excel"</strong> button above to begin.
+                        </p>
+                    </div>
+                `;
+                
+                // Hide filters when no file uploaded
+                const filterBar = document.querySelector('.filter-bar');
+                if (filterBar) {
+                    filterBar.style.display = 'none';
+                }
+            } else {
+                // File is uploaded but no tags match filters
+                availableTagsContainer.innerHTML = `
+                    <div style="text-align: center; padding: 2rem 1rem; color: var(--text-secondary, #6c757d);">
+                        <div style="font-size: 2.5rem; margin-bottom: 0.75rem; opacity: 0.5;">🔍</div>
+                        <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">No products match your current filters</p>
+                        <p style="font-size: 0.9rem; opacity: 0.8;">Try adjusting or clearing your filters</p>
+                    </div>
+                `;
+            }
+            
             // Hide tag containers when no tags
             this._updateTagContainersVisibility(false);
             // Hide splash if showing
@@ -4175,10 +4216,12 @@ const TagManager = {
             // CRITICAL FIX: Clear filename display when no tags are available
             // This prevents confusion when file path shows but tags don't load
             const fileInfoText = document.getElementById('fileInfoText');
-            if (fileInfoText) {
+            if (fileInfoText && noFileUploaded) {
                 fileInfoText.textContent = 'No file uploaded';
                 verboseLog('✅ Cleared filename display - no tags available');
             }
+            
+            reenableScaling();
             return;
         }
         
@@ -10603,6 +10646,12 @@ const TagManager = {
         if (window.sessionStorage) {
             sessionStorage.removeItem('selectedTags');
             sessionStorage.removeItem('selected_tags');
+        }
+        
+        // CRITICAL FIX: Hide filters when no file uploaded
+        const filterBar = document.querySelector('.filter-bar');
+        if (filterBar) {
+            filterBar.style.display = 'none';
         }
         
         // Don't update UI immediately - let checkForExistingData handle it
