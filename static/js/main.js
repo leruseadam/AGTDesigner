@@ -4207,8 +4207,8 @@ const TagManager = {
                 `;
             }
             
-            // Hide tag containers when no tags
-            this._updateTagContainersVisibility(false);
+            // Don't hide tag containers - keep them visible even when empty
+            // this._updateTagContainersVisibility(false);
             // Hide splash if showing
             if (this.hideActionSplash) {
                 this.hideActionSplash();
@@ -4225,8 +4225,8 @@ const TagManager = {
             return;
         }
         
-        // Show tag containers when tags are available
-        this._updateTagContainersVisibility(true);
+        // Keep tag containers visible (don't toggle visibility)
+        // this._updateTagContainersVisibility(true);
         
         // PERFORMANCE: Skip loading spinner entirely to prevent flickering
         // Instead, show tags immediately without intermediate loading state
