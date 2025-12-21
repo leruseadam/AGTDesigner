@@ -818,12 +818,11 @@ body.modal-open #mainContent.store-selection-disabled,
   justify-content: flex-start !important;
   align-items: stretch !important;
   gap: 0 !important;
-  overflow-y: auto !important; /* Allow scrolling if content exceeds height */
+  overflow-y: visible !important;
   overflow-x: hidden !important;
-  height: var(--center-panel-height) !important;
-  min-height: var(--center-panel-height) !important;
-  /* Removed max-height to allow content to extend and scroll properly */
-  padding-bottom: 3rem !important; /* Extra bottom padding to ensure help button margin is visible */
+  height: auto !important;
+  min-height: auto !important;
+  padding-bottom: 1rem !important;
 }
 
 /* FORCE control-section to center its children, especially template select */
