@@ -865,7 +865,8 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .help-button-container {
-  margin-top: 0.75rem !important; /* Equal top margin */
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
 }
  
 .control-section {
