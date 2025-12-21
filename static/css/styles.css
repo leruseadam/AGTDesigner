@@ -8559,10 +8559,10 @@ body.modal-open #mainContent.store-selection-disabled,
     max-width: calc(var(--center-column-width) / 12 * 100%) !important;
   display: flex !important;
   flex-direction: column !important;
-  height: var(--center-panel-height) !important;
-  min-height: var(--center-panel-height) !important;
-  max-height: var(--center-panel-height) !important;
-  overflow: hidden !important;
+  height: auto !important;
+  min-height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
   }
   
   [data-container-type="available"],
@@ -8578,17 +8578,16 @@ body.modal-open #mainContent.store-selection-disabled,
     min-height: var(--filter-height) !important;
   }
   [data-container-type="center"] .control-panel {
-  height: var(--center-panel-height) !important;
-  min-height: var(--center-panel-height) !important;
-  max-height: var(--center-panel-height) !important;
+  height: auto !important;
+  min-height: auto !important;
+  max-height: none !important;
     display: flex !important;
     flex-direction: column !important;
-    flex: 1 1 auto !important;
+    flex: 0 1 auto !important;
   justify-content: flex-start !important;
   align-items: stretch !important;
   gap: 0 !important;
   overflow-y: visible !important;
-  min-height: calc(var(--center-panel-height) - 1.5rem) !important;
   }
   
   .control-panel > * {
