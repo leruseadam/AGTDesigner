@@ -3315,15 +3315,8 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 const isInSelected = e.target.closest('#selectedTags') !== null;
                 
-                // CRITICAL FIX: Save state BEFORE making changes for proper undo functionality
-                const previousState = {
-                    selected_tag_names: [...(this.state.persistentSelectedTags || [])],
-                    available_tag_names: (this.state.tags || [])
-                        .filter(tag => tag && !(this.state.persistentSelectedTags || []).includes(tag['Product Name*']))
-                        .map(tag => tag['Product Name*']),
-                    action_type: 'checkbox_change',
-                    timestamp: new Date().toISOString()
-                };
+                // Track this as the last toggled checkbox
+                this.state.lastToggledCheckbox = tagName;
                 
                 // Ensure _selectedTagsSet exists
                 if (!this.state._selectedTagsSet) {
@@ -3348,24 +3341,6 @@ const TagManager = {
                 
                 // Update the regular selectedTags set to match persistent ones
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                
-                // CRITICAL FIX: Save the PREVIOUS state to undo stack immediately
-                if (!this.state.localUndoStack) {
-                    this.state.localUndoStack = [];
-                }
-                this.state.localUndoStack.push(previousState);
-                // Limit local undo stack size
-                if (this.state.localUndoStack.length > 5) {
-                    this.state.localUndoStack = this.state.localUndoStack.slice(-5);
-                }
-                // Clear redo stack when making a new selection
-                if (!this.state.redoSnapshotStack) {
-                    this.state.redoSnapshotStack = [];
-                } else {
-                    this.state.redoSnapshotStack = [];
-                }
-                console.log(`💾 Saved previous state for undo (reinit) - Stack size: ${this.state.localUndoStack.length}, Previous selected: ${previousState.selected_tag_names.length}, Current selected: ${this.state.persistentSelectedTags.length}`);
-                verboseLog(`💾 Saved previous state for undo - Stack size: ${this.state.localUndoStack.length}, Previous selected: ${previousState.selected_tag_names.length}`);
                 
                 // Update selected tags display
                 const selectedTagObjects = this.getSelectedTagObjects();
@@ -5434,21 +5409,13 @@ const TagManager = {
             // Ensure the checkbox state is properly updated
             const isChecked = e.target.checked;
             
+            // Track this as the last toggled checkbox
+            this.state.lastToggledCheckbox = displayName;
+            
             // CRITICAL FIX: Ensure _selectedTagsSet exists before using it
             if (!this.state._selectedTagsSet) {
                 this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
             }
-            
-            // CRITICAL FIX: Save state BEFORE making changes for proper undo functionality
-            // Capture the current state before modifying it
-            const previousState = {
-                selected_tag_names: [...this.state.persistentSelectedTags],
-                available_tag_names: (this.state.tags || [])
-                    .filter(tag => tag && !this.state.persistentSelectedTags.includes(tag['Product Name*']))
-                    .map(tag => tag['Product Name*']),
-                action_type: 'checkbox_selection',
-                timestamp: new Date().toISOString()
-            };
             
             // PERFORMANCE: Use Set for O(1) lookups and updates instead of array operations
             if (isChecked) {
@@ -5469,21 +5436,6 @@ const TagManager = {
             
             // Update the regular selectedTags set to match persistent ones
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-            
-            // CRITICAL FIX: Save the PREVIOUS state to undo stack immediately
-            if (!this.state.localUndoStack) {
-                this.state.localUndoStack = [];
-            }
-            this.state.localUndoStack.push(previousState);
-            // Limit local undo stack size
-            if (this.state.localUndoStack.length > 5) {
-                this.state.localUndoStack = this.state.localUndoStack.slice(-5);
-            }
-            // Clear redo stack when making a new selection
-            if (this.state.redoSnapshotStack) {
-                this.state.redoSnapshotStack = [];
-            }
-            verboseLog(`💾 Saved previous state for undo - Stack size: ${this.state.localUndoStack.length}, Previous selected: ${previousState.selected_tag_names.length}`);
             
             // PERFORMANCE: For deselection, use immediate DOM manipulation instead of full rebuild
             if (!isChecked && isForSelectedTags) {
@@ -12027,304 +11979,98 @@ const TagManager = {
 
     async undoMove() {
         try {
-            console.log('🔙 Undoing most recent checkbox selection...');
+            console.log('🔙 Toggling last checkbox...');
             
-            // CRITICAL FIX: Ensure undo stack exists
-            if (!this.state.localUndoStack) {
-                this.state.localUndoStack = [];
-            }
-            
-            console.log('🔍 Undo stack state:', {
-                hasStack: !!this.state.localUndoStack,
-                stackLength: this.state.localUndoStack.length,
-                currentSelected: this.state.persistentSelectedTags?.length || 0,
-                stackContents: this.state.localUndoStack.map(s => ({
-                    selectedCount: s.selected_tag_names?.length || 0,
-                    action: s.action_type
-                }))
-            });
-
-            // Check if there's anything to undo
-            if (this.state.localUndoStack.length === 0) {
-                console.warn('⚠️ Undo stack is empty - nothing to undo');
+            // Check if we have a last toggled checkbox
+            if (!this.state.lastToggledCheckbox) {
+                console.warn('⚠️ No checkbox to toggle');
                 if (window.Toast) {
-                    Toast.show('info', 'Nothing to undo');
-                } else {
-                    alert('Nothing to undo');
+                    Toast.show('info', 'No recent checkbox action to undo');
                 }
                 return;
             }
 
-            // Show user feedback immediately
-            if (window.Toast) {
-                Toast.show('info', 'Undoing last selection batch...');
+            const tagName = this.state.lastToggledCheckbox;
+            
+            // Find the checkbox in either available or selected tags
+            const availableContainer = document.getElementById('availableTags');
+            const selectedContainer = document.getElementById('selectedTags');
+            
+            let checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
+            if (!checkbox) {
+                checkbox = selectedContainer?.querySelector(`input[value="${tagName}"]`);
             }
-
-            // Capture current state for redo
-            const captureCurrentState = () => ({
-                selected_tag_names: [...(this.state.persistentSelectedTags || [])],
-                available_tag_names: (this.state.tags || [])
-                    .filter(tag => tag && !this.state.persistentSelectedTags.includes(tag['Product Name*']))
-                    .map(tag => tag['Product Name*']),
-                action_type: 'undo_capture',
-                timestamp: new Date().toISOString()
-            });
-
-            if (!this.state.redoSnapshotStack) {
-                this.state.redoSnapshotStack = [];
-            }
-            this.state.redoSnapshotStack.push(captureCurrentState());
-            if (this.state.redoSnapshotStack.length > 5) {
-                this.state.redoSnapshotStack = this.state.redoSnapshotStack.slice(-5);
-            }
-
-            // Restore the last saved snapshot
-            const lastSnapshot = this.state.localUndoStack.pop();
-            console.log('📦 Restoring snapshot:', {
-                selectedNames: lastSnapshot.selected_tag_names?.length || 0,
-                snapshot: lastSnapshot
-            });
             
-            const selectedNames = lastSnapshot.selected_tag_names || [];
-            console.log(`🔄 Restoring ${selectedNames.length} selected tags from undo stack`);
-
-            // CRITICAL FIX: Update state first, then restore UI
-            this.state.persistentSelectedTags = [...selectedNames];
-            this.state.selectedTags = new Set(selectedNames);
-            
-            // CRITICAL FIX: Sync _selectedTagsSet to ensure consistency
-            if (!this.state._selectedTagsSet) {
-                this.state._selectedTagsSet = new Set();
-            }
-            this.state._selectedTagsSet = new Set(selectedNames);
-            
-            console.log('✅ State updated:', {
-                persistentSelectedTags: this.state.persistentSelectedTags.length,
-                selectedTags: this.state.selectedTags.size,
-                _selectedTagsSet: this.state._selectedTagsSet.size
-            });
-
-            const selectedTagObjects = selectedNames.map(tagName =>
-                this.state.tags.find(t => t['Product Name*'] === tagName) ||
-                this.state.originalTags.find(t => t['Product Name*'] === tagName)
-            ).filter(Boolean);
-            
-            console.log(`📋 Found ${selectedTagObjects.length} tag objects to restore`);
-            
-            // CRITICAL FIX: Update selected tags display first, then restore checkbox states
-            this.updateSelectedTags(selectedTagObjects);
-            
-            // CRITICAL FIX: Force restore checkbox states immediately after state update
-            // Use double setTimeout to ensure DOM is fully updated
-            setTimeout(() => {
-                console.log('🔄 Restoring checkbox states...');
-                this._restoreCheckboxStates();
+            if (checkbox) {
+                // Toggle the checkbox
+                checkbox.checked = !checkbox.checked;
+                // Dispatch change event to trigger state update
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 
-                // CRITICAL FIX: Also uncheck checkboxes in available tags that shouldn't be checked
-                const availableTagsContainer = document.getElementById('availableTags');
-                if (availableTagsContainer) {
-                    const availableCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
-                    availableCheckboxes.forEach(checkbox => {
-                        const tagName = checkbox.value;
-                        const shouldBeChecked = selectedNames.includes(tagName);
-                        if (checkbox.checked !== shouldBeChecked) {
-                            checkbox.checked = shouldBeChecked;
-                        }
-                    });
+                if (window.Toast) {
+                    Toast.show('success', `Toggled: ${tagName}`);
                 }
-                
-                // CRITICAL FIX: Also sync selected tags checkboxes
-                const selectedTagsContainer = document.getElementById('selectedTags');
-                if (selectedTagsContainer) {
-                    const selectedCheckboxes = selectedTagsContainer.querySelectorAll('.tag-checkbox');
-                    selectedCheckboxes.forEach(checkbox => {
-                        const tagName = checkbox.value;
-                        const shouldBeChecked = selectedNames.includes(tagName);
-                        if (checkbox.checked !== shouldBeChecked) {
-                            checkbox.checked = shouldBeChecked;
-                        }
-                    });
+                console.log(`✅ Toggled checkbox for: ${tagName}`);
+            } else {
+                console.warn(`⚠️ Checkbox not found for: ${tagName}`);
+                if (window.Toast) {
+                    Toast.show('info', 'Previous checkbox not found');
                 }
-                
-                console.log('✅ Checkbox states restored');
-            }, 0);
-            
-            // CRITICAL FIX: Re-initialize checkbox event handlers after undo to ensure they work
-            // After undo, checkboxes might have been recreated and lost their event handlers
-            setTimeout(() => {
-                this._ensureCheckboxesEnabled();
-                this._reinitializeCheckboxHandlers();
-                this.updateSelectAllCheckboxes();
-                
-                // Verify restoration worked
-                const currentSelectedCount = this.state.persistentSelectedTags.length;
-                const displayedSelectedCount = document.querySelectorAll('#selectedTags .tag-item').length;
-                console.log('✅ Undo complete:', {
-                    stateSelected: currentSelectedCount,
-                    displayedSelected: displayedSelectedCount,
-                    match: currentSelectedCount === displayedSelectedCount
-                });
-            }, 100);
-
-            if (window.Toast) {
-                Toast.show('success', `Undo: restored ${selectedNames.length} selection(s)`);
             }
-
-            verboseLog(`✅ Undo applied - restored ${selectedNames.length} selections`);
 
         } catch (error) {
             console.error('Failed to undo:', error.message);
             if (window.Toast) {
                 Toast.show('error', `Undo failed: ${error.message}`);
-            } else {
-                alert(`Undo failed: ${error.message}`);
             }
         }
     },
 
     async redoMove() {
         try {
-            console.log('🔁 Redoing most recent undo...');
-            console.log('🔍 Redo stack state:', {
-                hasStack: !!this.state.redoSnapshotStack,
-                stackLength: this.state.redoSnapshotStack?.length || 0,
-                stackContents: this.state.redoSnapshotStack || []
-            });
-
-            // Check if there's anything to redo
-            if (!this.state.redoSnapshotStack || this.state.redoSnapshotStack.length === 0) {
-                console.warn('⚠️ Redo stack is empty - nothing to redo');
+            console.log('🔁 Toggling last checkbox (redo)...');
+            
+            // Check if we have a last toggled checkbox
+            if (!this.state.lastToggledCheckbox) {
+                console.warn('⚠️ No checkbox to toggle');
                 if (window.Toast) {
-                    Toast.show('info', 'Nothing to redo');
-                } else {
-                    alert('Nothing to redo');
+                    Toast.show('info', 'No recent checkbox action to redo');
                 }
                 return;
             }
 
-            // Show user feedback immediately
-            if (window.Toast) {
-                Toast.show('info', 'Redoing last batch...');
+            const tagName = this.state.lastToggledCheckbox;
+            
+            // Find the checkbox in either available or selected tags
+            const availableContainer = document.getElementById('availableTags');
+            const selectedContainer = document.getElementById('selectedTags');
+            
+            let checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
+            if (!checkbox) {
+                checkbox = selectedContainer?.querySelector(`input[value="${tagName}"]`);
             }
-
-            // Capture current state for future undo
-            const captureCurrentState = () => ({
-                selected_tag_names: [...(this.state.persistentSelectedTags || [])],
-                available_tag_names: (this.state.tags || [])
-                    .filter(tag => tag && !this.state.persistentSelectedTags.includes(tag['Product Name*']))
-                    .map(tag => tag['Product Name*']),
-                action_type: 'redo_capture',
-                timestamp: new Date().toISOString()
-            });
-
-            const snapshotToRestore = this.state.redoSnapshotStack.pop();
-            console.log('📦 Restoring snapshot from redo:', {
-                selectedNames: snapshotToRestore.selected_tag_names?.length || 0,
-                snapshot: snapshotToRestore
-            });
             
-            if (!this.state.localUndoStack) {
-                this.state.localUndoStack = [];
-            }
-            this.state.localUndoStack.push(captureCurrentState());
-            if (this.state.localUndoStack.length > 5) {
-                this.state.localUndoStack = this.state.localUndoStack.slice(-5);
-            }
-
-            const selectedNames = snapshotToRestore.selected_tag_names || [];
-            console.log(`🔄 Restoring ${selectedNames.length} selected tags from redo stack`);
-            
-            // CRITICAL FIX: Update state first, then restore UI
-            this.state.persistentSelectedTags = [...selectedNames];
-            this.state.selectedTags = new Set(selectedNames);
-            
-            // CRITICAL FIX: Sync _selectedTagsSet to ensure consistency
-            if (!this.state._selectedTagsSet) {
-                this.state._selectedTagsSet = new Set();
-            }
-            this.state._selectedTagsSet = new Set(selectedNames);
-            
-            console.log('✅ State updated:', {
-                persistentSelectedTags: this.state.persistentSelectedTags.length,
-                selectedTags: this.state.selectedTags.size,
-                _selectedTagsSet: this.state._selectedTagsSet.size
-            });
-
-            const selectedTagObjects = selectedNames.map(tagName =>
-                this.state.tags.find(t => t['Product Name*'] === tagName) ||
-                this.state.originalTags.find(t => t['Product Name*'] === tagName)
-            ).filter(Boolean);
-            
-            console.log(`📋 Found ${selectedTagObjects.length} tag objects to restore`);
-            
-            // CRITICAL FIX: Update selected tags display first, then restore checkbox states
-            this.updateSelectedTags(selectedTagObjects);
-            
-            // CRITICAL FIX: Force restore checkbox states immediately after state update
-            setTimeout(() => {
-                console.log('🔄 Restoring checkbox states...');
-                this._restoreCheckboxStates();
+            if (checkbox) {
+                // Toggle the checkbox
+                checkbox.checked = !checkbox.checked;
+                // Dispatch change event to trigger state update
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 
-                // CRITICAL FIX: Also uncheck checkboxes in available tags that shouldn't be checked
-                const availableTagsContainer = document.getElementById('availableTags');
-                if (availableTagsContainer) {
-                    const availableCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox');
-                    availableCheckboxes.forEach(checkbox => {
-                        const tagName = checkbox.value;
-                        const shouldBeChecked = selectedNames.includes(tagName);
-                        if (checkbox.checked !== shouldBeChecked) {
-                            checkbox.checked = shouldBeChecked;
-                        }
-                    });
+                if (window.Toast) {
+                    Toast.show('success', `Toggled: ${tagName}`);
                 }
-                
-                // CRITICAL FIX: Also sync selected tags checkboxes
-                const selectedTagsContainer = document.getElementById('selectedTags');
-                if (selectedTagsContainer) {
-                    const selectedCheckboxes = selectedTagsContainer.querySelectorAll('.tag-checkbox');
-                    selectedCheckboxes.forEach(checkbox => {
-                        const tagName = checkbox.value;
-                        const shouldBeChecked = selectedNames.includes(tagName);
-                        if (checkbox.checked !== shouldBeChecked) {
-                            checkbox.checked = shouldBeChecked;
-                        }
-                    });
-                }
-                
-                console.log('✅ Checkbox states restored');
-            }, 0);
-            
-            // CRITICAL FIX: Re-initialize checkbox event handlers after redo to ensure they work
-            // After redo, checkboxes might have been recreated and lost their event handlers
-            setTimeout(() => {
-                this._ensureCheckboxesEnabled();
-                this._reinitializeCheckboxHandlers();
-                this.updateSelectAllCheckboxes();
-                
-                // Verify restoration worked
-                const currentSelectedCount = this.state.persistentSelectedTags.length;
-                const displayedSelectedCount = document.querySelectorAll('#selectedTags .tag-item').length;
-                console.log('✅ Redo complete:', {
-                    stateSelected: currentSelectedCount,
-                    displayedSelected: displayedSelectedCount,
-                    match: currentSelectedCount === displayedSelectedCount
-                });
-            }, 100);
-
-            if (window.Toast) {
-                Toast.show('success', `Redo: restored ${selectedNames.length} selection(s)`);
+                console.log(`✅ Toggled checkbox for: ${tagName}`);
             } else {
-                console.log(`✅ Redo: restored ${selectedNames.length} selection(s)`);
+                console.warn(`⚠️ Checkbox not found for: ${tagName}`);
+                if (window.Toast) {
+                    Toast.show('info', 'Previous checkbox not found');
+                }
             }
-
-            verboseLog(`✅ Redo applied - restored ${selectedNames.length} selections`);
 
         } catch (error) {
             console.error('Failed to redo:', error.message);
             if (window.Toast) {
                 Toast.show('error', `Redo failed: ${error.message}`);
-            } else {
-                alert(`Redo failed: ${error.message}`);
             }
         }
     },
