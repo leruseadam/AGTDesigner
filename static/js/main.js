@@ -2063,10 +2063,10 @@ const TagManager = {
                 }
             });
             
-            // Convert Sets to Arrays
+            // Convert Sets to Arrays (skip sorting for speed - browser will sort in dropdown anyway)
             const filterOptionsArrays = {};
             Object.keys(filterOptions).forEach(key => {
-                filterOptionsArrays[key] = Array.from(filterOptions[key]).sort();
+                filterOptionsArrays[key] = Array.from(filterOptions[key]);
             });
             
             console.log('⚡⚡⚡ Built filter options:', {
