@@ -1874,13 +1874,31 @@ const TagManager = {
             highCbd: 'highCbdFilter'
             // Removed strain since there's no strainFilter dropdown in the HTML
         };
-        
+
+        // Helper: robustly find a filter element by ID, data attribute or class
+        function _findFilterElement(filterId, filterType) {
+            let el = document.getElementById(filterId);
+            if (el) return el;
+            // Try data-filter attribute
+            el = document.querySelector(`[data-filter="${filterType}"]`);
+            if (el) return el;
+            // Try aria-label match
+            el = Array.from(document.querySelectorAll('.filter-select, select')).find(s => {
+                try { return s.getAttribute('aria-label') && s.getAttribute('aria-label').toLowerCase().includes(filterType.toLowerCase()); } catch (e) { return false; }
+            });
+            if (el) return el;
+            // Try by name/id partial match
+            el = document.querySelector(`[id*="${filterType}"]`) || document.querySelector(`[name*="${filterType}"]`);
+            return el;
+        }
+
         // Update each filter dropdown
         Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
-            const filterElement = document.getElementById(filterId);
+            const filterElement = _findFilterElement(filterId, filterType);
             
             if (!filterElement) {
-                console.warn(`Filter element not found: ${filterId}`);
+                console.error(`Filter element not found: ${filterId} (tried id, data-filter, aria-label, partial id/name). Filters WILL NOT be displayed.`);
+                // Fail gracefully: skip this filter but continue with others
                 return;
             }
             
