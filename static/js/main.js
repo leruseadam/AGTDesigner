@@ -1372,7 +1372,6 @@ const TagManager = {
         if (this.state.hydratedFromCache) {
             return false;
         }
-        
         // CRITICAL FIX: Don't load from cache if no Excel file is uploaded
         // Only hydrate cache when there's an actual Excel file loaded
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
@@ -1380,7 +1379,6 @@ const TagManager = {
             console.log('❌ No Excel file uploaded, skipping cache hydration');
             return false;
         }
-        
         // CRITICAL FIX: On page reload, check if we recently updated lineage
         // If so, skip cache to ensure we get fresh lineage data from database
         // BUT: Only skip if update was VERY recent (30 seconds) to avoid unnecessary reloads
@@ -1397,16 +1395,33 @@ const TagManager = {
                 sessionStorage.removeItem('lastLineageUpdateTime');
             }
         }
-        
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
-            console.log(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
+            // FINAL GUARANTEE: Normalize all lineage fields to database value for every tag
+            const normalizedTags = cachedTags.map(tag => {
+                const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                tag.canonical_lineage = dbLineage;
+                tag.currentLineage = dbLineage;
+                tag.Lineage = dbLineage;
+                tag.lineage = dbLineage.toLowerCase();
+                return tag;
+            });
+            // Debug log: show sample of normalized tags
+            if (normalizedTags.length > 0) {
+                console.log('🔍 [GUARANTEE] Sample normalized tag after cache hydration:', {
+                    name: normalizedTags[0]['Product Name*'],
+                    canonical_lineage: normalizedTags[0].canonical_lineage,
+                    currentLineage: normalizedTags[0].currentLineage,
+                    Lineage: normalizedTags[0].Lineage,
+                    lineage: normalizedTags[0].lineage
+                });
+            }
+            console.log(`⚡ INSTANT LOAD: Hydrating ${normalizedTags.length} tags from cache`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
             this.state.simplifiedAvailableTagsActive = false;
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
-            
+            this.state.tags = [...normalizedTags];
+            this.state.originalTags = [...normalizedTags];
             // CRITICAL FIX: Hide splash BEFORE rendering to prevent visual glitches
             if (this.hideActionSplash) {
                 this.hideActionSplash();
@@ -1415,15 +1430,13 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
             }
-            
             // CRITICAL FIX: Use requestAnimationFrame to ensure immediate render
             requestAnimationFrame(() => {
-                this._updateAvailableTags(cachedTags, null);
-                console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
-
+                this._updateAvailableTags(normalizedTags, null);
+                console.log(`✅ INSTANT LOAD: ${normalizedTags.length} tags rendered from cache`);
                 // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
                 // This makes page reloads instant while still updating in background
-                this._refreshLineageFromDatabase(cachedTags).then(() => {
+                this._refreshLineageFromDatabase(normalizedTags).then(() => {
                     console.log('✅ Background lineage check complete (fast mode)');
                 }).catch(err => {
                     console.warn('⚠️ Background lineage check failed (non-critical):', err);

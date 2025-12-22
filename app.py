@@ -12897,9 +12897,14 @@ def get_web_filter_options():
         if request.method == 'POST':
             data = request.get_json()
             current_filters = data.get('filters', {})
-        
+
+        # CRITICAL PERFORMANCE: Skip weight on initial load for instant filters
+        skip_weight = len(current_filters) == 0 or not any(current_filters.values())
+        if skip_weight:
+            logging.info("Web filter initial load - skipping weight for instant response")
+
         # Use optimized method for web clients
-        options = excel_processor.get_dynamic_filter_options(current_filters)
+        options = excel_processor.get_dynamic_filter_options(current_filters, skip_weight=skip_weight)
         
         import math
         def clean_list(lst):
@@ -13252,12 +13257,16 @@ def get_filter_options():
         else:
             logging.warning("Filter options: DataFrame not available for logging")
         
-        # Use optimized method for Windows
+        # Use optimized method - skip weight on initial load for instant filters
         try:
-            if is_windows_request or is_windows_ua:
-                options = excel_processor.get_dynamic_filter_options(current_filters)
-            else:
-                options = excel_processor.get_dynamic_filter_options(current_filters)
+            # CRITICAL PERFORMANCE: Skip weight filter if no filters are applied (initial load)
+            # Weight will be loaded on-demand when user clicks weight dropdown
+            skip_weight = len(current_filters) == 0 or not any(current_filters.values())
+
+            if skip_weight:
+                logging.info("Initial filter load - skipping weight computation for instant response")
+
+            options = excel_processor.get_dynamic_filter_options(current_filters, skip_weight=skip_weight)
         except Exception as filter_error:
             logging.error(f"CRITICAL: Error getting filter options: {filter_error}")
             import traceback
@@ -18469,8 +18478,9 @@ def get_initial_data():
                     logging.info(f"⚡ Using cached filter options (took {filters_elapsed:.0f}ms)")
                 else:
                     # Still need filters, but do it after tags are returned
-                    logging.info("Getting dynamic filter options...")
-                    filters = excel_processor.get_dynamic_filter_options({})
+                    # CRITICAL PERFORMANCE: Skip weight on initial load
+                    logging.info("Getting dynamic filter options (skipping weight for speed)...")
+                    filters = excel_processor.get_dynamic_filter_options({}, skip_weight=True)
                     import math
                     def clean_list(lst):
                         return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
@@ -18481,8 +18491,9 @@ def get_initial_data():
                     logging.info(f"Filter options processed: {len(filters)} filter categories (took {filters_elapsed:.0f}ms)")
             else:
                 # Normal mode - get filters (they may be cached internally by get_dynamic_filter_options)
-                logging.info("Getting dynamic filter options...")
-                filters = excel_processor.get_dynamic_filter_options({})
+                # CRITICAL PERFORMANCE: Skip weight on initial load
+                logging.info("Getting dynamic filter options (skipping weight for speed)...")
+                filters = excel_processor.get_dynamic_filter_options({}, skip_weight=True)
                 import math
                 def clean_list(lst):
                     return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
