@@ -15281,6 +15281,31 @@ async function handleJsonPasteInput(input) {
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
+    // Global undo stack tracker for ALL checkbox changes
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('tag-checkbox') && window.TagManager) {
+            const tagName = e.target.value;
+            console.log(`🌍 Global checkbox change detected: ${tagName}, skipUndoTracking: ${window.TagManager.state?.skipUndoTracking}`);
+            
+            // Add to undo stack (unless this is from undo/redo operation)
+            if (!window.TagManager.state.skipUndoTracking) {
+                if (!window.TagManager.state.undoStack) {
+                    window.TagManager.state.undoStack = [];
+                }
+                window.TagManager.state.undoStack.push(tagName);
+                console.log(`📝 Global handler added to undo stack: ${tagName}, stack size: ${window.TagManager.state.undoStack.length}`);
+                // Limit undo stack size to 10
+                if (window.TagManager.state.undoStack.length > 10) {
+                    window.TagManager.state.undoStack.shift();
+                }
+                // Clear redo stack on new action
+                if (window.TagManager.state.redoStack) {
+                    window.TagManager.state.redoStack = [];
+                }
+            }
+        }
+    }, true); // Use capture phase to catch before other handlers
+    
     // Show splash screen immediately (but don't load tags yet - wait for store selection)
     AppLoadingSplash.show();
     AppLoadingSplash.updateProgress(10, 'Initializing application...');
