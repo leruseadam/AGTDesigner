@@ -1619,7 +1619,7 @@ class ExcelProcessor:
                 
                 # 3. Basic filtering (exclude sample rows) - vectorized for speed
                 initial_count = len(df)
-                df = df[~df["Product Type*"].isin(EXCLUDED_PRODUCT_TYPES)]
+                df = df[~df["Product Type*"].str.lower().isin([t.lower() for t in EXCLUDED_PRODUCT_TYPES])]
                 df.reset_index(drop=True, inplace=True)
                 final_count = len(df)
                 if initial_count != final_count:
@@ -2035,8 +2035,8 @@ class ExcelProcessor:
 
             # 4) Exclude sample rows and deactivated products
             initial_count = len(self.df)
-            excluded_by_type = self.df[self.df["Product Type*"].isin(EXCLUDED_PRODUCT_TYPES)]
-            self.df = self.df[~self.df["Product Type*"].isin(EXCLUDED_PRODUCT_TYPES)]
+            excluded_by_type = self.df[self.df["Product Type*"].str.lower().isin([t.lower() for t in EXCLUDED_PRODUCT_TYPES])]
+            self.df = self.df[~self.df["Product Type*"].str.lower().isin([t.lower() for t in EXCLUDED_PRODUCT_TYPES])]
             # Reset index after filtering to prevent duplicate labels
             self.df.reset_index(drop=True, inplace=True)
             self.logger.info(f"Excluded {len(excluded_by_type)} products by product type: {excluded_by_type['Product Type*'].unique().tolist()}")
@@ -5094,7 +5094,8 @@ class ExcelProcessor:
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
-                        if ("trade sample" in v_lower or "deactivated" in v_lower):
+                        # Exclude any product type containing 'deactivated' or 'x-deactivated' (case-insensitive)
+                        if ("trade sample" in v_lower or "deactivated" in v_lower or "x-deactivated" in v_lower):
                             continue
                         normalized_v = TYPE_OVERRIDES.get(v_lower, v)
                         filtered_values.append(normalized_v)
