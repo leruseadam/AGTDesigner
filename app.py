@@ -16537,14 +16537,29 @@ def json_match():
                 weight = p.get('Weight*') or p.get('Weight') or ''
                 units = p.get('Units') or ''
                 combined_weight = p.get('CombinedWeight') or ''
-
-                # Build display name: "Product Name - Weight"
-                if combined_weight:
+                
+                # CRITICAL FIX: Default units to 'g' if weight exists but units are missing
+                if weight and not units:
+                    units = 'g'
+                    logging.debug(f"Added default units 'g' for product: {product_name}")
+                
+                # CRITICAL FIX: Check if product name already contains weight to avoid duplication
+                # Common weight patterns: "1g", "1.0g", "0.5g", "2g", etc.
+                import re
+                has_weight_in_name = bool(re.search(r'\d+\.?\d*\s*g\b', product_name, re.IGNORECASE))
+                
+                # Build display name: "Product Name - Weight" (but avoid duplicating weight)
+                if has_weight_in_name:
+                    # Product name already contains weight, don't add it again
+                    display_name = product_name
+                    logging.debug(f"Product name already contains weight: {product_name}")
+                elif combined_weight:
                     display_name = f"{product_name} - {combined_weight}"
                 elif weight and units:
                     display_name = f"{product_name} - {weight}{units}"
                 elif weight:
-                    display_name = f"{product_name} - {weight}"
+                    # Fallback: if weight exists but no units, add 'g' as default
+                    display_name = f"{product_name} - {weight}g"
                 else:
                     display_name = product_name
 
