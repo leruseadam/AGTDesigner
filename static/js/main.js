@@ -15282,11 +15282,13 @@ async function handleJsonPasteInput(input) {
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     // Global undo stack tracker for ALL checkbox changes
+    console.log('🎯 Setting up global checkbox change listener for undo tracking');
     document.addEventListener('change', function(e) {
+        console.log('🔔 Change event detected on:', e.target, 'has tag-checkbox class:', e.target.classList?.contains('tag-checkbox'));
         if (e.target.classList.contains('tag-checkbox') && window.TagManager) {
             const tagName = e.target.value;
             console.log(`🌍 Global checkbox change detected: ${tagName}, skipUndoTracking: ${window.TagManager.state?.skipUndoTracking}`);
-            
+
             // Add to undo stack (unless this is from undo/redo operation)
             if (!window.TagManager.state.skipUndoTracking) {
                 if (!window.TagManager.state.undoStack) {
@@ -15302,6 +15304,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (window.TagManager.state.redoStack) {
                     window.TagManager.state.redoStack = [];
                 }
+            } else {
+                console.log(`⏭️ Skipping undo tracking for: ${tagName} (skipUndoTracking is true)`);
             }
         }
     }, true); // Use capture phase to catch before other handlers
@@ -15547,12 +15551,24 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add event listener for the redo button with retry mechanism
     function attachRedoButtonListener() {
         const redoButton = document.getElementById('redo-move-btn');
+        console.log('🔍 Attempting to attach redo button listener, button found:', !!redoButton);
         if (redoButton) {
-            // Remove any existing listeners by cloning
-            const newButton = redoButton.cloneNode(true);
-            redoButton.parentNode.replaceChild(newButton, redoButton);
+            console.log('🔍 Redo button details:', {
+                id: redoButton.id,
+                classes: redoButton.className,
+                disabled: redoButton.disabled,
+                display: window.getComputedStyle(redoButton).display,
+                visibility: window.getComputedStyle(redoButton).visibility,
+                pointerEvents: window.getComputedStyle(redoButton).pointerEvents
+            });
 
-            newButton.addEventListener('click', async function(e) {
+            // Don't clone - just remove old listeners and add new one directly
+            const oldButton = redoButton;
+            oldButton.replaceWith(oldButton.cloneNode(true));
+            const freshButton = document.getElementById('redo-move-btn');
+
+            freshButton.addEventListener('click', async function(e) {
+                console.log('🔁🔁🔁 REDO BUTTON CLICKED - EVENT FIRED! 🔁🔁🔁');
                 e.preventDefault();
                 e.stopPropagation();
                 console.log('🔁 Redo button clicked');
@@ -15571,8 +15587,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.error('❌ TagManager or redoMove method not available');
                     alert('Redo functionality is not available. Please try refreshing the page.');
                 }
-            });
-            console.log('✅ Redo button event listener attached successfully');
+            }, {capture: false, passive: false});
+            console.log('✅ Redo button event listener attached successfully to fresh button');
             verboseLog('Redo button event listener attached successfully');
             return true;
         } else {

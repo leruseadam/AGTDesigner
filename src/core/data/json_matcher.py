@@ -483,7 +483,11 @@ def extract_vendor_info(json_data):
             'hustler\'s ambition': 'hustler\'s ambition',
             '1555 industrial llc': '1555 industrial llc',
             'harmony farms': 'airo pro',
-            'jsm': 'jsm llc'
+            'jsm': 'jsm llc',
+            'grow op': 'phat n sticky',
+            'growop': 'phat n sticky',
+            'phat n sticky': 'phat n sticky',
+            'phatnsticky': 'phat n sticky'
         }
         
         for key, value in vendor_mappings.items():
@@ -1077,8 +1081,8 @@ class JSONMatcher:
                                     best_vendor_score = score
                                     best_vendor_match = candidate
                             
-                            # Use vendor-specific match if it's reasonably good (score >= 50)
-                            if best_vendor_match and best_vendor_score >= 50:
+                            # Use vendor-specific match if it's reasonably good (score >= 40, lowered from 50)
+                            if best_vendor_match and best_vendor_score >= 40:
                                 logging.info(f"✅ Found better match from correct vendor (score: {best_vendor_score} vs {best_score})")
                                 best_vendor_match['_similarity_score'] = best_vendor_score
                                 return best_vendor_match
@@ -2618,18 +2622,18 @@ class JSONMatcher:
                                     else:
                                         score += 30.0  # Reduced score for weak overlap
                                 
-                                # 4. Enhanced fuzzy matching with stricter threshold
+                                # 4. Enhanced fuzzy matching with more lenient threshold
                                 try:
                                     from fuzzywuzzy import fuzz
                                     
                                     # Use token_sort_ratio for better word-order-independent matching
                                     token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
                                     
-                                    # Only use fuzzy if above threshold
-                                    if token_sort_score >= 70:  # Stricter threshold (was 50)
-                                        score += token_sort_score * 0.5  # Reduced weight for fuzzy
-                                    elif token_sort_score >= 60:
-                                        score += token_sort_score * 0.3  # Very low weight for marginal matches
+                                    # More lenient thresholds for better product discovery
+                                    if token_sort_score >= 60:  # Lowered from 70 for more matches
+                                        score += token_sort_score * 0.6  # Increased weight
+                                    elif token_sort_score >= 50:
+                                        score += token_sort_score * 0.4  # Increased weight for marginal matches
                                         
                                 except ImportError:
                                     pass
@@ -2688,13 +2692,14 @@ class JSONMatcher:
                         from fuzzywuzzy import fuzz
                         name_similarity = fuzz.token_sort_ratio(json_name, db_name)
                         
-                        # Require at least 70% name similarity for ANY match
+                        # Require at least 60% name similarity for ANY match (lowered from 70% for better discovery)
                         # This allows legitimate matches like:
                         # - "Jet Fuel Gelato Vaporizer" → "Jet Fuel Gelato Live Resin" (75%+)
                         # - "Wedding Cake Cartridge" → "Wedding Cake Live Resin" (75%+)
+                        # - Products with slight variations in naming
                         # But prevents wrong matches like:
-                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (65%)
-                        if name_similarity < 70:
+                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (below 60%)
+                        if name_similarity < 60:
                             logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
                             best_match = None
                             best_score = 0
