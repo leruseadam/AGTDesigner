@@ -6196,7 +6196,35 @@ def check_store_required():
         logging.info(f"has_store_selection() returned: {has_selection}")
         
         if not current_store:
-            logging.info(f"No store resolved for IP {ip_address}, requiring selection")
+            logging.info(f"No store resolved for IP {ip_address}")
+            # Development convenience: auto-select fallback store for localhost or debug mode
+            try:
+                from flask import current_app
+                is_local = ip_address in ('127.0.0.1', '::1')
+                is_debug = bool(current_app.config.get('DEBUG', False))
+            except Exception:
+                is_local = False
+                is_debug = False
+
+            if is_local or is_debug:
+                fallback = 'AGT_Bothell'
+                session['selected_store'] = fallback
+                session['store_server_id'] = SERVER_INSTANCE_ID
+                session.modified = True
+                logging.info(f"Auto-selected fallback store '{fallback}' for local/dev request")
+                return {
+                    'success': True,
+                    'requires_store': False,
+                    'store': fallback,
+                    'debug': {
+                        'session_store': session_store,
+                        'ip_address': ip_address,
+                        'has_selection': has_selection,
+                        'auto_selected': True
+                    }
+                }
+
+            logging.info(f"Requiring explicit store selection for IP {ip_address}")
             return {
                 'success': True,
                 'requires_store': True,
@@ -7888,9 +7916,24 @@ def generate_labels():
                                 if processed_db.get('Product Brand'):
                                     record['ProductBrand'] = processed_db.get('Product Brand')
                                     record['Product Brand'] = processed_db.get('Product Brand')
+
+                                # CRITICAL FIX: For classic types, NEVER use "Mixed" strain
+                                # Classic types (Flower, Pre-Roll, etc.) should have specific strains, not "Mixed"
                                 if processed_db.get('Product Strain'):
-                                    record['Product Strain'] = processed_db.get('Product Strain')
-                                    record['ProductStrain'] = processed_db.get('Product Strain')
+                                    db_strain = processed_db.get('Product Strain', '').strip()
+                                    product_type = record.get('Product Type*', '').strip().lower()
+
+                                    from src.core.constants import CLASSIC_TYPES
+                                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
+
+                                    # For classic types, reject "Mixed" strain - keep Excel value instead
+                                    if is_classic_type and db_strain.lower() == 'mixed':
+                                        logging.info(f"⚠️ Rejecting 'Mixed' strain from database for classic type '{product_name}' (type: '{product_type}')")
+                                        # Keep original Excel strain value, don't override
+                                    else:
+                                        # For non-classic types or valid classic strains, use database value
+                                        record['Product Strain'] = db_strain
+                                        record['ProductStrain'] = db_strain
                                 
                         logging.info(f"✅ Enriched {enriched_count} Excel records with database data")
                 except Exception as enrich_error:
@@ -18509,6 +18552,10 @@ def get_initial_data():
             store_name = get_current_store_name()
             aligned_available_tags = _align_tags_with_db_lineage(available_tags, store_name) if available_tags else []
             
+            # CRITICAL FIX: Restore selected tags from session on page reload
+            preserved_selected_tags = session.get('selected_tags', [])
+            logging.info(f"CRITICAL FIX: Restoring {len(preserved_selected_tags)} selected tags on page reload")
+
             initial_data = {
                 'success': True,
                 'data_loaded': True,  # Add this field for frontend compatibility
@@ -18517,7 +18564,7 @@ def get_initial_data():
                 'columns': excel_processor.df.columns.tolist(),
                 'filters': filters,  # Use the properly formatted filters
                 'available_tags': aligned_available_tags,
-                'selected_tags': [],  # Don't restore selected tags on page reload
+                'selected_tags': preserved_selected_tags,  # CRITICAL FIX: Restore selected tags on reload
                 'total_records': len(excel_processor.df),
                 'source': 'excel'
             }
