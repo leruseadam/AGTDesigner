@@ -68,6 +68,31 @@
             }
             return;
         }
+
+        // IMMEDIATE FILTER POPULATION: If tags are already hydrated in TagManager state,
+        // build and apply filters synchronously to ensure dropdowns appear instantly.
+        try {
+            if (window.TagManager && TagManager.state && Array.isArray(TagManager.state.tags) && TagManager.state.tags.length > 0) {
+                console.log('⚡ FastPageLoad: Immediately building filters from TagManager.state.tags');
+                try {
+                    // Build options from tags and apply them synchronously
+                    const built = TagManager._extractFiltersFromTags(TagManager.state.tags);
+                    // Directly update filters (preserve existing values)
+                    TagManager.updateFilters(built, true);
+                    console.log('✅ FastPageLoad: Filters applied synchronously from in-memory tags');
+                    // Hide splash if present
+                    if (TagManager.hideActionSplash) TagManager.hideActionSplash();
+                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                } catch (innerErr) {
+                    console.warn('FastPageLoad: synchronous filter build failed:', innerErr);
+                }
+            }
+        } catch (e) {
+            console.warn('FastPageLoad: immediate filter population check failed:', e);
+        }
         
         // Store original function
         originalCheckForExistingData = TagManager.checkForExistingData;
