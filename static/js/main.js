@@ -6003,17 +6003,17 @@ const TagManager = {
             });
         }
         
-        // Remove 'by ...' patterns (with or without hyphen)
+        // Remove 'by ...' patterns (with or without hyphen) and any trailing weight/unit info
         let cleanedName = displayName.replace(/ by [^-]*$/i, ''); // Remove "by ..." at the end
         cleanedName = cleanedName.replace(/ by [^-]+(?= -)/i, ''); // Remove "by ..." before hyphen
         cleanedName = cleanedName.replace(/-/g, '\u2011');
+        // Remove trailing weight/unit if present (e.g., ' - 1g', ' - 3.5g', ' - 1 oz')
+        cleanedName = cleanedName.replace(/\s*-\s*\d+(\.\d+)?\s*[a-zA-Z]+$/, '');
         tagName.textContent = cleanedName;
 
-        // --- BEGIN PATCH: Add visible, normalized weight+units display for all tags ---
-        // Robust fallback chain for weight and units
+        // Only show normalized weight/units in the dedicated weight div
         let weight = tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '';
         let units = tag.Units || tag.units || '';
-        // If weight already contains units, don't append units again
         let showWeight = '';
         if (weight) {
             // If weight already has units (e.g., '3.5g', '1oz'), don't double-append
@@ -6033,7 +6033,6 @@ const TagManager = {
         weightDiv.style.color = '#e0e0e0';
         weightDiv.textContent = showWeight || '-';
         tagName.appendChild(weightDiv);
-        // --- END PATCH ---
         tagInfo.appendChild(tagName);
         
 
