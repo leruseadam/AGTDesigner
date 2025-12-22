@@ -10013,8 +10013,8 @@ const TagManager = {
     },
 
     async fetchAndPopulateFilters(retryCount = 0, skipIfEmpty = false) {
-        const maxRetries = 3; // Reduced retries for faster loading
-        const retryDelay = 500; // Reduced to 500ms for faster response
+        const maxRetries = 1; // Reduced to 1 retry - if cache works, we don't need retries
+        const retryDelay = 200; // Reduced to 200ms - minimal delay for instant response
         
         try {
             // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
@@ -10348,14 +10348,10 @@ const TagManager = {
             let filtersPopulated = false;
             if (this.state.tags && this.state.tags.length > 0) {
                 console.log('⚡ Building filter options from', this.state.tags.length, 'cached tags immediately...');
-                // Force synchronous rendering by using requestAnimationFrame
+                // Build filters synchronously for instant display - NO async delays
                 this.buildFilterOptionsFromTags(this.state.tags);
-                // Force browser to render immediately
-                requestAnimationFrame(() => {
-                    console.log('✅ Filter options rendered to DOM');
-                });
                 filtersPopulated = true;
-                console.log('✅ Filter options built from cache');
+                console.log('✅ Filter options built from cache instantly');
             } else {
                 console.log('❌ No tags available for filter building');
             }

@@ -2979,6 +2979,7 @@ class JSONMatcher:
             inventory_category = str(item.get("inventory_category", "")).strip()
             raw_weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
             raw_units = str(item.get("unit_weight_uom", item.get("uom", "g"))).strip()
+            logging.info(f"📦 JSON Weight extracted: raw_weight='{raw_weight}', raw_units='{raw_units}' from item")
             # Capture price from any JSON field before estimating
             price_candidates = [
                 item.get("line_price"),
@@ -3152,6 +3153,9 @@ class JSONMatcher:
             # Vendor and brand - CRITICAL: Vendor should NEVER be empty
             vendor_final = vendor if vendor and vendor.strip() else (global_vendor if global_vendor else 'Unknown Vendor')
             
+            # Determine DOH value based on product type
+            doh_value = self._determine_doh_value(product_type, description)
+            
             product = {
                 # Core identification
                 'Product Name*': description,  # Use standardized format
@@ -3193,6 +3197,10 @@ class JSONMatcher:
                 # Ratios
                 'Ratio': ratio,
                 'Ratio_or_THC_CBD': ratio,
+                
+                # DOH Compliance
+                'DOH': doh_value,
+                'DOH Compliant (Yes/No)': doh_value,
                 
                 # Metadata
                 'Source': 'JSON - No DB Match',
