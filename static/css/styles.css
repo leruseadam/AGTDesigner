@@ -841,7 +841,7 @@ body.modal-open #mainContent.store-selection-disabled,
   flex-direction: column !important;
   align-items: center !important;
   width: 100% !important;
-  padding-bottom: 3rem !important; /* Ensure help button margin is visible */
+  padding-bottom: 0.5rem !important;
   position: relative !important;
 }
 
@@ -861,11 +861,6 @@ body.modal-open #mainContent.store-selection-disabled,
 
 .control-panel > .control-section + .control-section {
   margin-top: 0.25rem !important; /* Further reduced from 0.5rem */
-}
-
-.control-panel > .control-section + .help-button-container {
-  margin-top: 2rem !important;
-  margin-bottom: 2rem !important;
 }
  
 .control-section {
@@ -916,7 +911,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: 2rem 0 !important;
+  margin: 0.5rem 0 !important;
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
