@@ -15481,12 +15481,24 @@ document.addEventListener('DOMContentLoaded', function() {
     // Add event listener for the undo button with retry mechanism
     function attachUndoButtonListener() {
         const undoButton = document.getElementById('undo-move-btn');
+        console.log('🔍 Attempting to attach undo button listener, button found:', !!undoButton);
         if (undoButton) {
-            // Remove any existing listeners by cloning
-            const newButton = undoButton.cloneNode(true);
-            undoButton.parentNode.replaceChild(newButton, undoButton);
+            console.log('🔍 Undo button details:', {
+                id: undoButton.id,
+                classes: undoButton.className,
+                disabled: undoButton.disabled,
+                display: window.getComputedStyle(undoButton).display,
+                visibility: window.getComputedStyle(undoButton).visibility,
+                pointerEvents: window.getComputedStyle(undoButton).pointerEvents
+            });
 
-            newButton.addEventListener('click', async function(e) {
+            // Don't clone - just remove old listeners and add new one directly
+            const oldButton = undoButton;
+            oldButton.replaceWith(oldButton.cloneNode(true));
+            const freshButton = document.getElementById('undo-move-btn');
+
+            freshButton.addEventListener('click', async function(e) {
+                console.log('🔙🔙🔙 UNDO BUTTON CLICKED - EVENT FIRED! 🔙🔙🔙');
                 e.preventDefault();
                 e.stopPropagation();
                 console.log('🔙 Undo button clicked');
@@ -15522,8 +15534,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         alert('Undo functionality is not available. Please try refreshing the page.');
                     }
                 }
-            });
-            console.log('✅ Undo button event listener attached successfully');
+            }, {capture: false, passive: false});
+            console.log('✅ Undo button event listener attached successfully to fresh button');
             verboseLog('Undo button event listener attached successfully');
             return true;
         } else {

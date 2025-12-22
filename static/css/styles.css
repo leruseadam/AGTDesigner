@@ -35,8 +35,8 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin-top: 0.5rem !important;
-  margin-bottom: 0.5rem !important;
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
   padding: 0 !important;
   display: flex !important;
   justify-content: center !important;
@@ -46,8 +46,8 @@
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin-top: 0.5rem !important;
-    margin-bottom: 0.5rem !important;
+    margin-top: 0.25rem !important;
+    margin-bottom: 0.25rem !important;
     padding: 0 !important;
   }
 }
@@ -911,7 +911,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: 0.25rem 0 0.25rem 0 !important;
+  margin: 0 0 0.5rem 0 !important;
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
