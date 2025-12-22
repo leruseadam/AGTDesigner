@@ -12382,6 +12382,16 @@ const TagManager = {
                     this.state.selectedTags.clear();
                 }
                 this.state.filterCache = null;
+
+                // CRITICAL: Clear undo/redo stacks
+                if (Array.isArray(this.state.undoStack)) {
+                    this.state.undoStack = [];
+                    console.log('🗑️ Cleared undo stack');
+                }
+                if (Array.isArray(this.state.redoStack)) {
+                    this.state.redoStack = [];
+                    console.log('🗑️ Cleared redo stack');
+                }
             }
             
             // INSTANTANEOUS: Clear all checkboxes immediately (no batching)
@@ -12519,10 +12529,12 @@ const TagManager = {
                 }
             };
             
+            console.log('🔄 Clearing JSON matches and switching to full Excel view...');
             fetchWithTimeout('/api/json-clear', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             }, 5000).then(() => {
+                console.log('✅ JSON matches cleared');
                 // Then switch to full Excel view
                 return fetchWithTimeout('/api/toggle-json-filter', {
                     method: 'POST',
@@ -12530,16 +12542,19 @@ const TagManager = {
                     body: JSON.stringify({ filter_mode: 'full_excel' })
                 }, 5000);
             }).then(response => {
+                console.log('✅ Switched to full Excel view');
                 if (response && response.ok) {
                     return response.json();
                 }
                 return null;
             }).then(data => {
+                console.log('🔄 Refreshing tags with full Excel data...');
                 // Always refresh available tags after clearing JSON matches and switching to full Excel
                 refreshTagsAfterClear();
             }).catch(fetchError => {
                 // Silently handle errors - UI is already updated, but still try to refresh tags
                 verboseLog('Backend JSON clear/toggle call failed (non-critical):', fetchError);
+                console.warn('⚠️ Failed to clear JSON/switch to Excel, but will still refresh tags');
                 // Still refresh tags to ensure we show full Excel data
                 refreshTagsAfterClear();
             });
