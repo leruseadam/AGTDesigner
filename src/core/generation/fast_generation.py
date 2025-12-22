@@ -273,13 +273,28 @@ def optimize_records_for_generation(records: List[Dict]) -> List[Dict]:
     start_time = time.time()
     
     optimized = []
+    from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES
+
     for record in records:
         # Create a minimal record with only required fields
+        # Normalize lineage for classic types: any non-canonical value -> 'HYBRID'
+        raw_lineage = record.get('Lineage', '')
+        product_type = (record.get('ProductType', '') or '').strip().lower()
+        lineage_up = str(raw_lineage).strip().upper() if raw_lineage is not None else ''
+        if product_type in CLASSIC_TYPES:
+            if not lineage_up or lineage_up == 'MIXED' or lineage_up not in VALID_CLASSIC_LINEAGES:
+                normalized_lineage = 'HYBRID'
+            else:
+                normalized_lineage = lineage_up
+        else:
+            # Non-classic types preserve whatever lineage/brand is present (default to MIXED)
+            normalized_lineage = lineage_up if lineage_up else 'MIXED'
+
         optimized_record = {
             'Product Name*': record.get('Product Name*', record.get('ProductName', '')),
             'ProductName': record.get('Product Name*', record.get('ProductName', '')),
             'ProductType': record.get('ProductType', ''),
-            'Lineage': record.get('Lineage', 'MIXED'),
+            'Lineage': normalized_lineage,
             'ProductBrand': record.get('ProductBrand', record.get('Product Brand', '')),
             'Product Brand': record.get('Product Brand', record.get('ProductBrand', '')),
             'Vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
