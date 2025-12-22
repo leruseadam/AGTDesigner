@@ -1176,7 +1176,7 @@ class ExcelProcessor:
             for key in oldest_keys:
                 del self._file_cache[key]
     
-    def _schedule_product_db_integration(self):
+    def _schedule_product_db_integration(self, force_sync: bool = False):
         """Schedule product database integration in background to avoid blocking file load."""
         # Check if integration is enabled
         if not getattr(self, '_product_db_enabled', True):
@@ -1285,6 +1285,15 @@ class ExcelProcessor:
                 except Exception as e:
                     self.logger.error(f"[ProductDB] Background integration error: {e}")
             
+            # If forced synchronous mode via parameter, instance flag, or env var, run inline
+            env_force = os.environ.get('FORCE_SYNC_DB_INTEGRATION', '').lower() == 'true'
+            instance_force = getattr(self, '_force_sync_db_integration', False)
+            if force_sync or env_force or instance_force:
+                self.logger.info("[ProductDB] Running synchronous DB integration (force sync enabled)")
+                # Run integration inline (no thread)
+                background_integration()
+                return
+
             # Start background thread
             thread = threading.Thread(target=background_integration, daemon=True)
             thread.start()
@@ -6105,7 +6114,7 @@ class ExcelProcessor:
             'rso/co2 tankers': '$40.00'
         }
         
-        return price_ranges.get(product_type, '$25.00')
+        return price_ranges.get(product_type, '$0.00')
     
     def _infer_weight_from_name(self, product_name, product_type):
         """Infer weight and units from product name and type."""
@@ -6752,8 +6761,8 @@ class ExcelProcessor:
                     'Quantity*': '1',
                     'Quantity': '1',
                     'Units': educated_guess.get("units", "g"),
-                    'Price': educated_guess.get("price", "25"),
-                    'Price* (Tier Name for Bulk)': educated_guess.get("price", "25"),
+                    'Price': educated_guess.get("price", "0"),
+                    'Price* (Tier Name for Bulk)': educated_guess.get("price", "0"),
                     'Source': f'Educated Guess ({educated_guess.get("confidence", "medium")})',
                     'Quantity Received*': '1',
                     'Weight Unit* (grams/gm or ounces/oz)': educated_guess.get("units", "g"),

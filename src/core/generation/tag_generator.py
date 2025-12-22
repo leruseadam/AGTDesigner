@@ -1320,6 +1320,29 @@ def process_chunk(args):
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
 
+    # DEFENSIVE NORMALIZATION: Ensure all label contexts use canonical lineage values
+    # This guarantees classic types never output non-canonical values like 'MIXED'
+    try:
+        from src.core.constants import VALID_CLASSIC_LINEAGES, CLASSIC_TYPES
+        for key, ld in list(context.items()):
+            if not isinstance(ld, dict):
+                continue
+            ptype = (ld.get('ProductType') or '').strip().lower()
+            if ptype in CLASSIC_TYPES:
+                lin = str(ld.get('Lineage', '')).strip().upper() if ld.get('Lineage') is not None else ''
+                if not lin or lin == 'MIXED' or lin not in VALID_CLASSIC_LINEAGES:
+                    ld['Lineage'] = 'HYBRID'
+                    # Also sync ProductBrand fields which templates sometimes use
+                    ld['ProductBrand'] = 'HYBRID'
+                    ld['ProductBrand_Center'] = 'HYBRID'
+            else:
+                # Normalize non-classic lineage fields to preserve case (keep brand fallback)
+                if ld.get('Lineage') is None or str(ld.get('Lineage')).strip() == '':
+                    ld['Lineage'] = 'MIXED'
+    except Exception:
+        # Non-fatal - if normalization fails, proceed and let earlier logic handle it
+        logger.debug('Defensive lineage normalization failed (non-fatal)')
+
     # Render template
     if DEBUG_ENABLED:
         logger.debug("Rendering template...")
