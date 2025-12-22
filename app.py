@@ -16510,12 +16510,28 @@ def json_match():
         # Format: "Product Name - Weight" (e.g., "Biscotti Live Resin Disposable Vape - 1g")
         matched_names = []
         if matched_products:
+            # CRITICAL FIX: Filter out placeholder/invalid products before adding to matched_names
+            invalid_names = ['unknown vendor', 'unknown', 'unknown type', 'no price', 'json product']
+            
             for p in matched_products:
                 if not isinstance(p, dict):
                     continue
 
                 # Get product name
                 product_name = p.get('Product Name*') or p.get('Description') or 'Unknown Product'
+                
+                # Skip placeholder/invalid products
+                product_name_lower = product_name.lower()
+                if any(invalid in product_name_lower for invalid in invalid_names):
+                    logging.info(f"Skipping placeholder product: '{product_name}'")
+                    continue
+                
+                # Skip products with empty or invalid vendor
+                vendor = p.get('Vendor') or p.get('Vendor/Supplier*') or ''
+                vendor_lower = vendor.lower() if vendor else ''
+                if vendor_lower in ['unknown vendor', 'unknown', '']:
+                    logging.info(f"Skipping product with invalid vendor: '{product_name}' (vendor: '{vendor}')")
+                    continue
 
                 # Get weight information (already cleaned above)
                 weight = p.get('Weight*') or p.get('Weight') or ''
