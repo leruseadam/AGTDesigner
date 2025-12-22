@@ -16532,21 +16532,28 @@ def json_match():
                 if not isinstance(p, dict):
                     continue
 
-                # Get product name
+                # Get product name and vendor
                 product_name = p.get('Product Name*') or p.get('Description') or 'Unknown Product'
-                
+                vendor = p.get('Vendor') or p.get('Vendor/Supplier*') or ''
+
                 # Skip placeholder/invalid products
                 product_name_lower = product_name.lower()
                 if any(invalid in product_name_lower for invalid in invalid_names):
                     logging.info(f"Skipping placeholder product: '{product_name}'")
                     continue
-                
+
                 # Skip products with empty or invalid vendor
-                vendor = p.get('Vendor') or p.get('Vendor/Supplier*') or ''
                 vendor_lower = vendor.lower() if vendor else ''
                 if vendor_lower in ['unknown vendor', 'unknown', '']:
                     logging.info(f"Skipping product with invalid vendor: '{product_name}' (vendor: '{vendor}')")
                     continue
+
+                # CRITICAL FIX: Check if product name already includes "by Vendor"
+                # If not, add it to match Excel tag format
+                if vendor and ' by ' not in product_name.lower():
+                    # Add vendor to product name: "Product Name by Vendor"
+                    product_name = f"{product_name} by {vendor}"
+                    logging.debug(f"Added vendor to product name: {product_name}")
 
                 # Get weight information (already cleaned above)
                 weight = p.get('Weight*') or p.get('Weight') or ''

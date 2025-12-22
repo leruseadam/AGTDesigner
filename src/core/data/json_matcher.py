@@ -5081,11 +5081,18 @@ class JSONMatcher:
                                 params = []
                                 for term in search_terms[:3]:
                                     params.extend([f'%{term}%', f'%{term}%'])
-                                
-                                # Add brand filter if we know it's Ceres
-                                where_sql += ' AND "Product Brand" = ?'
-                                params.append('Ceres')
-                                
+
+                                # CRITICAL FIX: Only add brand filter if we actually have brand information from JSON
+                                # Don't hardcode 'Ceres' - use the actual brand from the JSON item
+                                if brand and brand.strip():
+                                    where_sql += ' AND "Product Brand" = ?'
+                                    params.append(brand)
+
+                                # CRITICAL FIX: Also add vendor filter for better matching accuracy
+                                if vendor and vendor.strip():
+                                    where_sql += ' AND "Vendor/Supplier*" = ?'
+                                    params.append(vendor)
+
                                 logging.info(f"🔍 SQL WHERE clause: {where_sql}")
                                 logging.info(f"🔍 SQL params: {params}")
                                 

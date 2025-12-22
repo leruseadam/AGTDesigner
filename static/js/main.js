@@ -1696,15 +1696,8 @@ const TagManager = {
             }
 
             return Promise.resolve(loadPromise)
-                .catch(error => {
-                    console.error('refreshAfterStoreChange failed', error);
-                    verboseLog('refreshAfterStoreChange error:', error);
-                    if (typeof this.checkForExistingData === 'function') {
-                        return this.checkForExistingData();
-                    }
-                    return false;
-                })
-                .finally(() => {
+                .then(() => {
+                    // Only hide splash after filters are loaded
                     if (typeof this.hideActionSplash === 'function') {
                         this.hideActionSplash();
                     }
@@ -1712,6 +1705,14 @@ const TagManager = {
                         this.hideEnhancedGenerationSplash();
                     }
                     this.state.loading = false;
+                })
+                .catch(error => {
+                    console.error('refreshAfterStoreChange failed', error);
+                    verboseLog('refreshAfterStoreChange error:', error);
+                    if (typeof this.checkForExistingData === 'function') {
+                        return this.checkForExistingData();
+                    }
+                    return false;
                 });
         } catch (err) {
             console.error('refreshAfterStoreChange encountered an exception', err);
@@ -10081,7 +10082,12 @@ const TagManager = {
         const retryDelay = 0; // No delay needed
         
         try {
-            // Try to load filter options from sessionStorage for instant display
+            // INSTANT FILTERS: Always build filter options from tags in memory for instant dropdowns
+            if (this.state.tags && this.state.tags.length > 0) {
+                this.buildFilterOptionsFromTags(this.state.tags);
+            }
+
+            // Try to load filter options from sessionStorage for instant display (fallback only)
             let filterOptions = null;
             const filterCacheKey = 'agt_filter_options_cache';
             if (window.sessionStorage && sessionStorage.getItem(filterCacheKey)) {
