@@ -1790,10 +1790,18 @@ const TagManager = {
 
     updateFilters(filters, preserveExistingValues = true) {
         if (!filters) return;
-        
+
         // Debug log for filters
+        console.log('🔧🔧🔧 updateFilters called with:', {
+            vendor: filters.vendor?.length || 0,
+            brand: filters.brand?.length || 0,
+            productType: filters.productType?.length || 0,
+            lineage: filters.lineage?.length || 0,
+            weight: filters.weight?.length || 0,
+            preserveExistingValues
+        });
         verboseLog('Updating filters with:', filters, 'preserveExistingValues:', preserveExistingValues);
-        
+
         // CRITICAL FIX: Check if all filters are empty and we're trying to preserve values
         // If so, skip the update to prevent clearing user's selections
         const allEmpty = Object.values(filters).every(arr => !arr || arr.length === 0);
@@ -1988,9 +1996,12 @@ const TagManager = {
     
     buildFilterOptionsFromTags(tags) {
         try {
-            if (!tags || tags.length === 0) return;
-            
-            console.log('⚡ Building filter options from', tags.length, 'cached tags');
+            if (!tags || tags.length === 0) {
+                console.log('❌ buildFilterOptionsFromTags: No tags provided!');
+                return;
+            }
+
+            console.log('⚡⚡⚡ Building filter options from', tags.length, 'cached tags');
             
             // Extract unique values for each filter
             const filterOptions = {
@@ -2040,16 +2051,18 @@ const TagManager = {
                 filterOptionsArrays[key] = Array.from(filterOptions[key]).sort();
             });
             
-            console.log('⚡ Built filter options:', {
+            console.log('⚡⚡⚡ Built filter options:', {
                 vendor: filterOptionsArrays.vendor.length,
                 brand: filterOptionsArrays.brand.length,
                 productType: filterOptionsArrays.productType.length,
                 lineage: filterOptionsArrays.lineage.length,
                 weight: filterOptionsArrays.weight.length
             });
-            
+
             // Update filters immediately
+            console.log('⚡⚡⚡ Calling updateFilters with built options...');
             this.updateFilters(filterOptionsArrays, true);
+            console.log('⚡⚡⚡ updateFilters completed');
             
         } catch (error) {
             console.warn('Failed to build filter options from tags:', error);
