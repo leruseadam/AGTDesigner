@@ -16527,13 +16527,13 @@ def json_match():
                 logging.info(f"Extracted {len(matched_names)} product names from matched products")
                 logging.info(f"Sample matched names: {matched_names[:3]}")
 
-                # Clear selected tags after JSON match - products will be available but not auto-selected
+                # Auto-select JSON matched products for label generation
                 if hasattr(excel_processor, 'selected_tags'):
-                    excel_processor.selected_tags = []
-                session['selected_tags'] = []
+                    excel_processor.selected_tags = matched_names.copy()
+                session['selected_tags'] = matched_names.copy()
                 session.modified = True
 
-                logging.info(f"✅ Cleared selected tags after JSON match - {len(matched_names)} products available but not selected")
+                logging.info(f"✅ Auto-selected {len(matched_names)} JSON matched products for label generation")
 
         except Exception as persist_error:
             logging.error(f"Error adding JSON matched products to Excel DataFrame: {persist_error}")
@@ -16622,12 +16622,12 @@ def json_match():
             logging.info(f"🔍   - displayName: {matched_products[0].get('displayName', 'MISSING')}")
             logging.info(f"🔍   - All keys: {list(matched_products[0].keys())}")
 
-        # Clear selected tags after JSON match
+        # Auto-select JSON matched products
         if excel_processor and hasattr(excel_processor, 'selected_tags'):
-            excel_processor.selected_tags = []
-        session['selected_tags'] = []
+            excel_processor.selected_tags = matched_names.copy()
+        session['selected_tags'] = matched_names.copy()
         session.modified = True
-        logging.info("✅ Cleared selected tags after JSON match")
+        logging.info(f"✅ Auto-selected {len(matched_names)} JSON matched products")
 
         # Create response data - Return matched products directly
         response_products = json_matcher._upgrade_fallback_products(matched_products, None) if matched_products else []
@@ -16636,10 +16636,10 @@ def json_match():
             'matched_count': len(response_products),
             'matched_names': matched_names,
             'available_tags': response_products,  # Return matched products directly
-            'selected_tags': [],  # Clear selected tags - products available but not auto-selected
-            'message': f"Successfully matched {len(response_products)} products. They are available for selection.",
-            'auto_selected': False,
-            'selected_count': 0
+            'selected_tags': matched_names,  # Auto-select matched products
+            'message': f"Successfully matched {len(response_products)} products and automatically selected them for label generation.",
+            'auto_selected': True,
+            'selected_count': len(matched_names)
         }
 
         if response_products:

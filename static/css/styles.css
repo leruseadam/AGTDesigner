@@ -911,7 +911,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: -0.5rem 0 0.5rem 0 !important;
+  margin: 0.25rem 0 !important;
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;

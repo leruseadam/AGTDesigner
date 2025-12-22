@@ -8183,7 +8183,7 @@ class JSONMatcher:
                 # Core product information - follow existing tag format
                 'Product Name*': primary_product_name,
                 'ProductName': primary_product_name,
-                'Description': self._create_detailed_display_name(primary_product_name, description, thc_result, cbd_result, test_unit, weight, units),  # Use detailed name for output
+                'Description': description or primary_product_name,  # Use actual database Description field
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type or "Unknown",
                 'Product Type': product_type or "Unknown",

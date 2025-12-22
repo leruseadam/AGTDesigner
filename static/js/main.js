@@ -1986,6 +1986,76 @@ const TagManager = {
         return null;
     },
     
+    buildFilterOptionsFromTags(tags) {
+        try {
+            if (!tags || tags.length === 0) return;
+            
+            console.log('⚡ Building filter options from', tags.length, 'cached tags');
+            
+            // Extract unique values for each filter
+            const filterOptions = {
+                vendor: new Set(),
+                brand: new Set(),
+                productType: new Set(),
+                lineage: new Set(),
+                weight: new Set(),
+                doh: new Set(),
+                highCbd: new Set()
+            };
+            
+            tags.forEach(tag => {
+                // Vendor
+                const vendor = tag['Vendor/Supplier*'] || tag.Vendor || tag['Vendor/Supplier'] || '';
+                if (vendor && vendor.trim()) filterOptions.vendor.add(vendor.trim());
+                
+                // Brand
+                const brand = tag['Product Brand'] || tag.ProductBrand || tag.Brand || '';
+                if (brand && brand.trim()) filterOptions.brand.add(brand.trim());
+                
+                // Product Type
+                const productType = tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '';
+                if (productType && productType.trim()) filterOptions.productType.add(productType.trim());
+                
+                // Lineage
+                const lineage = tag.Lineage || tag.lineage || '';
+                if (lineage && lineage.trim()) filterOptions.lineage.add(lineage.trim());
+                
+                // Weight
+                const weight = tag['Weight*'] || tag.Weight || tag.weight || '';
+                if (weight && weight.toString().trim()) filterOptions.weight.add(weight.toString().trim());
+                
+                // DOH
+                const doh = tag.DOH || tag['DOH Compliant (Yes/No)'] || '';
+                if (doh && doh.trim()) filterOptions.doh.add(doh.trim());
+                
+                // High CBD (check product type)
+                if (productType && productType.toLowerCase().includes('high cbd')) {
+                    filterOptions.highCbd.add('High CBD');
+                }
+            });
+            
+            // Convert Sets to Arrays
+            const filterOptionsArrays = {};
+            Object.keys(filterOptions).forEach(key => {
+                filterOptionsArrays[key] = Array.from(filterOptions[key]).sort();
+            });
+            
+            console.log('⚡ Built filter options:', {
+                vendor: filterOptionsArrays.vendor.length,
+                brand: filterOptionsArrays.brand.length,
+                productType: filterOptionsArrays.productType.length,
+                lineage: filterOptionsArrays.lineage.length,
+                weight: filterOptionsArrays.weight.length
+            });
+            
+            // Update filters immediately
+            this.updateFilters(filterOptionsArrays, true);
+            
+        } catch (error) {
+            console.warn('Failed to build filter options from tags:', error);
+        }
+    },
+    
     saveSelectedTagsToStorage() {
         try {
             if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
@@ -5405,8 +5475,13 @@ const TagManager = {
         
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = (e) => {
-            console.log(`🎯 Checkbox handler called for: ${displayName}, skipUndoTracking: ${this.state.skipUndoTracking}`);
-            
+            console.log(`🎯🎯🎯 CHECKBOX HANDLER CALLED FOR: ${displayName}, skipUndoTracking: ${this.state.skipUndoTracking}`);
+            console.log('Checkbox details:', {
+                value: e.target.value,
+                checked: e.target.checked,
+                className: e.target.className
+            });
+
             // CRITICAL FIX: Always allow checkbox clicks - clear drag attributes if they exist
             // This prevents checkboxes from being permanently disabled after drag operations
             if (e.target.hasAttribute('data-reordering')) {
@@ -6705,6 +6780,13 @@ const TagManager = {
                 sessionStorage.setItem('lastLineageUpdateTime', updateTime);
                 localStorage.setItem('lastLineageUpdateTime', updateTime);
                 console.log('🗑️ Cleared frontend cache after lineage update to ensure fresh data on reload');
+                
+                // CRITICAL FIX: Save updated tags to cache immediately after clearing
+                // This ensures the updated lineage is cached and persists on page reload
+                if (this.state.tags && this.state.tags.length > 0) {
+                    this.saveAvailableTagsToCache(this.state.tags);
+                    console.log('💾 Saved updated tags with new lineage to cache for persistence');
+                }
             }
 
             // CRITICAL FIX: Use verified lineage from response (may be normalized differently)
@@ -9873,8 +9955,8 @@ const TagManager = {
     },
 
     async fetchAndPopulateFilters(retryCount = 0, skipIfEmpty = false) {
-        const maxRetries = 5; // Increased retries
-        const retryDelay = 2000; // Increased to 2 seconds for better chance of data being ready
+        const maxRetries = 3; // Reduced retries for faster loading
+        const retryDelay = 500; // Reduced to 500ms for faster response
         
         try {
             // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
@@ -10208,6 +10290,13 @@ const TagManager = {
             // Load selected tags and filters in background (non-blocking)
             this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
             
+            // CRITICAL FIX: Build filter options from cached tags IMMEDIATELY for instant filters
+            // This prevents filters from appearing empty on page load
+            if (this.state.tags && this.state.tags.length > 0) {
+                console.log('⚡ Building filter options from cached tags immediately...');
+                this.buildFilterOptionsFromTags(this.state.tags);
+            }
+            
             // CRITICAL FIX: Restore filters from localStorage IMMEDIATELY before API call
             // This prevents filters from disappearing on page refresh
             const savedFilters = this.loadFiltersFromStorage();
@@ -10222,6 +10311,7 @@ const TagManager = {
                 });
             }
             
+            // Fetch fresh filter options from API in background (non-blocking)
             if (this.fetchAndPopulateFilters) {
                 this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
             }
