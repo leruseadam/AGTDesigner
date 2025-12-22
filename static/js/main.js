@@ -12215,7 +12215,7 @@ const TagManager = {
     async redoMove() {
         try {
             console.log('🔁 Redoing last undone action...');
-            
+
             // Initialize redo stack if needed
             if (!this.state.redoStack) {
                 this.state.redoStack = [];
@@ -12223,7 +12223,7 @@ const TagManager = {
             if (!this.state.undoStack) {
                 this.state.undoStack = [];
             }
-            
+
             // Check if there's anything to redo
             if (this.state.redoStack.length === 0) {
                 console.warn('⚠️ Nothing to redo');
@@ -12234,26 +12234,41 @@ const TagManager = {
             }
 
             // Pop from redo stack
-            const tagName = this.state.redoStack.pop();
-            
+            const lastAction = this.state.redoStack.pop();
+
+            // Handle both old string format and new object format
+            let checkboxInfo;
+            if (typeof lastAction === 'string') {
+                checkboxInfo = { id: lastAction, type: 'tag' };
+            } else {
+                checkboxInfo = lastAction;
+            }
+
             // Push back to undo stack
-            this.state.undoStack.push(tagName);
-            
-            // Find the checkbox
-            const availableContainer = document.getElementById('availableTags');
-            const selectedContainer = document.getElementById('selectedTags');
-            
-            let checkbox = availableContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
-            if (!checkbox) {
-                checkbox = selectedContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
+            this.state.undoStack.push(checkboxInfo);
+
+            // Find the checkbox using the stored element reference or by searching
+            let checkbox = checkboxInfo.element;
+
+            // If element reference is stale, search for it
+            if (!checkbox || !document.contains(checkbox)) {
+                if (checkboxInfo.type === 'group') {
+                    // Find group checkbox by ID
+                    const groupId = checkboxInfo.id.replace('group:', '');
+                    checkbox = document.getElementById(groupId) ||
+                              document.querySelector(`.select-all-checkbox[data-group="${groupId}"]`);
+                } else {
+                    // Find tag checkbox
+                    const availableContainer = document.getElementById('availableTags');
+                    const selectedContainer = document.getElementById('selectedTags');
+
+                    checkbox = availableContainer?.querySelector(`input[data-tag-name="${checkboxInfo.id}"]`) ||
+                              selectedContainer?.querySelector(`input[data-tag-name="${checkboxInfo.id}"]`) ||
+                              availableContainer?.querySelector(`input[value="${checkboxInfo.id}"]`) ||
+                              selectedContainer?.querySelector(`input[value="${checkboxInfo.id}"]`);
+                }
             }
-            if (!checkbox) {
-                checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
-            }
-            if (!checkbox) {
-                checkbox = selectedContainer?.querySelector(`input[value="${tagName}"]`);
-            }
-            
+
             if (checkbox) {
                 // Prevent this click from being added to undo stack
                 this.state.skipUndoTracking = true;
@@ -12261,15 +12276,15 @@ const TagManager = {
                 setTimeout(() => {
                     this.state.skipUndoTracking = false;
                 }, 100);
-                
+
                 if (window.Toast) {
-                    Toast.show('success', `Redone: ${tagName}`);
+                    Toast.show('success', `Redone: ${checkboxInfo.id}`);
                 }
-                console.log(`✅ Redone checkbox for: ${tagName}`);
+                console.log(`✅ Redone checkbox for: ${checkboxInfo.id}`);
             } else {
-                console.warn(`⚠️ Checkbox not found for: ${tagName}`);
+                console.warn(`⚠️ Checkbox not found for: ${checkboxInfo.id}`);
                 // Put it back on redo stack if checkbox not found
-                this.state.redoStack.push(tagName);
+                this.state.redoStack.push(checkboxInfo);
                 this.state.undoStack.pop();
                 if (window.Toast) {
                     Toast.show('info', 'Checkbox not found');
