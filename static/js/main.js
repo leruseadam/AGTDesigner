@@ -10348,7 +10348,12 @@ const TagManager = {
             let filtersPopulated = false;
             if (this.state.tags && this.state.tags.length > 0) {
                 console.log('⚡ Building filter options from', this.state.tags.length, 'cached tags immediately...');
+                // Force synchronous rendering by using requestAnimationFrame
                 this.buildFilterOptionsFromTags(this.state.tags);
+                // Force browser to render immediately
+                requestAnimationFrame(() => {
+                    console.log('✅ Filter options rendered to DOM');
+                });
                 filtersPopulated = true;
                 console.log('✅ Filter options built from cache');
             } else {
