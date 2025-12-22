@@ -10383,7 +10383,6 @@ const TagManager = {
             } else if (filtersPopulated) {
                 console.log('✅ Filters already populated from cache instantly, skipping API call for speed');
             }
-            }
             
             // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
             // This prevents unnecessary reloads on every page refresh
