@@ -15399,12 +15399,29 @@ async function handleJsonPasteInput(input) {
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     // Global undo stack tracker for ALL checkbox changes
-    console.log('🎯 Setting up global checkbox change listener for undo tracking');
-    document.addEventListener('change', function(e) {
-        console.log('🔔 Change event detected on:', e.target, 'has tag-checkbox class:', e.target.classList?.contains('tag-checkbox'));
-        if (e.target.classList.contains('tag-checkbox') && window.TagManager) {
+    console.log('🎯 Setting up global checkbox CLICK listener for undo tracking (using event delegation)');
+
+    // CRITICAL FIX: Use CLICK events instead of CHANGE events since change events aren't firing
+    // Use event delegation so it works even after drag-and-drop clones checkboxes
+    let lastClickedCheckbox = null;
+    let lastClickTime = 0;
+
+    document.addEventListener('click', function(e) {
+        // Check if the clicked element is a tag checkbox
+        if (e.target.classList && e.target.classList.contains('tag-checkbox') && window.TagManager) {
             const tagName = e.target.value;
-            console.log(`🌍 Global checkbox change detected: ${tagName}, skipUndoTracking: ${window.TagManager.state?.skipUndoTracking}`);
+            const now = Date.now();
+
+            // Debounce to prevent duplicate calls
+            if (lastClickedCheckbox === tagName && (now - lastClickTime) < 100) {
+                console.log(`⏭️ Ignoring duplicate click on: ${tagName}`);
+                return;
+            }
+
+            lastClickedCheckbox = tagName;
+            lastClickTime = now;
+
+            console.log(`🌍🌍🌍 GLOBAL CLICK detected on tag checkbox: ${tagName}, checked: ${e.target.checked}, skipUndoTracking: ${window.TagManager.state?.skipUndoTracking}`);
 
             // Add to undo stack (unless this is from undo/redo operation)
             if (!window.TagManager.state.skipUndoTracking) {
@@ -15412,7 +15429,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     window.TagManager.state.undoStack = [];
                 }
                 window.TagManager.state.undoStack.push(tagName);
-                console.log(`📝 Global handler added to undo stack: ${tagName}, stack size: ${window.TagManager.state.undoStack.length}`);
+                console.log(`📝📝📝 Global CLICK handler added to undo stack: ${tagName}, stack size: ${window.TagManager.state.undoStack.length}`);
                 // Limit undo stack size to 10
                 if (window.TagManager.state.undoStack.length > 10) {
                     window.TagManager.state.undoStack.shift();

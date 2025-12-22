@@ -8185,15 +8185,29 @@ class JSONMatcher:
             # Extract clean product name for UI display
             clean_display_name = extract_clean_product_name(primary_product_name)
             
-            # Create DescAndWeight field in the same format as other tags
-            # CRITICAL FIX: Don't add weight to description to avoid duplication
-            desc_and_weight = description or primary_product_name
+            # Create Description and DescAndWeight with proper weight formatting
+            # Format: "Product Name - Weight" (e.g., "Georgia Pie Cured Resin Ceramic Cartridge - 1g")
+            base_description = description or primary_product_name
+            weight_display = f"{weight}{units}" if weight and units else ""
+            
+            # Check if description already contains the weight
+            has_weight_in_desc = (base_description and weight_display and 
+                                 weight_display.lower() in base_description.lower())
+            
+            if weight_display and not has_weight_in_desc:
+                # Append weight to description with soft hyphen format
+                formatted_description = f"{base_description} - {weight_display}"
+                desc_and_weight = formatted_description
+            else:
+                # Use description as-is (already has weight or no weight to add)
+                formatted_description = base_description
+                desc_and_weight = base_description
             
             tag = {
                 # Core product information - follow existing tag format
                 'Product Name*': primary_product_name,
                 'ProductName': primary_product_name,
-                'Description': description or primary_product_name,  # Use actual database Description field
+                'Description': formatted_description,  # Description with weight appended
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type or "Unknown",
                 'Product Type': product_type or "Unknown",
