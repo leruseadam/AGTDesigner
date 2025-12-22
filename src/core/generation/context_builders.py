@@ -28,7 +28,12 @@ def build_context(record, doc, template_type='vertical'):
     context['ratio_or_thc_cbd'] = record.get('Ratio_or_THC_CBD', '')
     
     # Lineage and DOH
-    context['lineage'] = record.get('Lineage', '')
+    # Use canonical_lineage or currentLineage if present, fallback to Lineage (to match UI and DOCX export logic)
+    context['lineage'] = (
+        record.get('canonical_lineage') or
+        record.get('currentLineage') or
+        record.get('Lineage', '')
+    )
     context['doh'] = record.get('DOH', '')
     
     # Vendor information - only include for classic types
@@ -54,7 +59,13 @@ def build_label_context(record):
         Dictionary containing label-specific context data
     """
     context = build_context(record, None)
-    
+    # Ensure lineage is normalized for label context as well
+    context['lineage'] = (
+        record.get('canonical_lineage') or
+        record.get('currentLineage') or
+        record.get('Lineage', '')
+    )
+
     # Add label-specific formatting
     if context.get('price'):
         try:
@@ -65,11 +76,11 @@ def build_label_context(record):
                 context['formatted_price'] = f"${price_float:.2f}"
         except (ValueError, TypeError):
             context['formatted_price'] = str(context['price'])
-    
+
     # Format description for label display
     if context.get('description'):
         context['formatted_description'] = context['description'][:100] + '...' if len(context['description']) > 100 else context['description']
-    
+
     return context
 
 def process_chunk(chunk, orientation='vertical', scale_factor=1.0):

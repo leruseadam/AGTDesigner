@@ -3236,16 +3236,18 @@ class ExcelProcessor:
 
             # CRITICAL PERFORMANCE: Pre-compute filter options immediately after loading
             # This ensures filters populate instantly on page load
+            # Skip weight filter on initial load for maximum speed (weight loaded on-demand)
             try:
                 import time
                 filter_start = time.time()
-                self.logger.info("Pre-computing filter options for instant page load...")
+                self.logger.info("Pre-computing filter options for instant page load (skipping weight for speed)...")
 
-                # Compute with empty filters (initial state) - this caches the result
-                initial_filters = self.get_dynamic_filter_options({})
+                # Compute with empty filters, skip weight for fast initial load
+                # Weight filter will be computed on-demand when user clicks weight dropdown
+                initial_filters = self.get_dynamic_filter_options({}, skip_weight=True)
 
                 filter_time = (time.time() - filter_start) * 1000
-                self.logger.info(f"✅ Filter options pre-computed in {filter_time:.1f}ms - filters will now load instantly")
+                self.logger.info(f"✅ Filter options pre-computed in {filter_time:.1f}ms (weight skipped) - filters will now load instantly")
             except Exception as filter_error:
                 # Don't fail file load if filter pre-computation fails
                 self.logger.warning(f"Failed to pre-compute filters (non-critical): {filter_error}")
@@ -4992,7 +4994,7 @@ class ExcelProcessor:
             
         return result
 
-    def get_dynamic_filter_options(self, current_filters: Dict[str, str]) -> Dict[str, list]:
+    def get_dynamic_filter_options(self, current_filters: Dict[str, str], skip_weight: bool = False) -> Dict[str, list]:
         # Return empty options if no data is loaded
         if self.df is None:
             return {
@@ -5007,9 +5009,9 @@ class ExcelProcessor:
             }
 
         # CRITICAL PERFORMANCE: Check cache first
-        # Create cache key from current filters
+        # Create cache key from current filters (include skip_weight in key)
         import json
-        cache_key = f"filter_opts_{json.dumps(current_filters, sort_keys=True)}"
+        cache_key = f"filter_opts_{json.dumps(current_filters, sort_keys=True)}_skip_weight_{skip_weight}"
         cached_result = self._get_cached_value(self._filter_options_cache, cache_key)
         if cached_result is not None:
             self.logger.debug(f"Using cached filter options for filters: {current_filters}")
@@ -5048,6 +5050,12 @@ class ExcelProcessor:
         for filter_key, col in filter_map.items():
             # For each filter, get unique values from the already filtered DataFrame
             if col in filtered_df.columns:
+                # CRITICAL PERFORMANCE: Skip weight filter if requested (for fast initial load)
+                if filter_key == "weight" and skip_weight:
+                    self.logger.debug("Skipping weight filter computation for fast initial load")
+                    options[filter_key] = []
+                    continue
+
                 if filter_key == "weight":
                     # CRITICAL PERFORMANCE FIX: Use purely vectorized operations for weight
                     # Skip the complex _format_weight_units entirely for filter generation
@@ -5083,19 +5091,26 @@ class ExcelProcessor:
                             combined = combined.str.strip()
                             values.extend(combined[combined != ''].unique().tolist())
 
-                    # Filter out invalid weight values using vectorized operations
+                    # Filter out invalid weight values using PURE vectorized operations
                     if values:
                         # Convert to Series for vectorized filtering
                         values_series = pd.Series(values).drop_duplicates()
 
-                        # Remove values with invalid keywords
-                        weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?|pack)?', re.IGNORECASE)
+                        # CRITICAL PERFORMANCE: Use pure vectorized str operations, NO apply()
+                        # Remove values with invalid keywords (pure vectorized)
                         invalid_keywords = ['thc', 'cbd', 'ratio', '|br|', ':', 'nan']
 
-                        # Vectorized filtering
-                        valid_mask = values_series.apply(lambda x: bool(weight_pattern.match(str(x))))
+                        # Start with all True mask
+                        valid_mask = pd.Series([True] * len(values_series), index=values_series.index)
+
+                        # Filter out values containing invalid keywords (vectorized)
+                        values_lower = values_series.str.lower()
                         for keyword in invalid_keywords:
-                            valid_mask &= ~values_series.str.lower().str.contains(keyword, na=False)
+                            valid_mask &= ~values_lower.str.contains(keyword, na=False)
+
+                        # Filter out values that don't start with a digit (vectorized)
+                        # Valid weights start with digit: "1g", "0.5g", "100mg", etc.
+                        valid_mask &= values_series.str.match(r'^\d', na=False)
 
                         values = values_series[valid_mask].tolist()
 
