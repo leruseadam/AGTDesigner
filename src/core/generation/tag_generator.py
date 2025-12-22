@@ -1133,10 +1133,24 @@ def process_chunk(args):
             # CRITICAL FIX: Use Excel processor's weight normalization with Excel-first priority
             from src.core.data.excel_processor import ExcelProcessor
             excel_processor = ExcelProcessor()
+
             weight_units = excel_processor._format_weight_units(row, excel_priority=True)
-            
+            # Always abbreviate grams/ounces in output (never full spelling)
+            def abbreviate_weight_units(val):
+                if not val:
+                    return val
+                # Replace all full spellings with abbreviations
+                val = re.sub(r'\bgrams?\b', 'g', val, flags=re.IGNORECASE)
+                val = re.sub(r'\bounces?\b', 'oz', val, flags=re.IGNORECASE)
+                val = re.sub(r'\bgram\b', 'g', val, flags=re.IGNORECASE)
+                val = re.sub(r'\bounce\b', 'oz', val, flags=re.IGNORECASE)
+                # Remove any double abbreviations (e.g., 'g g', 'oz oz')
+                val = re.sub(r'\b(g|oz)\s+\1\b', r'\1', val, flags=re.IGNORECASE)
+                return val
+            weight_units = abbreviate_weight_units(weight_units)
+
             print(f"DEBUG: Excel-first weight construction - Weight*: '{row.get('Weight*', '')}', Units: '{row.get('Units', '')}' -> '{weight_units}'")
-            
+
             # Preserve original ProductName; keep Description as the clean field
             label_data["ProductName"] = product_name  # Do not repurpose ProductName
             label_data["Description"] = description  # Primary clean display field

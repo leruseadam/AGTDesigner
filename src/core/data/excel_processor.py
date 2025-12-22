@@ -4989,6 +4989,15 @@ class ExcelProcessor:
                 "highCbd": []
             }
 
+        # CRITICAL PERFORMANCE: Check cache first
+        # Create cache key from current filters
+        import json
+        cache_key = f"filter_opts_{json.dumps(current_filters, sort_keys=True)}"
+        cached_result = self._get_cached_value(self._filter_options_cache, cache_key)
+        if cached_result is not None:
+            self.logger.debug(f"Using cached filter options for filters: {current_filters}")
+            return self._clone_filter_options(cached_result)
+
         # Optimization: filter the DataFrame once for all filters, not per filter
         df = self.df
         filter_map = {
@@ -5006,39 +5015,75 @@ class ExcelProcessor:
             return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
 
         # Apply all filters except 'All' and empty
-        filtered_df = df.copy()
+        # PERFORMANCE: Don't copy the entire df, just create a boolean mask
+        mask = pd.Series([True] * len(df), index=df.index)
         for key, value in current_filters.items():
             if value and value != "All":
                 filter_col = filter_map.get(key)
-                if filter_col and filter_col in filtered_df.columns:
-                    filtered_df = filtered_df[filtered_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()]
+                if filter_col and filter_col in df.columns:
+                    # Build combined mask instead of repeatedly filtering
+                    col_mask = df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
+                    mask &= col_mask
+
+        filtered_df = df[mask]
 
         options = {}
         for filter_key, col in filter_map.items():
             # For each filter, get unique values from the already filtered DataFrame
             if col in filtered_df.columns:
                 if filter_key == "weight":
-                    # PERFORMANCE OPTIMIZATION: Use vectorized operations instead of iterrows()
+                    # CRITICAL PERFORMANCE FIX: Use purely vectorized operations for weight
+                    # Skip the complex _format_weight_units entirely for filter generation
                     import re
-                    weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
 
-                    # Apply _format_weight_units vectorized using apply
-                    def format_weight_fast(row):
-                        weight_with_units = self._format_weight_units(row.to_dict(), excel_priority=True)
-                        if weight_with_units and weight_with_units.strip():
-                            weight_str = weight_with_units.strip()
-                            if weight_pattern.match(weight_str):
-                                return weight_str
-                            elif not any(keyword in weight_str.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
-                                return weight_str
-                        return None
+                    values = []
 
-                    # Use apply with axis=1 which is much faster than iterrows
-                    weight_series = filtered_df.apply(format_weight_fast, axis=1)
-                    values = weight_series.dropna().unique().tolist()
+                    # Strategy 1: Use CombinedWeight if available (already computed)
+                    if 'CombinedWeight' in filtered_df.columns:
+                        combined_weights = filtered_df['CombinedWeight'].dropna().astype(str)
+                        values.extend(combined_weights[combined_weights.str.strip() != ''].unique().tolist())
+
+                    # Strategy 2: Fast concatenation of Weight* + Units using vectorized ops
+                    if len(values) == 0 and 'Weight*' in filtered_df.columns:
+                        weight_col = filtered_df['Weight*'].fillna('').astype(str)
+                        units_col = filtered_df['Units'].fillna('').astype(str) if 'Units' in filtered_df.columns else ''
+
+                        # Vectorized: Check if weight already has units
+                        has_units = weight_col.str.contains(r'[a-zA-Z]', regex=True, na=False)
+
+                        # For weights with units, use as-is
+                        weights_with_units = weight_col[has_units & (weight_col.str.strip() != '')]
+                        values.extend(weights_with_units.unique().tolist())
+
+                        # For weights without units, concatenate with Units column
+                        if isinstance(units_col, pd.Series):
+                            weights_without_units_mask = ~has_units & (weight_col.str.strip() != '')
+                            weights_no_units = weight_col[weights_without_units_mask]
+                            corresponding_units = units_col[weights_without_units_mask]
+
+                            # Vectorized concatenation
+                            combined = weights_no_units + ' ' + corresponding_units
+                            combined = combined.str.strip()
+                            values.extend(combined[combined != ''].unique().tolist())
+
+                    # Filter out invalid weight values using vectorized operations
+                    if values:
+                        # Convert to Series for vectorized filtering
+                        values_series = pd.Series(values).drop_duplicates()
+
+                        # Remove values with invalid keywords
+                        weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?|pack)?', re.IGNORECASE)
+                        invalid_keywords = ['thc', 'cbd', 'ratio', '|br|', ':', 'nan']
+
+                        # Vectorized filtering
+                        valid_mask = values_series.apply(lambda x: bool(weight_pattern.match(str(x))))
+                        for keyword in invalid_keywords:
+                            valid_mask &= ~values_series.str.lower().str.contains(keyword, na=False)
+
+                        values = values_series[valid_mask].tolist()
 
                     if values:
-                        self.logger.info(f"Weight filter values generated: {values[:5]}...")
+                        self.logger.info(f"Weight filter values generated: {len(values)} unique values")
                     else:
                         self.logger.warning("No weight values generated for filter dropdown")
                 else:
@@ -5070,6 +5115,10 @@ class ExcelProcessor:
                 options[filter_key] = clean_list(values)
             else:
                 options[filter_key] = []
+
+        # Store in cache before returning
+        cached_copy = self._clone_filter_options(options)
+        self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
 
         return options
 
