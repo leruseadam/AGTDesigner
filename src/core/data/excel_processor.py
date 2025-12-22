@@ -3233,6 +3233,23 @@ class ExcelProcessor:
 
             self._on_dataset_updated(file_path, file_mtime)
             self.logger.info(f"File loaded successfully: {len(self.df)} rows, {len(self.df.columns)} columns")
+
+            # CRITICAL PERFORMANCE: Pre-compute filter options immediately after loading
+            # This ensures filters populate instantly on page load
+            try:
+                import time
+                filter_start = time.time()
+                self.logger.info("Pre-computing filter options for instant page load...")
+
+                # Compute with empty filters (initial state) - this caches the result
+                initial_filters = self.get_dynamic_filter_options({})
+
+                filter_time = (time.time() - filter_start) * 1000
+                self.logger.info(f"✅ Filter options pre-computed in {filter_time:.1f}ms - filters will now load instantly")
+            except Exception as filter_error:
+                # Don't fail file load if filter pre-computation fails
+                self.logger.warning(f"Failed to pre-compute filters (non-critical): {filter_error}")
+
             return True
             
         except MemoryError as me:
