@@ -1880,17 +1880,35 @@ const TagManager = {
             // Store current value
             const currentValue = filterElement.value;
             
-            // Update the dropdown options with special formatting for RSO/CO2 Tanker
-            filterElement.innerHTML = `
-                <option value="">All</option>
-                ${sortedValues.map(value => {
-                    // Apply special font formatting for RSO/CO2 Tanker
-                    if (value === 'rso/co2 tankers') {
-                        return `<option value="${value}" style="font-weight: bold; font-style: italic; color: #a084e8;">RSO/CO2 Tanker</option>`;
-                    }
-                    return `<option value="${value}">${value}</option>`;
-                }).join('')}
-            `;
+            // PERFORMANCE: Use DocumentFragment for faster DOM manipulation
+            const fragment = document.createDocumentFragment();
+            
+            // Add "All" option
+            const allOption = document.createElement('option');
+            allOption.value = '';
+            allOption.textContent = 'All';
+            fragment.appendChild(allOption);
+            
+            // Add options using fragment (much faster than innerHTML for large lists)
+            sortedValues.forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                
+                // Apply special font formatting for RSO/CO2 Tanker
+                if (value === 'rso/co2 tankers') {
+                    option.style.fontWeight = 'bold';
+                    option.style.fontStyle = 'italic';
+                    option.style.color = '#a084e8';
+                    option.textContent = 'RSO/CO2 Tanker';
+                }
+                
+                fragment.appendChild(option);
+            });
+            
+            // Clear and append in one operation
+            filterElement.innerHTML = '';
+            filterElement.appendChild(fragment);
             
             // Handle value restoration based on preserveExistingValues parameter
             if (preserveExistingValues) {

@@ -16481,52 +16481,41 @@ def json_match():
         matched_products = _normalize_json_product_names(matched_products)
         
         # Initialize matched_names to ensure it's always defined
-        # CRITICAL FIX: Use Description field for display (includes weight, vendor, brand)
-        # This makes JSON match descriptions resemble normal Excel descriptions
+        # Format: "Product Name - Weight" (e.g., "Biscotti Live Resin Disposable Vape - 1g")
         matched_names = []
         if matched_products:
             for p in matched_products:
                 if not isinstance(p, dict):
                     continue
 
-                # Prefer Description field (complete format with weight, etc.)
-                # Fallback to Product Name* if Description is missing
-                display_name = p.get('Description') or p.get('Product Name*') or 'Unknown Product'
+                # Get product name
+                product_name = p.get('Product Name*') or p.get('Description') or 'Unknown Product'
 
-                # If Description is empty or same as Product Name*, build a complete description
-                product_name = p.get('Product Name*', '')
-                if not display_name or display_name == product_name:
-                    # Build description from components: Brand Product - Weight - Vendor
-                    parts = []
+                # Get weight information
+                weight = p.get('Weight*') or p.get('Weight') or ''
+                units = p.get('Units') or ''
+                combined_weight = p.get('CombinedWeight') or ''
 
-                    # Add brand if available
-                    brand = p.get('Product Brand') or p.get('ProductBrand') or ''
-                    if brand and brand.strip():
-                        parts.append(brand.strip())
+                # Helper function to clean weight format (remove .0 decimals)
+                def clean_weight(weight_str):
+                    """Remove unnecessary .0 from weights (e.g., 1.0g -> 1g)"""
+                    if not weight_str:
+                        return weight_str
+                    weight_str = str(weight_str)
+                    # Remove .0 from numbers like 1.0, 2.0, etc.
+                    import re
+                    weight_str = re.sub(r'(\d+)\.0+(?=[a-zA-Z\s]|$)', r'\1', weight_str)
+                    return weight_str
 
-                    # Add product name
-                    if product_name:
-                        parts.append(product_name.strip())
-
-                    # Add weight if available
-                    weight = p.get('Weight*') or p.get('Weight') or ''
-                    units = p.get('Units') or ''
-                    combined_weight = p.get('CombinedWeight') or ''
-
-                    if combined_weight:
-                        parts.append(f"{combined_weight}")
-                    elif weight and units:
-                        parts.append(f"{weight}{units}")
-                    elif weight:
-                        parts.append(str(weight))
-
-                    # Add vendor if available
-                    vendor = p.get('Vendor/Supplier*') or p.get('Vendor') or ''
-                    if vendor and vendor.strip():
-                        parts.append(vendor.strip())
-
-                    # Join parts with " - " separator
-                    display_name = " - ".join(parts) if parts else 'Unknown Product'
+                # Build display name: "Product Name - Weight"
+                if combined_weight:
+                    display_name = f"{product_name} - {clean_weight(combined_weight)}"
+                elif weight and units:
+                    display_name = f"{product_name} - {clean_weight(str(weight) + str(units))}"
+                elif weight:
+                    display_name = f"{product_name} - {clean_weight(weight)}"
+                else:
+                    display_name = product_name
 
                 matched_names.append(display_name)
         
