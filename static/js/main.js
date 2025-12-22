@@ -2039,9 +2039,11 @@ const TagManager = {
                 const doh = tag.DOH || tag['DOH Compliant (Yes/No)'] || '';
                 if (doh && doh.trim()) filterOptions.doh.add(doh.trim());
                 
-                // High CBD (check product type)
-                if (productType && productType.toLowerCase().includes('high cbd')) {
-                    filterOptions.highCbd.add('High CBD');
+                // High CBD/THC (check product type)
+                if (productType) {
+                    const pt = productType.toLowerCase();
+                    if (pt.includes('high cbd')) filterOptions.highCbd.add('High CBD');
+                    if (pt.includes('high thc')) filterOptions.highCbd.add('High THC');
                 }
             });
             
