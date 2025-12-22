@@ -4976,85 +4976,102 @@ class ExcelProcessor:
         return result
 
     def get_dynamic_filter_options(self, current_filters: Dict[str, str]) -> Dict[str, list]:
+        # Return empty options if no data is loaded
         if self.df is None:
-            # Return empty options if no data is loaded
-            # Optimization: filter the DataFrame once for all filters, not per filter
-            df = self.df
-            filter_map = {
-                "vendor": "Vendor",
-                "brand": "Product Brand",
-                "productType": "Product Type*",
-                "lineage": "Lineage",
-                "weight": "CombinedWeight",
-                "strain": "Product Strain",
-                "doh": "DOH",
-                "highCbd": "Product Type*"
+            return {
+                "vendor": [],
+                "brand": [],
+                "productType": [],
+                "lineage": [],
+                "weight": [],
+                "strain": [],
+                "doh": [],
+                "highCbd": []
             }
-            import math
-            def clean_list(lst):
-                return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
-            # Apply all filters except 'All' and empty
-            filtered_df = df
-            for key, value in current_filters.items():
-                if value and value != "All":
-                    filter_col = filter_map.get(key)
-                    if filter_col and filter_col in filtered_df.columns:
-                        filtered_df = filtered_df[filtered_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()]
-            options = {}
-            for filter_key, col in filter_map.items():
-                # For each filter, get unique values from the already filtered DataFrame
-                if col in filtered_df.columns:
-                    if filter_key == "weight":
-                        values = []
-                        for _, row in filtered_df.iterrows():
-                            row_dict = row.to_dict()
-                            weight_with_units = self._format_weight_units(row_dict, excel_priority=True)
-                            if weight_with_units and weight_with_units.strip():
-                                weight_str = weight_with_units.strip()
-                                import re
-                                weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
-                                if weight_pattern.match(weight_str):
-                                    values.append(weight_str)
-                                elif not any(keyword in weight_str.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
-                                    values.append(weight_str)
-                        if values:
-                            self.logger.info(f"Weight filter values generated: {values[:5]}...")
-                        else:
-                            self.logger.warning("No weight values generated for filter dropdown")
+
+        # Optimization: filter the DataFrame once for all filters, not per filter
+        df = self.df
+        filter_map = {
+            "vendor": "Vendor",
+            "brand": "Product Brand",
+            "productType": "Product Type*",
+            "lineage": "Lineage",
+            "weight": "CombinedWeight",
+            "strain": "Product Strain",
+            "doh": "DOH",
+            "highCbd": "Product Type*"
+        }
+        import math
+        def clean_list(lst):
+            return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
+
+        # Apply all filters except 'All' and empty
+        filtered_df = df.copy()
+        for key, value in current_filters.items():
+            if value and value != "All":
+                filter_col = filter_map.get(key)
+                if filter_col and filter_col in filtered_df.columns:
+                    filtered_df = filtered_df[filtered_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()]
+
+        options = {}
+        for filter_key, col in filter_map.items():
+            # For each filter, get unique values from the already filtered DataFrame
+            if col in filtered_df.columns:
+                if filter_key == "weight":
+                    # PERFORMANCE OPTIMIZATION: Use vectorized operations instead of iterrows()
+                    import re
+                    weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
+
+                    # Apply _format_weight_units vectorized using apply
+                    def format_weight_fast(row):
+                        weight_with_units = self._format_weight_units(row.to_dict(), excel_priority=True)
+                        if weight_with_units and weight_with_units.strip():
+                            weight_str = weight_with_units.strip()
+                            if weight_pattern.match(weight_str):
+                                return weight_str
+                            elif not any(keyword in weight_str.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
+                                return weight_str
+                        return None
+
+                    # Use apply with axis=1 which is much faster than iterrows
+                    weight_series = filtered_df.apply(format_weight_fast, axis=1)
+                    values = weight_series.dropna().unique().tolist()
+
+                    if values:
+                        self.logger.info(f"Weight filter values generated: {values[:5]}...")
                     else:
-                        values = filtered_df[col].dropna().unique().tolist()
-                        values = [str(v) for v in values if str(v).strip()]
-                    if filter_key == "productType":
-                        filtered_values = []
-                        for v in values:
-                            v_lower = v.strip().lower()
-                            if ("trade sample" in v_lower or "deactivated" in v_lower):
-                                continue
-                            normalized_v = TYPE_OVERRIDES.get(v_lower, v)
-                            filtered_values.append(normalized_v)
-                        values = filtered_values
-                    elif filter_key == "doh":
-                        filtered_values = []
-                        for v in values:
-                            v_upper = v.strip().upper()
-                            if v_upper in ["YES", "NO"]:
-                                filtered_values.append(v_upper)
-                        values = filtered_values
-                    elif filter_key == "highCbd":
-                        has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in values)
-                        values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
-                    values = list(set(values))
-                    values.sort()
-                    options[filter_key] = clean_list(values)
+                        self.logger.warning("No weight values generated for filter dropdown")
                 else:
-                    options[filter_key] = []
-            cached_copy = self._clone_filter_options(options)
-            self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
-            return self._clone_filter_options(cached_copy)
-        
-        cached_copy = self._clone_filter_options(options)
-        self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
-        return self._clone_filter_options(cached_copy)
+                    values = filtered_df[col].dropna().unique().tolist()
+                    values = [str(v) for v in values if str(v).strip()]
+
+                if filter_key == "productType":
+                    filtered_values = []
+                    for v in values:
+                        v_lower = v.strip().lower()
+                        if ("trade sample" in v_lower or "deactivated" in v_lower):
+                            continue
+                        normalized_v = TYPE_OVERRIDES.get(v_lower, v)
+                        filtered_values.append(normalized_v)
+                    values = filtered_values
+                elif filter_key == "doh":
+                    filtered_values = []
+                    for v in values:
+                        v_upper = v.strip().upper()
+                        if v_upper in ["YES", "NO"]:
+                            filtered_values.append(v_upper)
+                    values = filtered_values
+                elif filter_key == "highCbd":
+                    has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in values)
+                    values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
+
+                values = list(set(values))
+                values.sort()
+                options[filter_key] = clean_list(values)
+            else:
+                options[filter_key] = []
+
+        return options
 
     @staticmethod
     def parse_weight_str(w, u=None):
