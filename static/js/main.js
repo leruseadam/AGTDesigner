@@ -1849,26 +1849,8 @@ const TagManager = {
                 }
             });
             
-            // Sort values alphabetically for consistent ordering
-            const sortedValues = Array.from(values).sort((a, b) => {
-                // Special handling for lineage to maintain logical order
-                if (filterType === 'lineage') {
-                    const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
-                    const aIndex = lineageOrder.indexOf(a.toUpperCase());
-                    const bIndex = lineageOrder.indexOf(b.toUpperCase());
-                    if (aIndex !== -1 && bIndex !== -1) {
-                        return aIndex - bIndex;
-                    }
-                }
-                // Special handling for High CBD filter - High CBD Products should come first
-                if (filterType === 'highCbd') {
-                    if (a === 'High CBD Products') return -1;
-                    if (b === 'High CBD Products') return 1;
-                    if (a === 'Non-High CBD Products') return 1;
-                    if (b === 'Non-High CBD Products') return -1;
-                }
-                return a.localeCompare(b);
-            });
+            // Convert to array (skip sorting for speed - browser will handle display)
+            const sortedValues = Array.from(values);
             
             verboseLog(`Updating ${filterId} with values:`, sortedValues);
             
