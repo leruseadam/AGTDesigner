@@ -16538,6 +16538,25 @@ def json_match():
                 units = p.get('Units') or p.get('units') or p.get('Weight Unit* (grams/gm or ounces/oz)') or p.get('unit_weight_uom') or ''
                 combined_weight = p.get('CombinedWeight') or ''
                 
+                # Infer units from product type or description if missing
+                if weight and not units:
+                    description = (p.get('Description') or '').lower()
+                    product_type = (p.get('Product Type') or '').lower()
+                    
+                    # Most cannabis products use grams unless they're edibles (often mg) or concentrates (sometimes g)
+                    if 'edible' in product_type or 'edible' in description:
+                        # Edibles often use mg, but if weight is >= 100, likely grams (like 100mg THC total)
+                        try:
+                            weight_val = float(weight)
+                            units = 'mg' if weight_val < 10 else 'mg'  # Most edibles show "100mg" not "0.1g"
+                        except:
+                            units = 'mg'
+                    else:
+                        # Default to grams for flower, vapes, concentrates, pre-rolls, etc.
+                        units = 'g'
+                    
+                    logging.info(f"Inferred units '{units}' for product: {product_name} (type: {product_type})")
+                
                 # CRITICAL FIX: Check if product name already contains weight to avoid duplication
                 # Common weight patterns: "1g", "1.0g", "0.5g", "2g", etc.
                 has_weight_in_name = False
