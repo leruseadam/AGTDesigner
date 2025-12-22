@@ -5051,14 +5051,7 @@ class ExcelProcessor:
             cached_copy = self._clone_filter_options(options)
             self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
             return self._clone_filter_options(cached_copy)
-                            filtered_values.append(v_upper)
-                    values = filtered_values
-                
-                # Special processing for High CBD filter
-                elif filter_key == "highCbd":
-                    # Check if any product types start with "high cbd"
-                    has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in values)
-                    values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
+                # (Removed duplicate and mis-indented code)
                 
                 # Remove duplicates and sort
                 values = list(set(values))
