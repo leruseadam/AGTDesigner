@@ -12535,75 +12535,24 @@ const TagManager = {
             }
             
             // CRITICAL FIX: Add timeout to fetch operations to prevent hanging
+            // Fire all backend clear/reset API calls in parallel (non-blocking)
             const fetchWithTimeout = (url, options, timeout = 5000) => {
                 return Promise.race([
                     fetch(url, options),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Request timeout')), timeout)
-                    )
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), timeout))
                 ]);
             };
-            
-            // NON-BLOCKING: Clear JSON matches and switch to full Excel view with timeout
-            // CRITICAL FIX: Wait for any in-progress fetch to complete before starting new one
-            const refreshTagsAfterClear = async () => {
-                // Wait for any in-progress fetch to complete (max 3 seconds)
-                let waitCount = 0;
-                while (this._fetchingAvailableTags && waitCount < 30) {
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    waitCount++;
-                }
-                
-                // Now refresh tags
-                verboseLog('Refreshing available tags with full Excel data...');
-                if (this.fetchAndUpdateAvailableTags) {
-                    try {
-                        await this.fetchAndUpdateAvailableTags();
-                    } catch (fetchError) {
-                        console.error('Error refreshing available tags:', fetchError);
-                        this.state.isClearing = false; // Ensure flag is reset
-                    }
-                }
-            };
-            
-            console.log('🔄 Clearing JSON matches and switching to full Excel view...');
-            fetchWithTimeout('/api/json-clear', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            }, 5000).then(() => {
-                console.log('✅ JSON matches cleared');
-                // Then switch to full Excel view
-                return fetchWithTimeout('/api/toggle-json-filter', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filter_mode: 'full_excel' })
-                }, 5000);
-            }).then(response => {
-                console.log('✅ Switched to full Excel view');
-                if (response && response.ok) {
-                    return response.json();
-                }
-                return null;
-            }).then(data => {
-                console.log('🔄 Refreshing tags with full Excel data...');
-                // Always refresh available tags after clearing JSON matches and switching to full Excel
-                refreshTagsAfterClear();
-            }).catch(fetchError => {
-                // Silently handle errors - UI is already updated, but still try to refresh tags
-                verboseLog('Backend JSON clear/toggle call failed (non-critical):', fetchError);
-                console.warn('⚠️ Failed to clear JSON/switch to Excel, but will still refresh tags');
-                // Still refresh tags to ensure we show full Excel data
-                refreshTagsAfterClear();
-            });
-            
-            // NON-BLOCKING: Fire-and-forget backend API call for clearing filters (don't wait for it)
-            fetchWithTimeout('/api/clear-filters', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            }, 5000).catch(fetchError => {
-                // Silently handle errors - UI is already updated
-                verboseLog('Backend clear-filters call failed (non-critical):', fetchError);
-            });
+            fetchWithTimeout('/api/json-clear', { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 5000).catch(()=>{});
+            fetchWithTimeout('/api/toggle-json-filter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filter_mode: 'full_excel' }) }, 5000).catch(()=>{});
+            fetchWithTimeout('/api/clear-filters', { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 5000).catch(()=>{});
+
+            // Refresh tags immediately after UI reset (no waiting)
+            if (this.fetchAndUpdateAvailableTags) {
+                this.fetchAndUpdateAvailableTags().catch(fetchError => {
+                    console.error('Error refreshing available tags:', fetchError);
+                    this.state.isClearing = false;
+                });
+            }
             
         } catch (error) {
             console.error('Failed to clear selected tags:', error);
