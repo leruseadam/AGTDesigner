@@ -16540,7 +16540,6 @@ def json_match():
                 
                 # CRITICAL FIX: Check if product name already contains weight to avoid duplication
                 # Common weight patterns: "1g", "1.0g", "0.5g", "2g", etc.
-                import re
                 has_weight_in_name = bool(re.search(r'\d+\.?\d*\s*g\b', product_name, re.IGNORECASE))
                 
                 # Build display name: "Product Name - Weight" (but avoid duplicating weight)
