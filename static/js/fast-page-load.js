@@ -78,7 +78,7 @@
                     // Build options from tags and apply them synchronously
                     const built = TagManager._extractFiltersFromTags(TagManager.state.tags);
                     // Directly update filters (preserve existing values)
-                    TagManager.updateFilters(built, true);
+                        TagManager.updateFilters(built, true);
                     console.log('✅ FastPageLoad: Filters applied synchronously from in-memory tags');
                     // Hide splash if present
                     if (TagManager.hideActionSplash) TagManager.hideActionSplash();
@@ -93,6 +93,57 @@
         } catch (e) {
             console.warn('FastPageLoad: immediate filter population check failed:', e);
         }
+            
+            // If originalFilterOptions exist, prefer them (they may include server-side defaults)
+            try {
+                if (TagManager.state && TagManager.state.originalFilterOptions) {
+                    console.log('⚡ FastPageLoad: Applying originalFilterOptions synchronously');
+                    TagManager.updateFilters(TagManager.state.originalFilterOptions, true);
+                }
+            } catch (err) {
+                console.warn('FastPageLoad: applying originalFilterOptions failed:', err);
+            }
+
+            // DOM sanity check: if vendorFilter still only contains 'All', create missing selects and reapply filters
+            try {
+                const vendorEl = document.getElementById('vendorFilter');
+                const needsCreate = !vendorEl || (vendorEl.options && vendorEl.options.length <= 1);
+                if (needsCreate) {
+                    console.warn('FastPageLoad: vendorFilter appears empty or missing - creating filter selects and reapplying options');
+                    const filterRow = document.querySelector('.filter-row') || document.body;
+                    const ensureSelect = (id, labelText) => {
+                        if (!document.getElementById(id)) {
+                            const wrapper = document.createElement('div');
+                            wrapper.className = 'filter-group';
+                            const label = document.createElement('label');
+                            label.htmlFor = id;
+                            label.className = 'filter-label';
+                            label.textContent = labelText;
+                            const select = document.createElement('select');
+                            select.id = id;
+                            select.className = 'form-select filter-select';
+                            const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'All'; select.appendChild(opt);
+                            wrapper.appendChild(label);
+                            wrapper.appendChild(select);
+                            filterRow.appendChild(wrapper);
+                        }
+                    };
+                    ensureSelect('vendorFilter', 'VENDOR');
+                    ensureSelect('brandFilter', 'BRAND');
+                    ensureSelect('productTypeFilter', 'PRODUCT TYPE');
+                    ensureSelect('lineageFilter', 'LINEAGE');
+                    ensureSelect('weightFilter', 'WEIGHT');
+                    ensureSelect('dohFilter', 'DOH COMPLIANCE');
+                    ensureSelect('highCbdFilter', 'HIGH CBD/THC');
+
+                    // Rebuild from either originalFilterOptions or from tags
+                    const optionsToApply = (TagManager.state && TagManager.state.originalFilterOptions) ? TagManager.state.originalFilterOptions : TagManager._extractFiltersFromTags(TagManager.state.tags);
+                    TagManager.updateFilters(optionsToApply, true);
+                    console.log('✅ FastPageLoad: Created missing selects and reapplied filter options');
+                }
+            } catch (domErr) {
+                console.warn('FastPageLoad: DOM fallback failed:', domErr);
+            }
         
         // Store original function
         originalCheckForExistingData = TagManager.checkForExistingData;
