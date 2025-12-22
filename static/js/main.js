@@ -3299,6 +3299,8 @@ const TagManager = {
             
             // Recreate the change handler (same logic as in createTagElement)
             const handleCheckboxChange = (e) => {
+                console.log(`🎯 Checkbox handler called for: ${tagName}, skipUndoTracking: ${this.state.skipUndoTracking}`);
+                
                 // CRITICAL FIX: Always allow checkbox clicks - clear drag attributes if they exist
                 if (e.target.hasAttribute('data-reordering')) {
                     e.target.removeAttribute('data-reordering');
@@ -5403,6 +5405,8 @@ const TagManager = {
         
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = (e) => {
+            console.log(`🎯 Checkbox handler called for: ${displayName}, skipUndoTracking: ${this.state.skipUndoTracking}`);
+            
             // CRITICAL FIX: Always allow checkbox clicks - clear drag attributes if they exist
             // This prevents checkboxes from being permanently disabled after drag operations
             if (e.target.hasAttribute('data-reordering')) {
