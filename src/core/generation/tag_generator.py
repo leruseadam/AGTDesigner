@@ -1231,6 +1231,20 @@ def process_chunk(args):
                     lineage_val = 'MIXED'  # Default for non-classic types
                 print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
                 
+            # Ensure classic types never have MIXED lineage: convert to HYBRID
+            try:
+                # Any value that isn't a canonical lineage should become HYBRID for classic types
+                valid_lineages = {k.strip().upper() for k in LINEAGE_COLOR_MAP.keys()}
+                if is_classic_type:
+                    # Treat 'MIXED' as invalid for classic types even if present in color map
+                    up = lineage_val.strip().upper() if isinstance(lineage_val, str) else ''
+                    if not up or up == 'MIXED' or up not in valid_lineages:
+                        lineage_val = 'HYBRID'
+            except Exception:
+                # Defensive: if something unexpected occurs, fall back to HYBRID for classic
+                if is_classic_type:
+                    lineage_val = 'HYBRID'
+
             # No extra space before Lineage in the output
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
             
@@ -1673,6 +1687,21 @@ def create_safe_document():
     except Exception as e:
         logger.error(f"Error creating safe document: {e}")
         raise
+
+
+def _normalize_lineage_for_classic(lineage_val, is_classic_type):
+    """Helper for testing: ensure classic types never return 'MIXED'."""
+    try:
+        # Use LINEAGE_COLOR_MAP to validate canonical lineage values
+        valid_lineages = {k.strip().upper() for k in LINEAGE_COLOR_MAP.keys()}
+        up = lineage_val.strip().upper() if isinstance(lineage_val, str) else ''
+        # Treat 'MIXED' as invalid for classic types even if present in the map
+        if is_classic_type and (not up or up == 'MIXED' or up not in valid_lineages):
+            return 'HYBRID'
+    except Exception:
+        if is_classic_type:
+            return 'HYBRID'
+    return lineage_val
 
 
 
