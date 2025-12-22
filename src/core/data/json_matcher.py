@@ -8026,11 +8026,11 @@ class JSONMatcher:
                 weight_val = float(weight)
                 # Convert grams to ounces (1 oz = 28.3495 g)
                 oz_val = round(weight_val / 28.3495, 2)
-                # Remove trailing zeros and format without space before unit
+                # Return weight and units separately (don't concatenate)
                 if oz_val.is_integer():
-                    return f"{int(oz_val)}oz", 'oz'
+                    return str(int(oz_val)), 'oz'
                 else:
-                    return f"{oz_val:.2f}".rstrip('0').rstrip('.') + 'oz', 'oz'
+                    return f"{oz_val:.2f}".rstrip('0').rstrip('.'), 'oz'
             except ValueError:
                 # If conversion fails, return original values
                 return weight, units

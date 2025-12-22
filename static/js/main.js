@@ -12126,7 +12126,7 @@ const TagManager = {
     async undoMove() {
         try {
             console.log('🔙 Undoing last checkbox action...');
-            
+
             // Initialize undo/redo stacks if needed
             if (!this.state.undoStack) {
                 this.state.undoStack = [];
@@ -12134,9 +12134,9 @@ const TagManager = {
             if (!this.state.redoStack) {
                 this.state.redoStack = [];
             }
-            
+
             console.log(`📚 Undo stack size: ${this.state.undoStack.length}, contents:`, this.state.undoStack);
-            
+
             // Check if there's anything to undo
             if (this.state.undoStack.length === 0) {
                 console.warn('⚠️ Nothing to undo');
@@ -12147,26 +12147,41 @@ const TagManager = {
             }
 
             // Pop the last action from undo stack
-            const tagName = this.state.undoStack.pop();
-            
+            const lastAction = this.state.undoStack.pop();
+
+            // Handle both old string format and new object format
+            let checkboxInfo;
+            if (typeof lastAction === 'string') {
+                checkboxInfo = { id: lastAction, type: 'tag' };
+            } else {
+                checkboxInfo = lastAction;
+            }
+
             // Push to redo stack
-            this.state.redoStack.push(tagName);
-            
-            // Find the checkbox
-            const availableContainer = document.getElementById('availableTags');
-            const selectedContainer = document.getElementById('selectedTags');
-            
-            let checkbox = availableContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
-            if (!checkbox) {
-                checkbox = selectedContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
+            this.state.redoStack.push(checkboxInfo);
+
+            // Find the checkbox using the stored element reference or by searching
+            let checkbox = checkboxInfo.element;
+
+            // If element reference is stale, search for it
+            if (!checkbox || !document.contains(checkbox)) {
+                if (checkboxInfo.type === 'group') {
+                    // Find group checkbox by ID
+                    const groupId = checkboxInfo.id.replace('group:', '');
+                    checkbox = document.getElementById(groupId) ||
+                              document.querySelector(`.select-all-checkbox[data-group="${groupId}"]`);
+                } else {
+                    // Find tag checkbox
+                    const availableContainer = document.getElementById('availableTags');
+                    const selectedContainer = document.getElementById('selectedTags');
+
+                    checkbox = availableContainer?.querySelector(`input[data-tag-name="${checkboxInfo.id}"]`) ||
+                              selectedContainer?.querySelector(`input[data-tag-name="${checkboxInfo.id}"]`) ||
+                              availableContainer?.querySelector(`input[value="${checkboxInfo.id}"]`) ||
+                              selectedContainer?.querySelector(`input[value="${checkboxInfo.id}"]`);
+                }
             }
-            if (!checkbox) {
-                checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
-            }
-            if (!checkbox) {
-                checkbox = selectedContainer?.querySelector(`input[value="${tagName}"]`);
-            }
-            
+
             if (checkbox) {
                 // Prevent this click from being added to undo stack
                 this.state.skipUndoTracking = true;
@@ -12174,15 +12189,15 @@ const TagManager = {
                 setTimeout(() => {
                     this.state.skipUndoTracking = false;
                 }, 100);
-                
+
                 if (window.Toast) {
-                    Toast.show('success', `Undone: ${tagName}`);
+                    Toast.show('success', `Undone: ${checkboxInfo.id}`);
                 }
-                console.log(`✅ Undone checkbox for: ${tagName}`);
+                console.log(`✅ Undone checkbox for: ${checkboxInfo.id}`);
             } else {
-                console.warn(`⚠️ Checkbox not found for: ${tagName}`);
+                console.warn(`⚠️ Checkbox not found for: ${checkboxInfo.id}`);
                 // Put it back on undo stack if checkbox not found
-                this.state.undoStack.push(tagName);
+                this.state.undoStack.push(checkboxInfo);
                 this.state.redoStack.pop();
                 if (window.Toast) {
                     Toast.show('info', 'Checkbox not found');
@@ -15396,54 +15411,89 @@ async function handleJsonPasteInput(input) {
     }
 }
 
+// CRITICAL: Set up global undo tracking IMMEDIATELY, not in DOMContentLoaded
+// This ensures it's active even if DOMContentLoaded already fired
+console.log('🎯🎯🎯 Setting up global checkbox CLICK listener for undo tracking IMMEDIATELY (using event delegation)');
+
+// Use event delegation so it works even after drag-and-drop clones checkboxes
+let lastClickedCheckbox = null;
+let lastClickTime = 0;
+
+document.addEventListener('click', function(e) {
+    console.log('👆 Document click detected on:', e.target.tagName, 'classes:', e.target.className);
+
+    // Check if the clicked element is ANY checkbox (tag checkbox, select-all, or group checkbox)
+    const isCheckbox = e.target.type === 'checkbox';
+    const isTagCheckbox = e.target.classList && e.target.classList.contains('tag-checkbox');
+    const isSelectAllCheckbox = e.target.classList && e.target.classList.contains('select-all-checkbox');
+
+    if (isCheckbox && (isTagCheckbox || isSelectAllCheckbox)) {
+        console.log('✅ Clicked checkbox type:', isTagCheckbox ? 'tag-checkbox' : 'select-all-checkbox');
+        console.log('TagManager exists:', !!window.TagManager);
+
+        if (!window.TagManager) {
+            console.error('❌ TagManager not available!');
+            return;
+        }
+
+        // For group checkboxes, get a unique identifier
+        let checkboxId;
+        if (isSelectAllCheckbox) {
+            // Use the checkbox's ID or create one from its parent label/context
+            checkboxId = e.target.id || `group:${e.target.value || e.target.getAttribute('data-group') || 'unknown'}`;
+        } else {
+            checkboxId = e.target.value; // Tag name for individual checkboxes
+        }
+
+        const now = Date.now();
+
+        // Debounce to prevent duplicate calls
+        if (lastClickedCheckbox === checkboxId && (now - lastClickTime) < 100) {
+            console.log(`⏭️ Ignoring duplicate click on: ${checkboxId}`);
+            return;
+        }
+
+        lastClickedCheckbox = checkboxId;
+        lastClickTime = now;
+
+        console.log(`🌍🌍🌍 GLOBAL CLICK detected on checkbox: ${checkboxId}, checked: ${e.target.checked}, skipUndoTracking: ${window.TagManager.state?.skipUndoTracking}`);
+
+        // Add to undo stack (unless this is from undo/redo operation)
+        if (!window.TagManager.state.skipUndoTracking) {
+            if (!window.TagManager.state.undoStack) {
+                window.TagManager.state.undoStack = [];
+            }
+            // Store both the checkbox ID and reference to the element
+            window.TagManager.state.undoStack.push({
+                id: checkboxId,
+                type: isSelectAllCheckbox ? 'group' : 'tag',
+                checked: e.target.checked,
+                element: e.target
+            });
+            console.log(`📝📝📝 Global CLICK handler added to undo stack: ${checkboxId}, stack size: ${window.TagManager.state.undoStack.length}`);
+            console.log('📚 Current undo stack:', window.TagManager.state.undoStack);
+            // Limit undo stack size to 10
+            if (window.TagManager.state.undoStack.length > 10) {
+                window.TagManager.state.undoStack.shift();
+            }
+            // Clear redo stack on new action
+            if (window.TagManager.state.redoStack) {
+                window.TagManager.state.redoStack = [];
+            }
+        } else {
+            console.log(`⏭️ Skipping undo tracking for: ${checkboxId} (skipUndoTracking is true)`);
+        }
+    } else if (isCheckbox) {
+        console.log('⚠️ Checkbox detected but not tag-checkbox or select-all-checkbox');
+    } else {
+        console.log('❌ Clicked element is not a checkbox');
+    }
+}, true); // Use capture phase to catch before other handlers
+
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
-    // Global undo stack tracker for ALL checkbox changes
-    console.log('🎯 Setting up global checkbox CLICK listener for undo tracking (using event delegation)');
+    console.log('📋 DOMContentLoaded fired - initializing app');
 
-    // CRITICAL FIX: Use CLICK events instead of CHANGE events since change events aren't firing
-    // Use event delegation so it works even after drag-and-drop clones checkboxes
-    let lastClickedCheckbox = null;
-    let lastClickTime = 0;
-
-    document.addEventListener('click', function(e) {
-        // Check if the clicked element is a tag checkbox
-        if (e.target.classList && e.target.classList.contains('tag-checkbox') && window.TagManager) {
-            const tagName = e.target.value;
-            const now = Date.now();
-
-            // Debounce to prevent duplicate calls
-            if (lastClickedCheckbox === tagName && (now - lastClickTime) < 100) {
-                console.log(`⏭️ Ignoring duplicate click on: ${tagName}`);
-                return;
-            }
-
-            lastClickedCheckbox = tagName;
-            lastClickTime = now;
-
-            console.log(`🌍🌍🌍 GLOBAL CLICK detected on tag checkbox: ${tagName}, checked: ${e.target.checked}, skipUndoTracking: ${window.TagManager.state?.skipUndoTracking}`);
-
-            // Add to undo stack (unless this is from undo/redo operation)
-            if (!window.TagManager.state.skipUndoTracking) {
-                if (!window.TagManager.state.undoStack) {
-                    window.TagManager.state.undoStack = [];
-                }
-                window.TagManager.state.undoStack.push(tagName);
-                console.log(`📝📝📝 Global CLICK handler added to undo stack: ${tagName}, stack size: ${window.TagManager.state.undoStack.length}`);
-                // Limit undo stack size to 10
-                if (window.TagManager.state.undoStack.length > 10) {
-                    window.TagManager.state.undoStack.shift();
-                }
-                // Clear redo stack on new action
-                if (window.TagManager.state.redoStack) {
-                    window.TagManager.state.redoStack = [];
-                }
-            } else {
-                console.log(`⏭️ Skipping undo tracking for: ${tagName} (skipUndoTracking is true)`);
-            }
-        }
-    }, true); // Use capture phase to catch before other handlers
-    
     // Show splash screen immediately (but don't load tags yet - wait for store selection)
     AppLoadingSplash.show();
     AppLoadingSplash.updateProgress(10, 'Initializing application...');
