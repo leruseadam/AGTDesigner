@@ -3137,17 +3137,13 @@ class JSONMatcher:
             ratio = self._calculate_ratio_for_json_product(product_type, item)
             
             # ===== STEP 9.5: Standardize description format for consistency =====
-            if use_excel_style_name:
-                description = product_name
+            import re
+            desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*[a-zA-Z]+\s*$', '', product_name, flags=re.IGNORECASE)
+            desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+            if weight_label:
+                description = f"{desc_clean} - {weight_label}"
             else:
-                description = product_name
-                import re
-                desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*[a-zA-Z]+\s*$', '', description, flags=re.IGNORECASE)
-                desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
-                if weight_label:
-                    description = f"{desc_clean} - {weight_label}"
-                else:
-                    description = desc_clean
+                description = desc_clean
             
             # ===== STEP 10: Build COMPLETE product with ALL required fields =====
             # Vendor and brand - CRITICAL: Vendor should NEVER be empty
