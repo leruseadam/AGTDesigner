@@ -10013,13 +10013,13 @@ const TagManager = {
     },
 
     async fetchAndPopulateFilters(retryCount = 0, skipIfEmpty = false) {
-        const maxRetries = 1; // Reduced to 1 retry - if cache works, we don't need retries
-        const retryDelay = 200; // Reduced to 200ms - minimal delay for instant response
+        const maxRetries = 0; // No retries - cache handles instant display
+        const retryDelay = 0; // No delay needed
         
         try {
-            // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
+            // Use the filter options API WITHOUT refresh to use cached data for speed
             const timestamp = Date.now();
-            const response = await fetch(`/api/filter-options?refresh=true&t=${timestamp}`, {
+            const response = await fetch(`/api/filter-options?t=${timestamp}`, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -10039,10 +10039,9 @@ const TagManager = {
                 
                 // If there's an error but we haven't exceeded retries, retry
                 if (retryCount < maxRetries) {
-                    verboseLog(`⚠️ Filter options error (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
-                    setTimeout(() => {
-                        this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
-                    }, retryDelay);
+                    verboseLog(`⚠️ Filter options error (attempt ${retryCount + 1}/${maxRetries}), retrying immediately...`);
+                    // Retry immediately without delay
+                    this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
                     return;
                 } else {
                     console.error('Filter options error after all retries:', filterOptions.error);
@@ -10079,10 +10078,9 @@ const TagManager = {
                            (filterOptions.weight && filterOptions.weight.length > 0);
             
             if (!hasData && retryCount < maxRetries) {
-                verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
-                setTimeout(() => {
-                    this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
-                }, retryDelay);
+                verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying immediately...`);
+                // Retry immediately without delay
+                this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
                 return;
             }
             
@@ -10106,10 +10104,9 @@ const TagManager = {
             
             // Retry on error if we haven't exceeded max retries
             if (retryCount < maxRetries) {
-                verboseLog(`⚠️ Filter fetch error (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
-                setTimeout(() => {
-                    this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
-                }, retryDelay);
+                verboseLog(`⚠️ Filter fetch error (attempt ${retryCount + 1}/${maxRetries}), retrying immediately...`);
+                // Retry immediately without delay
+                this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
             } else {
                 console.error('Failed to load filter options after all retries');
                 // CRITICAL FIX: Don't clear filters if skipIfEmpty is true
@@ -10380,10 +10377,12 @@ const TagManager = {
             // CRITICAL FIX: Only fetch filter options from API if we didn't populate from cache
             // This prevents slow API calls from overwriting instant cache-based filters
             if (!filtersPopulated && this.fetchAndPopulateFilters) {
-                console.log('⚠️ No cached filters, fetching from API...');
+                console.log('⚠️ No cached filters, fetching from API in background...');
+                // Fetch in background without blocking - don't await
                 this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
             } else if (filtersPopulated) {
-                console.log('✅ Filters already populated from cache, skipping API call');
+                console.log('✅ Filters already populated from cache instantly, skipping API call for speed');
+            }
             }
             
             // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
