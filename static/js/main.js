@@ -9752,6 +9752,18 @@ const TagManager = {
             // CRITICAL FIX: Always reset flag in finally block to ensure it's cleared even if error occurs
             // This prevents the hangup issue where the flag gets stuck in true state
             this._fetchingAvailableTags = false;
+            
+            // CRITICAL FIX: Force hide splash in finally block to prevent freeze
+            // This ensures splash is always hidden even if error handling fails
+            clearTimeout(splashTimeout);
+            if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                console.log('⚡ Finally block: Force hiding splash');
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
         }
     },
 
