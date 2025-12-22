@@ -10187,6 +10187,31 @@ const TagManager = {
                            (filterOptions.lineage && filterOptions.lineage.length > 0) ||
                            (filterOptions.weight && filterOptions.weight.length > 0);
             
+            // FALLBACK: If API returned empty but we have tags in memory (from cache hydration), build filters from tags immediately
+            if (!hasData && this.state && Array.isArray(this.state.tags) && this.state.tags.length > 0) {
+                try {
+                    verboseLog('⚡ Fallback: building filter options from in-memory tags due to empty API response');
+                    const built = this._extractFiltersFromTags(this.state.tags);
+                    // Use built options as authoritative for now
+                    filterOptions = {
+                        vendor: built.vendor,
+                        brand: built.brand,
+                        productType: built.productType,
+                        lineage: built.lineage,
+                        weight: built.weight,
+                        strain: built.strain,
+                        doh: built.doh,
+                        highCbd: built.highCbd
+                    };
+                    // Cache the built options for future instant loads
+                    if (window.sessionStorage) {
+                        try { sessionStorage.setItem(filterCacheKey, JSON.stringify(filterOptions)); } catch (e) { verboseLog('Failed to cache built filter options:', e); }
+                    }
+                } catch (e) {
+                    console.warn('Fallback build from tags failed:', e);
+                }
+            }
+
             if (!hasData && retryCount < maxRetries) {
                 verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying immediately...`);
                 // Retry immediately without delay
