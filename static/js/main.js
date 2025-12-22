@@ -12157,9 +12157,6 @@ const TagManager = {
                 checkboxInfo = lastAction;
             }
 
-            // Push to redo stack
-            this.state.redoStack.push(checkboxInfo);
-
             // Find the checkbox using the stored element reference or by searching
             let checkbox = checkboxInfo.element;
 
@@ -12183,6 +12180,20 @@ const TagManager = {
             }
 
             if (checkbox) {
+                // Update the checkboxInfo with the NEW state (after undo click will toggle it)
+                const currentState = checkbox.checked;
+
+                // Create redo info with the state AFTER the undo action
+                const redoInfo = {
+                    ...checkboxInfo,
+                    checked: !currentState, // After clicking, it will be toggled
+                    element: checkbox
+                };
+
+                // Push to redo stack with updated state
+                this.state.redoStack.push(redoInfo);
+                console.log(`📚 Added to redo stack: ${redoInfo.id}, will restore to checked=${redoInfo.checked}`);
+
                 // Prevent this click from being added to undo stack
                 this.state.skipUndoTracking = true;
                 checkbox.click();
@@ -12198,7 +12209,6 @@ const TagManager = {
                 console.warn(`⚠️ Checkbox not found for: ${checkboxInfo.id}`);
                 // Put it back on undo stack if checkbox not found
                 this.state.undoStack.push(checkboxInfo);
-                this.state.redoStack.pop();
                 if (window.Toast) {
                     Toast.show('info', 'Checkbox not found');
                 }
