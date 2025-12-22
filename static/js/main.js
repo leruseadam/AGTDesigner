@@ -11989,11 +11989,18 @@ const TagManager = {
 
             const tagName = this.state.lastToggledCheckbox;
             
-            // Find the checkbox in either available or selected tags
+            // Find the checkbox in either available or selected tags using data-tag-name
             const availableContainer = document.getElementById('availableTags');
             const selectedContainer = document.getElementById('selectedTags');
             
-            let checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
+            let checkbox = availableContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
+            if (!checkbox) {
+                checkbox = selectedContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
+            }
+            // Fallback to value attribute if data-tag-name not found
+            if (!checkbox) {
+                checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
+            }
             if (!checkbox) {
                 checkbox = selectedContainer?.querySelector(`input[value="${tagName}"]`);
             }
@@ -12036,11 +12043,18 @@ const TagManager = {
 
             const tagName = this.state.lastToggledCheckbox;
             
-            // Find the checkbox in either available or selected tags
+            // Find the checkbox in either available or selected tags using data-tag-name
             const availableContainer = document.getElementById('availableTags');
             const selectedContainer = document.getElementById('selectedTags');
             
-            let checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
+            let checkbox = availableContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
+            if (!checkbox) {
+                checkbox = selectedContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
+            }
+            // Fallback to value attribute if data-tag-name not found
+            if (!checkbox) {
+                checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
+            }
             if (!checkbox) {
                 checkbox = selectedContainer?.querySelector(`input[value="${tagName}"]`);
             }
