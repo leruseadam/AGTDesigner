@@ -8187,7 +8187,8 @@ class JSONMatcher:
             
             # Create Description and DescAndWeight with proper weight formatting
             # Format: "Product Name - Weight" (e.g., "Georgia Pie Cured Resin Ceramic Cartridge - 1g")
-            base_description = description or primary_product_name
+            # ALWAYS use the transformed primary_product_name as the base (not the raw description field)
+            base_description = primary_product_name
             weight_display = f"{weight}{units}" if weight and units else ""
             
             # Check if description already contains the weight
@@ -8202,6 +8203,8 @@ class JSONMatcher:
                 # Use description as-is (already has weight or no weight to add)
                 formatted_description = base_description
                 desc_and_weight = base_description
+            
+            logging.info(f"📝 Final formatted description: '{formatted_description}'")
             
             tag = {
                 # Core product information - follow existing tag format

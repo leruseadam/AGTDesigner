@@ -12243,8 +12243,11 @@ const TagManager = {
                 return;
             }
 
+            console.log(`📚 Redo stack size: ${this.state.redoStack.length}, contents:`, this.state.redoStack);
+
             // Pop from redo stack
             const lastAction = this.state.redoStack.pop();
+            console.log('Popped from redo stack:', lastAction);
 
             // Handle both old string format and new object format
             let checkboxInfo;
@@ -12254,8 +12257,7 @@ const TagManager = {
                 checkboxInfo = lastAction;
             }
 
-            // Push back to undo stack
-            this.state.undoStack.push(checkboxInfo);
+            console.log('Redo checkbox info:', checkboxInfo);
 
             // Find the checkbox using the stored element reference or by searching
             let checkbox = checkboxInfo.element;
@@ -12280,8 +12282,22 @@ const TagManager = {
             }
 
             if (checkbox) {
-                // Prevent this click from being added to undo stack
+                console.log(`Found checkbox: ${checkboxInfo.id}, current state: ${checkbox.checked}`);
+
+                // Create undo info with current state before clicking
+                const undoInfo = {
+                    ...checkboxInfo,
+                    checked: checkbox.checked,
+                    element: checkbox
+                };
+
+                // Push to undo stack
+                this.state.undoStack.push(undoInfo);
+                console.log(`📚 Added to undo stack: ${undoInfo.id}, current state: ${undoInfo.checked}`);
+
+                // Prevent this click from being added to undo stack again
                 this.state.skipUndoTracking = true;
+                console.log(`Clicking checkbox to restore state...`);
                 checkbox.click();
                 setTimeout(() => {
                     this.state.skipUndoTracking = false;
@@ -12290,12 +12306,11 @@ const TagManager = {
                 if (window.Toast) {
                     Toast.show('success', `Redone: ${checkboxInfo.id}`);
                 }
-                console.log(`✅ Redone checkbox for: ${checkboxInfo.id}`);
+                console.log(`✅ Redone checkbox for: ${checkboxInfo.id}, new state: ${checkbox.checked}`);
             } else {
                 console.warn(`⚠️ Checkbox not found for: ${checkboxInfo.id}`);
                 // Put it back on redo stack if checkbox not found
                 this.state.redoStack.push(checkboxInfo);
-                this.state.undoStack.pop();
                 if (window.Toast) {
                     Toast.show('info', 'Checkbox not found');
                 }
