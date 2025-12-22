@@ -3321,6 +3321,7 @@ const TagManager = {
                         this.state.undoStack = [];
                     }
                     this.state.undoStack.push(tagName);
+                    console.log(`📝 Added to undo stack: ${tagName}, stack size: ${this.state.undoStack.length}`);
                     // Limit undo stack size to 10
                     if (this.state.undoStack.length > 10) {
                         this.state.undoStack.shift();
@@ -5428,6 +5429,7 @@ const TagManager = {
                     this.state.undoStack = [];
                 }
                 this.state.undoStack.push(displayName);
+                console.log(`📝 Added to undo stack: ${displayName}, stack size: ${this.state.undoStack.length}`);
                 // Limit undo stack size to 10
                 if (this.state.undoStack.length > 10) {
                     this.state.undoStack.shift();
@@ -12011,6 +12013,8 @@ const TagManager = {
             if (!this.state.redoStack) {
                 this.state.redoStack = [];
             }
+            
+            console.log(`📚 Undo stack size: ${this.state.undoStack.length}, contents:`, this.state.undoStack);
             
             // Check if there's anything to undo
             if (this.state.undoStack.length === 0) {
