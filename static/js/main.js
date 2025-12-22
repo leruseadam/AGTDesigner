@@ -3315,8 +3315,10 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 const isInSelected = e.target.closest('#selectedTags') !== null;
                 
-                // Track this as the last toggled checkbox
-                this.state.lastToggledCheckbox = tagName;
+                // Track this as the last toggled checkbox (unless this is undo/redo)
+                if (!this.state.isUndoRedoOperation) {
+                    this.state.lastToggledCheckbox = tagName;
+                }
                 
                 // Ensure _selectedTagsSet exists
                 if (!this.state._selectedTagsSet) {
@@ -5409,8 +5411,10 @@ const TagManager = {
             // Ensure the checkbox state is properly updated
             const isChecked = e.target.checked;
             
-            // Track this as the last toggled checkbox
-            this.state.lastToggledCheckbox = displayName;
+            // Track this as the last toggled checkbox (unless this is undo/redo)
+            if (!this.state.isUndoRedoOperation) {
+                this.state.lastToggledCheckbox = displayName;
+            }
             
             // CRITICAL FIX: Ensure _selectedTagsSet exists before using it
             if (!this.state._selectedTagsSet) {
@@ -11999,8 +12003,16 @@ const TagManager = {
             }
             
             if (checkbox) {
+                // Set flag to prevent updating lastToggledCheckbox during undo
+                this.state.isUndoRedoOperation = true;
+                
                 // Use click() for immediate response - it toggles and triggers change handler
                 checkbox.click();
+                
+                // Reset flag after a brief delay
+                setTimeout(() => {
+                    this.state.isUndoRedoOperation = false;
+                }, 100);
                 
                 if (window.Toast) {
                     Toast.show('success', `Toggled: ${tagName}`);
@@ -12046,8 +12058,16 @@ const TagManager = {
             }
             
             if (checkbox) {
+                // Set flag to prevent updating lastToggledCheckbox during redo
+                this.state.isUndoRedoOperation = true;
+                
                 // Use click() for immediate response - it toggles and triggers change handler
                 checkbox.click();
+                
+                // Reset flag after a brief delay
+                setTimeout(() => {
+                    this.state.isUndoRedoOperation = false;
+                }, 100);
                 
                 if (window.Toast) {
                     Toast.show('success', `Toggled: ${tagName}`);
