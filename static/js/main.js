@@ -5464,62 +5464,59 @@ const TagManager = {
                 
                 // CRITICAL: Do NOT trigger any filter updates or available tags re-render
                 return; // Exit immediately to prevent any further processing
-            } else {
-                // For selection, defer full rebuild
-                setTimeout(() => {
-                    // CRITICAL FIX: Use fallback lookup if tag not in _tagLookupMap
-                    // This prevents tags from disappearing on first selection
-                    const selectedTagObjects = this.state.persistentSelectedTags
-                        .map(name => {
-                            // Try lookup map first
-                            let tag = this._tagLookupMap?.get(name);
-                            if (tag) return tag;
-                            
-                            // Fallback to state.tags
-                            tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
-                            if (tag) return tag;
-                            
-                            // Fallback to originalTags
-                            tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
-                            if (tag) return tag;
-                            
-                            // If still not found, log warning but don't filter out - preserve selection
-                            console.warn(`Tag '${name}' not found in lookup maps, but preserving selection`);
-                            return null;
-                        })
-                        .filter(Boolean);
-                    
-                    // Only update if we have valid tag objects
-                    if (selectedTagObjects.length > 0) {
-                        this.updateSelectedTags(selectedTagObjects);
-                    } else {
-                        // If no valid objects but we have persistent selections, rebuild lookup map
-                        console.warn('No valid tag objects found, rebuilding lookup map');
-                        // Rebuild the lookup map
-                        this._tagLookupMap = new Map();
-                        this.state.tags.forEach(t => {
-                            if (t && t['Product Name*']) {
-                                this._tagLookupMap.set(t['Product Name*'], t);
-                            }
-                        });
-                        this.state.originalTags.forEach(t => {
-                            if (t && t['Product Name*'] && !this._tagLookupMap.has(t['Product Name*'])) {
-                                this._tagLookupMap.set(t['Product Name*'], t);
-                            }
-                        });
-                        // Retry with rebuilt map
-                        const retryTagObjects = this.state.persistentSelectedTags
-                            .map(name => this._tagLookupMap?.get(name))
-                            .filter(Boolean);
-                        if (retryTagObjects.length > 0) {
-                            this.updateSelectedTags(retryTagObjects);
-                        }
-                    }
-                }, 0);
-                
-                // State already saved above, just sync with backend
-                setTimeout(() => this.saveSelectionState('checkbox_selection'), 50);
             }
+            
+            // For selection, update immediately (no setTimeout to prevent race conditions)
+            // CRITICAL FIX: Use fallback lookup if tag not in _tagLookupMap
+            const selectedTagObjects = this.state.persistentSelectedTags
+                .map(name => {
+                    // Try lookup map first
+                    let tag = this._tagLookupMap?.get(name);
+                    if (tag) return tag;
+                    
+                    // Fallback to state.tags
+                    tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                    if (tag) return tag;
+                    
+                    // Fallback to originalTags
+                    tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                    if (tag) return tag;
+                    
+                    // If still not found, log warning but don't filter out - preserve selection
+                    console.warn(`Tag '${name}' not found in lookup maps, but preserving selection`);
+                    return null;
+                })
+                .filter(Boolean);
+            
+            // Only update if we have valid tag objects
+            if (selectedTagObjects.length > 0) {
+                this.updateSelectedTags(selectedTagObjects);
+            } else {
+                // If no valid objects but we have persistent selections, rebuild lookup map
+                console.warn('No valid tag objects found, rebuilding lookup map');
+                // Rebuild the lookup map
+                this._tagLookupMap = new Map();
+                this.state.tags.forEach(t => {
+                    if (t && t['Product Name*']) {
+                        this._tagLookupMap.set(t['Product Name*'], t);
+                    }
+                });
+                this.state.originalTags.forEach(t => {
+                    if (t && t['Product Name*'] && !this._tagLookupMap.has(t['Product Name*'])) {
+                        this._tagLookupMap.set(t['Product Name*'], t);
+                    }
+                });
+                // Retry with rebuilt map
+                const retryTagObjects = this.state.persistentSelectedTags
+                    .map(name => this._tagLookupMap?.get(name))
+                    .filter(Boolean);
+                if (retryTagObjects.length > 0) {
+                    this.updateSelectedTags(retryTagObjects);
+                }
+            }
+            
+            // State already saved above, just sync with backend
+            setTimeout(() => this.saveSelectionState('checkbox_selection'), 50);
         };
         
         // Store the handler on the element itself so we can reference it later
