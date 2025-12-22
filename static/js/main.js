@@ -11999,10 +11999,8 @@ const TagManager = {
             }
             
             if (checkbox) {
-                // Toggle the checkbox
-                checkbox.checked = !checkbox.checked;
-                // Dispatch change event to trigger state update
-                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                // Use click() for immediate response - it toggles and triggers change handler
+                checkbox.click();
                 
                 if (window.Toast) {
                     Toast.show('success', `Toggled: ${tagName}`);
@@ -12048,10 +12046,8 @@ const TagManager = {
             }
             
             if (checkbox) {
-                // Toggle the checkbox
-                checkbox.checked = !checkbox.checked;
-                // Dispatch change event to trigger state update
-                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                // Use click() for immediate response - it toggles and triggers change handler
+                checkbox.click();
                 
                 if (window.Toast) {
                     Toast.show('success', `Toggled: ${tagName}`);
