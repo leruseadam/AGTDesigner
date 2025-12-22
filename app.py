@@ -16535,13 +16535,8 @@ def json_match():
 
                 # Get weight information (already cleaned above)
                 weight = p.get('Weight*') or p.get('Weight') or ''
-                units = p.get('Units') or ''
+                units = p.get('Units') or p.get('units') or p.get('Weight Unit* (grams/gm or ounces/oz)') or p.get('unit_weight_uom') or ''
                 combined_weight = p.get('CombinedWeight') or ''
-                
-                # CRITICAL FIX: Default units to 'g' if weight exists but units are missing
-                if weight and not units:
-                    units = 'g'
-                    logging.debug(f"Added default units 'g' for product: {product_name}")
                 
                 # CRITICAL FIX: Check if product name already contains weight to avoid duplication
                 # Common weight patterns: "1g", "1.0g", "0.5g", "2g", etc.
@@ -16558,8 +16553,9 @@ def json_match():
                 elif weight and units:
                     display_name = f"{product_name} - {weight}{units}"
                 elif weight:
-                    # Fallback: if weight exists but no units, add 'g' as default
-                    display_name = f"{product_name} - {weight}g"
+                    # If weight exists but no units found anywhere, just use weight value
+                    display_name = f"{product_name} - {weight}"
+                    logging.warning(f"Weight without units for product: {product_name} (weight: {weight})")
                 else:
                     display_name = product_name
 
