@@ -10319,11 +10319,13 @@ const TagManager = {
             
             // CRITICAL FIX: Build filter options from cached tags IMMEDIATELY for instant filters
             // This prevents filters from appearing empty on page load
+            let filtersPopulated = false;
             if (this.state.tags && this.state.tags.length > 0) {
                 console.log('⚡ Building filter options from cached tags immediately...');
                 this.buildFilterOptionsFromTags(this.state.tags);
+                filtersPopulated = true;
             }
-            
+
             // CRITICAL FIX: Restore filters from localStorage IMMEDIATELY before API call
             // This prevents filters from disappearing on page refresh
             const savedFilters = this.loadFiltersFromStorage();
@@ -10337,10 +10339,14 @@ const TagManager = {
                     }
                 });
             }
-            
-            // Fetch fresh filter options from API in background (non-blocking)
-            if (this.fetchAndPopulateFilters) {
+
+            // CRITICAL FIX: Only fetch filter options from API if we didn't populate from cache
+            // This prevents slow API calls from overwriting instant cache-based filters
+            if (!filtersPopulated && this.fetchAndPopulateFilters) {
+                console.log('⚠️ No cached filters, fetching from API...');
                 this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
+            } else if (filtersPopulated) {
+                console.log('✅ Filters already populated from cache, skipping API call');
             }
             
             // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
