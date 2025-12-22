@@ -3315,8 +3315,21 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 const isInSelected = e.target.closest('#selectedTags') !== null;
                 
-                // Track this as the last toggled checkbox
-                this.state.lastToggledCheckbox = tagName;
+                // Add to undo stack (unless this is from undo/redo operation)
+                if (!this.state.skipUndoTracking) {
+                    if (!this.state.undoStack) {
+                        this.state.undoStack = [];
+                    }
+                    this.state.undoStack.push(tagName);
+                    // Limit undo stack size to 10
+                    if (this.state.undoStack.length > 10) {
+                        this.state.undoStack.shift();
+                    }
+                    // Clear redo stack on new action
+                    if (this.state.redoStack) {
+                        this.state.redoStack = [];
+                    }
+                }
                 
                 // Ensure _selectedTagsSet exists
                 if (!this.state._selectedTagsSet) {
@@ -5409,8 +5422,21 @@ const TagManager = {
             // Ensure the checkbox state is properly updated
             const isChecked = e.target.checked;
             
-            // Track this as the last toggled checkbox
-            this.state.lastToggledCheckbox = displayName;
+            // Add to undo stack (unless this is from undo/redo operation)
+            if (!this.state.skipUndoTracking) {
+                if (!this.state.undoStack) {
+                    this.state.undoStack = [];
+                }
+                this.state.undoStack.push(displayName);
+                // Limit undo stack size to 10
+                if (this.state.undoStack.length > 10) {
+                    this.state.undoStack.shift();
+                }
+                // Clear redo stack on new action
+                if (this.state.redoStack) {
+                    this.state.redoStack = [];
+                }
+            }
             
             // CRITICAL FIX: Ensure _selectedTagsSet exists before using it
             if (!this.state._selectedTagsSet) {
@@ -11976,20 +12002,32 @@ const TagManager = {
 
     async undoMove() {
         try {
-            console.log('🔙 Toggling last checkbox...');
+            console.log('🔙 Undoing last checkbox action...');
             
-            // Check if we have a last toggled checkbox
-            if (!this.state.lastToggledCheckbox) {
-                console.warn('⚠️ No checkbox to toggle');
+            // Initialize undo/redo stacks if needed
+            if (!this.state.undoStack) {
+                this.state.undoStack = [];
+            }
+            if (!this.state.redoStack) {
+                this.state.redoStack = [];
+            }
+            
+            // Check if there's anything to undo
+            if (this.state.undoStack.length === 0) {
+                console.warn('⚠️ Nothing to undo');
                 if (window.Toast) {
-                    Toast.show('info', 'No recent checkbox action to undo');
+                    Toast.show('info', 'Nothing to undo');
                 }
                 return;
             }
 
-            const tagName = this.state.lastToggledCheckbox;
+            // Pop the last action from undo stack
+            const tagName = this.state.undoStack.pop();
             
-            // Find the checkbox in either available or selected tags using data-tag-name
+            // Push to redo stack
+            this.state.redoStack.push(tagName);
+            
+            // Find the checkbox
             const availableContainer = document.getElementById('availableTags');
             const selectedContainer = document.getElementById('selectedTags');
             
@@ -11997,7 +12035,6 @@ const TagManager = {
             if (!checkbox) {
                 checkbox = selectedContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
             }
-            // Fallback to value attribute if data-tag-name not found
             if (!checkbox) {
                 checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
             }
@@ -12006,17 +12043,24 @@ const TagManager = {
             }
             
             if (checkbox) {
-                // Use click() for immediate response - it toggles and triggers change handler
+                // Prevent this click from being added to undo stack
+                this.state.skipUndoTracking = true;
                 checkbox.click();
+                setTimeout(() => {
+                    this.state.skipUndoTracking = false;
+                }, 100);
                 
                 if (window.Toast) {
-                    Toast.show('success', `Toggled: ${tagName}`);
+                    Toast.show('success', `Undone: ${tagName}`);
                 }
-                console.log(`✅ Toggled checkbox for: ${tagName}`);
+                console.log(`✅ Undone checkbox for: ${tagName}`);
             } else {
                 console.warn(`⚠️ Checkbox not found for: ${tagName}`);
+                // Put it back on undo stack if checkbox not found
+                this.state.undoStack.push(tagName);
+                this.state.redoStack.pop();
                 if (window.Toast) {
-                    Toast.show('info', 'Previous checkbox not found');
+                    Toast.show('info', 'Checkbox not found');
                 }
             }
 
@@ -12030,20 +12074,32 @@ const TagManager = {
 
     async redoMove() {
         try {
-            console.log('🔁 Toggling last checkbox (redo)...');
+            console.log('🔁 Redoing last undone action...');
             
-            // Check if we have a last toggled checkbox
-            if (!this.state.lastToggledCheckbox) {
-                console.warn('⚠️ No checkbox to toggle');
+            // Initialize redo stack if needed
+            if (!this.state.redoStack) {
+                this.state.redoStack = [];
+            }
+            if (!this.state.undoStack) {
+                this.state.undoStack = [];
+            }
+            
+            // Check if there's anything to redo
+            if (this.state.redoStack.length === 0) {
+                console.warn('⚠️ Nothing to redo');
                 if (window.Toast) {
-                    Toast.show('info', 'No recent checkbox action to redo');
+                    Toast.show('info', 'Nothing to redo');
                 }
                 return;
             }
 
-            const tagName = this.state.lastToggledCheckbox;
+            // Pop from redo stack
+            const tagName = this.state.redoStack.pop();
             
-            // Find the checkbox in either available or selected tags using data-tag-name
+            // Push back to undo stack
+            this.state.undoStack.push(tagName);
+            
+            // Find the checkbox
             const availableContainer = document.getElementById('availableTags');
             const selectedContainer = document.getElementById('selectedTags');
             
@@ -12051,7 +12107,6 @@ const TagManager = {
             if (!checkbox) {
                 checkbox = selectedContainer?.querySelector(`input[data-tag-name="${tagName}"]`);
             }
-            // Fallback to value attribute if data-tag-name not found
             if (!checkbox) {
                 checkbox = availableContainer?.querySelector(`input[value="${tagName}"]`);
             }
@@ -12060,17 +12115,24 @@ const TagManager = {
             }
             
             if (checkbox) {
-                // Use click() for immediate response - it toggles and triggers change handler
+                // Prevent this click from being added to undo stack
+                this.state.skipUndoTracking = true;
                 checkbox.click();
+                setTimeout(() => {
+                    this.state.skipUndoTracking = false;
+                }, 100);
                 
                 if (window.Toast) {
-                    Toast.show('success', `Toggled: ${tagName}`);
+                    Toast.show('success', `Redone: ${tagName}`);
                 }
-                console.log(`✅ Toggled checkbox for: ${tagName}`);
+                console.log(`✅ Redone checkbox for: ${tagName}`);
             } else {
                 console.warn(`⚠️ Checkbox not found for: ${tagName}`);
+                // Put it back on redo stack if checkbox not found
+                this.state.redoStack.push(tagName);
+                this.state.undoStack.pop();
                 if (window.Toast) {
-                    Toast.show('info', 'Previous checkbox not found');
+                    Toast.show('info', 'Checkbox not found');
                 }
             }
 
