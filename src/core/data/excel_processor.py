@@ -5051,14 +5051,6 @@ class ExcelProcessor:
             cached_copy = self._clone_filter_options(options)
             self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
             return self._clone_filter_options(cached_copy)
-                # (Removed duplicate and mis-indented code)
-                
-                # Remove duplicates and sort
-                values = list(set(values))
-                values.sort()
-                options[filter_key] = clean_list(values)
-            else:
-                options[filter_key] = []
         
         cached_copy = self._clone_filter_options(options)
         self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
