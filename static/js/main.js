@@ -1,3 +1,45 @@
+// Enhanced Lineage Editor: Strain search logic for modal
+window.searchProducts = function(searchTerm) {
+    // Only run if the enhanced lineage editor modal is open
+    const productResults = document.getElementById('productResults');
+    const vendorResults = document.getElementById('vendorResults');
+    const vendorInput = document.getElementById('vendorSearch');
+    const productInput = document.getElementById('productSearch');
+    if (!productResults || !vendorResults || !vendorInput || !productInput) return;
+
+    // Get selected vendor from vendorResults (assume selected vendor is highlighted or stored)
+    let selectedVendor = null;
+    const selectedVendorDiv = vendorResults.querySelector('.selected-vendor');
+    if (selectedVendorDiv) {
+        selectedVendor = selectedVendorDiv.textContent.trim();
+    } else if (vendorInput.value && vendorInput.value.trim() !== '') {
+        selectedVendor = vendorInput.value.trim();
+    }
+    if (!selectedVendor) {
+        productInput.disabled = true;
+        productResults.innerHTML = '<div class="text-center text-white-50"><i class="fas fa-info-circle me-2"></i>Select a vendor first</div>';
+        return;
+    }
+    productInput.disabled = false;
+
+    // Get all products for the selected vendor from a global cache or state (assume window.allProductsByVendor)
+    const allProducts = (window.allProductsByVendor && window.allProductsByVendor[selectedVendor]) || [];
+    const term = (searchTerm || '').toLowerCase().trim();
+    const filtered = term ? allProducts.filter(p => (p['Product Name*'] || '').toLowerCase().includes(term)) : allProducts;
+
+    if (filtered.length === 0) {
+        productResults.innerHTML = '<div class="text-center text-white-50"><i class="fas fa-search me-2"></i>No strains found</div>';
+        return;
+    }
+
+    // Render filtered products
+    productResults.innerHTML = filtered.map(p => `
+        <div class="list-group-item list-group-item-action strain-result" data-product-name="${p['Product Name*']}">
+            <strong>${p['Product Name*']}</strong><br>
+            <small class="text-muted">Current Lineage: ${p.currentLineage || p.Lineage || 'Unknown'}</small>
+        </div>
+    `).join('');
+};
 // Detect Windows platform for optimizations
 const isWindows = navigator.platform.toLowerCase().includes('win') ||
                  navigator.userAgent.toLowerCase().includes('windows');
@@ -5966,6 +6008,32 @@ const TagManager = {
         cleanedName = cleanedName.replace(/ by [^-]+(?= -)/i, ''); // Remove "by ..." before hyphen
         cleanedName = cleanedName.replace(/-/g, '\u2011');
         tagName.textContent = cleanedName;
+
+        // --- BEGIN PATCH: Add visible, normalized weight+units display for all tags ---
+        // Robust fallback chain for weight and units
+        let weight = tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '';
+        let units = tag.Units || tag.units || '';
+        // If weight already contains units, don't append units again
+        let showWeight = '';
+        if (weight) {
+            // If weight already has units (e.g., '3.5g', '1oz'), don't double-append
+            if (units && !weight.toString().toLowerCase().includes(units.toString().toLowerCase())) {
+                showWeight = `${weight} ${units}`.trim();
+            } else {
+                showWeight = weight.toString().trim();
+            }
+        } else if (units) {
+            showWeight = units.toString().trim();
+        }
+        // Always show weight if available, otherwise show '-'
+        const weightDiv = document.createElement('div');
+        weightDiv.className = 'tag-weight d-inline-block ms-2';
+        weightDiv.style.fontSize = '0.92em';
+        weightDiv.style.fontWeight = '500';
+        weightDiv.style.color = '#e0e0e0';
+        weightDiv.textContent = showWeight || '-';
+        tagName.appendChild(weightDiv);
+        // --- END PATCH ---
         tagInfo.appendChild(tagName);
         
 
