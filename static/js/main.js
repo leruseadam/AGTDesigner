@@ -9861,6 +9861,13 @@ const TagManager = {
                     tag['Lineage*'] = normalized;
                 }
             }
+            // FINAL GUARANTEE: If canonical_lineage/currentLineage are still missing but Lineage exists, set them to Lineage
+            if (!tag.canonical_lineage && tag.Lineage) {
+                tag.canonical_lineage = tag.Lineage;
+            }
+            if (!tag.currentLineage && tag.Lineage) {
+                tag.currentLineage = tag.Lineage;
+            }
         } catch (e) {
             console.warn('Failed to normalize lineage for tag:', tag, e);
         }
@@ -10074,20 +10081,41 @@ const TagManager = {
         const retryDelay = 0; // No delay needed
         
         try {
-            // Use the filter options API WITHOUT refresh to use cached data for speed
+            // Try to load filter options from sessionStorage for instant display
+            let filterOptions = null;
+            const filterCacheKey = 'agt_filter_options_cache';
+            if (window.sessionStorage && sessionStorage.getItem(filterCacheKey)) {
+                try {
+                    filterOptions = JSON.parse(sessionStorage.getItem(filterCacheKey));
+                    verboseLog('💾 Loaded filter options from sessionStorage:', filterOptions);
+                    this.updateFilters(filterOptions, true);
+                } catch (e) {
+                    console.warn('Failed to parse cached filter options:', e);
+                }
+            }
+
+            // Always fetch latest filter options in background for freshness
             const timestamp = Date.now();
             const response = await fetch(`/api/filter-options?t=${timestamp}`, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
             });
-            
+
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(`Failed to fetch filter options: ${response.status} ${errorText}`);
             }
-            
-            const filterOptions = await response.json();
+
+            filterOptions = await response.json();
             verboseLog('Fetched filter options:', filterOptions);
+            // Cache the latest filter options for instant future loads
+            if (window.sessionStorage) {
+                try {
+                    sessionStorage.setItem(filterCacheKey, JSON.stringify(filterOptions));
+                } catch (e) {
+                    console.warn('Failed to cache filter options:', e);
+                }
+            }
             
             // CRITICAL FIX: Check for error field in response, but don't treat "No default file available" as an error
             // Database-only mode is valid and shouldn't trigger warnings

@@ -6958,6 +6958,10 @@ def _align_tags_with_db_lineage(tags, store_name):
                 tag['lineage'] = db_lineage.lower()
                 tag['canonical_lineage'] = db_lineage
                 tag['currentLineage'] = db_lineage
+            # Guarantee: if Lineage is set but canonical/current missing, set them to Lineage
+            elif tag.get('Lineage'):
+                tag['canonical_lineage'] = tag['Lineage']
+                tag['currentLineage'] = tag['Lineage']
         
         return aligned_tags
     except Exception as e:
@@ -11999,7 +12003,12 @@ def update_lineage():
                         excel_processor.df.loc[product_mask, 'Lineage'] = new_lineage
                         updated_count = product_mask.sum()
                         logging.info(f"✅ CRITICAL: Directly updated DataFrame lineage for '{tag_name}' to '{new_lineage}' ({updated_count} row(s))")
-                        excel_processor._invalidate_caches()  # Invalidate cache since DataFrame changed
+                        # CRITICAL: Invalidate ALL caches including filter options cache
+                        excel_processor._invalidate_caches()  # Invalidate internal caches
+                        # Also clear filter options cache in excel_processor
+                        if hasattr(excel_processor, '_filter_options_cache'):
+                            excel_processor._filter_options_cache.clear()
+                            logging.info("✅ Cleared excel_processor filter options cache")
                     else:
                         logging.warning(f"⚠️ Product '{tag_name}' not found in DataFrame for direct update (tried exact, case-insensitive, and normalized matches)")
         except Exception as df_update_err:
@@ -12035,9 +12044,9 @@ def update_lineage():
             if hasattr(g, 'excel_processor'):
                 delattr(g, 'excel_processor')
                 logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
-            if _excel_processor is not None:
-                _excel_processor = None
-                logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
+            # CRITICAL: Actually clear the global processor (previous code didn't work)
+            _excel_processor = None
+            logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
         except Exception as clear_err:
             logging.warning(f"Could not clear caches/processor: {clear_err}")
         
@@ -12349,6 +12358,12 @@ def batch_update_lineage():
                         # Non-fatal; continue updating others
                         pass
                 logging.info(f"Updated lineage in Excel processor DataFrame for {updated_count}/{len(changes_made)} items")
+                # CRITICAL: Clear excel_processor internal caches after DataFrame update
+                if hasattr(excel_processor, '_invalidate_caches'):
+                    excel_processor._invalidate_caches()
+                if hasattr(excel_processor, '_filter_options_cache'):
+                    excel_processor._filter_options_cache.clear()
+                    logging.info("✅ Cleared excel_processor filter options cache after batch update")
         except Exception as e_df:
             logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
         # Clear caches to ensure refreshed data after batch lineage updates
