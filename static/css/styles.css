@@ -2648,7 +2648,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .col-lg-4[data-container-type="selected"] {
     height: auto !important;
     max-height: none !important;
-    min-height: 37.5rem !important;
+    min-height: 40.5rem !important;
   }
 
   /* SYMMETRICAL - Make left and right columns equal width */
