@@ -60,3 +60,4 @@ After syncing, check the database stats:
 - Make sure you uploaded the Excel file with ALL sheets
 - Check server logs for "Excel file loaded from X sheets" message
 - Try clearing the database first, then re-upload
+

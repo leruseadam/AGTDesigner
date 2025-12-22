@@ -15482,37 +15482,41 @@ document.addEventListener('DOMContentLoaded', function() {
     function attachUndoButtonListener() {
         const undoButton = document.getElementById('undo-move-btn');
         if (undoButton) {
-            // Remove any existing listeners to prevent duplicates
+            // Remove any existing listeners by cloning
             const newButton = undoButton.cloneNode(true);
             undoButton.parentNode.replaceChild(newButton, undoButton);
-            
-            newButton.addEventListener('click', function(e) {
+
+            newButton.addEventListener('click', async function(e) {
                 e.preventDefault();
                 e.stopPropagation();
                 console.log('🔙 Undo button clicked');
                 verboseLog('Undo button clicked');
-                
+
                 if (window.TagManager && typeof window.TagManager.undoMove === 'function') {
                     console.log('✅ Calling TagManager.undoMove()');
                     verboseLog('Calling TagManager.undoMove()');
-                    window.TagManager.undoMove().catch(error => {
+                    try {
+                        await window.TagManager.undoMove.call(window.TagManager);
+                    } catch (error) {
                         console.error('❌ Error in undoMove:', error);
                         alert(`Undo failed: ${error.message || error}`);
-                    });
+                    }
                 } else {
                     console.error('❌ TagManager or undoMove method not available', {
                         hasTagManager: !!window.TagManager,
-                        hasUndoMove: !!(window.TagManager && TagManager.undoMove),
-                        typeofUndoMove: typeof (window.TagManager && TagManager.undoMove)
+                        hasUndoMove: !!(window.TagManager && window.TagManager.undoMove),
+                        typeofUndoMove: typeof (window.TagManager && window.TagManager.undoMove)
                     });
                     // Fallback: try to call the undo function directly
                     if (typeof window.undoMove === 'function') {
                         console.log('🔄 Calling window.undoMove() directly');
                         verboseLog('Calling undoMove() directly');
-                        window.undoMove().catch(error => {
+                        try {
+                            await window.undoMove();
+                        } catch (error) {
                             console.error('❌ Error in window.undoMove:', error);
                             alert(`Undo failed: ${error.message || error}`);
-                        });
+                        }
                     } else {
                         console.error('❌ No undo function available');
                         alert('Undo functionality is not available. Please try refreshing the page.');
@@ -15532,11 +15536,11 @@ document.addEventListener('DOMContentLoaded', function() {
     function attachRedoButtonListener() {
         const redoButton = document.getElementById('redo-move-btn');
         if (redoButton) {
-            // Remove any existing listeners to prevent duplicates
+            // Remove any existing listeners by cloning
             const newButton = redoButton.cloneNode(true);
             redoButton.parentNode.replaceChild(newButton, redoButton);
 
-            newButton.addEventListener('click', function(e) {
+            newButton.addEventListener('click', async function(e) {
                 e.preventDefault();
                 e.stopPropagation();
                 console.log('🔁 Redo button clicked');
@@ -15545,10 +15549,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (window.TagManager && typeof window.TagManager.redoMove === 'function') {
                     console.log('✅ Calling TagManager.redoMove()');
                     verboseLog('Calling TagManager.redoMove()');
-                    window.TagManager.redoMove().catch(error => {
+                    try {
+                        await window.TagManager.redoMove.call(window.TagManager);
+                    } catch (error) {
                         console.error('❌ Error in redoMove:', error);
                         alert(`Redo failed: ${error.message || error}`);
-                    });
+                    }
                 } else {
                     console.error('❌ TagManager or redoMove method not available');
                     alert('Redo functionality is not available. Please try refreshing the page.');
