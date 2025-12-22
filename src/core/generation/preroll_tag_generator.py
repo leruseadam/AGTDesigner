@@ -134,7 +134,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         # pack labels clearly indicate they are prerolls.
         return {
             'group_id': f'{weight}g-{count}pack',
-            'display_name': f'Assorted Pre-Roll {weight_display}g x {count} Packs',
+            'display_name': f'Assorted Pre-Roll\u2011\u00A0{weight_display}g x {count} Packs',
             'category': f'{weight_display}g x {count} Packs'
         }
     
@@ -143,7 +143,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         # Ensure the specific 1g x 5 pack group also includes "Pre-Roll"
         return {
             'group_id': '5packs',
-            'display_name': 'Assorted Pre-Roll 1g x 5 Packs',
+            'display_name': 'Assorted Pre-Roll\u2011\u00A01g x 5 Packs',
             'category': '1g x 5 Packs'
         }
     
@@ -154,8 +154,8 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             weight = weight_match.group(1)
             return {
                 'group_id': f'infused-preroll-{weight}g',
-                'display_name': f'Infused Pre-Roll - {weight}g',
-                'category': f'Infused Pre-Roll - {weight}g'
+                'display_name': f'Infused Pre-Roll\u2011\u00A0{weight}g',
+                'category': f'Infused Pre-Roll\u2011\u00A0{weight}g'
             }
         else:
             return {
@@ -171,8 +171,8 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             weight = weight_match.group(1)
             return {
                 'group_id': f'preroll-{weight}g',
-                'display_name': f'Pre-Roll - {weight}g',
-                'category': f'Pre-Roll - {weight}g'
+                'display_name': f'Pre-Roll\u2011\u00A0{weight}g',
+                'category': f'Pre-Roll\u2011\u00A0{weight}g'
             }
     
     # Default: use truncated description pattern

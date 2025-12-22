@@ -8098,7 +8098,7 @@ class JSONMatcher:
                 'CombinedWeight': weight or "1",
                 'Description_Complexity': '1',
                 'Ratio_or_THC_CBD': self._calculate_ratio_for_json_product(product_type, json_item),
-                'displayName': clean_product_name(primary_product_name),
+                # Note: displayName already set correctly above - don't overwrite it here
                 'weightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
                 'WeightWithUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
                 'WeightUnits': f"{str(round(float(weight or '1')))}{units or 'g'}",
