@@ -4994,7 +4994,21 @@ class ExcelProcessor:
             
         return result
 
-    def get_dynamic_filter_options(self, current_filters: Dict[str, str], skip_weight: bool = False) -> Dict[str, list]:
+    def get_dynamic_filter_options(self, current_filters: Dict[str, str], skip_weight: bool = False, return_empty: bool = False) -> Dict[str, list]:
+        # CRITICAL PERFORMANCE: For instant initial load, return empty immediately
+        if return_empty:
+            self.logger.info("Returning empty filter options for instant initial load")
+            return {
+                "vendor": [],
+                "brand": [],
+                "productType": [],
+                "lineage": [],
+                "weight": [],
+                "strain": [],
+                "doh": [],
+                "highCbd": []
+            }
+
         # Return empty options if no data is loaded
         if self.df is None:
             return {

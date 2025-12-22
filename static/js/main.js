@@ -1422,20 +1422,19 @@ const TagManager = {
             this.state.simplifiedAvailableTagsActive = false;
             this.state.tags = [...normalizedTags];
             this.state.originalTags = [...normalizedTags];
-            // CRITICAL FIX: Hide splash BEFORE rendering to prevent visual glitches
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-            // CRITICAL FIX: Use requestAnimationFrame to ensure immediate render
+            // CRITICAL FIX: Render tags from cache immediately and hide splash right after
             requestAnimationFrame(() => {
                 this._updateAvailableTags(normalizedTags, null);
+                // Hide splash as soon as cached tags are rendered
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
                 console.log(`✅ INSTANT LOAD: ${normalizedTags.length} tags rendered from cache`);
-                // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
-                // This makes page reloads instant while still updating in background
+                // Always update from backend in background (non-blocking)
                 this._refreshLineageFromDatabase(normalizedTags).then(() => {
                     console.log('✅ Background lineage check complete (fast mode)');
                 }).catch(err => {

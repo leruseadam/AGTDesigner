@@ -12898,13 +12898,15 @@ def get_web_filter_options():
             data = request.get_json()
             current_filters = data.get('filters', {})
 
-        # CRITICAL PERFORMANCE: Skip weight on initial load for instant filters
-        skip_weight = len(current_filters) == 0 or not any(current_filters.values())
-        if skip_weight:
-            logging.info("Web filter initial load - skipping weight for instant response")
+        # CRITICAL PERFORMANCE: Return empty filters immediately for instant page load
+        is_initial_load = len(current_filters) == 0 or not any(current_filters.values())
 
-        # Use optimized method for web clients
-        options = excel_processor.get_dynamic_filter_options(current_filters, skip_weight=skip_weight)
+        if is_initial_load:
+            logging.info("⚡ INSTANT initial load - returning empty filters")
+            options = excel_processor.get_dynamic_filter_options(current_filters, return_empty=True)
+        else:
+            logging.info("Computing filter options with active filters")
+            options = excel_processor.get_dynamic_filter_options(current_filters, skip_weight=True)
         
         import math
         def clean_list(lst):
@@ -13257,16 +13259,17 @@ def get_filter_options():
         else:
             logging.warning("Filter options: DataFrame not available for logging")
         
-        # Use optimized method - skip weight on initial load for instant filters
+        # Use optimized method - return empty on initial load for INSTANT response
         try:
-            # CRITICAL PERFORMANCE: Skip weight filter if no filters are applied (initial load)
-            # Weight will be loaded on-demand when user clicks weight dropdown
-            skip_weight = len(current_filters) == 0 or not any(current_filters.values())
+            # CRITICAL PERFORMANCE: Return empty filters immediately on initial load
+            is_initial_load = len(current_filters) == 0 or not any(current_filters.values())
 
-            if skip_weight:
-                logging.info("Initial filter load - skipping weight computation for instant response")
-
-            options = excel_processor.get_dynamic_filter_options(current_filters, skip_weight=skip_weight)
+            if is_initial_load:
+                logging.info("⚡ INSTANT initial load - returning empty filters")
+                options = excel_processor.get_dynamic_filter_options(current_filters, return_empty=True)
+            else:
+                logging.info("Computing filter options with active filters")
+                options = excel_processor.get_dynamic_filter_options(current_filters, skip_weight=True)
         except Exception as filter_error:
             logging.error(f"CRITICAL: Error getting filter options: {filter_error}")
             import traceback
