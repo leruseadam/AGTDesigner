@@ -7398,7 +7398,7 @@ def generate_labels():
                             db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
                     else:
                         # Use batched queries for better performance
-                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=50)
+                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=200)
                     
                     logging.debug(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records")
                     
