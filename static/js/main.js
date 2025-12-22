@@ -5496,17 +5496,11 @@ const TagManager = {
     },
 
     createTagElement(tag, isForSelectedTags = false) {
-        // For JSON matched tags and educated guess tags, prioritize the matched database display information
-        let displayName;
+        // Unified display logic for all tags (JSON or Excel)
         const isJsonMatched = (tag.Source && (tag.Source === 'JSON Match' || tag.Source.includes('Educated Guess'))) ||
                               (tag.JSON_Source && (tag.JSON_Source === 'JSON Match' || tag.JSON_Source.includes('Educated Guess')));
-        if (isJsonMatched) {
-            // JSON matched tags and educated guess tags: use matched database product name
-            displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
-        } else {
-            // Regular tags: use standard fallback chain
-            displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
-        }
+        // Use the same fallback chain for all tags
+        let displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
         
         verboseLog('Creating tag element for:', displayName);
         
@@ -6007,9 +6001,9 @@ const TagManager = {
         let cleanedName = displayName.replace(/ by [^-]*$/i, ''); // Remove "by ..." at the end
         cleanedName = cleanedName.replace(/ by [^-]+(?= -)/i, ''); // Remove "by ..." before hyphen
         cleanedName = cleanedName.replace(/-/g, '\u2011');
-        // Remove trailing weight/unit if present (e.g., ' - 1g', ' - 3.5g', ' - 1 oz')
-        cleanedName = cleanedName.replace(/\s*-\s*\d+(\.\d+)?\s*[a-zA-Z]+$/, '');
-        tagName.textContent = cleanedName;
+        // Remove trailing weight/unit if present (e.g., ' - 1g', ' - 3.5g', ' - 1 oz', ' 1g', ' 1 g', ' 3.5g', ' 3.5 g', etc.)
+        cleanedName = cleanedName.replace(/\s*-?\s*\d+(\.\d+)?\s*[a-zA-Z]+\s*$/, '');
+        tagName.textContent = cleanedName.trim();
 
         // Only show normalized weight/units in the dedicated weight div
         let weight = tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '';
@@ -6148,17 +6142,17 @@ const TagManager = {
         
         tagInfo.appendChild(imageContainer);
         
-        // Add JSON match indicator if this tag came from JSON matching or educated guessing
-        if (isJsonMatched) {
-          const jsonBadge = document.createElement('span');
-          jsonBadge.className = 'badge bg-success me-2';
-          jsonBadge.style.fontSize = '0.7rem';
-          jsonBadge.style.padding = '2px 6px';
-          const source = tag.Source || tag.JSON_Source || 'JSON Match';
-          jsonBadge.textContent = source.includes('Educated Guess') ? 'AI' : 'JSON';
-          jsonBadge.title = `This item was ${source.includes('Educated Guess') ? 'inferred by AI' : 'matched from JSON data'} (${source})`;
-          tagInfo.appendChild(jsonBadge);
-        }
+                // Add JSON match indicator badge only (no display logic difference)
+                if (isJsonMatched) {
+                    const jsonBadge = document.createElement('span');
+                    jsonBadge.className = 'badge bg-success me-2';
+                    jsonBadge.style.fontSize = '0.7rem';
+                    jsonBadge.style.padding = '2px 6px';
+                    const source = tag.Source || tag.JSON_Source || 'JSON Match';
+                    jsonBadge.textContent = source.includes('Educated Guess') ? 'AI' : 'JSON';
+                    jsonBadge.title = `This item was ${source.includes('Educated Guess') ? 'inferred by AI' : 'matched from JSON data'} (${source})`;
+                    tagInfo.appendChild(jsonBadge);
+                }
         // Create lineage dropdown
         const lineageSelect = document.createElement('select');
         lineageSelect.className = 'form-select form-select-sm lineage-select lineage-dropdown lineage-dropdown-mini';
