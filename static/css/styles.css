@@ -713,7 +713,7 @@ canvas#lava-lamp-canvas {
 /* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
 :root {
   --tag-list-vertical-offset: clamp(3.25rem, 4.5vh, 5rem);
-  --tag-list-min-height: 55rem;
+  --tag-list-min-height: 58rem;
 }
 @supports (height: 100svh) {
   :root {

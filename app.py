@@ -16481,12 +16481,54 @@ def json_match():
         matched_products = _normalize_json_product_names(matched_products)
         
         # Initialize matched_names to ensure it's always defined
+        # CRITICAL FIX: Use Description field for display (includes weight, vendor, brand)
+        # This makes JSON match descriptions resemble normal Excel descriptions
         matched_names = []
         if matched_products:
-            matched_names = [
-                p.get('Product Name*') for p in matched_products
-                if isinstance(p, dict) and p.get('Product Name*')
-            ]
+            for p in matched_products:
+                if not isinstance(p, dict):
+                    continue
+
+                # Prefer Description field (complete format with weight, etc.)
+                # Fallback to Product Name* if Description is missing
+                display_name = p.get('Description') or p.get('Product Name*') or 'Unknown Product'
+
+                # If Description is empty or same as Product Name*, build a complete description
+                product_name = p.get('Product Name*', '')
+                if not display_name or display_name == product_name:
+                    # Build description from components: Brand Product - Weight - Vendor
+                    parts = []
+
+                    # Add brand if available
+                    brand = p.get('Product Brand') or p.get('ProductBrand') or ''
+                    if brand and brand.strip():
+                        parts.append(brand.strip())
+
+                    # Add product name
+                    if product_name:
+                        parts.append(product_name.strip())
+
+                    # Add weight if available
+                    weight = p.get('Weight*') or p.get('Weight') or ''
+                    units = p.get('Units') or ''
+                    combined_weight = p.get('CombinedWeight') or ''
+
+                    if combined_weight:
+                        parts.append(f"{combined_weight}")
+                    elif weight and units:
+                        parts.append(f"{weight}{units}")
+                    elif weight:
+                        parts.append(str(weight))
+
+                    # Add vendor if available
+                    vendor = p.get('Vendor/Supplier*') or p.get('Vendor') or ''
+                    if vendor and vendor.strip():
+                        parts.append(vendor.strip())
+
+                    # Join parts with " - " separator
+                    display_name = " - ".join(parts) if parts else 'Unknown Product'
+
+                matched_names.append(display_name)
         
         # CRITICAL FIX: Add JSON matched products directly to Excel DataFrame
         # This makes them work exactly like regular tags - no special handling needed

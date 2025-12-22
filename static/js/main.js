@@ -10318,26 +10318,31 @@ const TagManager = {
         const hydrated = this.hydrateAvailableTagsFromCache();
         if (hydrated) {
             console.log(`⚡ INSTANT CACHE: Tags hydrated from cache, displayed immediately`);
-            this.state.initialized = true;
-            this._initializing = false;
-            
+
             // CRITICAL FIX: Hide splash immediately when cache loaded for smooth experience
             if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
             }
-            
-            // Load selected tags and filters in background (non-blocking)
-            this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
-            
+
             // CRITICAL FIX: Build filter options from cached tags IMMEDIATELY for instant filters
-            // This prevents filters from appearing empty on page load
+            // This MUST happen BEFORE setting initialized=true to prevent race conditions
             let filtersPopulated = false;
             if (this.state.tags && this.state.tags.length > 0) {
-                console.log('⚡ Building filter options from cached tags immediately...');
+                console.log('⚡ Building filter options from', this.state.tags.length, 'cached tags immediately...');
                 this.buildFilterOptionsFromTags(this.state.tags);
                 filtersPopulated = true;
+                console.log('✅ Filter options built from cache');
+            } else {
+                console.log('❌ No tags available for filter building');
             }
+
+            // CRITICAL: Set initialized flags AFTER building filters to prevent early returns
+            this.state.initialized = true;
+            this._initializing = false;
+
+            // Load selected tags in background (non-blocking)
+            this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
 
             // CRITICAL FIX: Restore filters from localStorage IMMEDIATELY before API call
             // This prevents filters from disappearing on page refresh
