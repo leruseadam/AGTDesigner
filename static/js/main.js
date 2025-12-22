@@ -1372,29 +1372,7 @@ const TagManager = {
         if (this.state.hydratedFromCache) {
             return false;
         }
-        // CRITICAL FIX: Don't load from cache if no Excel file is uploaded
-        // Only hydrate cache when there's an actual Excel file loaded
-        const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-        if (!file || file === 'nofile' || file === '' || file === 'database') {
-            console.log('❌ No Excel file uploaded, skipping cache hydration');
-            return false;
-        }
-        // CRITICAL FIX: On page reload, check if we recently updated lineage
-        // If so, skip cache to ensure we get fresh lineage data from database
-        // BUT: Only skip if update was VERY recent (30 seconds) to avoid unnecessary reloads
-        const recentLineageUpdate = sessionStorage.getItem('lastLineageUpdateTime');
-        if (recentLineageUpdate) {
-            const timeSinceUpdate = Date.now() - parseInt(recentLineageUpdate, 10);
-            // Only skip cache if lineage was updated within last 30 seconds (reduced from 2 minutes)
-            if (timeSinceUpdate < 30000) {
-                console.log('🔄 Very recent lineage update detected (within 30s), skipping cache to fetch fresh data...');
-                sessionStorage.removeItem('lastLineageUpdateTime'); // Clear after use
-                return false; // Force fresh fetch
-            } else {
-                // Clear stale timestamp to prevent future unnecessary checks
-                sessionStorage.removeItem('lastLineageUpdateTime');
-            }
-        }
+        // Always attempt to hydrate from cache, even if recent update or no Excel file, for instant UI
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
             // FINAL GUARANTEE: Normalize all lineage fields to database value for every tag
@@ -1406,7 +1384,6 @@ const TagManager = {
                 tag.lineage = dbLineage.toLowerCase();
                 return tag;
             });
-            // Debug log: show sample of normalized tags
             if (normalizedTags.length > 0) {
                 console.log('🔍 [GUARANTEE] Sample normalized tag after cache hydration:', {
                     name: normalizedTags[0]['Product Name*'],
@@ -1422,10 +1399,9 @@ const TagManager = {
             this.state.simplifiedAvailableTagsActive = false;
             this.state.tags = [...normalizedTags];
             this.state.originalTags = [...normalizedTags];
-            // CRITICAL FIX: Render tags from cache immediately and hide splash right after
+            // Render tags from cache immediately and hide splash right after
             requestAnimationFrame(() => {
                 this._updateAvailableTags(normalizedTags, null);
-                // Hide splash as soon as cached tags are rendered
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
@@ -1442,8 +1418,21 @@ const TagManager = {
                 });
             });
             return true;
+        } else {
+            // If no cache, fallback to minimal UI and hide splash immediately
+            requestAnimationFrame(() => {
+                this._updateAvailableTags([], null);
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                console.warn('⚠️ No cached tags found, rendered minimal UI and hid splash. Backend will update when ready.');
+            });
+            return false;
         }
-        return false;
     },
 
     // Helper method to refresh lineage from database
