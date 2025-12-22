@@ -8117,18 +8117,28 @@ class JSONMatcher:
             # Create tag using database information - prioritize Product Name* from database
             # Always use Product Name* from database if available, otherwise use Description
             # CRITICAL FIX: Use Description column from database FIRST (highest priority)
-            # Priority: Database Description > Transformed SKU > Raw SKU
+            # Priority: Database Description (if formatted) > Transformed Description (if SKU-like) > Transformed SKU
             raw_product_name = db_info.get("Product Name*", "") or db_info.get("ProductName", "")
             db_description = db_info.get("Description", "")
             
-            # Use database Description if it exists and is not just the SKU
-            if db_description and db_description != raw_product_name:
+            # Check if description looks like a formatted product name (has spaces and not all caps)
+            is_formatted_description = (db_description and 
+                                       ' ' in db_description and 
+                                       not db_description.isupper() and
+                                       len(db_description) > 10)
+            
+            # Use database Description if it's already well-formatted
+            if is_formatted_description:
                 primary_product_name = db_description
-                logging.info(f"📝 Using database Description: '{primary_product_name}'")
+                logging.info(f"📝 Using well-formatted database Description: '{primary_product_name}'")
+            # Otherwise transform the Description field (which may contain SKU)
+            elif db_description and db_description.strip():
+                primary_product_name = transform_sku_to_readable_name(db_description) or db_description
+                logging.info(f"📝 Using transformed Description: '{primary_product_name}' (from '{db_description}')")
+            # Last resort: transform the Product Name* field
             else:
-                # Fall back to transforming the SKU
                 primary_product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
-                logging.info(f"📝 Using transformed SKU: '{primary_product_name}'")
+                logging.info(f"📝 Using transformed Product Name*: '{primary_product_name}' (from '{raw_product_name}'")
             
             if not primary_product_name and strain and lineage and weight and units:
                 # Strain-based lookup: create formatted description

@@ -5628,13 +5628,23 @@ const TagManager = {
         
         // Store the handler on the element itself so we can reference it later
         checkbox._changeHandler = handleCheckboxChange;
-        
-        // Bind change handler for both available and selected tags
-        checkbox.addEventListener('change', handleCheckboxChange);
-        
+
+        // CRITICAL FIX: Use both addEventListener AND onclick to ensure handlers work
+        // Some code paths may be removing addEventListener handlers, so we use both
+        let changeHandlerCalled = false;
+        const wrappedChangeHandler = (e) => {
+            changeHandlerCalled = true;
+            handleCheckboxChange(e);
+        };
+
+        checkbox.addEventListener('change', wrappedChangeHandler);
+        checkbox.onchange = wrappedChangeHandler; // Backup using DOM property
+
         // CRITICAL FIX: Add click handler as fallback to ensure checkboxes always respond
         // This prevents checkboxes from being unresponsive after drag operations or tag updates
         checkbox.addEventListener('click', (e) => {
+            console.log(`🖱️ Click detected on checkbox: ${displayName}, checked: ${e.target.checked}`);
+
             // Clear any drag attributes that might block the checkbox
             if (e.target.hasAttribute('data-reordering') || e.target.hasAttribute('data-drag-disabled')) {
                 e.target.removeAttribute('data-reordering');
@@ -5645,6 +5655,23 @@ const TagManager = {
             // Ensure checkbox is enabled
             e.target.disabled = false;
             e.target.style.pointerEvents = 'auto';
+
+            // CRITICAL: Manually call change handler as backup if change event doesn't fire
+            // Wait to see if the change event fires naturally first
+            changeHandlerCalled = false;
+            setTimeout(() => {
+                if (!changeHandlerCalled) {
+                    console.log(`⚠️ Change event didn't fire! Manually calling handler for: ${displayName}, checked state: ${e.target.checked}`);
+                    const syntheticEvent = {
+                        target: e.target,
+                        currentTarget: e.target,
+                        type: 'change'
+                    };
+                    handleCheckboxChange(syntheticEvent);
+                } else {
+                    console.log(`✅ Change event fired naturally for: ${displayName}`);
+                }
+            }, 10);
         });
         
         // Ensure the checkbox is not disabled by drag-and-drop manager
