@@ -1668,14 +1668,41 @@ class TemplateProcessor:
             product_name = record.get('ProductName', record.get('Product Name*', ''))
             excel_lineage = label_context.get('Lineage', '') or record.get('Lineage', '')
             
-            # CRITICAL: Always check database FIRST - database lineage always takes priority
-            if product_name:
+            # CRITICAL: Use record lineage first (already enriched with database value, no sativa hybrid override)
+            # Only query database if record lineage is missing
+            db_lineage = None
+            record_lineage = record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
+            if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
+                db_lineage = str(record_lineage).strip()
+                if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
+                    self.logger.info(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
+            elif product_name:
+                # Record lineage missing - query database directly (avoid get_product_lineage which applies override)
                 from app import get_product_database, get_current_store_name
                 store_name = get_current_store_name()
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # FIRST: Check product-level lineage (preserves user changes)
-                    db_lineage = product_db.get_product_lineage(product_name)
+                    # Query database directly to avoid sativa hybrid override in get_product_lineage()
+                    try:
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            SELECT "Lineage", "canonical_lineage"
+                            FROM products
+                            WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                            ORDER BY id DESC
+                            LIMIT 1
+                        ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
+                        result = cursor.fetchone()
+                        if result and result[0]:
+                            db_lineage = str(result[0]).strip()
+                        elif result and result[1]:
+                            db_lineage = str(result[1]).strip()
+                    except Exception as db_err:
+                        self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
+                        # Fallback to get_product_lineage if direct query fails
+                        db_lineage = product_db.get_product_lineage(product_name)
                     
                     # If no product-level lineage, check strain-level lineage
                     if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
@@ -2199,11 +2226,37 @@ class TemplateProcessor:
                     store_name = get_current_store_name()
                     product_db = get_product_database(store_name)
                     
-                    # Try to get product-level lineage first (more specific, includes manual updates)
+                    # CRITICAL: Use record lineage first (already enriched, avoids sativa hybrid override)
+                    # Only query database if record lineage is missing
                     product_name = record.get('Product Name*', record.get('ProductName', ''))
                     db_lineage = None
-                    if product_name:
-                        db_lineage = product_db.get_product_lineage(product_name)
+                    record_lineage = record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
+                    if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                        # Use record lineage (already set correctly by enrichment)
+                        db_lineage = str(record_lineage).strip()
+                        if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
+                            self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
+                    elif product_name:
+                        # Query database directly to avoid sativa hybrid override
+                        try:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                                SELECT "Lineage", "canonical_lineage"
+                                FROM products
+                                WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                                ORDER BY id DESC
+                                LIMIT 1
+                            ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                db_lineage = str(result[0]).strip()
+                            elif result and result[1]:
+                                db_lineage = str(result[1]).strip()
+                        except Exception as db_err:
+                            self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
+                            # Fallback to get_product_lineage if direct query fails
+                            db_lineage = product_db.get_product_lineage(product_name)
                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
                         lineage_val = str(db_lineage).strip().upper()
                         self.logger.info(f"✅ Using database product lineage fallback: '{lineage_val}' for '{product_name}'")
