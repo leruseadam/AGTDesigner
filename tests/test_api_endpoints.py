@@ -17,9 +17,23 @@ def client():
     """Create a test client for the Flask app."""
     # Import app after setting up path
     try:
+        # Try importing from app module (works on server)
+        import sys
+        import importlib
+        
+        # Clear any cached imports
+        if 'app' in sys.modules:
+            importlib.reload(sys.modules['app'])
+        
         from app import app
         app.config['TESTING'] = True
         app.config['SECRET_KEY'] = 'test-secret-key'
+        
+        # Set up test database path if needed
+        import os
+        if 'TEST_DB_PATH' in os.environ:
+            app.config['DATABASE_PATH'] = os.environ['TEST_DB_PATH']
+        
         with app.test_client() as client:
             with app.app_context():
                 yield client

@@ -6922,7 +6922,9 @@ def _align_tags_with_db_lineage(tags, store_name):
             ''', [name.lower() for name in chunk])
             for row in cursor.fetchall():
                 db_name = row[0]
-                db_lineage = row[1] or row[2]
+                # CRITICAL FIX: Prioritize canonical_lineage (database source of truth) over Lineage field
+                # canonical_lineage is what the UI displays and should be used consistently
+                db_lineage = row[2] or row[1]  # canonical_lineage first, then Lineage as fallback
                 if db_name and db_lineage:
                     lineage_map[db_name.lower().strip()] = str(db_lineage).strip().upper()
         
@@ -8964,11 +8966,13 @@ def process_database_product_for_api(db_product):
     
     # CRITICAL FIX: Ensure lineage from database is preserved and normalized for UI
     # The UI reads from multiple fields: canonical_lineage, currentLineage, Lineage, lineage
+    # CRITICAL FIX: Prioritize canonical_lineage (database source of truth) over Lineage field
+    # canonical_lineage is what the UI displays and should be used consistently
     db_lineage = (
-        processed_product.get('Lineage') or
-        processed_product.get('lineage') or
         processed_product.get('canonical_lineage') or
         processed_product.get('currentLineage') or
+        processed_product.get('Lineage') or
+        processed_product.get('lineage') or
         ''
     )
     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan', 'NULL']:

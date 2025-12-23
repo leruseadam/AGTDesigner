@@ -9,36 +9,49 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# Try both import paths for compatibility
+try:
+    from core.generation.template_processor import TemplateProcessor, get_font_scheme
+except ImportError:
+    try:
+        from src.core.generation.template_processor import TemplateProcessor, get_font_scheme
+    except ImportError:
+        TemplateProcessor = None
+        get_font_scheme = None
+
 class TestTemplateProcessor:
     """Tests for TemplateProcessor class."""
     
     def test_template_processor_initialization(self):
         """Test that TemplateProcessor can be initialized."""
+        if TemplateProcessor is None or get_font_scheme is None:
+            pytest.skip("TemplateProcessor not available")
         try:
-            from core.generation.template_processor import TemplateProcessor, get_font_scheme
             font_scheme = get_font_scheme('vertical')
             processor = TemplateProcessor('vertical', font_scheme)
             assert processor is not None
-        except (ImportError, TypeError):
-            pytest.skip("TemplateProcessor not available or requires template_type and font_scheme")
+        except (ImportError, TypeError) as e:
+            pytest.skip(f"TemplateProcessor initialization failed: {e}")
     
     def test_get_template_path(self):
         """Test getting template path for different template types."""
+        if TemplateProcessor is None or get_font_scheme is None:
+            pytest.skip("TemplateProcessor not available")
         try:
-            from core.generation.template_processor import TemplateProcessor, get_font_scheme
             template_types = ['mini', 'double', 'inventory', 'horizontal', 'vertical']
             for template_type in template_types:
                 font_scheme = get_font_scheme(template_type)
                 processor = TemplateProcessor(template_type, font_scheme)
                 path = processor._get_template_path()
                 assert path is not None
-        except (ImportError, AttributeError, TypeError):
-            pytest.skip("TemplateProcessor._get_template_path not available")
+        except (ImportError, AttributeError, TypeError) as e:
+            pytest.skip(f"TemplateProcessor._get_template_path not available: {e}")
     
     def test_process_template(self):
         """Test processing a template with product data."""
+        if TemplateProcessor is None or get_font_scheme is None:
+            pytest.skip("TemplateProcessor not available")
         try:
-            from core.generation.template_processor import TemplateProcessor, get_font_scheme
             font_scheme = get_font_scheme('vertical')
             processor = TemplateProcessor('vertical', font_scheme)
             
@@ -52,8 +65,8 @@ class TestTemplateProcessor:
             # result = processor.process_template(product_data, 'vertical')
             # assert result is not None
             assert processor is not None
-        except (ImportError, TypeError):
-            pytest.skip("TemplateProcessor not available or requires template_type and font_scheme")
+        except (ImportError, TypeError) as e:
+            pytest.skip(f"TemplateProcessor not available or requires template_type and font_scheme: {e}")
 
 class TestTemplateFormatting:
     """Tests for template formatting functionality."""
