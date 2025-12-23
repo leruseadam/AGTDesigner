@@ -6632,7 +6632,10 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-right: 0.5em;
   }
 
-  select, .form-select, .form-select-modern {
+  /* CRITICAL: Exclude templateSelect from generic select rules */
+  select:not(#templateSelect):not(#templateSelectModal), 
+  .form-select:not(#templateSelect):not(#templateSelectModal), 
+  .form-select-modern:not(#templateSelect):not(#templateSelectModal) {
     /* Cross-platform consistency - remove platform-specific styling */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
@@ -6668,48 +6671,72 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #e0d6f6 !important;
   }
 
-  /* Custom dropdown arrow for glassy background */
-  select, .form-select, .form-select-modern {
+  /* Custom dropdown arrow for glassy background - exclude templateSelect */
+  select:not(#templateSelect):not(#templateSelectModal), 
+  .form-select:not(#templateSelect):not(#templateSelectModal), 
+  .form-select-modern:not(#templateSelect):not(#templateSelectModal) {
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
     background-repeat: no-repeat;
     background-position: right 14px center;
     background-size: 18px 18px;
   }
 
-  /* Specific style for the Template selection boxes (main + modal) */
+  /* Specific style for the Template selection boxes (main + modal) - Mac native style matching PC */
   #templateSelect,
   #templateSelectModal {
-    /* Cross-platform consistency - remove platform-specific styling */
+    /* Remove native styling to manually create Mac look */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
     
-    /* Standardized styling for consistent appearance */
+    /* Layout and sizing */
     display: block !important;
     box-sizing: border-box !important;
-    width: 140px !important; /* Fixed width to match min/max */
-    min-width: 140px !important; /* Reduced width for more compact appearance */
-    max-width: 140px !important; /* Limit max width to match min-width */
+    width: 100% !important;
+    min-width: 180px !important;
+    max-width: 100% !important;
     min-height: 60px !important;
     height: 60px !important;
-    margin: 0.5rem auto 0.75rem auto !important; /* Center with auto margins */
+    margin: 0.5rem auto 0.75rem auto !important; /* Center horizontally */
+    
+    /* Text alignment - perfectly centered */
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important; /* Ensure left-to-right for proper centering */
-    padding: 12px 45px 12px 45px !important; /* Symmetric padding to center text - arrow space accounted for on right */
-    font-size: 1.2em !important; /* Increased for better readability */
-    font-weight: 700 !important;
-    color: #e0d6f6 !important;
-    background: rgba(34, 34, 51, 0.85) !important;
-    border: 2.5px solid #a084e8 !important;
-    border-radius: 12px !important;
-    box-shadow: 0 6px 28px 0 rgba(160, 132, 232, 0.18) !important;
-    backdrop-filter: blur(10px) !important;
-    -webkit-backdrop-filter: blur(10px) !important;
-    transition: border 0.2s, box-shadow 0.2s;
-    overflow: visible !important;
-    white-space: nowrap !important; /* Prevent text wrapping */
+
+    /* Padding - Mac native style padding with space for arrow */
+    padding: 12px 40px 12px 16px !important; /* Standard Mac padding */
+    
+    /* Font styling - Mac native style */
+    font-size: 1.15em !important;
+    font-weight: 500 !important; /* Mac uses medium weight, not bold */
+    color: #000000 !important; /* Dark text like Mac native */
+    line-height: 1.5 !important;
+    letter-spacing: 0.3px !important; /* Mac native letter spacing */
+    
+    /* Background - Mac native light, semi-transparent style */
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+    border: 1px solid rgba(0, 0, 0, 0.15) !important; /* Subtle Mac-style border */
+    border-radius: 6px !important; /* Mac native border radius */
+    
+    /* Subtle Mac-style shadow */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+    
+    /* No backdrop filter - Mac native doesn't use blur */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    
+    /* Prevent text wrapping */
+    white-space: nowrap !important;
     text-overflow: ellipsis !important;
+    overflow: visible !important;
+    
+    /* Mac-style dropdown arrow (dark, subtle) */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23000000" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 12px center !important;
+    background-size: 16px 16px !important;
     
     /* CRITICAL: Force centering - override any conflicting rules */
     margin-left: auto !important;
@@ -6720,38 +6747,100 @@ body.modal-open #mainContent.store-selection-disabled,
     right: auto !important;
     transform: none !important;
     
-    /* Ensure consistent arrow across platforms - positioned to not interfere with centering */
-    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
-    background-repeat: no-repeat !important;
-    background-position: right 14px center !important;
-    background-size: 18px 18px !important;
+    /* CRITICAL: Mac Safari needs explicit color override */
+    -webkit-text-fill-color: #000000 !important;
+    color: #000000 !important;
   }
   
-  /* OVERRIDE form-select-modern class for template select */
+  /* OVERRIDE form-select-modern class for template select - Mac native style */
   #templateSelect.form-select-modern,
   #templateSelectModal.form-select-modern {
-    margin: 0.5rem auto 0.75rem auto !important;
-    text-align: center !important;
-    text-align-last: center !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    font-size: 1.1rem !important; /* Increased for better readability */
-    padding-left: 24px !important; /* Equal padding accounting for arrow */
-    padding-right: 24px !important; /* Equal padding accounting for arrow */
-  /* Keep padding symmetric so text sits truly centered */
-  padding-left: 32px !important;
-  padding-right: 32px !important;
+    /* CRITICAL: Ensure Mac browsers respect all styling */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23000000" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 12px center !important;
+    background-size: 16px 16px !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
   }
   
-  /* CRITICAL: Force text centering by adjusting padding to account for arrow */
+  /* Mac Safari/Chrome specific override - ensure custom styling is applied */
+  @supports (-webkit-appearance: none) {
+    #templateSelect,
+    #templateSelectModal {
+      -webkit-appearance: none !important;
+      appearance: none !important;
+      background-color: rgba(45, 34, 58, 0.95) !important;
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+    }
+  }
+  
+  /* Template dropdown options - Mac native style matching PC */
   #templateSelect option,
   #templateSelectModal option {
+    color: #000000 !important; /* Dark text like Mac native */
+    background-color: rgba(255, 255, 255, 0.95) !important; /* Light background like Mac */
+    background: rgba(255, 255, 255, 0.95) !important;
+    -webkit-background-color: rgba(255, 255, 255, 0.95) !important;
+    font-size: 1.05em !important;
+    font-weight: 400 !important; /* Mac native uses regular weight */
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important;
     display: block !important;
-    font-size: 0.9em !important; /* Increased for better readability */
-    padding: 6px 16px !important; /* Equal left/right padding for centering */
+    padding: 8px 16px !important; /* Mac native padding */
+    line-height: 1.5 !important;
+    -webkit-text-fill-color: #000000 !important;
+  }
+  
+  /* Selected/checked option styling - Mac native style */
+  #templateSelect option:checked,
+  #templateSelectModal option:checked,
+  #templateSelect option[selected],
+  #templateSelectModal option[selected] {
+    background-color: rgba(0, 122, 255, 0.1) !important; /* Mac blue highlight */
+    background: rgba(0, 122, 255, 0.1) !important;
+    -webkit-background-color: rgba(0, 122, 255, 0.1) !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    font-weight: 500 !important;
+  }
+  
+  /* Hover state for options */
+  #templateSelect option:hover,
+  #templateSelectModal option:hover {
+    background-color: rgba(0, 122, 255, 0.15) !important;
+    background: rgba(0, 122, 255, 0.15) !important;
+    -webkit-background-color: rgba(0, 122, 255, 0.15) !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+  }
+  
+  /* Focused option styling */
+  #templateSelect option:focus,
+  #templateSelectModal option:focus {
+    background-color: rgba(0, 122, 255, 0.2) !important;
+    background: rgba(0, 122, 255, 0.2) !important;
+    -webkit-background-color: rgba(0, 122, 255, 0.2) !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    outline: none !important;
+  }
+  
+  /* Mac Safari specific option styling */
+  @supports (-webkit-appearance: none) {
+    #templateSelect option,
+    #templateSelectModal option {
+      -webkit-appearance: none !important;
+      background-color: rgba(255, 255, 255, 0.95) !important;
+      color: #000000 !important;
+      -webkit-text-fill-color: #000000 !important;
+    }
   }
   
   /* CRITICAL: Ensure selected text in dropdown is centered - override all other rules */
@@ -6945,24 +7034,16 @@ body.modal-open #mainContent.store-selection-disabled,
     width: 100% !important;
   }
 
-  #templateSelect option,
-  #templateSelectModal option {
-    color: #e0d6f6 !important;
-    background: rgba(34, 34, 51, 0.95) !important;
-    font-size: 0.75em !important; /* Smaller font to fit in dropdown */
-    font-weight: 500;
-    text-align: center !important;
-    text-align-last: center !important;
-    direction: ltr !important;
-    display: block !important;
-    padding: 6px 16px !important; /* Equal left/right padding for centering */
-    margin: 0 auto !important;
-  }
+  /* Duplicate option styling removed - using the one above that matches PC styling */
 
+  /* Template dropdown focus state - Match PC styling */
+  /* Template dropdown focus state - Mac native style matching PC */
   #templateSelect:focus,
   #templateSelectModal:focus {
-    border-color: #cbb6f6 !important;
-    box-shadow: 0 0 0 2px #a084e8 !important;
+    border-color: rgba(0, 122, 255, 0.5) !important; /* Mac blue focus color */
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+    outline: none !important;
+    background-color: rgba(255, 255, 255, 1) !important; /* Solid white on focus */
   }
 
   /* Mobile: let the select fill the column */

@@ -132,10 +132,10 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     will-change: auto !important;
 }
 
-/* Template dropdown - Clean, neat, and centered styling for PC */
+/* Template dropdown - Mimic Mac native dropdown style for PC */
 #templateSelect,
 #templateSelectModal {
-    /* Cross-platform consistency - remove platform-specific styling */
+    /* Remove native styling to manually create Mac look */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
@@ -155,63 +155,64 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     text-align-last: center !important;
     direction: ltr !important; /* Ensure left-to-right for proper centering */
 
-    /* Padding - CRITICAL FIX: Account for dropdown arrow on right side
-       Arrow is 20px wide positioned at right 16px (36px from edge)
-       Left padding should match right side INCLUDING arrow space for perfect centering */
-    padding: 12px 16px 12px 36px !important; /* Left 36px to balance arrow on right */
+    /* Padding - Mac native style padding with space for arrow */
+    padding: 12px 40px 12px 16px !important; /* Standard Mac padding */
     
-    /* Font styling - larger and more readable for PC */
+    /* Font styling - Mac native style */
     font-size: 1.15em !important;
-    font-weight: 700 !important;
-    color: #ffffff !important; /* Pure white for maximum readability */
+    font-weight: 500 !important; /* Mac uses medium weight, not bold */
+    color: #000000 !important; /* Dark text like Mac native */
     line-height: 1.5 !important;
-    letter-spacing: 0.5px !important; /* Slight spacing for better readability */
+    letter-spacing: 0.3px !important; /* Mac native letter spacing */
     
-    /* Background and border - higher contrast for readability */
-    background: rgba(45, 34, 58, 0.95) !important; /* Darker background for better contrast */
-    border: 2.5px solid #a084e8 !important;
-    border-radius: 12px !important;
+    /* Background - Mac native light, semi-transparent style */
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    background: rgba(255, 255, 255, 0.9) !important;
+    border: 1px solid rgba(0, 0, 0, 0.15) !important; /* Subtle Mac-style border */
+    border-radius: 6px !important; /* Mac native border radius */
     
-    /* Subtle shadow for depth */
-    box-shadow: 0 6px 28px 0 rgba(160, 132, 232, 0.18) !important;
+    /* Subtle Mac-style shadow */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
     
-    /* Backdrop filter for glass effect */
-    backdrop-filter: blur(10px) !important;
-    -webkit-backdrop-filter: blur(10px) !important;
+    /* No backdrop filter - Mac native doesn't use blur */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     
     /* Prevent text wrapping */
     white-space: nowrap !important;
     text-overflow: ellipsis !important;
     overflow: visible !important;
     
-    /* Custom dropdown arrow - positioned to not interfere with centering */
-    background-image: url('data:image/svg+xml;utf8,<svg fill="%23ffffff" height="20" viewBox="0 0 24 24" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    /* Mac-style dropdown arrow (dark, subtle) */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23000000" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
-    background-position: right 16px center !important;
-    background-size: 20px 20px !important;
+    background-position: right 12px center !important;
+    background-size: 16px 16px !important;
 }
 
-/* Template dropdown options - clean styling with better readability */
+/* Template dropdown options - Mac native style */
 #templateSelect option,
 #templateSelectModal option {
-    color: #ffffff !important; /* Pure white for maximum readability */
-    background: rgba(45, 34, 58, 0.98) !important; /* Darker background for better contrast */
-    font-size: 1.05em !important; /* Slightly larger for readability */
-    font-weight: 600 !important; /* Bolder for better visibility */
+    color: #000000 !important; /* Dark text like Mac native */
+    background-color: rgba(255, 255, 255, 0.95) !important; /* Light background like Mac */
+    background: rgba(255, 255, 255, 0.95) !important;
+    font-size: 1.05em !important;
+    font-weight: 400 !important; /* Mac native uses regular weight */
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important;
     display: block !important;
-    padding: 12px 16px !important; /* More padding for better clickability */
-    line-height: 1.6 !important;
+    padding: 8px 16px !important; /* Mac native padding */
+    line-height: 1.5 !important;
 }
 
-/* Template dropdown focus state */
+/* Template dropdown focus state - Mac native style */
 #templateSelect:focus,
 #templateSelectModal:focus {
-    border-color: #cbb6f6 !important;
-    box-shadow: 0 0 0 2px rgba(160, 132, 232, 0.3), 0 6px 28px 0 rgba(160, 132, 232, 0.18) !important;
+    border-color: rgba(0, 122, 255, 0.5) !important; /* Mac blue focus color */
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
     outline: none !important;
+    background-color: rgba(255, 255, 255, 1) !important; /* Solid white on focus */
 }
 
 /* PC-specific: Ensure template dropdown is properly centered */

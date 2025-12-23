@@ -1062,7 +1062,7 @@ const TagManager = {
             const normalizedFile = String(file).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
             
             const cacheKey = `agt_available_tags_${normalizedStore}_${normalizedFile}`;
-            console.log('🔑 Cache key generated:', cacheKey, '{ store:', normalizedStore, 'file:', normalizedFile, '}');
+            verboseLog('🔑 Cache key generated:', cacheKey, '{ store:', normalizedStore, 'file:', normalizedFile, '}');
             return cacheKey;
         } catch (error) {
             console.warn('Failed to build available-tags cache key:', error);
@@ -1156,22 +1156,17 @@ const TagManager = {
                     allCacheKeys.push(key);
                 }
             }
-            if (allCacheKeys.length > 0) {
-                console.log('🔍 Available cache keys in sessionStorage:', allCacheKeys);
-            }
-            
             // Try each variation
             for (const key of variations) {
                 const raw = sessionStorage.getItem(key);
                 if (raw) {
-                    console.log(`✅ Found cache with variation key: ${key}`);
+                    verboseLog(`✅ Found cache with variation key: ${key}`);
                     return { key, raw };
                 }
             }
             
             // CRITICAL FIX: If no exact match, try fuzzy matching by base filename
             // This handles cases where timestamp in filename differs but it's the same file
-            console.log('🔄 Trying fuzzy match by base filename...');
             for (const cacheKey of allCacheKeys) {
                 // Extract store and file from cache key: "agt_available_tags_STORE_FILENAME"
                 const match = cacheKey.match(/^agt_available_tags_(.+?)_(.+)$/);
@@ -1183,7 +1178,7 @@ const TagManager = {
                     
                     // Match if store matches and base filename matches (ignoring timestamp)
                     if (normalizedCachedStore === normalizedStore && normalizedCachedBase === normalizedBaseFilename) {
-                        console.log(`✅ Found cache with fuzzy match: ${cacheKey} (base filename matches)`);
+                        verboseLog(`✅ Found cache with fuzzy match: ${cacheKey} (base filename matches)`);
                         const raw = sessionStorage.getItem(cacheKey);
                         if (raw) {
                             return { key: cacheKey, raw };
@@ -1191,8 +1186,6 @@ const TagManager = {
                     }
                 }
             }
-            
-            console.log('❌ No cache found in any variation or fuzzy match');
             return null;
         } catch (error) {
             console.warn('Failed to try multiple cache keys:', error);
@@ -1202,9 +1195,8 @@ const TagManager = {
 
     loadAvailableTagsFromCache() {
         try {
-            console.log('💾 Attempting to load tags from cache...');
+            verboseLog('💾 Attempting to load tags from cache...');
             if (!window.sessionStorage) {
-                console.log('❌ No sessionStorage available');
                 return null;
             }
             
@@ -1212,7 +1204,6 @@ const TagManager = {
             // Only load cache when there's an actual Excel file loaded
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
             if (!file || file === 'nofile' || file === '' || file === 'database') {
-                console.log('❌ No Excel file uploaded, skipping cache load');
                 return null;
             }
             
@@ -1221,54 +1212,30 @@ const TagManager = {
             
             // CRITICAL FIX: If exact key not found, try normalized key first (ignores timestamp)
             if (!raw) {
-                console.log('❌ No cached data found for exact key:', cacheKey);
                 const normalizedKey = this.getNormalizedCacheKey();
                 if (normalizedKey && normalizedKey !== cacheKey) {
-                    console.log('🔄 Trying normalized cache key (ignores timestamp):', normalizedKey);
                     raw = sessionStorage.getItem(normalizedKey);
-                    if (raw) {
-                        console.log(`✅ Found cache with normalized key: ${normalizedKey}`);
-                    }
                 }
             }
             
             // CRITICAL FIX: If still not found, try multiple variations
             if (!raw) {
-                console.log('🔄 Trying cache key variations...');
                 const fallbackResult = this.tryMultipleCacheKeys();
                 if (fallbackResult) {
                     raw = fallbackResult.raw;
-                    console.log(`✅ Found cache with fallback key: ${fallbackResult.key}`);
                 } else {
-                    console.log('❌ No cached data found in any variation');
                     return null;
                 }
             }
-            console.log('✅ Found cached data, parsing...');
             const payload = JSON.parse(raw);
             if (!payload || !Array.isArray(payload.tags) || payload.tags.length === 0) {
-                console.log('❌ Invalid cache payload:', payload);
                 return null;
             }
             const age = Date.now() - payload.timestamp;
-            const ageMinutes = (age / 60000).toFixed(1);
-            console.log(`📅 Cache age: ${ageMinutes} minutes (max: ${this.CACHE_TTL_MS / 60000} minutes)`);
             if (payload.timestamp && age > this.CACHE_TTL_MS) {
-                console.log('⏰ Cache expired, ignoring');
                 return null;
             }
-            console.log(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
-            
-            // Verify cached tags have database lineage
-            const sampleTag = payload.tags[0];
-            if (sampleTag) {
-                console.log('🔍 Sample cached tag lineage:', {
-                    name: sampleTag['Product Name*'],
-                    canonical_lineage: sampleTag.canonical_lineage,
-                    currentLineage: sampleTag.currentLineage,
-                    Lineage: sampleTag.Lineage
-                });
-            }
+            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
             
             return payload.tags;
         } catch (error) {
@@ -1280,7 +1247,6 @@ const TagManager = {
     saveAvailableTagsToCache(tags) {
         try {
             if (!window.sessionStorage || !Array.isArray(tags) || tags.length === 0) {
-                console.log('⚠️ Cannot save cache:', !window.sessionStorage ? 'no sessionStorage' : 'invalid tags');
                 return;
             }
             const payload = {
@@ -1293,14 +1259,13 @@ const TagManager = {
             // This allows cache to be found even if filename timestamp changes
             const normalizedKey = this.getNormalizedCacheKey();
             if (normalizedKey && normalizedKey !== cacheKey) {
-                console.log(`💾 Saving cache with normalized key: ${normalizedKey}`);
                 sessionStorage.setItem(normalizedKey, JSON.stringify(payload));
             }
             
             // Verify tags have database lineage before caching
             const sampleTag = tags[0];
             if (sampleTag) {
-                console.log('💾 Saving to cache - sample tag lineage:', {
+                verboseLog('💾 Saving to cache - sample tag lineage:', {
                     name: sampleTag['Product Name*'],
                     canonical_lineage: sampleTag.canonical_lineage,
                     currentLineage: sampleTag.currentLineage,
@@ -1347,7 +1312,7 @@ const TagManager = {
             const timeSinceUpdate = Date.now() - parseInt(recentLineageUpdate, 10);
             // Only skip cache if lineage was updated within last 30 seconds (reduced from 2 minutes)
             if (timeSinceUpdate < 30000) {
-                console.log('🔄 Very recent lineage update detected (within 30s), skipping cache to fetch fresh data...');
+                verboseLog('🔄 Very recent lineage update detected (within 30s), skipping cache to fetch fresh data...');
                 sessionStorage.removeItem('lastLineageUpdateTime'); // Clear after use
                 return false; // Force fresh fetch
             } else {
@@ -1358,7 +1323,7 @@ const TagManager = {
         
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
-            console.log(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
+            verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
             this.state.simplifiedAvailableTagsActive = false;
@@ -1377,12 +1342,12 @@ const TagManager = {
             // CRITICAL FIX: Use requestAnimationFrame to ensure immediate render
             requestAnimationFrame(() => {
                 this._updateAvailableTags(cachedTags, null);
-                console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+                verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
 
                 // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
                 // This makes page reloads instant while still updating in background
                 this._refreshLineageFromDatabase(cachedTags).then(() => {
-                    console.log('✅ Background lineage check complete (fast mode)');
+                    verboseLog('✅ Background lineage check complete (fast mode)');
                 }).catch(err => {
                     console.warn('⚠️ Background lineage check failed (non-critical):', err);
                 });
@@ -1405,7 +1370,7 @@ const TagManager = {
             const fastLoad = recentlyUpdated ? 0 : 1;
             
             if (recentlyUpdated) {
-                console.log('🔄 Recent lineage update detected - forcing database refresh');
+                verboseLog('🔄 Recent lineage update detected - forcing database refresh');
             }
             
             const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=${fastLoad}`, {
@@ -1449,7 +1414,7 @@ const TagManager = {
                                 tag.Lineage = dbLineage;
                                 tag.lineage = dbLineage.toLowerCase();
                                 updatedCount++;
-                                console.log(`🔄 Updated lineage for "${name}": "${oldLineage}" → "${dbLineage}"`);
+                                verboseLog(`🔄 Updated lineage for "${name}": "${oldLineage}" → "${dbLineage}"`);
                             } else {
                                 // Ensure fields are set even if values match
                                 tag.canonical_lineage = dbLineage;
@@ -1478,11 +1443,11 @@ const TagManager = {
                     this.state.tags = [...tagsToUpdate];
                     
                     if (updatedCount > 0) {
-                        console.log(`✅ Refreshed lineage for ${updatedCount} tags from database`);
+                        verboseLog(`✅ Refreshed lineage for ${updatedCount} tags from database`);
                         // Re-render with updated lineage
                         this._updateAvailableTags(this.state.tags, null);
                     } else {
-                        console.log(`✅ Lineage already up-to-date (verified ${freshTags.length} tags)`);
+                        verboseLog(`✅ Lineage already up-to-date (verified ${freshTags.length} tags)`);
                     }
                 }
             }
@@ -1539,6 +1504,14 @@ const TagManager = {
                         'Lineage': 'MIXED'
                     };
                 }
+                
+                // CRITICAL FIX: Ensure all lineage fields are present for color generation
+                // The backend expects canonical_lineage, currentLineage, or Lineage fields
+                const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                if (!tag.canonical_lineage) tag.canonical_lineage = lineage;
+                if (!tag.currentLineage) tag.currentLineage = lineage;
+                if (!tag.Lineage) tag.Lineage = lineage;
+                
                 return tag;
             })
             .filter(Boolean);
@@ -1970,11 +1943,11 @@ const TagManager = {
         // GUARANTEED FIX: Save current filter values to localStorage
         this.saveFiltersToStorage();
 
-        // CRITICAL FIX: Restore the flag after a short delay to allow DOM to settle
-        // Use setTimeout to ensure change events from value assignment are ignored
-        setTimeout(() => {
+        // CRITICAL FIX: Restore the flag immediately - no delay needed
+        // Use requestAnimationFrame for immediate but safe execution
+        requestAnimationFrame(() => {
             this._isUpdatingFilters = wasUpdatingFilters || false;
-        }, 100);
+        });
     },
     
     saveFiltersToStorage() {
@@ -2043,6 +2016,15 @@ const TagManager = {
                 highCbd: new Set()
             };
             
+            // Excluded product types (matching backend logic)
+            const excludedTypes = [
+                "Samples - Educational",
+                "Sample - Vendor",
+                "x-DEACTIVATED 1",
+                "x-DEACTIVATED 2"
+            ];
+            const excludedTypesLower = excludedTypes.map(t => t.toLowerCase());
+            
             tags.forEach(tag => {
                 // Vendor
                 const vendor = tag['Vendor/Supplier*'] || tag.Vendor || tag['Vendor/Supplier'] || '';
@@ -2052,9 +2034,17 @@ const TagManager = {
                 const brand = tag['Product Brand'] || tag.ProductBrand || tag.Brand || '';
                 if (brand && brand.trim()) filterOptions.brand.add(brand.trim());
                 
-                // Product Type
+                // Product Type - exclude deactivated and sample types
                 const productType = tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '';
-                if (productType && productType.trim()) filterOptions.productType.add(productType.trim());
+                if (productType && productType.trim()) {
+                    const ptLower = productType.trim().toLowerCase();
+                    // Filter out deactivated, trade sample, and excluded types
+                    if (!ptLower.includes('deactivated') && 
+                        !ptLower.includes('trade sample') && 
+                        !excludedTypesLower.includes(ptLower)) {
+                        filterOptions.productType.add(productType.trim());
+                    }
+                }
                 
                 // Lineage
                 const lineage = tag.Lineage || tag.lineage || '';
@@ -2080,7 +2070,16 @@ const TagManager = {
                 filterOptionsArrays[key] = Array.from(filterOptions[key]).sort();
             });
             
-            console.log('⚡⚡⚡ Built filter options:', {
+            // CRITICAL FIX: Remove deactivated/sample product types from dropdowns (matching backend logic)
+            filterOptionsArrays.productType = filterOptionsArrays.productType.filter(pt => {
+                if (!pt || !pt.trim()) return false;
+                const ptLower = pt.trim().toLowerCase();
+                return !ptLower.includes('deactivated') && 
+                       !ptLower.includes('trade sample') && 
+                       !excludedTypesLower.includes(ptLower);
+            });
+            
+            verboseLog('⚡⚡⚡ Built filter options:', {
                 vendor: filterOptionsArrays.vendor.length,
                 brand: filterOptionsArrays.brand.length,
                 productType: filterOptionsArrays.productType.length,
@@ -2089,9 +2088,9 @@ const TagManager = {
             });
 
             // Update filters immediately
-            console.log('⚡⚡⚡ Calling updateFilters with built options...');
+            verboseLog('⚡⚡⚡ Calling updateFilters with built options...');
             this.updateFilters(filterOptionsArrays, true);
-            console.log('⚡⚡⚡ updateFilters completed');
+            verboseLog('⚡⚡⚡ updateFilters completed');
             
         } catch (error) {
             console.warn('Failed to build filter options from tags:', error);
@@ -3284,10 +3283,10 @@ const TagManager = {
         //     filteredTags: filteredTags ? filteredTags.slice(0, 2) : null
         // });
         
-        // Show loading splash for tag population
+        // Show loading splash IMMEDIATELY for tag population (no delay, no conditions)
         const tagsToShow = filteredTags || originalTags;
-        // Avoid showing splash when user is actively typing/searching to reduce flicker
-        if (tagsToShow && tagsToShow.length > 0 && !this.state.isSearching) {
+        // Show splash immediately when tags are being loaded, unless user is actively searching
+        if (!this.state.isSearching) {
             this.showActionSplash('Loading tags...');
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen
@@ -4328,8 +4327,15 @@ const TagManager = {
             return;
         }
         
-        // Keep tag containers visible (don't toggle visibility)
-        // this._updateTagContainersVisibility(true);
+        // CRITICAL FIX: Ensure containers are visible when tags are loaded
+        // This prevents visual malformation if containers were hidden during state clearing
+        this._updateTagContainersVisibility(true);
+        
+        // PERFORMANCE: Build filters immediately from loaded tags (instant population)
+        if (tags && tags.length > 0 && !this._filtersBuiltFromTags) {
+            this.buildFilterOptionsFromTags(tags);
+            this._filtersBuiltFromTags = true; // Prevent duplicate builds
+        }
         
         // PERFORMANCE: Skip loading spinner entirely to prevent flickering
         // Instead, show tags immediately without intermediate loading state
@@ -6766,6 +6772,10 @@ const TagManager = {
         // CRITICAL FIX: Update UI IMMEDIATELY before backend call
         // This ensures the user sees the change right away, even if backend is slow
         this.updateTagLineageInUI(tagName, newLineage);
+
+        // CRITICAL FIX: Record timestamp for pre-generation refresh check
+        this._lastLineageUpdateTime = Date.now();
+
         const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
         if (originalTag) {
             originalTag.lineage = newLineage;
@@ -6779,8 +6789,14 @@ const TagManager = {
             currentTag.Lineage = newLineage;
             currentTag.currentLineage = newLineage;
             currentTag.canonical_lineage = newLineage;
+
+            // CRITICAL FIX: Update _tagLookupMap immediately for getSelectedTagObjects()
+            // This ensures tag objects retrieved for generation have the latest lineage
+            if (this._tagLookupMap && this._tagLookupMap.has(tagName)) {
+                this._tagLookupMap.set(tagName, currentTag);
+            }
         }
-        
+
         try {
             verboseLog(`🔄 Updating lineage for ${tagName} to ${newLineage}...`);
             
@@ -9133,6 +9149,29 @@ const TagManager = {
         // Track background-processing retries (reset on success)
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
+        // CRITICAL FIX: Show splash IMMEDIATELY without any delay or conditions
+        // This ensures users see loading feedback instantly
+        const availableTagsContainer = document.getElementById('availableTags');
+        const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
+        
+        // Show splash immediately before any processing
+        if (!hasExistingTags) {
+            this.showActionSplash('Loading tags...');
+            if (availableTagsContainer) {
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-white">Loading tags...</p>
+                    </div>
+                `;
+            }
+        } else {
+            // For warm refreshes, just show the splash without clearing the current list.
+            this.showActionSplash('Refreshing tags...');
+        }
+        
         // CRITICAL FIX: Add timeout to force hide splash if fetch takes too long
         const splashTimeout = setTimeout(() => {
             if (AppLoadingSplash && AppLoadingSplash.isVisible) {
@@ -9154,21 +9193,6 @@ const TagManager = {
             // This prevents "safetyTimeout is not defined" errors if an exception occurs early
             let safetyTimeout = null;
             
-            const hydratedFromCache = this.hydrateAvailableTagsFromCache();
-            if (hydratedFromCache) {
-                console.log('✅ Tags rendered instantly from cache');
-                // PERFORMANCE FIX: Background refresh uses fast_load now (set in _refreshLineageFromDatabase)
-                console.log('⚡ PERFORMANCE: Cache loaded, background refresh will use fast mode');
-                return true;
-            }
-            
-            // Only show loading if we don't have cached tags
-            console.log('⏳ No cache available - preparing loader');
-            // Only replace the list with a loader on true cold start; during mid-use refreshes,
-            // keep the existing inventory visible so it does not disappear while new tags load.
-            const availableTagsContainer = document.getElementById('availableTags');
-            const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
-            
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
@@ -9182,22 +9206,20 @@ const TagManager = {
                 }, 60000); // 60 seconds - very generous timeout
             }
             
-            if (!hasExistingTags) {
-                this.showActionSplash('Loading tags...');
-                if (availableTagsContainer) {
-                    availableTagsContainer.innerHTML = `
-                        <div class="text-center py-4">
-                            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2 text-white">Loading tags...</p>
-                        </div>
-                    `;
+            const hydratedFromCache = this.hydrateAvailableTagsFromCache();
+            if (hydratedFromCache) {
+                console.log('✅ Tags rendered instantly from cache');
+                // PERFORMANCE FIX: Background refresh uses fast_load now (set in _refreshLineageFromDatabase)
+                console.log('⚡ PERFORMANCE: Cache loaded, background refresh will use fast mode');
+                // Hide splash since we have cached tags
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
                 }
-            } else {
-                // For warm refreshes, just show the splash without clearing the current list.
-                this.showActionSplash('Refreshing tags...');
+                return true;
             }
+            
+            // Only show loading if we don't have cached tags
+            console.log('⏳ No cache available - preparing loader');
             
             // Preserve current scroll/anchor so refreshes don't jump the list
             const savedScroll = this._saveAvailableScrollPosition();
@@ -9278,12 +9300,12 @@ const TagManager = {
             while (retryCount < maxRetries || processingRetryCount < maxProcessingRetries) {
                 try {
                     const controller = new AbortController();
-                    // CRITICAL: Set timeout to 180 seconds for PythonAnywhere large file loading
-                    // Background thread needs time to load 2000+ rows and cache tags
+                    // PERFORMANCE: Reduced timeout to 30 seconds for faster failure/retry
+                    // Tags should load much faster with all the optimizations
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn('⚠️ Tag loading timeout after 180 seconds - will try cache or show error');
-                    }, 180000); // 3 minutes for large files on PythonAnywhere
+                        console.warn('⚠️ Tag loading timeout after 30 seconds - will try cache or show error');
+                    }, 30000); // 30 seconds - should be plenty with optimizations
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
@@ -9541,6 +9563,11 @@ const TagManager = {
             // This is especially important when lineage alignment happened on the backend
             console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
             this._backgroundProcessingRetries = 0; // reset after successful load
+            
+            // PERFORMANCE: Build filters immediately from loaded tags (instant population)
+            if (tags && tags.length > 0) {
+                this.buildFilterOptionsFromTags(tags);
+            }
             
             // CRITICAL: If lineage was aligned from database, ensure tags are fully re-rendered to show database lineage
             const lineageWasAligned = responseData && responseData.source && 
@@ -10024,10 +10051,33 @@ const TagManager = {
     },
 
     async fetchAndPopulateFilters(retryCount = 0, skipIfEmpty = false) {
-        const maxRetries = 3; // Reduced retries for faster loading
-        const retryDelay = 500; // Reduced to 500ms for faster response
+        const maxRetries = 2; // Reduced retries for faster loading
+        const retryDelay = 200; // Reduced to 200ms for faster response
         
         try {
+            // PERFORMANCE: Try to build filters from cached tags first (instant)
+            if (this.state.tags && this.state.tags.length > 0) {
+                verboseLog('⚡ Building filters from cached tags for instant population');
+                this.buildFilterOptionsFromTags(this.state.tags);
+                // Still fetch from backend in background for accuracy, but don't wait
+                fetch(`/api/filter-options?t=${Date.now()}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                }).then(response => {
+                    if (response.ok) {
+                        return response.json();
+                    }
+                }).then(filterOptions => {
+                    if (filterOptions && !filterOptions.error) {
+                        // Update with backend data (more accurate)
+                        this.updateFilters(filterOptions, true);
+                    }
+                }).catch(err => {
+                    verboseLog('Background filter fetch failed (non-critical):', err);
+                });
+                return; // Return immediately after building from cache
+            }
+            
             // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
             const timestamp = Date.now();
             const response = await fetch(`/api/filter-options?refresh=true&t=${timestamp}`, {
@@ -11603,6 +11653,8 @@ const TagManager = {
             }
 
             // Get full tag objects with all properties including lineage
+            // The _tagLookupMap is updated immediately when lineage changes (line 6752-6756)
+            // so we don't need to refresh - just get the objects directly
             const checkedTags = this.getSelectedTagObjects();
 
             verboseLog('Generation request - full tag objects with lineage:', checkedTags);
@@ -14740,8 +14792,9 @@ const TagManager = {
             selectedContainer.innerHTML = '';
         }
         
-        // Hide tag containers when clearing UI state (will be shown again when new tags load)
-        this._updateTagContainersVisibility(false);
+        // CRITICAL FIX: Keep containers visible - they'll show empty states when needed
+        // Don't hide containers as this can cause visual malformation if tags fail to load
+        // this._updateTagContainersVisibility(false); // REMOVED - containers should always be visible
         
         // Clear search inputs
         const searchInputs = document.querySelectorAll('input[type="text"]');
