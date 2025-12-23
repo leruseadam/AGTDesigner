@@ -7621,43 +7621,38 @@ def generate_labels():
                                     # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                     processed_record = process_database_product_for_api(db_record)
                                     
-                                    # CRITICAL FIX: Use UI lineage if available, otherwise use database lineage, then defaults
-                                    # This ensures DOCX matches what's shown in the UI
-                                    lineage_from_ui = ui_lineage_map.get(product_name_for_record.strip())
-                                    if lineage_from_ui:
-                                        docx_lineage = lineage_from_ui
-                                        logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (matches UI display)")
+                                    # CRITICAL FIX: ALWAYS use database lineage as source of truth for tag generation
+                                    # UI lineage may contain sativa hybrid overrides that shouldn't affect tag output
+                                    # Database lineage is the ONLY source of truth - ignore UI lineage completely
+                                    db_lineage_raw = (
+                                        db_record.get('Lineage') or 
+                                        db_record.get('lineage') or 
+                                        db_record.get('canonical_lineage') or
+                                        db_record.get('currentLineage') or
+                                        db_record.get('sovereign_lineage') or
+                                        processed_record.get('Lineage') or 
+                                        processed_record.get('lineage') or 
+                                        processed_record.get('canonical_lineage') or
+                                        processed_record.get('currentLineage') or
+                                        processed_record.get('sovereign_lineage')
+                                    )
+                                    
+                                    # CRITICAL: Always use database lineage, never UI lineage (which may have sativa hybrid override)
+                                    if db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
+                                        docx_lineage = str(db_lineage_raw).strip().upper()
+                                        logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}' (ignoring UI lineage to avoid sativa hybrid override)")
                                     else:
-                                        # Try database lineage first - check all possible lineage fields
-                                        docx_lineage = (
-                                            processed_record.get('Lineage') or 
-                                            processed_record.get('lineage') or 
-                                            processed_record.get('canonical_lineage') or
-                                            processed_record.get('currentLineage') or
-                                            processed_record.get('sovereign_lineage') or
-                                            db_record.get('Lineage') or
-                                            db_record.get('lineage') or
-                                            db_record.get('canonical_lineage') or
-                                            db_record.get('currentLineage') or
-                                            db_record.get('sovereign_lineage')
-                                        )
-                                        logging.info(f"🔍 LINEAGE CHECK: Product '{product_name_for_record}' - Processed record lineage fields: Lineage='{processed_record.get('Lineage')}', canonical_lineage='{processed_record.get('canonical_lineage')}', currentLineage='{processed_record.get('currentLineage')}'")
-                                        logging.info(f"🔍 LINEAGE CHECK: DB record lineage fields: Lineage='{db_record.get('Lineage')}', canonical_lineage='{db_record.get('canonical_lineage')}', currentLineage='{db_record.get('currentLineage')}'")
-                                        if not docx_lineage or str(docx_lineage).strip() in ['', 'None', 'nan']:
-                                            # No database lineage - use defaults based on product type (never Excel)
-                                            product_type = processed_record.get('Product Type*', '').lower()
-                                            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                                            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                                            
-                                            if is_classic:
-                                                docx_lineage = 'HYBRID'
-                                            else:
-                                                docx_lineage = 'MIXED'
-                                            
-                                            logging.info(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                                        # No database lineage found - use defaults based on product type
+                                        product_type = processed_record.get('Product Type*', '').lower()
+                                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                                        
+                                        if is_classic:
+                                            docx_lineage = 'HYBRID'
                                         else:
-                                            docx_lineage = str(docx_lineage).strip().upper()
-                                            logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
+                                            docx_lineage = 'MIXED'
+                                        
+                                        logging.info(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type")
                                     
                                     # Extract price with logging
                                     extracted_price = _extract_price_from_database_product(processed_record)
