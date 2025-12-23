@@ -154,9 +154,11 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important; /* Ensure left-to-right for proper centering */
-    
-    /* Padding - symmetric for visual centering (account for arrow visually) */
-    padding: 12px 50px 12px 50px !important; /* Symmetric padding for proper centering */
+
+    /* Padding - CRITICAL FIX: Account for dropdown arrow on right side
+       Arrow is 20px wide positioned at right 16px (36px from edge)
+       Left padding should match right side INCLUDING arrow space for perfect centering */
+    padding: 12px 16px 12px 36px !important; /* Left 36px to balance arrow on right */
     
     /* Font styling - larger and more readable for PC */
     font-size: 1.15em !important;

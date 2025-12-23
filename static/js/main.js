@@ -1791,6 +1791,11 @@ const TagManager = {
     updateFilters(filters, preserveExistingValues = true) {
         if (!filters) return;
 
+        // CRITICAL FIX: Set flag to prevent filter change events from triggering during update
+        // This prevents tags from being cleared when filters are programmatically updated on page load
+        const wasUpdatingFilters = this._isUpdatingFilters;
+        this._isUpdatingFilters = true;
+
         // Debug log for filters
         console.log('🔧🔧🔧 updateFilters called with:', {
             vendor: filters.vendor?.length || 0,
@@ -1961,9 +1966,15 @@ const TagManager = {
                 }
             }
         });
-        
+
         // GUARANTEED FIX: Save current filter values to localStorage
         this.saveFiltersToStorage();
+
+        // CRITICAL FIX: Restore the flag after a short delay to allow DOM to settle
+        // Use setTimeout to ensure change events from value assignment are ignored
+        setTimeout(() => {
+            this._isUpdatingFilters = wasUpdatingFilters || false;
+        }, 100);
     },
     
     saveFiltersToStorage() {
@@ -10311,7 +10322,14 @@ const TagManager = {
             return;
         }
         this._initializing = true;
-        
+
+        // CRITICAL FIX: Show splash IMMEDIATELY before any processing
+        // This prevents blank screen while cache is being checked and rendered
+        console.log('⚡ Showing splash screen immediately to prevent blank screen');
+        AppLoadingSplash.show();
+        AppLoadingSplash.startAutoAdvance();
+        AppLoadingSplash.updateProgress(10, 'Initializing...');
+
         console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
         console.log('⚡ TagManager initializing...');
         const availableTagsContainer = document.getElementById('availableTags');
@@ -10319,30 +10337,46 @@ const TagManager = {
         if (availableTagsContainer) {
             console.log('📝 Container ready for tags');
         }
-        
+
         // CRITICAL FIX: Initialize lineage update tracking
         this._lineageUpdatePending = new Set();
         this._lineageUpdateCompletions = new Map();
         this._lineageUpdateProcessing = false;
-        
+
         // CRITICAL FIX: Prevent page reload until lineage updates complete
         this._setupLineageUpdateReloadProtection();
-        
+
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
-        
+
+        // Update splash progress
+        AppLoadingSplash.updateProgress(30, 'Loading cached data...');
+
         // CRITICAL FIX: Hydrate from cache FIRST synchronously for instant display
         // This ensures tags appear immediately on page reload before any API calls
         const hydrated = this.hydrateAvailableTagsFromCache();
         if (hydrated) {
             console.log(`⚡ INSTANT CACHE: Tags hydrated from cache, displayed immediately`);
+            AppLoadingSplash.updateProgress(60, 'Rendering tags...');
 
-            // CRITICAL FIX: Hide splash immediately when cache loaded for smooth experience
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-
+            // CRITICAL FIX: Wait for tags to actually render before hiding splash
+            // Use requestAnimationFrame to ensure DOM has updated
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    // Check if tags are actually visible
+                    const tagItems = document.querySelectorAll('.tag-item');
+                    if (tagItems.length > 0) {
+                        console.log(`✅ ${tagItems.length} tags rendered, hiding splash`);
+                        AppLoadingSplash.updateProgress(100, 'Ready!');
+                        setTimeout(() => {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }, 200); // Brief delay to show "Ready!" message
+                    } else {
+                        console.log('⚠️ Tags not yet rendered, keeping splash visible');
+                    }
+                });
+            });
             // CRITICAL FIX: Build filter options from cached tags IMMEDIATELY for instant filters
             // This MUST happen BEFORE setting initialized=true to prevent race conditions
             let filtersPopulated = false;
@@ -10389,7 +10423,7 @@ const TagManager = {
             } else if (filtersPopulated) {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
-            
+
             // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
             // This prevents unnecessary reloads on every page refresh
             try {
@@ -10399,7 +10433,7 @@ const TagManager = {
                     const payload = JSON.parse(cachedData);
                     const cacheAge = Date.now() - (payload.timestamp || 0);
                     const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
-                    
+
                     if (cacheAge > CACHE_MAX_AGE) {
                         console.log(`🔄 Cache is ${Math.round(cacheAge / 1000)}s old, refreshing in background...`);
                         setTimeout(() => {
@@ -10416,17 +10450,16 @@ const TagManager = {
             } catch (e) {
                 console.warn('Could not check cache age:', e);
             }
-            
-            // Continue with rest of initialization (filters, etc.) but skip splash
+
+            // Continue with rest of initialization (filters, etc.)
             this._continueInitWithoutSplash();
             return;
+        } else {
+            // No cache - load from server (splash already shown at start of init())
+            console.log('❌ No cache available, will load from server');
+            AppLoadingSplash.updateProgress(40, 'Loading from server...');
         }
-        
-        // No cache - show splash screen and load from server
-        // Show application splash screen
-        AppLoadingSplash.show();
-        AppLoadingSplash.startAutoAdvance();
-        
+
         // Initialize empty state first (but don't clear if we have tags)
         this.clearInitialDataRetry();
         // CRITICAL FIX: Only initialize empty state if we don't have tags already
@@ -11557,14 +11590,25 @@ const TagManager = {
         this.isGenerating = true;
 
         try {
-            // Always use the latest persistentSelectedTags for generation
-            let checkedTags = [...this.state.persistentSelectedTags];
+            // CRITICAL FIX: Send full tag objects with lineage, not just names
+            // This ensures backend gets updated lineage values from UI
+            const selectedTagNames = [...this.state.persistentSelectedTags];
 
-            verboseLog('Generation request - persistentSelectedTags:', checkedTags);
-            verboseLog('Generation request - persistentSelectedTags count:', checkedTags.length);
+            verboseLog('Generation request - persistentSelectedTags:', selectedTagNames);
+            verboseLog('Generation request - persistentSelectedTags count:', selectedTagNames.length);
+
+            if (selectedTagNames.length === 0) {
+                console.error('Please select at least one tag to generate');
+                return;
+            }
+
+            // Get full tag objects with all properties including lineage
+            const checkedTags = this.getSelectedTagObjects();
+
+            verboseLog('Generation request - full tag objects with lineage:', checkedTags);
 
             if (checkedTags.length === 0) {
-                console.error('Please select at least one tag to generate');
+                console.error('Could not find tag objects for selected tags');
                 return;
             }
 
@@ -14202,7 +14246,13 @@ const TagManager = {
         // Immediate filter update function (no debounce for instant response)
         const immediateFilterUpdate = async (filterType, value) => {
             verboseLog(`🔥 immediateFilterUpdate called for ${filterType}: ${value}`);
-            
+
+            // CRITICAL FIX: Don't update filters during programmatic filter updates
+            if (self._isUpdatingFilters) {
+                verboseLog('🚫 SKIPPING immediateFilterUpdate - programmatic filter update in progress');
+                return;
+            }
+
             // CRITICAL FIX: Don't update filters during deselection
             if (self.state.isProcessingDeselection) {
                 verboseLog('🚫 SKIPPING immediateFilterUpdate - currently processing deselection');

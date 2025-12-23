@@ -4610,6 +4610,16 @@ class ProductDatabase:
                 logger.warning(f"No product found in database to update: '{product_name}' (vendor={vendor}, brand={brand})")
             else:
                 logger.info(f"Successfully updated {rows_updated} row(s) for product '{product_name}'")
+
+                # CRITICAL FIX: Clear lineage cache for this product to force fresh lookup
+                # Without this, get_product_lineage() will return the old cached value
+                with _lineage_cache_lock:
+                    cache_key = product_name.strip().lower()
+                    if cache_key in _lineage_cache:
+                        del _lineage_cache[cache_key]
+                        del _lineage_cache_timestamps[cache_key]
+                        logger.info(f"✅ Cleared lineage cache for '{product_name}' after update")
+
             return rows_updated > 0
         except Exception as e:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
