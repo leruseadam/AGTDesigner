@@ -6196,35 +6196,7 @@ def check_store_required():
         logging.info(f"has_store_selection() returned: {has_selection}")
         
         if not current_store:
-            logging.info(f"No store resolved for IP {ip_address}")
-            # Development convenience: auto-select fallback store for localhost or debug mode
-            try:
-                from flask import current_app
-                is_local = ip_address in ('127.0.0.1', '::1')
-                is_debug = bool(current_app.config.get('DEBUG', False))
-            except Exception:
-                is_local = False
-                is_debug = False
-
-            if is_local or is_debug:
-                fallback = 'AGT_Bothell'
-                session['selected_store'] = fallback
-                session['store_server_id'] = SERVER_INSTANCE_ID
-                session.modified = True
-                logging.info(f"Auto-selected fallback store '{fallback}' for local/dev request")
-                return {
-                    'success': True,
-                    'requires_store': False,
-                    'store': fallback,
-                    'debug': {
-                        'session_store': session_store,
-                        'ip_address': ip_address,
-                        'has_selection': has_selection,
-                        'auto_selected': True
-                    }
-                }
-
-            logging.info(f"Requiring explicit store selection for IP {ip_address}")
+            logging.info(f"No store resolved for IP {ip_address}, requiring selection")
             return {
                 'success': True,
                 'requires_store': True,
@@ -6986,10 +6958,6 @@ def _align_tags_with_db_lineage(tags, store_name):
                 tag['lineage'] = db_lineage.lower()
                 tag['canonical_lineage'] = db_lineage
                 tag['currentLineage'] = db_lineage
-            # Guarantee: if Lineage is set but canonical/current missing, set them to Lineage
-            elif tag.get('Lineage'):
-                tag['canonical_lineage'] = tag['Lineage']
-                tag['currentLineage'] = tag['Lineage']
         
         return aligned_tags
     except Exception as e:
@@ -7430,7 +7398,7 @@ def generate_labels():
                             db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
                     else:
                         # Use batched queries for better performance
-                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=200)
+                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=50)
                     
                     logging.debug(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records")
                     
@@ -7916,24 +7884,9 @@ def generate_labels():
                                 if processed_db.get('Product Brand'):
                                     record['ProductBrand'] = processed_db.get('Product Brand')
                                     record['Product Brand'] = processed_db.get('Product Brand')
-
-                                # CRITICAL FIX: For classic types, NEVER use "Mixed" strain
-                                # Classic types (Flower, Pre-Roll, etc.) should have specific strains, not "Mixed"
                                 if processed_db.get('Product Strain'):
-                                    db_strain = processed_db.get('Product Strain', '').strip()
-                                    product_type = record.get('Product Type*', '').strip().lower()
-
-                                    from src.core.constants import CLASSIC_TYPES
-                                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
-
-                                    # For classic types, reject "Mixed" strain - keep Excel value instead
-                                    if is_classic_type and db_strain.lower() == 'mixed':
-                                        logging.info(f"⚠️ Rejecting 'Mixed' strain from database for classic type '{product_name}' (type: '{product_type}')")
-                                        # Keep original Excel strain value, don't override
-                                    else:
-                                        # For non-classic types or valid classic strains, use database value
-                                        record['Product Strain'] = db_strain
-                                        record['ProductStrain'] = db_strain
+                                    record['Product Strain'] = processed_db.get('Product Strain')
+                                    record['ProductStrain'] = processed_db.get('Product Strain')
                                 
                         logging.info(f"✅ Enriched {enriched_count} Excel records with database data")
                 except Exception as enrich_error:
@@ -12046,12 +11999,7 @@ def update_lineage():
                         excel_processor.df.loc[product_mask, 'Lineage'] = new_lineage
                         updated_count = product_mask.sum()
                         logging.info(f"✅ CRITICAL: Directly updated DataFrame lineage for '{tag_name}' to '{new_lineage}' ({updated_count} row(s))")
-                        # CRITICAL: Invalidate ALL caches including filter options cache
-                        excel_processor._invalidate_caches()  # Invalidate internal caches
-                        # Also clear filter options cache in excel_processor
-                        if hasattr(excel_processor, '_filter_options_cache'):
-                            excel_processor._filter_options_cache.clear()
-                            logging.info("✅ Cleared excel_processor filter options cache")
+                        excel_processor._invalidate_caches()  # Invalidate cache since DataFrame changed
                     else:
                         logging.warning(f"⚠️ Product '{tag_name}' not found in DataFrame for direct update (tried exact, case-insensitive, and normalized matches)")
         except Exception as df_update_err:
@@ -12087,9 +12035,9 @@ def update_lineage():
             if hasattr(g, 'excel_processor'):
                 delattr(g, 'excel_processor')
                 logging.info("✅ Cleared Excel processor from request context - will reload with fresh database lineage")
-            # CRITICAL: Actually clear the global processor (previous code didn't work)
-            _excel_processor = None
-            logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
+            if _excel_processor is not None:
+                _excel_processor = None
+                logging.info("✅ Cleared global Excel processor - will reload with fresh database lineage on next request")
         except Exception as clear_err:
             logging.warning(f"Could not clear caches/processor: {clear_err}")
         
@@ -12401,12 +12349,6 @@ def batch_update_lineage():
                         # Non-fatal; continue updating others
                         pass
                 logging.info(f"Updated lineage in Excel processor DataFrame for {updated_count}/{len(changes_made)} items")
-                # CRITICAL: Clear excel_processor internal caches after DataFrame update
-                if hasattr(excel_processor, '_invalidate_caches'):
-                    excel_processor._invalidate_caches()
-                if hasattr(excel_processor, '_filter_options_cache'):
-                    excel_processor._filter_options_cache.clear()
-                    logging.info("✅ Cleared excel_processor filter options cache after batch update")
         except Exception as e_df:
             logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
         # Clear caches to ensure refreshed data after batch lineage updates
@@ -12940,16 +12882,9 @@ def get_web_filter_options():
         if request.method == 'POST':
             data = request.get_json()
             current_filters = data.get('filters', {})
-
-        # CRITICAL PERFORMANCE: Return empty filters immediately for instant page load
-        is_initial_load = len(current_filters) == 0 or not any(current_filters.values())
-
-        if is_initial_load:
-            logging.info("⚡ INSTANT initial load - returning empty filters")
-            options = excel_processor.get_dynamic_filter_options(current_filters, return_empty=True)
-        else:
-            logging.info("Computing filter options with active filters")
-            options = excel_processor.get_dynamic_filter_options(current_filters, skip_weight=True)
+        
+        # Use optimized method for web clients
+        options = excel_processor.get_dynamic_filter_options(current_filters)
         
         import math
         def clean_list(lst):
@@ -13302,17 +13237,12 @@ def get_filter_options():
         else:
             logging.warning("Filter options: DataFrame not available for logging")
         
-        # Use optimized method - return empty on initial load for INSTANT response
+        # Use optimized method for Windows
         try:
-            # CRITICAL PERFORMANCE: Return empty filters immediately on initial load
-            is_initial_load = len(current_filters) == 0 or not any(current_filters.values())
-
-            if is_initial_load:
-                logging.info("⚡ INSTANT initial load - returning empty filters")
-                options = excel_processor.get_dynamic_filter_options(current_filters, return_empty=True)
+            if is_windows_request or is_windows_ua:
+                options = excel_processor.get_dynamic_filter_options(current_filters)
             else:
-                logging.info("Computing filter options with active filters")
-                options = excel_processor.get_dynamic_filter_options(current_filters, skip_weight=True)
+                options = excel_processor.get_dynamic_filter_options(current_filters)
         except Exception as filter_error:
             logging.error(f"CRITICAL: Error getting filter options: {filter_error}")
             import traceback
@@ -16580,82 +16510,25 @@ def json_match():
         # Format: "Product Name - Weight" (e.g., "Biscotti Live Resin Disposable Vape - 1g")
         matched_names = []
         if matched_products:
-            # CRITICAL FIX: Filter out placeholder/invalid products before adding to matched_names
-            invalid_names = ['unknown vendor', 'unknown', 'unknown type', 'no price', 'json product']
-            
             for p in matched_products:
                 if not isinstance(p, dict):
                     continue
 
-                # Get product name and vendor
+                # Get product name
                 product_name = p.get('Product Name*') or p.get('Description') or 'Unknown Product'
-                vendor = p.get('Vendor') or p.get('Vendor/Supplier*') or ''
-
-                # Skip placeholder/invalid products
-                product_name_lower = product_name.lower()
-                if any(invalid in product_name_lower for invalid in invalid_names):
-                    logging.info(f"Skipping placeholder product: '{product_name}'")
-                    continue
-
-                # Skip products with empty or invalid vendor
-                vendor_lower = vendor.lower() if vendor else ''
-                if vendor_lower in ['unknown vendor', 'unknown', '']:
-                    logging.info(f"Skipping product with invalid vendor: '{product_name}' (vendor: '{vendor}')")
-                    continue
-
-                # CRITICAL FIX: Check if product name already includes "by Vendor"
-                # If not, add it to match Excel tag format
-                if vendor and ' by ' not in product_name.lower():
-                    # Add vendor to product name: "Product Name by Vendor"
-                    product_name = f"{product_name} by {vendor}"
-                    logging.debug(f"Added vendor to product name: {product_name}")
 
                 # Get weight information (already cleaned above)
                 weight = p.get('Weight*') or p.get('Weight') or ''
-                units = p.get('Units') or p.get('units') or p.get('Weight Unit* (grams/gm or ounces/oz)') or p.get('unit_weight_uom') or ''
+                units = p.get('Units') or ''
                 combined_weight = p.get('CombinedWeight') or ''
-                
-                # Infer units from product type or description if missing
-                if weight and not units:
-                    description = (p.get('Description') or '').lower()
-                    product_type = (p.get('Product Type') or '').lower()
-                    
-                    # Most cannabis products use grams unless they're edibles (often mg) or concentrates (sometimes g)
-                    if 'edible' in product_type or 'edible' in description:
-                        # Edibles often use mg, but if weight is >= 100, likely grams (like 100mg THC total)
-                        try:
-                            weight_val = float(weight)
-                            units = 'mg' if weight_val < 10 else 'mg'  # Most edibles show "100mg" not "0.1g"
-                        except:
-                            units = 'mg'
-                    else:
-                        # Default to grams for flower, vapes, concentrates, pre-rolls, etc.
-                        units = 'g'
-                    
-                    logging.info(f"Inferred units '{units}' for product: {product_name} (type: {product_type})")
-                
-                # CRITICAL FIX: Check if product name already contains weight to avoid duplication
-                # Common weight patterns: "1g", "1.0g", "0.5g", "2g", etc.
-                has_weight_in_name = False
-                if product_name:
-                    try:
-                        has_weight_in_name = bool(re.search(r'\d+\.?\d*\s*g\b', product_name, re.IGNORECASE))
-                    except Exception as e:
-                        logging.warning(f"Failed to check weight in product name: {e}")
-                
-                # Build display name: "Product Name - Weight" (but avoid duplicating weight)
-                if has_weight_in_name:
-                    # Product name already contains weight, don't add it again
-                    display_name = product_name
-                    logging.debug(f"Product name already contains weight: {product_name}")
-                elif combined_weight:
+
+                # Build display name: "Product Name - Weight"
+                if combined_weight:
                     display_name = f"{product_name} - {combined_weight}"
                 elif weight and units:
                     display_name = f"{product_name} - {weight}{units}"
                 elif weight:
-                    # If weight exists but no units found anywhere, just use weight value
                     display_name = f"{product_name} - {weight}"
-                    logging.warning(f"Weight without units for product: {product_name} (weight: {weight})")
                 else:
                     display_name = product_name
 
@@ -18524,9 +18397,8 @@ def get_initial_data():
                     logging.info(f"⚡ Using cached filter options (took {filters_elapsed:.0f}ms)")
                 else:
                     # Still need filters, but do it after tags are returned
-                    # CRITICAL PERFORMANCE: Skip weight on initial load
-                    logging.info("Getting dynamic filter options (skipping weight for speed)...")
-                    filters = excel_processor.get_dynamic_filter_options({}, skip_weight=True)
+                    logging.info("Getting dynamic filter options...")
+                    filters = excel_processor.get_dynamic_filter_options({})
                     import math
                     def clean_list(lst):
                         return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
@@ -18537,9 +18409,8 @@ def get_initial_data():
                     logging.info(f"Filter options processed: {len(filters)} filter categories (took {filters_elapsed:.0f}ms)")
             else:
                 # Normal mode - get filters (they may be cached internally by get_dynamic_filter_options)
-                # CRITICAL PERFORMANCE: Skip weight on initial load
-                logging.info("Getting dynamic filter options (skipping weight for speed)...")
-                filters = excel_processor.get_dynamic_filter_options({}, skip_weight=True)
+                logging.info("Getting dynamic filter options...")
+                filters = excel_processor.get_dynamic_filter_options({})
                 import math
                 def clean_list(lst):
                     return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
@@ -18552,10 +18423,6 @@ def get_initial_data():
             store_name = get_current_store_name()
             aligned_available_tags = _align_tags_with_db_lineage(available_tags, store_name) if available_tags else []
             
-            # CRITICAL FIX: Restore selected tags from session on page reload
-            preserved_selected_tags = session.get('selected_tags', [])
-            logging.info(f"CRITICAL FIX: Restoring {len(preserved_selected_tags)} selected tags on page reload")
-
             initial_data = {
                 'success': True,
                 'data_loaded': True,  # Add this field for frontend compatibility
@@ -18564,7 +18431,7 @@ def get_initial_data():
                 'columns': excel_processor.df.columns.tolist(),
                 'filters': filters,  # Use the properly formatted filters
                 'available_tags': aligned_available_tags,
-                'selected_tags': preserved_selected_tags,  # CRITICAL FIX: Restore selected tags on reload
+                'selected_tags': [],  # Don't restore selected tags on page reload
                 'total_records': len(excel_processor.df),
                 'source': 'excel'
             }

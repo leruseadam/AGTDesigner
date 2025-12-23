@@ -1,45 +1,3 @@
-// Enhanced Lineage Editor: Strain search logic for modal
-window.searchProducts = function(searchTerm) {
-    // Only run if the enhanced lineage editor modal is open
-    const productResults = document.getElementById('productResults');
-    const vendorResults = document.getElementById('vendorResults');
-    const vendorInput = document.getElementById('vendorSearch');
-    const productInput = document.getElementById('productSearch');
-    if (!productResults || !vendorResults || !vendorInput || !productInput) return;
-
-    // Get selected vendor from vendorResults (assume selected vendor is highlighted or stored)
-    let selectedVendor = null;
-    const selectedVendorDiv = vendorResults.querySelector('.selected-vendor');
-    if (selectedVendorDiv) {
-        selectedVendor = selectedVendorDiv.textContent.trim();
-    } else if (vendorInput.value && vendorInput.value.trim() !== '') {
-        selectedVendor = vendorInput.value.trim();
-    }
-    if (!selectedVendor) {
-        productInput.disabled = true;
-        productResults.innerHTML = '<div class="text-center text-white-50"><i class="fas fa-info-circle me-2"></i>Select a vendor first</div>';
-        return;
-    }
-    productInput.disabled = false;
-
-    // Get all products for the selected vendor from a global cache or state (assume window.allProductsByVendor)
-    const allProducts = (window.allProductsByVendor && window.allProductsByVendor[selectedVendor]) || [];
-    const term = (searchTerm || '').toLowerCase().trim();
-    const filtered = term ? allProducts.filter(p => (p['Product Name*'] || '').toLowerCase().includes(term)) : allProducts;
-
-    if (filtered.length === 0) {
-        productResults.innerHTML = '<div class="text-center text-white-50"><i class="fas fa-search me-2"></i>No strains found</div>';
-        return;
-    }
-
-    // Render filtered products
-    productResults.innerHTML = filtered.map(p => `
-        <div class="list-group-item list-group-item-action strain-result" data-product-name="${p['Product Name*']}">
-            <strong>${p['Product Name*']}</strong><br>
-            <small class="text-muted">Current Lineage: ${p.currentLineage || p.Lineage || 'Unknown'}</small>
-        </div>
-    `).join('');
-};
 // Detect Windows platform for optimizations
 const isWindows = navigator.platform.toLowerCase().includes('win') ||
                  navigator.userAgent.toLowerCase().includes('windows');
@@ -1372,67 +1330,66 @@ const TagManager = {
         if (this.state.hydratedFromCache) {
             return false;
         }
-        // Always attempt to hydrate from cache, even if recent update or no Excel file, for instant UI
+        
+        // CRITICAL FIX: Don't load from cache if no Excel file is uploaded
+        // Only hydrate cache when there's an actual Excel file loaded
+        const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+        if (!file || file === 'nofile' || file === '' || file === 'database') {
+            console.log('❌ No Excel file uploaded, skipping cache hydration');
+            return false;
+        }
+        
+        // CRITICAL FIX: On page reload, check if we recently updated lineage
+        // If so, skip cache to ensure we get fresh lineage data from database
+        // BUT: Only skip if update was VERY recent (30 seconds) to avoid unnecessary reloads
+        const recentLineageUpdate = sessionStorage.getItem('lastLineageUpdateTime');
+        if (recentLineageUpdate) {
+            const timeSinceUpdate = Date.now() - parseInt(recentLineageUpdate, 10);
+            // Only skip cache if lineage was updated within last 30 seconds (reduced from 2 minutes)
+            if (timeSinceUpdate < 30000) {
+                console.log('🔄 Very recent lineage update detected (within 30s), skipping cache to fetch fresh data...');
+                sessionStorage.removeItem('lastLineageUpdateTime'); // Clear after use
+                return false; // Force fresh fetch
+            } else {
+                // Clear stale timestamp to prevent future unnecessary checks
+                sessionStorage.removeItem('lastLineageUpdateTime');
+            }
+        }
+        
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
-            // FINAL GUARANTEE: Normalize all lineage fields to database value for every tag
-            const normalizedTags = cachedTags.map(tag => {
-                const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
-                tag.canonical_lineage = dbLineage;
-                tag.currentLineage = dbLineage;
-                tag.Lineage = dbLineage;
-                tag.lineage = dbLineage.toLowerCase();
-                return tag;
-            });
-            if (normalizedTags.length > 0) {
-                console.log('🔍 [GUARANTEE] Sample normalized tag after cache hydration:', {
-                    name: normalizedTags[0]['Product Name*'],
-                    canonical_lineage: normalizedTags[0].canonical_lineage,
-                    currentLineage: normalizedTags[0].currentLineage,
-                    Lineage: normalizedTags[0].Lineage,
-                    lineage: normalizedTags[0].lineage
-                });
-            }
-            console.log(`⚡ INSTANT LOAD: Hydrating ${normalizedTags.length} tags from cache`);
+            console.log(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
             this.state.simplifiedAvailableTagsActive = false;
-            this.state.tags = [...normalizedTags];
-            this.state.originalTags = [...normalizedTags];
-            // Render tags from cache immediately and hide splash right after
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            
+            // CRITICAL FIX: Hide splash BEFORE rendering to prevent visual glitches
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            
+            // CRITICAL FIX: Use requestAnimationFrame to ensure immediate render
             requestAnimationFrame(() => {
-                this._updateAvailableTags(normalizedTags, null);
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-                console.log(`✅ INSTANT LOAD: ${normalizedTags.length} tags rendered from cache`);
-                // Always update from backend in background (non-blocking)
-                this._refreshLineageFromDatabase(normalizedTags).then(() => {
+                this._updateAvailableTags(cachedTags, null);
+                console.log(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+
+                // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
+                // This makes page reloads instant while still updating in background
+                this._refreshLineageFromDatabase(cachedTags).then(() => {
                     console.log('✅ Background lineage check complete (fast mode)');
                 }).catch(err => {
                     console.warn('⚠️ Background lineage check failed (non-critical):', err);
                 });
             });
             return true;
-        } else {
-            // If no cache, fallback to minimal UI and hide splash immediately
-            requestAnimationFrame(() => {
-                this._updateAvailableTags([], null);
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-                console.warn('⚠️ No cached tags found, rendered minimal UI and hid splash. Backend will update when ready.');
-            });
-            return false;
         }
+        return false;
     },
 
     // Helper method to refresh lineage from database
@@ -1697,16 +1654,6 @@ const TagManager = {
             }
 
             return Promise.resolve(loadPromise)
-                .then(() => {
-                    // Only hide splash after filters are loaded
-                    if (typeof this.hideActionSplash === 'function') {
-                        this.hideActionSplash();
-                    }
-                    if (typeof this.hideEnhancedGenerationSplash === 'function') {
-                        this.hideEnhancedGenerationSplash();
-                    }
-                    this.state.loading = false;
-                })
                 .catch(error => {
                     console.error('refreshAfterStoreChange failed', error);
                     verboseLog('refreshAfterStoreChange error:', error);
@@ -1714,6 +1661,15 @@ const TagManager = {
                         return this.checkForExistingData();
                     }
                     return false;
+                })
+                .finally(() => {
+                    if (typeof this.hideActionSplash === 'function') {
+                        this.hideActionSplash();
+                    }
+                    if (typeof this.hideEnhancedGenerationSplash === 'function') {
+                        this.hideEnhancedGenerationSplash();
+                    }
+                    this.state.loading = false;
                 });
         } catch (err) {
             console.error('refreshAfterStoreChange encountered an exception', err);
@@ -1874,31 +1830,13 @@ const TagManager = {
             highCbd: 'highCbdFilter'
             // Removed strain since there's no strainFilter dropdown in the HTML
         };
-
-        // Helper: robustly find a filter element by ID, data attribute or class
-        function _findFilterElement(filterId, filterType) {
-            let el = document.getElementById(filterId);
-            if (el) return el;
-            // Try data-filter attribute
-            el = document.querySelector(`[data-filter="${filterType}"]`);
-            if (el) return el;
-            // Try aria-label match
-            el = Array.from(document.querySelectorAll('.filter-select, select')).find(s => {
-                try { return s.getAttribute('aria-label') && s.getAttribute('aria-label').toLowerCase().includes(filterType.toLowerCase()); } catch (e) { return false; }
-            });
-            if (el) return el;
-            // Try by name/id partial match
-            el = document.querySelector(`[id*="${filterType}"]`) || document.querySelector(`[name*="${filterType}"]`);
-            return el;
-        }
-
+        
         // Update each filter dropdown
         Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
-            const filterElement = _findFilterElement(filterId, filterType);
+            const filterElement = document.getElementById(filterId);
             
             if (!filterElement) {
-                console.error(`Filter element not found: ${filterId} (tried id, data-filter, aria-label, partial id/name). Filters WILL NOT be displayed.`);
-                // Fail gracefully: skip this filter but continue with others
+                console.warn(`Filter element not found: ${filterId}`);
                 return;
             }
             
@@ -1911,8 +1849,26 @@ const TagManager = {
                 }
             });
             
-            // Convert to array (skip sorting for speed - browser will handle display)
-            const sortedValues = Array.from(values);
+            // Sort values alphabetically for consistent ordering
+            const sortedValues = Array.from(values).sort((a, b) => {
+                // Special handling for lineage to maintain logical order
+                if (filterType === 'lineage') {
+                    const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
+                    const aIndex = lineageOrder.indexOf(a.toUpperCase());
+                    const bIndex = lineageOrder.indexOf(b.toUpperCase());
+                    if (aIndex !== -1 && bIndex !== -1) {
+                        return aIndex - bIndex;
+                    }
+                }
+                // Special handling for High CBD filter - High CBD Products should come first
+                if (filterType === 'highCbd') {
+                    if (a === 'High CBD Products') return -1;
+                    if (b === 'High CBD Products') return 1;
+                    if (a === 'Non-High CBD Products') return 1;
+                    if (b === 'Non-High CBD Products') return -1;
+                }
+                return a.localeCompare(b);
+            });
             
             verboseLog(`Updating ${filterId} with values:`, sortedValues);
             
@@ -2101,18 +2057,16 @@ const TagManager = {
                 const doh = tag.DOH || tag['DOH Compliant (Yes/No)'] || '';
                 if (doh && doh.trim()) filterOptions.doh.add(doh.trim());
                 
-                // High CBD/THC (check product type)
-                if (productType) {
-                    const pt = productType.toLowerCase();
-                    if (pt.includes('high cbd')) filterOptions.highCbd.add('High CBD');
-                    if (pt.includes('high thc')) filterOptions.highCbd.add('High THC');
+                // High CBD (check product type)
+                if (productType && productType.toLowerCase().includes('high cbd')) {
+                    filterOptions.highCbd.add('High CBD');
                 }
             });
             
-            // Convert Sets to Arrays (skip sorting for speed - browser will sort in dropdown anyway)
+            // Convert Sets to Arrays
             const filterOptionsArrays = {};
             Object.keys(filterOptions).forEach(key => {
-                filterOptionsArrays[key] = Array.from(filterOptions[key]);
+                filterOptionsArrays[key] = Array.from(filterOptions[key]).sort();
             });
             
             console.log('⚡⚡⚡ Built filter options:', {
@@ -5516,11 +5470,17 @@ const TagManager = {
     },
 
     createTagElement(tag, isForSelectedTags = false) {
-        // Unified display logic for all tags (JSON or Excel)
+        // For JSON matched tags and educated guess tags, prioritize the matched database display information
+        let displayName;
         const isJsonMatched = (tag.Source && (tag.Source === 'JSON Match' || tag.Source.includes('Educated Guess'))) ||
                               (tag.JSON_Source && (tag.JSON_Source === 'JSON Match' || tag.JSON_Source.includes('Educated Guess')));
-        // Use the same fallback chain for all tags
-        let displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
+        if (isJsonMatched) {
+            // JSON matched tags and educated guess tags: use matched database product name
+            displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
+        } else {
+            // Regular tags: use standard fallback chain
+            displayName = tag.displayName || tag['Product Name*'] || tag.ProductName || tag.Description || 'Unnamed Product';
+        }
         
         verboseLog('Creating tag element for:', displayName);
         
@@ -6017,36 +5977,11 @@ const TagManager = {
             });
         }
         
-        // Remove 'by ...' patterns (with or without hyphen) and any trailing weight/unit info
+        // Remove 'by ...' patterns (with or without hyphen)
         let cleanedName = displayName.replace(/ by [^-]*$/i, ''); // Remove "by ..." at the end
         cleanedName = cleanedName.replace(/ by [^-]+(?= -)/i, ''); // Remove "by ..." before hyphen
         cleanedName = cleanedName.replace(/-/g, '\u2011');
-        // Remove trailing weight/unit if present (e.g., ' - 1g', ' - 3.5g', ' - 1 oz', ' 1g', ' 1 g', ' 3.5g', ' 3.5 g', etc.)
-        cleanedName = cleanedName.replace(/\s*-?\s*\d+(\.\d+)?\s*[a-zA-Z]+\s*$/, '');
-        tagName.textContent = cleanedName.trim();
-
-        // Only show normalized weight/units in the dedicated weight div
-        let weight = tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '';
-        let units = tag.Units || tag.units || '';
-        let showWeight = '';
-        if (weight) {
-            // If weight already has units (e.g., '3.5g', '1oz'), don't double-append
-            if (units && !weight.toString().toLowerCase().includes(units.toString().toLowerCase())) {
-                showWeight = `${weight} ${units}`.trim();
-            } else {
-                showWeight = weight.toString().trim();
-            }
-        } else if (units) {
-            showWeight = units.toString().trim();
-        }
-        // Always show weight if available, otherwise show '-'
-        const weightDiv = document.createElement('div');
-        weightDiv.className = 'tag-weight d-inline-block ms-2';
-        weightDiv.style.fontSize = '0.92em';
-        weightDiv.style.fontWeight = '500';
-        weightDiv.style.color = '#e0e0e0';
-        weightDiv.textContent = showWeight || '-';
-        tagName.appendChild(weightDiv);
+        tagName.textContent = cleanedName;
         tagInfo.appendChild(tagName);
         
 
@@ -6162,17 +6097,17 @@ const TagManager = {
         
         tagInfo.appendChild(imageContainer);
         
-                // Add JSON match indicator badge only (no display logic difference)
-                if (isJsonMatched) {
-                    const jsonBadge = document.createElement('span');
-                    jsonBadge.className = 'badge bg-success me-2';
-                    jsonBadge.style.fontSize = '0.7rem';
-                    jsonBadge.style.padding = '2px 6px';
-                    const source = tag.Source || tag.JSON_Source || 'JSON Match';
-                    jsonBadge.textContent = source.includes('Educated Guess') ? 'AI' : 'JSON';
-                    jsonBadge.title = `This item was ${source.includes('Educated Guess') ? 'inferred by AI' : 'matched from JSON data'} (${source})`;
-                    tagInfo.appendChild(jsonBadge);
-                }
+        // Add JSON match indicator if this tag came from JSON matching or educated guessing
+        if (isJsonMatched) {
+          const jsonBadge = document.createElement('span');
+          jsonBadge.className = 'badge bg-success me-2';
+          jsonBadge.style.fontSize = '0.7rem';
+          jsonBadge.style.padding = '2px 6px';
+          const source = tag.Source || tag.JSON_Source || 'JSON Match';
+          jsonBadge.textContent = source.includes('Educated Guess') ? 'AI' : 'JSON';
+          jsonBadge.title = `This item was ${source.includes('Educated Guess') ? 'inferred by AI' : 'matched from JSON data'} (${source})`;
+          tagInfo.appendChild(jsonBadge);
+        }
         // Create lineage dropdown
         const lineageSelect = document.createElement('select');
         lineageSelect.className = 'form-select form-select-sm lineage-select lineage-dropdown lineage-dropdown-mini';
@@ -9817,18 +9752,6 @@ const TagManager = {
             // CRITICAL FIX: Always reset flag in finally block to ensure it's cleared even if error occurs
             // This prevents the hangup issue where the flag gets stuck in true state
             this._fetchingAvailableTags = false;
-            
-            // CRITICAL FIX: Force hide splash in finally block to prevent freeze
-            // This ensures splash is always hidden even if error handling fails
-            clearTimeout(splashTimeout);
-            if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                console.log('⚡ Finally block: Force hiding splash');
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
         }
     },
 
@@ -9880,13 +9803,6 @@ const TagManager = {
                     tag.lineage = normalized;
                     tag['Lineage*'] = normalized;
                 }
-            }
-            // FINAL GUARANTEE: If canonical_lineage/currentLineage are still missing but Lineage exists, set them to Lineage
-            if (!tag.canonical_lineage && tag.Lineage) {
-                tag.canonical_lineage = tag.Lineage;
-            }
-            if (!tag.currentLineage && tag.Lineage) {
-                tag.currentLineage = tag.Lineage;
             }
         } catch (e) {
             console.warn('Failed to normalize lineage for tag:', tag, e);
@@ -10097,50 +10013,24 @@ const TagManager = {
     },
 
     async fetchAndPopulateFilters(retryCount = 0, skipIfEmpty = false) {
-        const maxRetries = 0; // No retries - cache handles instant display
-        const retryDelay = 0; // No delay needed
+        const maxRetries = 3; // Reduced retries for faster loading
+        const retryDelay = 500; // Reduced to 500ms for faster response
         
         try {
-            // INSTANT FILTERS: Always build filter options from tags in memory for instant dropdowns
-            if (this.state.tags && this.state.tags.length > 0) {
-                this.buildFilterOptionsFromTags(this.state.tags);
-            }
-
-            // Try to load filter options from sessionStorage for instant display (fallback only)
-            let filterOptions = null;
-            const filterCacheKey = 'agt_filter_options_cache';
-            if (window.sessionStorage && sessionStorage.getItem(filterCacheKey)) {
-                try {
-                    filterOptions = JSON.parse(sessionStorage.getItem(filterCacheKey));
-                    verboseLog('💾 Loaded filter options from sessionStorage:', filterOptions);
-                    this.updateFilters(filterOptions, true);
-                } catch (e) {
-                    console.warn('Failed to parse cached filter options:', e);
-                }
-            }
-
-            // Always fetch latest filter options in background for freshness
+            // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
             const timestamp = Date.now();
-            const response = await fetch(`/api/filter-options?t=${timestamp}`, {
+            const response = await fetch(`/api/filter-options?refresh=true&t=${timestamp}`, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' }
             });
-
+            
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(`Failed to fetch filter options: ${response.status} ${errorText}`);
             }
-
-            filterOptions = await response.json();
+            
+            const filterOptions = await response.json();
             verboseLog('Fetched filter options:', filterOptions);
-            // Cache the latest filter options for instant future loads
-            if (window.sessionStorage) {
-                try {
-                    sessionStorage.setItem(filterCacheKey, JSON.stringify(filterOptions));
-                } catch (e) {
-                    console.warn('Failed to cache filter options:', e);
-                }
-            }
             
             // CRITICAL FIX: Check for error field in response, but don't treat "No default file available" as an error
             // Database-only mode is valid and shouldn't trigger warnings
@@ -10149,9 +10039,10 @@ const TagManager = {
                 
                 // If there's an error but we haven't exceeded retries, retry
                 if (retryCount < maxRetries) {
-                    verboseLog(`⚠️ Filter options error (attempt ${retryCount + 1}/${maxRetries}), retrying immediately...`);
-                    // Retry immediately without delay
-                    this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
+                    verboseLog(`⚠️ Filter options error (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
+                    setTimeout(() => {
+                        this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
+                    }, retryDelay);
                     return;
                 } else {
                     console.error('Filter options error after all retries:', filterOptions.error);
@@ -10187,35 +10078,11 @@ const TagManager = {
                            (filterOptions.lineage && filterOptions.lineage.length > 0) ||
                            (filterOptions.weight && filterOptions.weight.length > 0);
             
-            // FALLBACK: If API returned empty but we have tags in memory (from cache hydration), build filters from tags immediately
-            if (!hasData && this.state && Array.isArray(this.state.tags) && this.state.tags.length > 0) {
-                try {
-                    verboseLog('⚡ Fallback: building filter options from in-memory tags due to empty API response');
-                    const built = this._extractFiltersFromTags(this.state.tags);
-                    // Use built options as authoritative for now
-                    filterOptions = {
-                        vendor: built.vendor,
-                        brand: built.brand,
-                        productType: built.productType,
-                        lineage: built.lineage,
-                        weight: built.weight,
-                        strain: built.strain,
-                        doh: built.doh,
-                        highCbd: built.highCbd
-                    };
-                    // Cache the built options for future instant loads
-                    if (window.sessionStorage) {
-                        try { sessionStorage.setItem(filterCacheKey, JSON.stringify(filterOptions)); } catch (e) { verboseLog('Failed to cache built filter options:', e); }
-                    }
-                } catch (e) {
-                    console.warn('Fallback build from tags failed:', e);
-                }
-            }
-
             if (!hasData && retryCount < maxRetries) {
-                verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying immediately...`);
-                // Retry immediately without delay
-                this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
+                verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
+                setTimeout(() => {
+                    this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
+                }, retryDelay);
                 return;
             }
             
@@ -10239,9 +10106,10 @@ const TagManager = {
             
             // Retry on error if we haven't exceeded max retries
             if (retryCount < maxRetries) {
-                verboseLog(`⚠️ Filter fetch error (attempt ${retryCount + 1}/${maxRetries}), retrying immediately...`);
-                // Retry immediately without delay
-                this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
+                verboseLog(`⚠️ Filter fetch error (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
+                setTimeout(() => {
+                    this.fetchAndPopulateFilters(retryCount + 1, skipIfEmpty);
+                }, retryDelay);
             } else {
                 console.error('Failed to load filter options after all retries');
                 // CRITICAL FIX: Don't clear filters if skipIfEmpty is true
@@ -10480,10 +10348,14 @@ const TagManager = {
             let filtersPopulated = false;
             if (this.state.tags && this.state.tags.length > 0) {
                 console.log('⚡ Building filter options from', this.state.tags.length, 'cached tags immediately...');
-                // Build filters synchronously for instant display - NO async delays
+                // Force synchronous rendering by using requestAnimationFrame
                 this.buildFilterOptionsFromTags(this.state.tags);
+                // Force browser to render immediately
+                requestAnimationFrame(() => {
+                    console.log('✅ Filter options rendered to DOM');
+                });
                 filtersPopulated = true;
-                console.log('✅ Filter options built from cache instantly');
+                console.log('✅ Filter options built from cache');
             } else {
                 console.log('❌ No tags available for filter building');
             }
@@ -10512,11 +10384,10 @@ const TagManager = {
             // CRITICAL FIX: Only fetch filter options from API if we didn't populate from cache
             // This prevents slow API calls from overwriting instant cache-based filters
             if (!filtersPopulated && this.fetchAndPopulateFilters) {
-                console.log('⚠️ No cached filters, fetching from API in background...');
-                // Fetch in background without blocking - don't await
+                console.log('⚠️ No cached filters, fetching from API...');
                 this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
             } else if (filtersPopulated) {
-                console.log('✅ Filters already populated from cache instantly, skipping API call for speed');
+                console.log('✅ Filters already populated from cache, skipping API call');
             }
             
             // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
@@ -12674,24 +12545,75 @@ const TagManager = {
             }
             
             // CRITICAL FIX: Add timeout to fetch operations to prevent hanging
-            // Fire all backend clear/reset API calls in parallel (non-blocking)
             const fetchWithTimeout = (url, options, timeout = 5000) => {
                 return Promise.race([
                     fetch(url, options),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), timeout))
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Request timeout')), timeout)
+                    )
                 ]);
             };
-            fetchWithTimeout('/api/json-clear', { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 5000).catch(()=>{});
-            fetchWithTimeout('/api/toggle-json-filter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filter_mode: 'full_excel' }) }, 5000).catch(()=>{});
-            fetchWithTimeout('/api/clear-filters', { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 5000).catch(()=>{});
-
-            // Refresh tags immediately after UI reset (no waiting)
-            if (this.fetchAndUpdateAvailableTags) {
-                this.fetchAndUpdateAvailableTags().catch(fetchError => {
-                    console.error('Error refreshing available tags:', fetchError);
-                    this.state.isClearing = false;
-                });
-            }
+            
+            // NON-BLOCKING: Clear JSON matches and switch to full Excel view with timeout
+            // CRITICAL FIX: Wait for any in-progress fetch to complete before starting new one
+            const refreshTagsAfterClear = async () => {
+                // Wait for any in-progress fetch to complete (max 3 seconds)
+                let waitCount = 0;
+                while (this._fetchingAvailableTags && waitCount < 30) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    waitCount++;
+                }
+                
+                // Now refresh tags
+                verboseLog('Refreshing available tags with full Excel data...');
+                if (this.fetchAndUpdateAvailableTags) {
+                    try {
+                        await this.fetchAndUpdateAvailableTags();
+                    } catch (fetchError) {
+                        console.error('Error refreshing available tags:', fetchError);
+                        this.state.isClearing = false; // Ensure flag is reset
+                    }
+                }
+            };
+            
+            console.log('🔄 Clearing JSON matches and switching to full Excel view...');
+            fetchWithTimeout('/api/json-clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }, 5000).then(() => {
+                console.log('✅ JSON matches cleared');
+                // Then switch to full Excel view
+                return fetchWithTimeout('/api/toggle-json-filter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filter_mode: 'full_excel' })
+                }, 5000);
+            }).then(response => {
+                console.log('✅ Switched to full Excel view');
+                if (response && response.ok) {
+                    return response.json();
+                }
+                return null;
+            }).then(data => {
+                console.log('🔄 Refreshing tags with full Excel data...');
+                // Always refresh available tags after clearing JSON matches and switching to full Excel
+                refreshTagsAfterClear();
+            }).catch(fetchError => {
+                // Silently handle errors - UI is already updated, but still try to refresh tags
+                verboseLog('Backend JSON clear/toggle call failed (non-critical):', fetchError);
+                console.warn('⚠️ Failed to clear JSON/switch to Excel, but will still refresh tags');
+                // Still refresh tags to ensure we show full Excel data
+                refreshTagsAfterClear();
+            });
+            
+            // NON-BLOCKING: Fire-and-forget backend API call for clearing filters (don't wait for it)
+            fetchWithTimeout('/api/clear-filters', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }, 5000).catch(fetchError => {
+                // Silently handle errors - UI is already updated
+                verboseLog('Backend clear-filters call failed (non-critical):', fetchError);
+            });
             
         } catch (error) {
             console.error('Failed to clear selected tags:', error);

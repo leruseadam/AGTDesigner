@@ -1275,18 +1275,9 @@
 
                 // Enhanced Lineage Editor Functions
             window.createEnhancedLineageEditor = function(browserData, vendorStats) {
-              const allStrains = browserData.strains || [];
+              const strains = browserData.strains || [];
               const vendors = browserData.vendors || [];
               const vendorStrains = browserData.vendor_strains || [];
-              // Default: show all strains, but allow filtering by vendor
-              let strains = allStrains;
-              // If a vendor is selected, filter strains to only those for that vendor
-              const selectedVendor = window._enhancedLineageSelectedVendor || '';
-              if (selectedVendor && vendorStrains.length > 0) {
-                // Get strain names for this vendor
-                const strainNames = vendorStrains.filter(vs => vs.vendor === selectedVendor).map(vs => vs.strain_name);
-                strains = allStrains.filter(s => strainNames.includes(s.strain_name));
-              }
               
               return `
                 <div class="enhanced-lineage-editor">
@@ -1304,10 +1295,10 @@
                           </div>
                           <div class="mb-3">
                             <label class="form-label">Filter by Vendor</label>
-                            <select class="form-select" id="vendorFilter" onchange="window._enhancedLineageVendorChanged(this.value)">
-                                <option value="">All Vendors</option>
-                                ${vendors.map(v => `<option value="${v.vendor}"${window._enhancedLineageSelectedVendor === v.vendor ? ' selected' : ''}>${v.vendor} (${v.total_products} products)</option>`).join('')}
-                              </select>
+                            <select class="form-select" id="vendorFilter">
+                              <option value="">All Vendors</option>
+                              ${vendors.map(v => `<option value="${v.vendor}">${v.vendor} (${v.total_products} products)</option>`).join('')}
+                            </select>
                           </div>
                           <div class="mb-3">
                             <label class="form-label">Filter by Lineage</label>
@@ -1469,26 +1460,20 @@
             
             // Use the consolidated function from window scope
             
-            window._enhancedLineageSelectedVendor = '';
-            window._enhancedLineageVendorChanged = function(vendor) {
-              window._enhancedLineageSelectedVendor = vendor;
-              // Re-render the modal with the new vendor filter
-              if (window._lastEnhancedLineageBrowserData && window._lastEnhancedLineageVendorStats) {
-                showDatabaseModal('Enhanced Lineage Editor', window.createEnhancedLineageEditor(window._lastEnhancedLineageBrowserData, window._lastEnhancedLineageVendorStats));
-                window.initializeEnhancedLineageEditor();
-              }
-            };
             window.initializeEnhancedLineageEditor = function() {
               // Store current data globally for functions to access
               window.currentStrainData = [];
               window.selectedStrains = new Set();
+              
               // Set up event listeners and initialize functionality
               updateSelectionCount();
+              
               // Enable bulk update button when lineage is selected
               document.getElementById('bulkLineageSelect').addEventListener('change', function() {
                 const selectedLineage = this.value;
                 const selectedCount = window.selectedStrains.size;
                 const bulkBtn = document.getElementById('bulkUpdateBtn');
+                
                 if (selectedLineage && selectedCount > 0) {
                   bulkBtn.disabled = false;
                   bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update ${selectedCount} strain${selectedCount > 1 ? 's' : ''} to ${selectedLineage}`;
@@ -1497,6 +1482,7 @@
                   bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update Selected (<span id="selectedCount">0</span>)`;
                 }
               });
+
               // Trigger search when pressing Enter in the search box
               const strainInput = document.getElementById('strainSearchInput');
               if (strainInput) {
@@ -1507,7 +1493,15 @@
                   }
                 });
               }
-              // Trigger search when changing lineage filter
+
+              // Trigger search when changing vendor/lineage filters
+              const vendorSelect = document.getElementById('vendorFilter');
+              if (vendorSelect) {
+                vendorSelect.addEventListener('change', function() {
+                  if (window.searchStrains) window.searchStrains();
+                });
+              }
+
               const lineageSelect = document.getElementById('lineageFilter');
               if (lineageSelect) {
                 lineageSelect.addEventListener('change', function() {
@@ -5636,11 +5630,9 @@
                       </select>
                     </div>
                     <div class="filter-group">
-                      <label for="highCbdFilter" class="filter-label">HIGH CBD/THC</label>
-                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD/THC products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
+                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
                         <option value="All">All</option>
-                        <option value="High CBD">High CBD</option>
-                        <option value="High THC">High THC</option>
                       </select>
                     </div>
                   </div>
@@ -8444,32 +8436,7 @@
         </form>
       `;
 
-      if (isNew) {
-        // Show in a dedicated Add Product modal
-        let modal = document.getElementById('addProductModal');
-        if (!modal) {
-          modal = document.createElement('div');
-          modal.id = 'addProductModal';
-          modal.className = 'modal fade';
-          modal.tabIndex = -1;
-          modal.innerHTML = `
-            <div class="modal-dialog modal-lg">
-              <div class="modal-content">
-                <div class="modal-header">
-                  <h5 class="modal-title">Add Product</h5>
-                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body"></div>
-              </div>
-            </div>`;
-          document.body.appendChild(modal);
-        }
-        modal.querySelector('.modal-body').innerHTML = content;
-        const bsModal = new bootstrap.Modal(modal);
-        bsModal.show();
-      } else {
-        showDatabaseModal(`Edit Product #${productId}`, content);
-      }
+      showDatabaseModal(isNew ? 'Add Product' : `Edit Product #${productId}`, content);
     }
 
     function editProduct(productId) {
@@ -9435,7 +9402,7 @@
                         <strong>${match.best_match['Product Name*'] || match.best_match['ProductName'] || 'Enhanced Match'}</strong>
                         <div class="mt-2">
                           <small class="text-muted">
-                            <strong>Price:</strong> $${match.best_match['Price'] || '0.00'}<br>
+                            <strong>Price:</strong> $${match.best_match['Price'] || '25.00'}<br>
                             <strong>Brand:</strong> ${match.best_match['Product Brand'] || 'CERES'}<br>
                             <strong>Type:</strong> ${match.best_match['Product Type*'] || 'Edible (Solid)'}<br>
                             <strong>Weight:</strong> ${match.best_match['Weight*'] || '1'}${match.best_match['Units'] || 'g'}<br>

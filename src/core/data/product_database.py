@@ -1366,9 +1366,9 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                # Rate-limit noisy blank-name logs: log first occurrence and then sparsely (every 1000)
-                if self._rejected_blank_names == 1 or self._rejected_blank_names % 1000 == 1:
-                    logger.info(
+                # Log only the first occurrence, then every 100th to avoid spam
+                if self._rejected_blank_names == 1 or self._rejected_blank_names % 100 == 1:
+                    logger.debug(
                         f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})"
                     )
                 return None
@@ -1376,17 +1376,16 @@ class ProductDatabase:
             # Check for invalid values
             if str(product_name).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_invalid_names += 1
-                # Rate-limit invalid-name logs
-                if self._rejected_invalid_names == 1 or self._rejected_invalid_names % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
+                if self._rejected_invalid_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
                 return None
             
             # RELAXED VALIDATION: Allow single character names for vertical template compatibility
             # Check for minimum length (at least 1 character instead of 2)
             if len(str(product_name).strip()) < 1:
                 self._rejected_short_names += 1
-                if self._rejected_short_names == 1 or self._rejected_short_names % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
+                if self._rejected_short_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
             # Additional validation for essential fields
@@ -1395,14 +1394,14 @@ class ProductDatabase:
             
             if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_missing_vendor += 1
-                if self._rejected_missing_vendor == 1 or self._rejected_missing_vendor % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
+                if self._rejected_missing_vendor % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
                 return None
             
             if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_missing_type += 1
-                if self._rejected_missing_type == 1 or self._rejected_missing_type % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
+                if self._rejected_missing_type % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
                 return None
             
             normalized_name = self._normalize_product_name(product_name)
@@ -5466,17 +5465,10 @@ class ProductDatabase:
             # If we didn't find all products, try fuzzy matching
             logger.info(f"Found {len(exact_matches)} exact matches, trying fuzzy matching for remaining products")
             
-            # Get all products for fuzzy matching (exclude deactivated and samples)
+            # Get all products for fuzzy matching
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT * FROM products
-                WHERE "Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND "Product Type*" NOT LIKE '%Sample%'
-                    AND "Product Type*" != 'Samples - Educational'
-                    AND "Product Type*" != 'Sample - Vendor'
-                ORDER BY "Product Name*"
-            ''')
+            cursor.execute('SELECT * FROM products ORDER BY "Product Name*"')
             all_rows = cursor.fetchall()
             columns = [description[0] for description in cursor.description]
             all_products = [dict(zip(columns, row)) for row in all_rows]
@@ -6808,16 +6800,12 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" = ?
-                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND p."Product Type*" NOT LIKE '%Sample%'
-                    AND p."Product Type*" != 'Samples - Educational'
-                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.last_seen_date DESC
             ''', (product_name,))
             
@@ -6844,16 +6832,12 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE (p."Product Strain" LIKE ? OR s.strain_name LIKE ?)
-                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND p."Product Type*" NOT LIKE '%Sample%'
-                    AND p."Product Type*" != 'Samples - Educational'
-                    AND p."Product Type*" != 'Sample - Vendor'
+                WHERE p."Product Strain" LIKE ? OR s.strain_name LIKE ?
                 ORDER BY p.last_seen_date DESC
             ''', (f'%{strain_name}%', f'%{strain_name}%'))
             
@@ -6880,16 +6864,12 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Type*" = ? AND (p."Product Strain" = ? OR s.strain_name = ?)
-                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND p."Product Type*" NOT LIKE '%Sample%'
-                    AND p."Product Type*" != 'Samples - Educational'
-                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.last_seen_date DESC
             ''', (product_type, strain_name, strain_name))
             
@@ -6947,10 +6927,6 @@ class ProductDatabase:
             query = f'''
                 SELECT p.id, {", ".join(select_columns)}
                 FROM products p
-                WHERE p."Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND p."Product Type*" NOT LIKE '%Sample%'
-                    AND p."Product Type*" != 'Samples - Educational'
-                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.id
             '''
             

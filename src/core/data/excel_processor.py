@@ -1176,7 +1176,7 @@ class ExcelProcessor:
             for key in oldest_keys:
                 del self._file_cache[key]
     
-    def _schedule_product_db_integration(self, force_sync: bool = False):
+    def _schedule_product_db_integration(self):
         """Schedule product database integration in background to avoid blocking file load."""
         # Check if integration is enabled
         if not getattr(self, '_product_db_enabled', True):
@@ -1285,15 +1285,6 @@ class ExcelProcessor:
                 except Exception as e:
                     self.logger.error(f"[ProductDB] Background integration error: {e}")
             
-            # If forced synchronous mode via parameter, instance flag, or env var, run inline
-            env_force = os.environ.get('FORCE_SYNC_DB_INTEGRATION', '').lower() == 'true'
-            instance_force = getattr(self, '_force_sync_db_integration', False)
-            if force_sync or env_force or instance_force:
-                self.logger.info("[ProductDB] Running synchronous DB integration (force sync enabled)")
-                # Run integration inline (no thread)
-                background_integration()
-                return
-
             # Start background thread
             thread = threading.Thread(target=background_integration, daemon=True)
             thread.start()
@@ -1628,7 +1619,7 @@ class ExcelProcessor:
                 
                 # 3. Basic filtering (exclude sample rows) - vectorized for speed
                 initial_count = len(df)
-                df = df[~df["Product Type*"].str.lower().isin([t.lower() for t in EXCLUDED_PRODUCT_TYPES])]
+                df = df[~df["Product Type*"].isin(EXCLUDED_PRODUCT_TYPES)]
                 df.reset_index(drop=True, inplace=True)
                 final_count = len(df)
                 if initial_count != final_count:
@@ -2044,8 +2035,8 @@ class ExcelProcessor:
 
             # 4) Exclude sample rows and deactivated products
             initial_count = len(self.df)
-            excluded_by_type = self.df[self.df["Product Type*"].str.lower().isin([t.lower() for t in EXCLUDED_PRODUCT_TYPES])]
-            self.df = self.df[~self.df["Product Type*"].str.lower().isin([t.lower() for t in EXCLUDED_PRODUCT_TYPES])]
+            excluded_by_type = self.df[self.df["Product Type*"].isin(EXCLUDED_PRODUCT_TYPES)]
+            self.df = self.df[~self.df["Product Type*"].isin(EXCLUDED_PRODUCT_TYPES)]
             # Reset index after filtering to prevent duplicate labels
             self.df.reset_index(drop=True, inplace=True)
             self.logger.info(f"Excluded {len(excluded_by_type)} products by product type: {excluded_by_type['Product Type*'].unique().tolist()}")
@@ -3242,25 +3233,6 @@ class ExcelProcessor:
 
             self._on_dataset_updated(file_path, file_mtime)
             self.logger.info(f"File loaded successfully: {len(self.df)} rows, {len(self.df.columns)} columns")
-
-            # CRITICAL PERFORMANCE: Pre-compute filter options immediately after loading
-            # This ensures filters populate instantly on page load
-            # Skip weight filter on initial load for maximum speed (weight loaded on-demand)
-            try:
-                import time
-                filter_start = time.time()
-                self.logger.info("Pre-computing filter options for instant page load (skipping weight for speed)...")
-
-                # Compute with empty filters, skip weight for fast initial load
-                # Weight filter will be computed on-demand when user clicks weight dropdown
-                initial_filters = self.get_dynamic_filter_options({}, skip_weight=True)
-
-                filter_time = (time.time() - filter_start) * 1000
-                self.logger.info(f"✅ Filter options pre-computed in {filter_time:.1f}ms (weight skipped) - filters will now load instantly")
-            except Exception as filter_error:
-                # Don't fail file load if filter pre-computation fails
-                self.logger.warning(f"Failed to pre-compute filters (non-critical): {filter_error}")
-
             return True
             
         except MemoryError as me:
@@ -5003,23 +4975,9 @@ class ExcelProcessor:
             
         return result
 
-    def get_dynamic_filter_options(self, current_filters: Dict[str, str], skip_weight: bool = False, return_empty: bool = False) -> Dict[str, list]:
-        # CRITICAL PERFORMANCE: For instant initial load, return empty immediately
-        if return_empty:
-            self.logger.info("Returning empty filter options for instant initial load")
-            return {
-                "vendor": [],
-                "brand": [],
-                "productType": [],
-                "lineage": [],
-                "weight": [],
-                "strain": [],
-                "doh": [],
-                "highCbd": []
-            }
-
-        # Return empty options if no data is loaded
+    def get_dynamic_filter_options(self, current_filters: Dict[str, str]) -> Dict[str, list]:
         if self.df is None:
+            # Return empty options if no data is loaded
             return {
                 "vendor": [],
                 "brand": [],
@@ -5030,153 +4988,108 @@ class ExcelProcessor:
                 "doh": [],
                 "highCbd": []
             }
-
-        # CRITICAL PERFORMANCE: Check cache first
-        # Create cache key from current filters (include skip_weight in key)
-        import json
-        cache_key = f"filter_opts_{json.dumps(current_filters, sort_keys=True)}_skip_weight_{skip_weight}"
-        cached_result = self._get_cached_value(self._filter_options_cache, cache_key)
-        if cached_result is not None:
-            self.logger.debug(f"Using cached filter options for filters: {current_filters}")
-            return self._clone_filter_options(cached_result)
-
-        # Optimization: filter the DataFrame once for all filters, not per filter
-        df = self.df
+        cache_key = self._build_cache_key('filter_options', current_filters or {})
+        cached_options = self._get_cached_value(self._filter_options_cache, cache_key)
+        if cached_options is not None:
+            return self._clone_filter_options(cached_options)
+        df = self.df.copy()
         filter_map = {
             "vendor": "Vendor",
             "brand": "Product Brand",
             "productType": "Product Type*",
             "lineage": "Lineage",
-            "weight": "CombinedWeight",
+            "weight": "CombinedWeight",  # Reverted back to "CombinedWeight" as requested
             "strain": "Product Strain",
             "doh": "DOH",
-            "highCbd": "Product Type*"
+            "highCbd": "Product Type*"  # Will be processed specially for high CBD detection
         }
+        options = {}
         import math
         def clean_list(lst):
             return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
-
-        # Apply all filters except 'All' and empty
-        # PERFORMANCE: Don't copy the entire df, just create a boolean mask
-        mask = pd.Series([True] * len(df), index=df.index)
-        for key, value in current_filters.items():
-            if value and value != "All":
-                filter_col = filter_map.get(key)
-                if filter_col and filter_col in df.columns:
-                    # Build combined mask instead of repeatedly filtering
-                    col_mask = df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
-                    mask &= col_mask
-
-        filtered_df = df[mask]
-
-        options = {}
+        # For each filter type, generate options by applying all other filters except itself
         for filter_key, col in filter_map.items():
-            # For each filter, get unique values from the already filtered DataFrame
-            if col in filtered_df.columns:
-                # CRITICAL PERFORMANCE: Skip weight filter if requested (for fast initial load)
-                if filter_key == "weight" and skip_weight:
-                    self.logger.debug("Skipping weight filter computation for fast initial load")
-                    options[filter_key] = []
-                    continue
-
+            temp_df = df.copy()
+            # Apply all other filters except the current one
+            for key, value in current_filters.items():
+                if key == filter_key:
+                    continue  # Skip filtering by itself
+                if value and value != "All":
+                    filter_col = filter_map.get(key)
+                    if filter_col and filter_col in temp_df.columns:
+                        temp_df = temp_df[
+                            temp_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
+                        ]
+            # Get unique values for this filter type
+            if col in temp_df.columns:
                 if filter_key == "weight":
-                    # CRITICAL PERFORMANCE FIX: Use purely vectorized operations for weight
-                    # Skip the complex _format_weight_units entirely for filter generation
-                    import re
-
+                    # For weight, use the properly formatted weight with units
                     values = []
-
-                    # Strategy 1: Use CombinedWeight if available (already computed)
-                    if 'CombinedWeight' in filtered_df.columns:
-                        combined_weights = filtered_df['CombinedWeight'].dropna().astype(str)
-                        values.extend(combined_weights[combined_weights.str.strip() != ''].unique().tolist())
-
-                    # Strategy 2: Fast concatenation of Weight* + Units using vectorized ops
-                    if len(values) == 0 and 'Weight*' in filtered_df.columns:
-                        weight_col = filtered_df['Weight*'].fillna('').astype(str)
-                        units_col = filtered_df['Units'].fillna('').astype(str) if 'Units' in filtered_df.columns else ''
-
-                        # Vectorized: Check if weight already has units
-                        has_units = weight_col.str.contains(r'[a-zA-Z]', regex=True, na=False)
-
-                        # For weights with units, use as-is
-                        weights_with_units = weight_col[has_units & (weight_col.str.strip() != '')]
-                        values.extend(weights_with_units.unique().tolist())
-
-                        # For weights without units, concatenate with Units column
-                        if isinstance(units_col, pd.Series):
-                            weights_without_units_mask = ~has_units & (weight_col.str.strip() != '')
-                            weights_no_units = weight_col[weights_without_units_mask]
-                            corresponding_units = units_col[weights_without_units_mask]
-
-                            # Vectorized concatenation
-                            combined = weights_no_units + ' ' + corresponding_units
-                            combined = combined.str.strip()
-                            values.extend(combined[combined != ''].unique().tolist())
-
-                    # Filter out invalid weight values using PURE vectorized operations
+                    for _, row in temp_df.iterrows():
+                        # Convert row to dict for _format_weight_units
+                        row_dict = row.to_dict()
+                        weight_with_units = self._format_weight_units(row_dict, excel_priority=True)
+                        if weight_with_units and weight_with_units.strip():
+                            weight_str = weight_with_units.strip()
+                            
+                            # Only include values that look like actual weights (with units like g, oz, mg)
+                            # Exclude THC/CBD content, ratios, and other non-weight content
+                            import re
+                            weight_pattern = re.compile(r'^\d+\.?\d*\s*(g|oz|mg|grams?|ounces?)$', re.IGNORECASE)
+                            
+                            if weight_pattern.match(weight_str):
+                                values.append(weight_str)
+                            elif not any(keyword in weight_str.lower() for keyword in ['thc', 'cbd', 'ratio', '|br|', ':']):
+                                # If it doesn't match weight pattern but also doesn't contain THC/CBD keywords, include it
+                                values.append(weight_str)
+                    
+                    # Debug: Log what weight values are being generated
                     if values:
-                        # Convert to Series for vectorized filtering
-                        values_series = pd.Series(values).drop_duplicates()
-
-                        # CRITICAL PERFORMANCE: Use pure vectorized str operations, NO apply()
-                        # Remove values with invalid keywords (pure vectorized)
-                        invalid_keywords = ['thc', 'cbd', 'ratio', '|br|', ':', 'nan']
-
-                        # Start with all True mask
-                        valid_mask = pd.Series([True] * len(values_series), index=values_series.index)
-
-                        # Filter out values containing invalid keywords (vectorized)
-                        values_lower = values_series.str.lower()
-                        for keyword in invalid_keywords:
-                            valid_mask &= ~values_lower.str.contains(keyword, na=False)
-
-                        # Filter out values that don't start with a digit (vectorized)
-                        # Valid weights start with digit: "1g", "0.5g", "100mg", etc.
-                        valid_mask &= values_series.str.match(r'^\d', na=False)
-
-                        values = values_series[valid_mask].tolist()
-
-                    if values:
-                        self.logger.info(f"Weight filter values generated: {len(values)} unique values")
+                        self.logger.info(f"Weight filter values generated: {values[:5]}...")  # Log first 5 values
                     else:
                         self.logger.warning("No weight values generated for filter dropdown")
                 else:
-                    values = filtered_df[col].dropna().unique().tolist()
+                    values = temp_df[col].dropna().unique().tolist()
                     values = [str(v) for v in values if str(v).strip()]
-
+                
+                # Exclude unwanted product types from dropdown and apply product type normalization
                 if filter_key == "productType":
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
-                        # Exclude any product type containing 'deactivated' or 'x-deactivated' (case-insensitive)
-                        if ("trade sample" in v_lower or "deactivated" in v_lower or "x-deactivated" in v_lower):
+                        if ("trade sample" in v_lower or "deactivated" in v_lower):
                             continue
+                        # Apply product type normalization (same as TYPE_OVERRIDES)
                         normalized_v = TYPE_OVERRIDES.get(v_lower, v)
                         filtered_values.append(normalized_v)
                     values = filtered_values
+                
+                # Special processing for DOH filter
                 elif filter_key == "doh":
+                    # Only include "YES" and "NO" values, normalize case
                     filtered_values = []
                     for v in values:
                         v_upper = v.strip().upper()
                         if v_upper in ["YES", "NO"]:
                             filtered_values.append(v_upper)
                     values = filtered_values
+                
+                # Special processing for High CBD filter
                 elif filter_key == "highCbd":
+                    # Check if any product types start with "high cbd"
                     has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in values)
                     values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
-
+                
+                # Remove duplicates and sort
                 values = list(set(values))
                 values.sort()
                 options[filter_key] = clean_list(values)
             else:
                 options[filter_key] = []
-
-        # Store in cache before returning
+        
         cached_copy = self._clone_filter_options(options)
         self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
-
-        return options
+        return self._clone_filter_options(cached_copy)
 
     @staticmethod
     def parse_weight_str(w, u=None):
@@ -6114,7 +6027,7 @@ class ExcelProcessor:
             'rso/co2 tankers': '$40.00'
         }
         
-        return price_ranges.get(product_type, '$0.00')
+        return price_ranges.get(product_type, '$25.00')
     
     def _infer_weight_from_name(self, product_name, product_type):
         """Infer weight and units from product name and type."""
@@ -6761,8 +6674,8 @@ class ExcelProcessor:
                     'Quantity*': '1',
                     'Quantity': '1',
                     'Units': educated_guess.get("units", "g"),
-                    'Price': educated_guess.get("price", "0"),
-                    'Price* (Tier Name for Bulk)': educated_guess.get("price", "0"),
+                    'Price': educated_guess.get("price", "25"),
+                    'Price* (Tier Name for Bulk)': educated_guess.get("price", "25"),
                     'Source': f'Educated Guess ({educated_guess.get("confidence", "medium")})',
                     'Quantity Received*': '1',
                     'Weight Unit* (grams/gm or ounces/oz)': educated_guess.get("units", "g"),

@@ -6003,7 +6003,7 @@ class ExcelProcessor:
             'rso/co2 tankers': '$40.00'
         }
         
-        return price_ranges.get(product_type, '$0.00')
+        return price_ranges.get(product_type, '$25.00')
     
     def _infer_weight_from_name(self, product_name, product_type):
         """Infer weight and units from product name and type."""

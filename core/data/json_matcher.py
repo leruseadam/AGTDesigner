@@ -3025,9 +3025,6 @@ class JSONMatcher:
                     description = desc_clean
             
             # ===== STEP 10: Build COMPLETE product with ALL required fields =====
-            # Determine DOH value based on product type
-            doh_value = self._determine_doh_value(product_type, description)
-            
             product = {
                 # Core identification
                 'Product Name*': description,  # Use standardized format
@@ -3069,10 +3066,6 @@ class JSONMatcher:
                 # Ratios
                 'Ratio': ratio,
                 'Ratio_or_THC_CBD': ratio,
-                
-                # DOH Compliance
-                'DOH': doh_value,
-                'DOH Compliant (Yes/No)': doh_value,
                 
                 # Metadata
                 'Source': 'JSON - No DB Match',

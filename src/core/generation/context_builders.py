@@ -28,29 +28,19 @@ def build_context(record, doc, template_type='vertical'):
     context['ratio_or_thc_cbd'] = record.get('Ratio_or_THC_CBD', '')
     
     # Lineage and DOH
-    # Use canonical_lineage or currentLineage if present, fallback to Lineage (to match UI and DOCX export logic)
-    lineage = (
-        record.get('canonical_lineage') or
-        record.get('currentLineage') or
-        record.get('Lineage', '')
-    )
+    context['lineage'] = record.get('Lineage', '')
     context['doh'] = record.get('DOH', '')
-
+    
     # Vendor information - only include for classic types
     product_type = record.get('Product Type*', '').lower()
     classic_types = ["flower", "pre-roll", "infused pre-roll", "concentrate", 
                     "solventless concentrate", "vape cartridge", "rso/co2 tankers"]
-    valid_classic_lineages = {"SATIVA", "HYBRID", "INDICA", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD"}
-
+    
     if product_type in classic_types:
-        # Only allow valid classic lineages, default to HYBRID if not valid
-        lineage_upper = str(lineage).strip().upper()
-        context['lineage'] = lineage_upper if lineage_upper in valid_classic_lineages else "HYBRID"
         context['vendor'] = record.get('Vendor', '')
     else:
-        context['lineage'] = lineage
         context['vendor'] = ''  # No vendor for non-classic types
-
+    
     return context
 
 def build_label_context(record):
@@ -64,22 +54,7 @@ def build_label_context(record):
         Dictionary containing label-specific context data
     """
     context = build_context(record, None)
-    # Ensure lineage is normalized for label context as well (same logic as build_context)
-    lineage = (
-        record.get('canonical_lineage') or
-        record.get('currentLineage') or
-        record.get('Lineage', '')
-    )
-    product_type = record.get('Product Type*', '').lower()
-    classic_types = ["flower", "pre-roll", "infused pre-roll", "concentrate", 
-                    "solventless concentrate", "vape cartridge", "rso/co2 tankers"]
-    valid_classic_lineages = {"SATIVA", "HYBRID", "INDICA", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD"}
-    if product_type in classic_types:
-        lineage_upper = str(lineage).strip().upper()
-        context['lineage'] = lineage_upper if lineage_upper in valid_classic_lineages else "HYBRID"
-    else:
-        context['lineage'] = lineage
-
+    
     # Add label-specific formatting
     if context.get('price'):
         try:
@@ -90,11 +65,11 @@ def build_label_context(record):
                 context['formatted_price'] = f"${price_float:.2f}"
         except (ValueError, TypeError):
             context['formatted_price'] = str(context['price'])
-
+    
     # Format description for label display
     if context.get('description'):
         context['formatted_description'] = context['description'][:100] + '...' if len(context['description']) > 100 else context['description']
-
+    
     return context
 
 def process_chunk(chunk, orientation='vertical', scale_factor=1.0):

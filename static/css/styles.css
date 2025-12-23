@@ -43,31 +43,6 @@
   width: 100% !important;
 }
 
-/* Add Product Modal Theming */
-#addProductModal .modal-content {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  border: 2px solid var(--accent-color);
-  border-radius: 10px;
-  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-}
-#addProductModal .modal-header {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--accent-color);
-}
-#addProductModal .modal-title {
-  color: var(--accent-color);
-  font-weight: 600;
-}
-#addProductModal .modal-body {
-  background: transparent;
-  color: var(--text-primary);
-}
-#addProductModal .btn-close {
-  filter: invert(1) grayscale(1) brightness(2);
-}
-
 @media (min-width: 992px) {
   .help-button-container {
     margin: 0.5rem 0 1rem 0 !important;

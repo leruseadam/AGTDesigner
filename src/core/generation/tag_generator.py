@@ -1133,24 +1133,10 @@ def process_chunk(args):
             # CRITICAL FIX: Use Excel processor's weight normalization with Excel-first priority
             from src.core.data.excel_processor import ExcelProcessor
             excel_processor = ExcelProcessor()
-
             weight_units = excel_processor._format_weight_units(row, excel_priority=True)
-            # Always abbreviate grams/ounces in output (never full spelling)
-            def abbreviate_weight_units(val):
-                if not val:
-                    return val
-                # Replace all full spellings with abbreviations
-                val = re.sub(r'\bgrams?\b', 'g', val, flags=re.IGNORECASE)
-                val = re.sub(r'\bounces?\b', 'oz', val, flags=re.IGNORECASE)
-                val = re.sub(r'\bgram\b', 'g', val, flags=re.IGNORECASE)
-                val = re.sub(r'\bounce\b', 'oz', val, flags=re.IGNORECASE)
-                # Remove any double abbreviations (e.g., 'g g', 'oz oz')
-                val = re.sub(r'\b(g|oz)\s+\1\b', r'\1', val, flags=re.IGNORECASE)
-                return val
-            weight_units = abbreviate_weight_units(weight_units)
-
+            
             print(f"DEBUG: Excel-first weight construction - Weight*: '{row.get('Weight*', '')}', Units: '{row.get('Units', '')}' -> '{weight_units}'")
-
+            
             # Preserve original ProductName; keep Description as the clean field
             label_data["ProductName"] = product_name  # Do not repurpose ProductName
             label_data["Description"] = description  # Primary clean display field
@@ -1231,20 +1217,6 @@ def process_chunk(args):
                     lineage_val = 'MIXED'  # Default for non-classic types
                 print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
                 
-            # Ensure classic types never have MIXED lineage: convert to HYBRID
-            try:
-                # Any value that isn't a canonical lineage should become HYBRID for classic types
-                valid_lineages = {k.strip().upper() for k in LINEAGE_COLOR_MAP.keys()}
-                if is_classic_type:
-                    # Treat 'MIXED' as invalid for classic types even if present in color map
-                    up = lineage_val.strip().upper() if isinstance(lineage_val, str) else ''
-                    if not up or up == 'MIXED' or up not in valid_lineages:
-                        lineage_val = 'HYBRID'
-            except Exception:
-                # Defensive: if something unexpected occurs, fall back to HYBRID for classic
-                if is_classic_type:
-                    lineage_val = 'HYBRID'
-
             # No extra space before Lineage in the output
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
             
@@ -1319,29 +1291,6 @@ def process_chunk(args):
             context[f"Label{i+1}"] = label_data
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
-
-    # DEFENSIVE NORMALIZATION: Ensure all label contexts use canonical lineage values
-    # This guarantees classic types never output non-canonical values like 'MIXED'
-    try:
-        from src.core.constants import VALID_CLASSIC_LINEAGES, CLASSIC_TYPES
-        for key, ld in list(context.items()):
-            if not isinstance(ld, dict):
-                continue
-            ptype = (ld.get('ProductType') or '').strip().lower()
-            if ptype in CLASSIC_TYPES:
-                lin = str(ld.get('Lineage', '')).strip().upper() if ld.get('Lineage') is not None else ''
-                if not lin or lin == 'MIXED' or lin not in VALID_CLASSIC_LINEAGES:
-                    ld['Lineage'] = 'HYBRID'
-                    # Also sync ProductBrand fields which templates sometimes use
-                    ld['ProductBrand'] = 'HYBRID'
-                    ld['ProductBrand_Center'] = 'HYBRID'
-            else:
-                # Normalize non-classic lineage fields to preserve case (keep brand fallback)
-                if ld.get('Lineage') is None or str(ld.get('Lineage')).strip() == '':
-                    ld['Lineage'] = 'MIXED'
-    except Exception:
-        # Non-fatal - if normalization fails, proceed and let earlier logic handle it
-        logger.debug('Defensive lineage normalization failed (non-fatal)')
 
     # Render template
     if DEBUG_ENABLED:
@@ -1710,21 +1659,6 @@ def create_safe_document():
     except Exception as e:
         logger.error(f"Error creating safe document: {e}")
         raise
-
-
-def _normalize_lineage_for_classic(lineage_val, is_classic_type):
-    """Helper for testing: ensure classic types never return 'MIXED'."""
-    try:
-        # Use LINEAGE_COLOR_MAP to validate canonical lineage values
-        valid_lineages = {k.strip().upper() for k in LINEAGE_COLOR_MAP.keys()}
-        up = lineage_val.strip().upper() if isinstance(lineage_val, str) else ''
-        # Treat 'MIXED' as invalid for classic types even if present in the map
-        if is_classic_type and (not up or up == 'MIXED' or up not in valid_lineages):
-            return 'HYBRID'
-    except Exception:
-        if is_classic_type:
-            return 'HYBRID'
-    return lineage_val
 
 
 
