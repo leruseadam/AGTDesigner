@@ -125,51 +125,66 @@ def sample_products():
 @pytest.fixture(scope='function')
 def populated_db(temp_db, sample_products):
     """Create a database populated with sample products."""
+    from datetime import datetime
     conn = sqlite3.connect(temp_db)
     cursor = conn.cursor()
     
-    # Create products table with proper schema matching the app
+    # Table should already exist from temp_db fixture, but ensure it has correct schema
+    # Drop and recreate to match exact schema
+    cursor.execute('DROP TABLE IF EXISTS products')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             "Product Name*" TEXT NOT NULL,
-            "Product Brand" TEXT,
+            normalized_name TEXT NOT NULL,
+            "Product Type*" TEXT NOT NULL,
             "Vendor/Supplier*" TEXT,
-            "Product Type*" TEXT,
-            "Weight*" REAL,
-            "Weight Unit* (grams/gm or ounces/oz)" TEXT,
-            "Price* (Tier Name for Bulk)" REAL,
+            "Product Brand" TEXT,
+            Description TEXT,
+            "Weight*" TEXT,
+            Units TEXT,
+            Price TEXT,
             Lineage TEXT,
             "Product Strain" TEXT,
             "Internal Product Identifier" TEXT,
-            Description TEXT,
-            Units TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            first_seen_date TEXT NOT NULL,
+            last_seen_date TEXT NOT NULL,
+            total_occurrences INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )
     ''')
     
+    now = datetime.now().isoformat()
+    
     for product in sample_products:
+        # Normalize product name for normalized_name column
+        normalized_name = product['product_name'].lower().strip()
+        
         cursor.execute('''
             INSERT INTO products (
-                "Product Name*", "Product Brand", "Vendor/Supplier*", "Product Type*",
-                "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Price* (Tier Name for Bulk)", 
+                "Product Name*", normalized_name, "Product Brand", "Vendor/Supplier*", "Product Type*",
+                "Weight*", Units, Price, 
                 Lineage, "Product Strain", "Internal Product Identifier",
-                Description, Units
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                Description, first_seen_date, last_seen_date, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             product['product_name'],
+            normalized_name,
             product['product_brand'],
             product['vendor'],
             product['product_type'],
-            product['weight'],
+            str(product['weight']),
             product['weight_unit'],
-            product['price'],
+            str(product['price']),
             product['lineage'],
             product['strain'],
             product['sku'],
             product['description'],
-            product['units']
+            now,
+            now,
+            now,
+            now
         ))
     
     conn.commit()
