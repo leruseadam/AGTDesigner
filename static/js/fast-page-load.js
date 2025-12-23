@@ -9,25 +9,16 @@
     
     console.log('⚡ Fast page load optimization v2.1.0 enabled');
     
-    // CRITICAL: Clear cache if no file uploaded
-    // Prevents showing stale cached data from previous sessions
-    // NOTE: Only clear sessionStorage, keep localStorage for faster reloads
+    // NOTE: Preserve cached tag lists even when no Excel file is present.
+    // Previous behavior cleared sessionStorage when no file was uploaded which
+    // caused the tag lists to disappear for users relying on cached data.
+    // Keep localStorage/sessionStorage intact so cached tags remain available.
     const fileInfoText = document.getElementById('fileInfoText');
     const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded');
     if (!hasUploadedFile) {
-        console.log('🗑️ No uploaded file detected - clearing stale sessionStorage cache (keeping localStorage)');
-        // Clear all tag-related cache entries from sessionStorage only
-        if (window.sessionStorage) {
-            const keysToRemove = [];
-            for (let i = 0; i < sessionStorage.length; i++) {
-                const key = sessionStorage.key(i);
-                if (key && key.includes('agt_available_tags')) {
-                    keysToRemove.push(key);
-                }
-            }
-            keysToRemove.forEach(key => sessionStorage.removeItem(key));
-            console.log(`✅ Cleared ${keysToRemove.length} stale sessionStorage cache entries`);
-        }
+        console.log('ℹ️ No uploaded file detected - preserving cached tag lists for instant access');
+        // Intentionally do not clear sessionStorage/localStorage here.
+        // If a manual cache clear is required, use the explicit UI control instead.
     }
     
     // Store original checkForExistingData function
