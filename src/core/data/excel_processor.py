@@ -5080,10 +5080,10 @@ class ExcelProcessor:
                     has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in values)
                     values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
                 
-            # Remove duplicates and sort
-            values = list(set(values))
-            values.sort()
-            options[filter_key] = clean_list(values)
+                # Remove duplicates and sort
+                values = list(set(values))
+                values.sort()
+                options[filter_key] = clean_list(values)
             else:
                 options[filter_key] = []
         
