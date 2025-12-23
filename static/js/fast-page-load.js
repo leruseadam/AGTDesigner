@@ -91,15 +91,76 @@
                 console.log('Error checking for current file:', error);
             }
             
-            // If no file exists, show upload prompt and exit early
+            // If no file exists, prefer cached tags (if available) before showing upload prompt
             const availableTagsContainer = document.getElementById('availableTags');
             if (!hasFile && availableTagsContainer) {
-                console.log('📤 No file uploaded - showing upload prompt');
-                // Hide any loading splash
+                console.log('📤 No file uploaded - checking cache before showing upload prompt');
+                const cachedTags = this.loadAvailableTagsFromCache ? this.loadAvailableTagsFromCache() : null;
+                if (cachedTags && Array.isArray(cachedTags) && cachedTags.length > 0) {
+                    console.log(`⚡ INSTANT CACHE HIT (no file): ${cachedTags.length} tags available`);
+                    const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
+                    this.state.tags = [...cachedTags];
+                    this.state.originalTags = [...cachedTags];
+                    this.state.hydratedFromCache = true;
+
+                    requestAnimationFrame(() => {
+                        console.log('🎨 Rendering cached tags (no file)...');
+                        if (this._updateAvailableTags) {
+                            this._updateAvailableTags(cachedTags, null);
+                        }
+
+                        if (savedSelectedTags.length > 0) {
+                            this.state.persistentSelectedTags = [...savedSelectedTags];
+                            this.state.selectedTags = new Set(savedSelectedTags);
+                            requestAnimationFrame(() => {
+                                savedSelectedTags.forEach(tagName => {
+                                    const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+                                    checkboxes.forEach(cb => { if (!cb.checked) cb.checked = true; });
+                                });
+                                if (this.getSelectedTagObjects && this.updateSelectedTags) {
+                                    const selectedTagObjects = this.getSelectedTagObjects();
+                                    if (selectedTagObjects.length > 0) {
+                                        this.updateSelectedTags(selectedTagObjects);
+                                    }
+                                }
+                            });
+                        }
+
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }
+                    });
+
+                    // Background: fetch selected tags and filters
+                    Promise.allSettled([
+                        this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
+                        this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
+                    ]).then(() => {
+                        console.log('✅ Background: Selected tags and filters loaded (no file cached)');
+                        if (savedSelectedTags.length > 0 && this.state.persistentSelectedTags.length === 0) {
+                            this.state.persistentSelectedTags = [...savedSelectedTags];
+                            this.state.selectedTags = new Set(savedSelectedTags);
+                            if (this.getSelectedTagObjects && this.updateSelectedTags) {
+                                const selectedTagObjects = this.getSelectedTagObjects();
+                                if (selectedTagObjects.length > 0) {
+                                    this.updateSelectedTags(selectedTagObjects);
+                                }
+                            }
+                        }
+                    }).catch(err => { console.warn('⚠️ Background load error (non-critical):', err); });
+
+                    return; // Exit early - rendered cached tags
+                }
+
+                // No cache available - show upload prompt
+                console.log('📤 No cache found - showing upload prompt');
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                // Show upload prompt instead of loading tags
                 availableTagsContainer.innerHTML = `
                     <div class="text-center py-5">
                         <div class="upload-prompt">
@@ -112,7 +173,6 @@
                         </div>
                     </div>
                 `;
-                // Complete splash screen
                 if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
