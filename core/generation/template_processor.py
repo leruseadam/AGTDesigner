@@ -183,6 +183,8 @@ class TemplateProcessor:
         # PERFORMANCE: QR code and DOH image caching
         self._qr_cache = {}  # Cache QR codes by product name
         self._doh_cache = {}  # Cache DOH images
+        
+        if self.template_type in ['horizontal', 'vertical', 'double']:
             self.logger.info(f"CRITICAL FIX: Chunking disabled for template '{self.template_type}' - chunk_size will match total records")
         else:
             self.logger.info(f"Chunking retained for template '{self.template_type}' with chunk_size {self.chunk_size}")

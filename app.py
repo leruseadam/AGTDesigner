@@ -8240,16 +8240,15 @@ def generate_labels():
                     enrichment_map = {}  # Maps record index to (product_name, strain_name)
                     
                     for idx, record in enumerate(records):
-                        # Only enrich if lineage is missing or empty
-                        existing_lineage = record.get('Lineage') or record.get('lineage') or record.get('canonical_lineage')
-                        if not existing_lineage or str(existing_lineage).strip() in ['', 'None', 'nan']:
-                            product_name = record.get('ProductName') or record.get('Product Name*', '')
-                            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
-                            if product_name:
-                                products_to_enrich.append(product_name)
-                                enrichment_map[idx] = (product_name, product_strain)
-                                if product_strain:
-                                    strains_to_enrich.add(product_strain)
+                        # CRITICAL FIX: ALWAYS enrich ALL records with database lineage to ensure UI matches output
+                        # Database lineage (canonical_lineage/sovereign_lineage) is the source of truth
+                        product_name = record.get('ProductName') or record.get('Product Name*', '')
+                        product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+                        if product_name:
+                            products_to_enrich.append(product_name)
+                            enrichment_map[idx] = (product_name, product_strain)
+                            if product_strain:
+                                strains_to_enrich.add(product_strain)
                     
                     if products_to_enrich or strains_to_enrich:
                         # Batch query product lineages
@@ -8266,7 +8265,8 @@ def generate_labels():
                                 normalized_to_original = {str(p).strip().lower(): p for p in products_to_enrich}
                                 
                                 batch_query = f'''
-                                    SELECT "Product Name*", "Lineage"
+                                    SELECT "Product Name*", 
+                                           COALESCE("canonical_lineage", "Lineage") as lineage
                                     FROM products
                                     WHERE LOWER(TRIM("Product Name*")) IN ({placeholders})
                                     ORDER BY id DESC
@@ -8280,6 +8280,7 @@ def generate_labels():
                                         pname_normalized = str(pname).strip().lower()
                                         if pname_normalized in normalized_to_original:
                                             original_name = normalized_to_original[pname_normalized]
+                                            # Use canonical_lineage if available, otherwise fall back to Lineage
                                             product_lineage_map[original_name] = str(lineage).strip().upper()
                             except Exception as batch_err:
                                 logging.warning(f"Batch product lineage query failed: {batch_err}")
@@ -8306,23 +8307,33 @@ def generate_labels():
                             except Exception as strain_err:
                                 logging.warning(f"Batch strain lineage query failed: {strain_err}")
                         
-                        # Apply enriched lineage to records
+                        # Apply enriched lineage to records - ALWAYS overwrite with database lineage
                         enriched_count = 0
                         for idx, (product_name, product_strain) in enrichment_map.items():
                             record = records[idx]
                             db_lineage = None
+                            old_lineage = record.get('Lineage') or record.get('lineage') or ''
                             
-                            # Try product-level lineage first
+                            # Try product-level lineage first (database is source of truth)
                             if product_name in product_lineage_map:
                                 db_lineage = product_lineage_map[product_name]
                             # Fall back to strain-level lineage
                             elif product_strain and product_strain in strain_lineage_map:
                                 db_lineage = strain_lineage_map[product_strain]
                             
+                            # CRITICAL FIX: ALWAYS overwrite with database lineage if it exists
+                            # This ensures tag output matches UI (which uses canonical_lineage/currentLineage)
                             if db_lineage:
+                                # Only log if lineage actually changed
+                                if old_lineage and str(old_lineage).strip().upper() != str(db_lineage).strip().upper():
+                                    logging.debug(f"🔄 Lineage update for '{product_name}': '{old_lineage}' → '{db_lineage}' (using database value)")
                                 record['Lineage'] = db_lineage
-                                record['lineage'] = db_lineage
+                                record['lineage'] = db_lineage.lower() if db_lineage else ''
+                                record['canonical_lineage'] = db_lineage  # Also set canonical_lineage for consistency
                                 enriched_count += 1
+                            elif old_lineage:
+                                # No database lineage found, but record has lineage - log warning
+                                logging.debug(f"⚠️ No database lineage found for '{product_name}', keeping existing: '{old_lineage}'")
                         
                         if enriched_count > 0:
                             logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
