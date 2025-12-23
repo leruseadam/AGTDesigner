@@ -1330,7 +1330,7 @@ const TagManager = {
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
             
-            // CRITICAL FIX: Hide splash BEFORE rendering to prevent visual glitches
+            // CRITICAL FIX: Hide splash IMMEDIATELY before rendering
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
@@ -1339,19 +1339,21 @@ const TagManager = {
                 AppLoadingSplash.complete();
             }
             
-            // CRITICAL FIX: Use requestAnimationFrame to ensure immediate render
-            requestAnimationFrame(() => {
-                this._updateAvailableTags(cachedTags, null);
-                verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+            // PERFORMANCE: Render tags INSTANTLY without requestAnimationFrame delay
+            this._updateAvailableTags(cachedTags, null);
+            verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+            
+            // PERFORMANCE: Build filters INSTANTLY from cached tags
+            this.buildFilterOptionsFromTags(cachedTags);
 
-                // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
-                // This makes page reloads instant while still updating in background
-                this._refreshLineageFromDatabase(cachedTags).then(() => {
-                    verboseLog('✅ Background lineage check complete (fast mode)');
-                }).catch(err => {
-                    console.warn('⚠️ Background lineage check failed (non-critical):', err);
-                });
+            // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
+            // This makes page reloads instant while still updating in background
+            this._refreshLineageFromDatabase(cachedTags).then(() => {
+                verboseLog('✅ Background lineage check complete (fast mode)');
+            }).catch(err => {
+                console.warn('⚠️ Background lineage check failed (non-critical):', err);
             });
+            
             return true;
         }
         return false;
@@ -9143,19 +9145,29 @@ const TagManager = {
             }
         }
         
+        // PERFORMANCE: Check cache FIRST before setting flags or showing splash
+        const cachedTags = this.loadAvailableTagsFromCache();
+        const hasCache = cachedTags && cachedTags.length > 0;
+        const availableTagsContainer = document.getElementById('availableTags');
+        const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
+        
+        // PERFORMANCE: If cache exists, hydrate immediately and return (instant load)
+        if (hasCache && !hasExistingTags) {
+            const hydrated = this.hydrateAvailableTagsFromCache();
+            if (hydrated) {
+                console.log('✅ INSTANT LOAD: Tags rendered from cache before any API calls');
+                return true;
+            }
+        }
+        
         // Set flag to prevent concurrent calls
         this._fetchingAvailableTags = true;
         this._fetchingAvailableTagsStartTime = Date.now();
         // Track background-processing retries (reset on success)
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
-        // CRITICAL FIX: Show splash IMMEDIATELY without any delay or conditions
-        // This ensures users see loading feedback instantly
-        const availableTagsContainer = document.getElementById('availableTags');
-        const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
-        
-        // Show splash immediately before any processing
-        if (!hasExistingTags) {
+        // Only show splash if no existing tags AND no cache (prevents splash on instant cache load)
+        if (!hasExistingTags && !hasCache) {
             this.showActionSplash('Loading tags...');
             if (availableTagsContainer) {
                 availableTagsContainer.innerHTML = `
@@ -9167,10 +9179,11 @@ const TagManager = {
                     </div>
                 `;
             }
-        } else {
+        } else if (hasExistingTags && !hasCache) {
             // For warm refreshes, just show the splash without clearing the current list.
             this.showActionSplash('Refreshing tags...');
         }
+        // If cache exists, skip splash entirely for instant load
         
         // CRITICAL FIX: Add timeout to force hide splash if fetch takes too long
         const splashTimeout = setTimeout(() => {
@@ -9195,7 +9208,7 @@ const TagManager = {
             
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
-            if (!hasExistingTags) {
+            if (!hasExistingTags && !hasCache) {
                 safetyTimeout = setTimeout(() => {
                     console.warn('⚠️ Safety timeout: Hiding loading spinner');
                     // Just hide the splash, don't show error message
@@ -9206,6 +9219,7 @@ const TagManager = {
                 }, 60000); // 60 seconds - very generous timeout
             }
             
+            // PERFORMANCE: Double-check cache (in case it was just saved)
             const hydratedFromCache = this.hydrateAvailableTagsFromCache();
             if (hydratedFromCache) {
                 console.log('✅ Tags rendered instantly from cache');
@@ -10373,13 +10387,6 @@ const TagManager = {
         }
         this._initializing = true;
 
-        // CRITICAL FIX: Show splash IMMEDIATELY before any processing
-        // This prevents blank screen while cache is being checked and rendered
-        console.log('⚡ Showing splash screen immediately to prevent blank screen');
-        AppLoadingSplash.show();
-        AppLoadingSplash.startAutoAdvance();
-        AppLoadingSplash.updateProgress(10, 'Initializing...');
-
         console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
         console.log('⚡ TagManager initializing...');
         const availableTagsContainer = document.getElementById('availableTags');
@@ -10399,50 +10406,36 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
 
-        // Update splash progress
-        AppLoadingSplash.updateProgress(30, 'Loading cached data...');
+        // PERFORMANCE: Check cache FIRST before showing splash for instant load
+        const cachedTags = this.loadAvailableTagsFromCache();
+        const hasFile = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+        const shouldShowSplash = !cachedTags || !cachedTags.length || !hasFile || hasFile === 'nofile' || hasFile === '' || hasFile === 'database';
+        
+        if (shouldShowSplash) {
+            // Only show splash if no cache available
+            console.log('⚡ No cache - showing splash');
+            AppLoadingSplash.show();
+            AppLoadingSplash.startAutoAdvance();
+            AppLoadingSplash.updateProgress(10, 'Initializing...');
+        } else {
+            // Cache exists - skip splash for instant load
+            console.log('⚡ Cache detected - skipping splash for instant load');
+        }
 
         // CRITICAL FIX: Hydrate from cache FIRST synchronously for instant display
         // This ensures tags appear immediately on page reload before any API calls
         const hydrated = this.hydrateAvailableTagsFromCache();
         if (hydrated) {
             console.log(`⚡ INSTANT CACHE: Tags hydrated from cache, displayed immediately`);
-            AppLoadingSplash.updateProgress(60, 'Rendering tags...');
-
-            // CRITICAL FIX: Wait for tags to actually render before hiding splash
-            // Use requestAnimationFrame to ensure DOM has updated
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    // Check if tags are actually visible
-                    const tagItems = document.querySelectorAll('.tag-item');
-                    if (tagItems.length > 0) {
-                        console.log(`✅ ${tagItems.length} tags rendered, hiding splash`);
-                        AppLoadingSplash.updateProgress(100, 'Ready!');
-                        setTimeout(() => {
-                            AppLoadingSplash.stopAutoAdvance();
-                            AppLoadingSplash.complete();
-                        }, 200); // Brief delay to show "Ready!" message
-                    } else {
-                        console.log('⚠️ Tags not yet rendered, keeping splash visible');
-                    }
-                });
-            });
-            // CRITICAL FIX: Build filter options from cached tags IMMEDIATELY for instant filters
-            // This MUST happen BEFORE setting initialized=true to prevent race conditions
-            let filtersPopulated = false;
-            if (this.state.tags && this.state.tags.length > 0) {
-                console.log('⚡ Building filter options from', this.state.tags.length, 'cached tags immediately...');
-                // Force synchronous rendering by using requestAnimationFrame
-                this.buildFilterOptionsFromTags(this.state.tags);
-                // Force browser to render immediately
-                requestAnimationFrame(() => {
-                    console.log('✅ Filter options rendered to DOM');
-                });
-                filtersPopulated = true;
-                console.log('✅ Filter options built from cache');
-            } else {
-                console.log('❌ No tags available for filter building');
+            
+            // PERFORMANCE: Hide splash IMMEDIATELY - tags are already rendered
+            if (AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
             }
+            
+            // Filters are already built in hydrateAvailableTagsFromCache
+            const filtersPopulated = true;
 
             // CRITICAL: Set initialized flags AFTER building filters to prevent early returns
             this.state.initialized = true;
