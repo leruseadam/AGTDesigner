@@ -121,12 +121,34 @@ def populated_db(temp_db, sample_products):
     conn = sqlite3.connect(temp_db)
     cursor = conn.cursor()
     
+    # Create products table with proper schema matching the app
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            "Product Name*" TEXT NOT NULL,
+            "Product Brand" TEXT,
+            "Vendor/Supplier*" TEXT,
+            "Product Type*" TEXT,
+            "Weight*" REAL,
+            "Weight Unit* (grams/gm or ounces/oz)" TEXT,
+            "Price* (Tier Name for Bulk)" REAL,
+            Lineage TEXT,
+            "Product Strain" TEXT,
+            "Internal Product Identifier" TEXT,
+            Description TEXT,
+            Units TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     for product in sample_products:
         cursor.execute('''
             INSERT INTO products (
-                product_name, product_brand, vendor, product_type,
-                weight, weight_unit, price, lineage, strain, sku,
-                description, units
+                "Product Name*", "Product Brand", "Vendor/Supplier*", "Product Type*",
+                "Weight*", "Weight Unit* (grams/gm or ounces/oz)", "Price* (Tier Name for Bulk)", 
+                Lineage, "Product Strain", "Internal Product Identifier",
+                Description, Units
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             product['product_name'],
