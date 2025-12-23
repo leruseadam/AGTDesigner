@@ -3648,9 +3648,25 @@ class ExcelProcessor:
                 logger.debug("No product database available for tag enrichment")
                 return tags
             
-            # Batch lookup products from database
-            product_names = [tag.get('Product Name*', tag.get('ProductName', '')) for tag in tags if tag.get('Product Name*') or tag.get('ProductName')]
+            # PERFORMANCE: Only enrich tags that don't already have database lineage
+            # Skip tags that already have canonical_lineage/currentLineage to speed up loading
+            tags_to_enrich = []
+            tags_with_lineage = 0
+            for tag in tags:
+                if tag.get('canonical_lineage') or tag.get('currentLineage'):
+                    tags_with_lineage += 1
+                else:
+                    tags_to_enrich.append(tag)
+            
+            # If most tags already have lineage, skip enrichment for speed
+            if tags_with_lineage >= len(tags) * 0.9:  # 90%+ already have lineage
+                logger.info(f"⚡ Skipping enrichment - {tags_with_lineage}/{len(tags)} tags already have lineage")
+                return tags
+            
+            # Batch lookup products from database (only for tags missing lineage)
+            product_names = [tag.get('Product Name*', tag.get('ProductName', '')) for tag in tags_to_enrich if tag.get('Product Name*') or tag.get('ProductName')]
             if not product_names:
+                logger.debug("No product names to enrich")
                 return tags
             
             # Get database records in batch
@@ -3668,8 +3684,15 @@ class ExcelProcessor:
                     db_lookup[normalized_name] = db_record
             
             # Enrich each tag with database values
+            # PERFORMANCE: Only enrich tags that don't already have lineage
             enriched_tags = []
+            enriched_count = 0
             for tag in tags:
+                # Skip enrichment if tag already has lineage (performance optimization)
+                if tag.get('canonical_lineage') or tag.get('currentLineage'):
+                    enriched_tags.append(tag)
+                    continue
+                
                 product_name = tag.get('Product Name*', tag.get('ProductName', ''))
                 if not product_name:
                     enriched_tags.append(tag)
@@ -3687,6 +3710,7 @@ class ExcelProcessor:
                         tag['lineage'] = db_lineage
                         tag['canonical_lineage'] = db_lineage
                         tag['currentLineage'] = db_lineage
+                        enriched_count += 1
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
                         db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')
@@ -3706,6 +3730,9 @@ class ExcelProcessor:
                         tag['CBD'] = db_record.get('CBD test result')
                 
                 enriched_tags.append(tag)
+            
+            if enriched_count > 0:
+                logger.info(f"✅ Enriched {enriched_count} tags with database values (skipped {tags_with_lineage} that already had lineage)")
             
             logger.debug(f"Enriched {len(enriched_tags)} tags with database values")
             return enriched_tags

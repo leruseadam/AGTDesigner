@@ -6886,13 +6886,25 @@ def _normalize_weight_fields(record):
     
     return record
 
-def _align_tags_with_db_lineage(tags, store_name):
+def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
     """
     Ensure tags shown in the UI use the latest lineage from the database.
     Returns a shallow-copied list so cached tag objects are not mutated.
+    
+    Args:
+        tags: List of tag dictionaries
+        store_name: Store name for database lookup
+        skip_if_aligned: If True, skip alignment if tags already have canonical_lineage/currentLineage
     """
     if not tags or not isinstance(tags, list):
         return tags
+    
+    # PERFORMANCE: Skip alignment if tags already have database lineage fields
+    if skip_if_aligned:
+        tags_with_lineage = sum(1 for t in tags if isinstance(t, dict) and (t.get('canonical_lineage') or t.get('currentLineage')))
+        if tags_with_lineage >= len(tags) * 0.9:  # 90%+ already have lineage
+            logging.debug(f"⚡ Skipping lineage alignment - {tags_with_lineage}/{len(tags)} tags already have lineage")
+            return tags
     
     try:
         product_db = get_product_database(store_name)
@@ -6902,9 +6914,16 @@ def _align_tags_with_db_lineage(tags, store_name):
         # Copy tags so we don't mutate cached objects
         aligned_tags = [tag.copy() if isinstance(tag, dict) else tag for tag in tags]
         
-        # Collect product names for lookup
-        product_names = [t.get('Product Name*') for t in aligned_tags if isinstance(t, dict) and t.get('Product Name*')]
+        # Collect product names for lookup (only those missing lineage)
+        product_names = []
+        for t in aligned_tags:
+            if isinstance(t, dict) and t.get('Product Name*'):
+                # Only align if missing canonical_lineage/currentLineage
+                if not (t.get('canonical_lineage') or t.get('currentLineage')):
+                    product_names.append(t.get('Product Name*'))
+        
         if not product_names:
+            logging.debug("⚡ No products need lineage alignment")
             return aligned_tags
         
         lineage_map = {}
@@ -6931,19 +6950,26 @@ def _align_tags_with_db_lineage(tags, store_name):
         if not lineage_map:
             return aligned_tags
         
-        # Apply lineage to tags
+        # Apply lineage to tags (only those that were missing it)
+        aligned_count = 0
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
             name = tag.get('Product Name*')
             if not name:
                 continue
-            db_lineage = lineage_map.get(str(name).lower().strip())
-            if db_lineage:
-                tag['Lineage'] = db_lineage
-                tag['lineage'] = db_lineage.lower()
-                tag['canonical_lineage'] = db_lineage
-                tag['currentLineage'] = db_lineage
+            # Only align if missing canonical_lineage/currentLineage
+            if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                db_lineage = lineage_map.get(str(name).lower().strip())
+                if db_lineage:
+                    tag['Lineage'] = db_lineage
+                    tag['lineage'] = db_lineage.lower()
+                    tag['canonical_lineage'] = db_lineage
+                    tag['currentLineage'] = db_lineage
+                    aligned_count += 1
+        
+        if aligned_count > 0:
+            logging.debug(f"✅ Aligned {aligned_count} tags with database lineage")
         
         return aligned_tags
     except Exception as e:
@@ -9005,7 +9031,8 @@ def get_available_tags():
             cached_tags = cache.get(cache_key)
             if cached_tags:
                 logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
+                # PERFORMANCE: Skip alignment if tags already have lineage
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
                 safe_cached_tags = make_json_safe(aligned_cached_tags)
                 return jsonify({
                     'tags': safe_cached_tags,
@@ -9038,14 +9065,15 @@ def get_available_tags():
                 # Return cached data instead of 429 error
                 cache_key = get_session_cache_key('available_tags')
                 cached_tags = cache.get(cache_key)
-                if cached_tags:
-                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
-                    safe_cached_tags = make_json_safe(aligned_cached_tags)
-                    return jsonify({
-                        'tags': safe_cached_tags,
-                        'total_count': len(safe_cached_tags),
-                        'source': 'rate-limited-cache'
-                    })
+            if cached_tags:
+                # PERFORMANCE: Skip alignment if tags already have lineage
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
+                safe_cached_tags = make_json_safe(aligned_cached_tags)
+                return jsonify({
+                    'tags': safe_cached_tags,
+                    'total_count': len(safe_cached_tags),
+                    'source': 'rate-limited-cache'
+                })
         
         # Record this request
         if client_ip not in get_available_tags._rate_limit_data:
@@ -9421,9 +9449,11 @@ def get_available_tags():
 
         # Force database lineage if we have any database lineage data
         if has_db_lineage or prefer_db:
-            logging.info("⚠️ Database lineage detected - forcing prefer_db mode to ensure DB lineage takes precedence")
-            fast_load = False  # Disable fast_load to ensure proper lineage alignment
+            logging.info("⚠️ Database lineage detected - enabling prefer_db mode to ensure DB lineage takes precedence")
+            # PERFORMANCE: Allow fast_load even when database lineage exists
+            # Enrichment will skip tags that already have lineage, and alignment happens later
             prefer_db = True  # CRITICAL: Always prefer database lineage when it exists
+            # Don't disable fast_load - let enrichment skip tags that already have lineage
 
             # Also check for recent lineage updates timestamp (for immediate cache clearing)
             lineage_update_ts = session.get('lineage_update_timestamp')
@@ -9464,8 +9494,9 @@ def get_available_tags():
 
         # CRITICAL: Never return cached tags when Excel data exists
         if fast_load and cached_tags and not recently_updated_lineage and not has_excel_data:
-            logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags) with DB lineage alignment")
-            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
+            logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags)")
+            # PERFORMANCE: Skip alignment if tags already have lineage (most cached tags do)
+            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
             safe_cached_tags = make_json_safe(aligned_cached_tags)
             return jsonify({
                 'tags': safe_cached_tags,
