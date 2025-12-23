@@ -7624,23 +7624,25 @@ def generate_labels():
                                     # CRITICAL FIX: ALWAYS use database lineage as source of truth for tag generation
                                     # UI lineage may contain sativa hybrid overrides that shouldn't affect tag output
                                     # Database lineage is the ONLY source of truth - ignore UI lineage completely
+                                    # IMPORTANT: Read ONLY from db_record (raw database value), NOT from processed_record
+                                    # which may have been modified by process_database_product_for_api()
                                     db_lineage_raw = (
                                         db_record.get('Lineage') or 
-                                        db_record.get('lineage') or 
                                         db_record.get('canonical_lineage') or
-                                        db_record.get('currentLineage') or
                                         db_record.get('sovereign_lineage') or
-                                        processed_record.get('Lineage') or 
-                                        processed_record.get('lineage') or 
-                                        processed_record.get('canonical_lineage') or
-                                        processed_record.get('currentLineage') or
-                                        processed_record.get('sovereign_lineage')
+                                        db_record.get('lineage') or 
+                                        db_record.get('currentLineage')
                                     )
+                                    
+                                    # Debug logging for Lemon Cherry Gelato
+                                    if 'lemon' in product_name_for_record.lower() or 'cherry' in product_name_for_record.lower():
+                                        logging.info(f"🔍 DEBUG LINEAGE: Product '{product_name_for_record}' - db_record Lineage='{db_record.get(\"Lineage\")}', canonical_lineage='{db_record.get(\"canonical_lineage\")}', db_lineage_raw='{db_lineage_raw}'")
                                     
                                     # CRITICAL: Always use database lineage, never UI lineage (which may have sativa hybrid override)
                                     if db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
                                         docx_lineage = str(db_lineage_raw).strip().upper()
-                                        logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}' (ignoring UI lineage to avoid sativa hybrid override)")
+                                        if 'lemon' in product_name_for_record.lower() or 'cherry' in product_name_for_record.lower():
+                                            logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}' (ignoring UI lineage to avoid sativa hybrid override)")
                                     else:
                                         # No database lineage found - use defaults based on product type
                                         product_type = processed_record.get('Product Type*', '').lower()
@@ -8320,17 +8322,23 @@ def generate_labels():
                             
                             # CRITICAL FIX: ALWAYS overwrite with database lineage if it exists
                             # This ensures tag output matches UI (which uses canonical_lineage/currentLineage)
+                            # IMPORTANT: Always overwrite even if lineage appears to match, to prevent sativa hybrid override issues
                             if db_lineage:
-                                # Only log if lineage actually changed
-                                if old_lineage and str(old_lineage).strip().upper() != str(db_lineage).strip().upper():
-                                    logging.debug(f"🔄 Lineage update for '{product_name}': '{old_lineage}' → '{db_lineage}' (using database value)")
+                                old_lineage_normalized = str(old_lineage).strip().upper() if old_lineage else ''
+                                db_lineage_normalized = str(db_lineage).strip().upper()
+                                # Always overwrite to ensure database value is used (prevents sativa hybrid override)
                                 record['Lineage'] = db_lineage
                                 record['lineage'] = db_lineage.lower() if db_lineage else ''
                                 record['canonical_lineage'] = db_lineage  # Also set canonical_lineage for consistency
                                 enriched_count += 1
+                                # Log if lineage changed or if it's a known sativa hybrid product (for debugging)
+                                if old_lineage_normalized != db_lineage_normalized:
+                                    logging.info(f"🔄 ENRICHMENT: Lineage update for '{product_name}': '{old_lineage}' → '{db_lineage}' (using database value)")
+                                elif 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
+                                    logging.info(f"✅ ENRICHMENT: Forced database lineage '{db_lineage}' for '{product_name}' (overriding any sativa hybrid override)")
                             elif old_lineage:
                                 # No database lineage found, but record has lineage - log warning
-                                logging.debug(f"⚠️ No database lineage found for '{product_name}', keeping existing: '{old_lineage}'")
+                                logging.warning(f"⚠️ ENRICHMENT: No database lineage found for '{product_name}', keeping existing: '{old_lineage}'")
                         
                         if enriched_count > 0:
                             logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
