@@ -7636,7 +7636,9 @@ def generate_labels():
                                     
                                     # Debug logging for Lemon Cherry Gelato
                                     if 'lemon' in product_name_for_record.lower() or 'cherry' in product_name_for_record.lower():
-                                        logging.info(f"🔍 DEBUG LINEAGE: Product '{product_name_for_record}' - db_record Lineage='{db_record.get(\"Lineage\")}', canonical_lineage='{db_record.get(\"canonical_lineage\")}', db_lineage_raw='{db_lineage_raw}'")
+                                        db_lineage = db_record.get('Lineage')
+                                        db_canonical_lineage = db_record.get('canonical_lineage')
+                                        logging.info(f"🔍 DEBUG LINEAGE: Product '{product_name_for_record}' - db_record Lineage='{db_lineage}', canonical_lineage='{db_canonical_lineage}', db_lineage_raw='{db_lineage_raw}'")
                                     
                                     # CRITICAL: Always use database lineage, never UI lineage (which may have sativa hybrid override)
                                     if db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
