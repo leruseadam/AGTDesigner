@@ -611,12 +611,9 @@ def _process_lineage_update_queue():
             try:
                 # Acquire lock and process update
                 with lineage_update_lock:
-                    logging.info(f"🔄 Processing queued lineage update: '{tag_name}' -> '{new_lineage}'")
                     result = callback()  # Execute the actual update logic
                     event.set()  # Signal completion
-                    if result:
-                        logging.info(f"✅ Queued lineage update completed: '{tag_name}' -> '{new_lineage}'")
-                    else:
+                    if not result:
                         logging.warning(f"⚠️  Queued lineage update returned False: '{tag_name}' -> '{new_lineage}'")
             except Exception as e:
                 logging.error(f"❌ Error processing queued lineage update: {e}")
@@ -889,7 +886,6 @@ def get_current_store_name(allow_fallback=True):
         
         # CRITICAL FIX: Check Flask session first (most reliable). Keep the value even if server instance changed.
         if session.get('selected_store'):
-            logging.debug(f"Returning store from session: {session.get('selected_store')}")
             return session.get('selected_store')
         
         # Fallback to IP-based selection
@@ -901,7 +897,7 @@ def get_current_store_name(allow_fallback=True):
                     # Check if the selection is still valid (not expired)
                     if is_store_selection_valid(ip_address, store_data):
                         if store_data.get('server_id') != SERVER_INSTANCE_ID:
-                            logging.info("IP store selection from previous server instance ignored")
+                            pass  # Ignore previous server instance selections
                         else:
                             # Also save to session for consistency
                             session['selected_store'] = store_data['store']
@@ -928,7 +924,6 @@ def has_store_selection():
         
         # CRITICAL FIX: Check Flask session FIRST (most reliable) and keep value even if server instance changed
         if session.get('selected_store'):
-            logging.debug(f"has_store_selection: Found store in session: {session.get('selected_store')}")
             return True
         
         # Fallback to IP-based selection
@@ -947,7 +942,6 @@ def has_store_selection():
                     # Also save to session for consistency
                     session['selected_store'] = store_data['store']
                     session['store_server_id'] = SERVER_INSTANCE_ID
-                    logging.debug(f"has_store_selection: Found store in IP selections and saved to session: {store_data['store']}")
                 return is_valid
         
         return False
@@ -1372,23 +1366,13 @@ def get_product_database(store_name=None):
     current_db_path = getattr(_product_database, 'db_path', None) if _product_database else None
     needs_reload = (_product_database is None or current_store_in_db != effective_store or current_db_path != db_path)
 
-    logging.info(
-        f"📦 Database load check: requested_store='{store_name}', "
-        f"resolved_store='{effective_store}', current_store_in_db='{current_store_in_db}', "
-        f"current_db_path='{current_db_path}', resolved_db_path='{db_path}', needs_reload={needs_reload}"
-    )
-
     if needs_reload:
         from src.core.data.product_database import ProductDatabase
-        logging.info(f"📦 Loading database for store '{effective_store}' from: {db_path}")
         _product_database = ProductDatabase(db_path)
         _product_database._store_name = effective_store
         if getattr(_product_database, 'db_path', db_path) != db_path:
             logging.warning(f"ProductDatabase db_path mismatch: {_product_database.db_path} != {db_path}")
-        logging.info(f"✅ ProductDatabase created with db_path: {_product_database.db_path}")
         _product_database.init_database()
-        if os.path.exists(db_path):
-            logging.info(f"✅ ProductDatabase loaded for store '{effective_store}' at: {db_path}")
 
     return _product_database
 
@@ -7989,36 +7973,35 @@ def generate_labels():
                     
                     if records:
                         logging.info(f"CRITICAL FIX: Created {len(records)} records from JSON matched products")
-                        
-                        # Apply database lineage override to JSON matched records
+
+                        # PERFORMANCE FIX: Batch lineage query for JSON matched records
                         logging.info("LINEAGE OVERRIDE: Checking for updated lineage in database for JSON matched products...")
-                        for record in records:
-                            product_name = record.get('Product Name*', record.get('ProductName', ''))
-                            if product_name:
-                                try:
-                                    store_name = get_current_store_name()
-                                    product_db = get_product_database(store_name)
-                                    if product_db:
-                                        # Try to get lineage by product name
-                                        db_lineage = product_db.get_product_lineage(product_name)
-                                        if db_lineage:
-                                            original_lineage = record.get('Lineage', '')
-                                            if str(db_lineage).strip() != str(original_lineage).strip():
-                                                logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' - Record: '{original_lineage}' -> Database: '{db_lineage}'")
-                                                record['Lineage'] = str(db_lineage).strip()
-                                        else:
-                                            # Try to get lineage by strain name
-                                            product_strain = record.get('Product Strain', '')
-                                            if product_strain:
-                                                strain_info = product_db.get_strain_info(product_strain)
-                                                if strain_info and strain_info.get('canonical_lineage'):
-                                                    db_lineage = strain_info['canonical_lineage']
-                                                    original_lineage = record.get('Lineage', '')
-                                                    if str(db_lineage).strip() != str(original_lineage).strip():
-                                                        logging.info(f"LINEAGE OVERRIDE (JSON): '{product_name}' (strain: '{product_strain}') - Record: '{original_lineage}' -> Database: '{db_lineage}'")
-                                                        record['Lineage'] = str(db_lineage).strip()
-                                except Exception as e:
-                                    logging.warning(f"Error checking lineage override for JSON product '{product_name}': {e}")
+                        store_name = get_current_store_name()
+                        product_db = get_product_database(store_name)
+
+                        if product_db:
+                            # Collect all product names
+                            product_names = [r.get('Product Name*', r.get('ProductName', '')) for r in records if r.get('Product Name*') or r.get('ProductName')]
+
+                            if product_names:
+                                # SINGLE bulk query
+                                db_products = product_db.get_products_by_names(product_names)
+
+                                # Build lineage map
+                                lineage_map = {}
+                                for db_prod in db_products:
+                                    pname = db_prod.get('Product Name*', '')
+                                    lineage = db_prod.get('Lineage') or db_prod.get('canonical_lineage') or db_prod.get('currentLineage')
+                                    if pname and lineage:
+                                        lineage_map[pname] = str(lineage).strip()
+
+                                # Apply lineage
+                                for record in records:
+                                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                                    if product_name and product_name in lineage_map:
+                                        record['Lineage'] = lineage_map[product_name]
+
+                                logging.info(f"✅ Applied lineage to JSON records in single batch query")
             
             # CRITICAL FIX: Log lineage values for debugging
             if records:
@@ -13764,6 +13747,17 @@ def search_products():
                 # Add product type search if available
                 if product_type_col:
                     search_mask = search_mask | vendor_filtered_df[product_type_col].str.contains(search_term, case=False, na=False)
+                
+                # Also search in Product Name* column if available
+                product_name_col = None
+                for col in ['Product Name*', 'ProductName', 'Product Name']:
+                    if col in vendor_filtered_df.columns:
+                        product_name_col = col
+                        break
+                
+                if product_name_col:
+                    search_mask = search_mask | vendor_filtered_df[product_name_col].str.contains(search_term, case=False, na=False)
+                    logging.info(f"Added Product Name* column '{product_name_col}' to search")
                 
                 # Also search in strain names if available
                 if 'Strain Names' in vendor_filtered_df.columns:
