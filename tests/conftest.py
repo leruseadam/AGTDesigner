@@ -32,33 +32,40 @@ def temp_db(test_data_dir):
     db_path = os.path.join(test_data_dir, 'test_product_database.db')
     conn = sqlite3.connect(db_path)
     
-    # Create basic schema
+    # Create schema matching actual ProductDatabase schema with quoted column names
     conn.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_name TEXT NOT NULL,
-            product_brand TEXT,
-            vendor TEXT,
-            product_type TEXT,
-            weight REAL,
-            weight_unit TEXT,
-            price REAL,
-            lineage TEXT,
-            strain TEXT,
-            sku TEXT,
-            description TEXT,
-            units TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            "Product Name*" TEXT NOT NULL,
+            normalized_name TEXT NOT NULL,
+            "Product Type*" TEXT NOT NULL,
+            "Vendor/Supplier*" TEXT,
+            "Product Brand" TEXT,
+            Description TEXT,
+            "Weight*" TEXT,
+            Units TEXT,
+            Price TEXT,
+            Lineage TEXT,
+            "Product Strain" TEXT,
+            "Internal Product Identifier" TEXT,
+            first_seen_date TEXT NOT NULL,
+            last_seen_date TEXT NOT NULL,
+            total_occurrences INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )
     ''')
     
     conn.execute('''
-        CREATE INDEX IF NOT EXISTS idx_product_name ON products(product_name)
+        CREATE INDEX IF NOT EXISTS idx_product_name ON products("Product Name*")
     ''')
     
     conn.execute('''
-        CREATE INDEX IF NOT EXISTS idx_vendor ON products(vendor)
+        CREATE INDEX IF NOT EXISTS idx_normalized_name ON products(normalized_name)
+    ''')
+    
+    conn.execute('''
+        CREATE INDEX IF NOT EXISTS idx_vendor ON products("Vendor/Supplier*")
     ''')
     
     conn.commit()
