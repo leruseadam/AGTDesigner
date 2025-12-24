@@ -1949,6 +1949,10 @@ const TagManager = {
         // Use requestAnimationFrame for immediate but safe execution
         requestAnimationFrame(() => {
             this._isUpdatingFilters = wasUpdatingFilters || false;
+            // CRITICAL: Always re-attach filter event listeners after updating filter dropdowns
+            if (typeof this.setupFilterEventListeners === 'function') {
+                this.setupFilterEventListeners();
+            }
         });
     },
     
