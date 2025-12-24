@@ -10475,11 +10475,12 @@ const TagManager = {
             console.log('⚡ Cache detected - skipping splash for instant load');
         }
 
-        // CRITICAL FIX: Hydrate from cache FIRST synchronously for instant display
-        // This ensures tags appear immediately on page reload before any API calls
-        const hydrated = this.hydrateAvailableTagsFromCache();
+        // CRITICAL FIX: Check if already hydrated from cache (may have been done by inline script)
+        // Then try to hydrate if not already done
+        const alreadyHydrated = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
+        const hydrated = alreadyHydrated || this.hydrateAvailableTagsFromCache();
         if (hydrated) {
-            console.log(`⚡ INSTANT CACHE: Tags hydrated from cache, displayed immediately`);
+            console.log(`⚡ INSTANT CACHE: Tags ${alreadyHydrated ? 'already' : ''} hydrated from cache, displayed immediately`);
             
             // PERFORMANCE: Hide splash IMMEDIATELY - tags are already rendered
             if (AppLoadingSplash.isVisible) {

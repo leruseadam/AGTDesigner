@@ -199,21 +199,16 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   #availableTags .tag-name,
   #availableTags .tag-text,
   #availableTags .tag-info,
-  #selectedTags,
-  #selectedTags *,
-  #selectedTags .tag-item,
   #selectedTags .tag-entry,
   #selectedTags .tag-name,
   #selectedTags .tag-text,
   #selectedTags .tag-info,
-  .tag-list-container,
-  .tag-list-container *,
   .tag-list-container .tag-item,
   .tag-list-container .tag-entry,
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 32px !important; /* Larger vendor/product text */
+    font-size: 1.25rem !important; /* Larger vendor/product text, but not excessive */
   }
   
   /* Reduce padding and margins */
