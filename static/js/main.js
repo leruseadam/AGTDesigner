@@ -15714,9 +15714,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
             const isInitialized = window.TagManager.state.initialized;
             const isChecking = window.TagManager._checkingExistingData;
-            
-            if (!hasTags && isInitialized && !isChecking) {
-                console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds, attempting retry...');
+
+            // Check if tags exist in cache before forcing reload
+            const hasCache = window.TagManager.loadAvailableTagsFromCache && window.TagManager.loadAvailableTagsFromCache();
+
+            if (!hasTags && !hasCache && isInitialized && !isChecking) {
+                console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no cache found, attempting retry...');
                 // Reset flags to allow retry
                 window.TagManager._checkingExistingData = false;
                 window.TagManager.state.initialDataAttempts = 0;
@@ -15732,6 +15735,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     });
                 }
+            } else if (hasTags || hasCache) {
+                console.log('✅ SAFEGUARD: Tags already loaded or cached, skipping retry');
             }
         }
     }, 5000);
@@ -15742,9 +15747,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
             const availableContainer = document.getElementById('availableTags');
             const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
-            
-            if (!hasTags && !hasRenderedTags) {
-                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds - forcing direct fetch');
+
+            // Check if tags exist in cache before forcing reload
+            const hasCache = window.TagManager.loadAvailableTagsFromCache && window.TagManager.loadAvailableTagsFromCache();
+
+            if (!hasTags && !hasRenderedTags && !hasCache) {
+                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no cache found - forcing direct fetch');
                 // Force reset all flags
                 window.TagManager._checkingExistingData = false;
                 window.TagManager._fetchingAvailableTags = false;
@@ -15755,6 +15763,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         console.error('Critical safeguard fetch failed:', e);
                     });
                 }
+            } else if (hasTags || hasRenderedTags || hasCache) {
+                console.log('✅ 10s SAFEGUARD: Tags already loaded, rendered, or cached - skipping force fetch');
             }
         }
     }, 10000);
@@ -15782,15 +15792,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 window.TagManager._fetchingAvailableTags = false;
             }
             
-            // If tags aren't loaded and flags are reset, try loading again
+            // If tags aren't loaded and flags are reset, try loading again (but check cache first)
             const hasTags = window.TagManager.state?.tags && window.TagManager.state.tags.length > 0;
-            if (!hasTags && !checkingStuck && !fetchingStuck) {
-                console.log('🔄 Page visible and no tags loaded, attempting to load tags...');
+            const hasCache = window.TagManager.loadAvailableTagsFromCache && window.TagManager.loadAvailableTagsFromCache();
+
+            if (!hasTags && !hasCache && !checkingStuck && !fetchingStuck) {
+                console.log('🔄 Page visible and no tags loaded or cached, attempting to load tags...');
                 if (typeof window.TagManager.checkForExistingData === 'function') {
                     window.TagManager.checkForExistingData().catch(e => {
                         console.error('Visibility change retry failed:', e);
                     });
                 }
+            } else if (hasTags || hasCache) {
+                console.log('✅ VISIBILITY: Tags already loaded or cached, skipping reload');
             }
         }
     });
