@@ -2044,11 +2044,8 @@ class TemplateProcessor:
                                     self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         
                         # Keep weight on the same line as description with non-breaking space
-                        # For preroll template, use non-breaking hyphen to keep hyphen and weight together
-                        if self.template_type == 'preroll':
-                            desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
-                        else:
-                            desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                        # Use consistent space-hyphen-space pattern for all templates
+                        desc_and_weight = f"{desc} - {clean_weight}"
                         self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
                     else:
                         # Fallback to constructing from Weight* + Units
@@ -2064,11 +2061,8 @@ class TemplateProcessor:
                         
                         if weight_value and units_value:
                             clean_weight = f"{weight_value}{units_value}"
-                            # For preroll template, use non-breaking hyphen to keep hyphen and weight together
-                            if self.template_type == 'preroll':
-                                desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
-                            else:
-                                desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                            # Use consistent space-hyphen-space pattern for all templates
+                            desc_and_weight = f"{desc} - {clean_weight}"
                             self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             desc_and_weight = desc
