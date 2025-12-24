@@ -1306,19 +1306,21 @@ const TagManager = {
         
         // CRITICAL FIX: On page reload, check if we recently updated lineage
         // If so, skip cache to ensure we get fresh lineage data from database
-        // BUT: Only skip if update was VERY recent (30 seconds) to avoid unnecessary reloads
-        const recentLineageUpdate = sessionStorage.getItem('lastLineageUpdateTime');
+        // Skip cache if lineage was updated within last 5 minutes (300000 ms)
+        const now = Date.now();
+        const sessionLineageUpdate = sessionStorage.getItem('lastLineageUpdateTime');
+        const localLineageUpdate = localStorage.getItem('lastLineageUpdateTime');
+        let recentLineageUpdate = null;
+        if (sessionLineageUpdate && now - parseInt(sessionLineageUpdate, 10) < 300000) {
+            recentLineageUpdate = sessionLineageUpdate;
+        } else if (localLineageUpdate && now - parseInt(localLineageUpdate, 10) < 300000) {
+            recentLineageUpdate = localLineageUpdate;
+        }
         if (recentLineageUpdate) {
-            const timeSinceUpdate = Date.now() - parseInt(recentLineageUpdate, 10);
-            // Only skip cache if lineage was updated within last 30 seconds (reduced from 2 minutes)
-            if (timeSinceUpdate < 30000) {
-                verboseLog('🔄 Very recent lineage update detected (within 30s), skipping cache to fetch fresh data...');
-                sessionStorage.removeItem('lastLineageUpdateTime'); // Clear after use
-                return false; // Force fresh fetch
-            } else {
-                // Clear stale timestamp to prevent future unnecessary checks
-                sessionStorage.removeItem('lastLineageUpdateTime');
-            }
+            verboseLog('🔄 Recent lineage update detected (within 5 min), skipping cache to fetch fresh data...');
+            sessionStorage.removeItem('lastLineageUpdateTime');
+            localStorage.removeItem('lastLineageUpdateTime');
+            return false; // Force fresh fetch
         }
         
         const cachedTags = this.loadAvailableTagsFromCache();
@@ -1346,6 +1348,15 @@ const TagManager = {
             // PERFORMANCE: Build filters INSTANTLY from cached tags
             this.buildFilterOptionsFromTags(cachedTags);
 
+            // CRITICAL: Setup filter event listeners so filters work
+            // Wait a tiny bit to ensure DOM elements are rendered
+            setTimeout(() => {
+                if (typeof this.setupFilterEventListeners === 'function') {
+                    this.setupFilterEventListeners();
+                    console.log('✅ Filter event listeners attached after cache hydration');
+                }
+            }, 50);
+
             // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
             // This makes page reloads instant while still updating in background
             this._refreshLineageFromDatabase(cachedTags).then(() => {
@@ -1353,7 +1364,7 @@ const TagManager = {
             }).catch(err => {
                 console.warn('⚠️ Background lineage check failed (non-critical):', err);
             });
-            
+
             return true;
         }
         return false;
@@ -1942,18 +1953,13 @@ const TagManager = {
             }
         });
 
+        // CRITICAL FIX: Clear the flag IMMEDIATELY after updating dropdowns
+        // Don't use requestAnimationFrame - clear synchronously so user can interact immediately
+        this._isUpdatingFilters = wasUpdatingFilters || false;
+        console.log('✅ Filter update complete, _isUpdatingFilters reset to:', this._isUpdatingFilters);
+
         // GUARANTEED FIX: Save current filter values to localStorage
         this.saveFiltersToStorage();
-
-        // CRITICAL FIX: Restore the flag immediately - no delay needed
-        // Use requestAnimationFrame for immediate but safe execution
-        requestAnimationFrame(() => {
-            this._isUpdatingFilters = wasUpdatingFilters || false;
-            // CRITICAL: Always re-attach filter event listeners after updating filter dropdowns
-            if (typeof this.setupFilterEventListeners === 'function') {
-                this.setupFilterEventListeners();
-            }
-        });
     },
     
     saveFiltersToStorage() {
