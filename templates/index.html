@@ -7433,15 +7433,33 @@
     if (window.TagManager && typeof window.TagManager.hydrateAvailableTagsFromCache === 'function') {
       try {
         console.log('⚡ Attempting to hydrate tags from cache...');
+
+        // Debug: Check what's available in localStorage and sessionStorage
+        const cacheKey = window.TagManager.getAvailableTagsCacheKey ? window.TagManager.getAvailableTagsCacheKey() : 'unknown';
+        console.log('📦 Expected cache key:', cacheKey);
+
+        const localStorageKeys = [];
+        const sessionStorageKeys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.includes('agt_available_tags')) {
+            localStorageKeys.push(key);
+          }
+        }
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (key && key.includes('agt_available_tags')) {
+            sessionStorageKeys.push(key);
+          }
+        }
+        console.log('📦 LocalStorage tag cache keys:', localStorageKeys);
+        console.log('📦 SessionStorage tag cache keys:', sessionStorageKeys);
+
         const hydrated = window.TagManager.hydrateAvailableTagsFromCache();
         if (hydrated) {
-          console.log('⚡ INSTANT: Tags hydrated from cache immediately after main.js load');
+          console.log('✅ INSTANT: Tags hydrated from cache immediately after main.js load');
         } else {
           console.warn('⚠️ Cache hydration returned false - no cache available or cache check failed');
-          // Debug: Check what's in sessionStorage
-          const cacheKey = window.TagManager.getAvailableTagsCacheKey ? window.TagManager.getAvailableTagsCacheKey() : 'unknown';
-          console.log('📦 Cache key would be:', cacheKey);
-          console.log('📦 SessionStorage keys:', Object.keys(sessionStorage));
         }
       } catch (err) {
         console.error('❌ Cache hydration failed:', err);

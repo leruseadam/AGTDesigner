@@ -1210,13 +1210,8 @@ const TagManager = {
                 return null;
             }
 
-            // CRITICAL FIX: Don't load from cache if no Excel file is uploaded
-            // Only load cache when there's an actual Excel file loaded
-            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-            if (!file || file === 'nofile' || file === '' || file === 'database') {
-                return null;
-            }
-
+            // CRITICAL FIX: Try to load cache even if no Excel file - database mode uses "nofile" as key
+            // This allows cache to work in both Excel mode and database-only mode
             const cacheKey = this.getAvailableTagsCacheKey();
             let raw = storage.getItem(cacheKey);
 
