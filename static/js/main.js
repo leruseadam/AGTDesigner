@@ -1304,24 +1304,8 @@ const TagManager = {
             return false;
         }
         
-        // CRITICAL FIX: On page reload, check if we recently updated lineage
-        // If so, skip cache to ensure we get fresh lineage data from database
-        // Skip cache if lineage was updated within last 5 minutes (300000 ms)
-        const now = Date.now();
-        const sessionLineageUpdate = sessionStorage.getItem('lastLineageUpdateTime');
-        const localLineageUpdate = localStorage.getItem('lastLineageUpdateTime');
-        let recentLineageUpdate = null;
-        if (sessionLineageUpdate && now - parseInt(sessionLineageUpdate, 10) < 300000) {
-            recentLineageUpdate = sessionLineageUpdate;
-        } else if (localLineageUpdate && now - parseInt(localLineageUpdate, 10) < 300000) {
-            recentLineageUpdate = localLineageUpdate;
-        }
-        if (recentLineageUpdate) {
-            verboseLog('🔄 Recent lineage update detected (within 5 min), skipping cache to fetch fresh data...');
-            sessionStorage.removeItem('lastLineageUpdateTime');
-            localStorage.removeItem('lastLineageUpdateTime');
-            return false; // Force fresh fetch
-        }
+        // PATCH: Always use cache, even after recent lineage updates, but keep lineage update logic elsewhere intact.
+        // (No-op: do not skip cache after recent lineage update)
         
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {

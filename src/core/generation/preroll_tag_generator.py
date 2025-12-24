@@ -126,10 +126,13 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     if pack_match:
         weight = pack_match.group(1)
         count = pack_match.group(2)
-        # Normalize weight display (remove leading zeros in decimals)
-        weight_display = weight.lstrip('0').lstrip('.') if '.' in weight else weight
-        if weight_display.startswith('.'):
-            weight_display = '0' + weight_display
+        # Normalize weight display (handle .5g -> 0.5g, but keep 0.5g as 0.5g)
+        if weight.startswith('.'):
+            # ".5" -> "0.5"
+            weight_display = '0' + weight
+        else:
+            # "0.5" stays "0.5", "1" stays "1"
+            weight_display = weight
         # Include the word "Pre-Roll" in the display name so grouped
         # pack labels clearly indicate they are prerolls.
         return {

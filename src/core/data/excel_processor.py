@@ -2986,7 +2986,7 @@ class ExcelProcessor:
                         # self.logger.debug(f"Fixed JointRatio for record {idx}: Generated default '{default_joint_ratio}' from Weight")
                     except (ValueError, TypeError):
                         pass
-            
+
             # JointRatio: preserve original spacing exactly as in Excel - no normalization
             # self.logger.debug(f"Sample JointRatio values after NaN fixes: {self.df.loc[preroll_mask, 'JointRatio'].head()}")
             # Add detailed logging for JointRatio values

@@ -8261,6 +8261,7 @@ def generate_labels():
 
         # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
         # PERFORMANCE OPTIMIZATION: Batch query all lineages at once instead of N+1 queries
+        _enrichment_start = time.time()
         try:
             store_name = session.get('current_store')
             if store_name:
@@ -8377,12 +8378,15 @@ def generate_labels():
                             logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
         except Exception as enrich_err:
             logging.error(f"Lineage enrichment failed: {enrich_err}")
-        
+
+        _enrichment_time = time.time() - _enrichment_start
+        logging.info(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
+
         # Bail out early if no records made it this far (prevents NoneType errors downstream)
         if not records:
             logging.error("❌ No records available for generation after validation/deduplication")
             return jsonify({'error': 'No valid tags to generate. Please refresh and try again.'}), 400
-        
+
         # Fast generation with caching
         fast_engine = FastGenerationEngine(processor)
         cache_hits_before = fast_engine.cache_hits
@@ -8547,7 +8551,9 @@ def generate_labels():
         # Set proper download filename with headers
         response = set_download_filename(response, filename)
         response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        
+
+        _total_time = time.time() - _start_time
+        logging.info(f"⏱️ PERFORMANCE: Total generation time {_total_time:.2f}s for {len(records)} records ({_total_time/len(records):.3f}s per record)")
         logging.info(f"🔍 TRACE: Returning file, final store = {get_current_store_name()}")
         return response
 
@@ -22605,7 +22611,7 @@ def display_preroll_items(group_id):
             </html>
             """, 404
         
-        # Generate mobile-friendly HTML
+        # Generate mobile-friendly HTML with lineage color coding
         items_html = ""
         for idx, item in enumerate(preroll_items, 1):
             product_name = item.get('product_name', 'Unknown Product')
@@ -22614,20 +22620,41 @@ def display_preroll_items(group_id):
             weight = item.get('weight', '')
             vendor = item.get('vendor', '')
             strain = item.get('strain', '')
-            lineage = item.get('lineage', '')
-            
+            lineage = item.get('lineage', '').upper()
+
+            # Determine lineage badge color and emoji
+            lineage_class = ''
+            lineage_emoji = ''
+            if 'SATIVA' in lineage:
+                lineage_class = 'lineage-sativa'
+                lineage_emoji = '⚡'
+            elif 'INDICA' in lineage:
+                lineage_class = 'lineage-indica'
+                lineage_emoji = '🌙'
+            elif 'HYBRID' in lineage:
+                lineage_class = 'lineage-hybrid'
+                lineage_emoji = '🌿'
+            elif 'CBD' in lineage:
+                lineage_class = 'lineage-cbd'
+                lineage_emoji = '💚'
+            else:
+                lineage_class = 'lineage-mixed'
+                lineage_emoji = '🌈'
+
             items_html += f"""
             <div class="item-card">
                 <div class="item-number">{idx}</div>
                 <div class="item-content">
-                    <h3 class="product-name">{product_name}</h3>
+                    <div class="product-header">
+                        <h3 class="product-name">{product_name}</h3>
+                        {f'<span class="lineage-badge {lineage_class}">{lineage_emoji} {lineage}</span>' if lineage else ''}
+                    </div>
                     {f'<p class="description">{description}</p>' if description else ''}
                     <div class="item-details">
-                        {f'<span class="detail"><strong>Price:</strong> {price}</span>' if price and price != 'N/A' else ''}
-                        {f'<span class="detail"><strong>Weight:</strong> {weight}</span>' if weight else ''}
-                        {f'<span class="detail"><strong>Vendor:</strong> {vendor}</span>' if vendor else ''}
-                        {f'<span class="detail"><strong>Strain:</strong> {strain}</span>' if strain else ''}
-                        {f'<span class="detail"><strong>Lineage:</strong> {lineage}</span>' if lineage else ''}
+                        {f'<span class="detail price-tag">💰 {price}</span>' if price and price != 'N/A' else ''}
+                        {f'<span class="detail">⚖️ {weight}</span>' if weight else ''}
+                        {f'<span class="detail">🏪 {vendor}</span>' if vendor else ''}
+                        {f'<span class="detail">🌱 {strain}</span>' if strain else ''}
                     </div>
                 </div>
             </div>
@@ -22642,7 +22669,7 @@ def display_preroll_items(group_id):
             <title>{group_display_name}</title>
             <style>
                 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-                body {{ 
+                body {{
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     min-height: 100vh;
@@ -22683,6 +22710,7 @@ def display_preroll_items(group_id):
                     gap: 15px;
                     box-shadow: 0 3px 15px rgba(0,0,0,0.1);
                     transition: transform 0.2s, box-shadow 0.2s;
+                    border-left: 4px solid #667eea;
                 }}
                 .item-card:active {{
                     transform: scale(0.98);
@@ -22703,11 +22731,57 @@ def display_preroll_items(group_id):
                 .item-content {{
                     flex: 1;
                 }}
+                .product-header {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    gap: 10px;
+                    margin-bottom: 8px;
+                    flex-wrap: wrap;
+                }}
                 .product-name {{
                     color: #333;
                     font-size: 18px;
-                    margin-bottom: 8px;
                     font-weight: 600;
+                    flex: 1;
+                    min-width: 200px;
+                }}
+                .lineage-badge {{
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    white-space: nowrap;
+                }}
+                .lineage-sativa {{
+                    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+                    color: #333;
+                    box-shadow: 0 2px 8px rgba(255, 215, 0, 0.3);
+                }}
+                .lineage-indica {{
+                    background: linear-gradient(135deg, #9370DB 0%, #6A5ACD 100%);
+                    color: white;
+                    box-shadow: 0 2px 8px rgba(147, 112, 219, 0.3);
+                }}
+                .lineage-hybrid {{
+                    background: linear-gradient(135deg, #32CD32 0%, #228B22 100%);
+                    color: white;
+                    box-shadow: 0 2px 8px rgba(50, 205, 50, 0.3);
+                }}
+                .lineage-cbd {{
+                    background: linear-gradient(135deg, #4ECDC4 0%, #44A08D 100%);
+                    color: white;
+                    box-shadow: 0 2px 8px rgba(78, 205, 196, 0.3);
+                }}
+                .lineage-mixed {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
                 }}
                 .description {{
                     color: #666;
@@ -22717,22 +22791,32 @@ def display_preroll_items(group_id):
                 }}
                 .item-details {{
                     display: flex;
-                    flex-direction: column;
-                    gap: 5px;
+                    flex-wrap: wrap;
+                    gap: 12px;
                 }}
                 .detail {{
                     color: #555;
-                    font-size: 13px;
+                    font-size: 14px;
                     line-height: 1.5;
+                    padding: 4px 10px;
+                    background: #f5f5f5;
+                    border-radius: 8px;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
                 }}
-                .detail strong {{
+                .price-tag {{
+                    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
                     color: #333;
-                    margin-right: 5px;
+                    font-weight: 600;
+                    box-shadow: 0 2px 6px rgba(255, 215, 0, 0.2);
                 }}
                 @media (max-width: 480px) {{
                     .header h1 {{ font-size: 24px; }}
-                    .product-name {{ font-size: 16px; }}
+                    .product-name {{ font-size: 16px; min-width: 150px; }}
                     .item-card {{ padding: 15px; }}
+                    .lineage-badge {{ font-size: 11px; padding: 3px 8px; }}
+                    .product-header {{ flex-direction: column; align-items: flex-start; }}
                 }}
             </style>
         </head>
