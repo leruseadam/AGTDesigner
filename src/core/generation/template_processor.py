@@ -2989,10 +2989,14 @@ class TemplateProcessor:
                 except Exception:
                     base_url = ''
 
-                # If host_url is unavailable (very unusual), allow an override via env
+                # If host_url is unavailable, allow an override via env
                 if not base_url:
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
-                
+
+                # If still no base_url, raise an error (never allow relative URLs for QR/menu)
+                if not base_url:
+                    raise RuntimeError("No base URL available for QR/menu generation. Set QR_BASE_URL or ensure request.host_url is available.")
+
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
                 # This allows the route to filter products by vendor
@@ -3000,33 +3004,15 @@ class TemplateProcessor:
                     # URL encode vendor to handle special characters
                     from urllib.parse import quote
                     vendor_encoded = quote(vendor_clean)
-                    if base_url:
-                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
-                    else:
-                        # Use relative URL if no base_url available
-                        qr_url = f"/preroll-items/{group_id}?vendor={vendor_encoded}"
+                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
                 else:
                     # Fallback to group_id only if no vendor (backward compatibility)
-                    if base_url:
-                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
-                    else:
-                        # Use relative URL if no base_url available
-                        qr_url = f"/preroll-items/{group_id}"
-                
+                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
+
                 # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
-                # If we detect a local host, just drop the scheme/host and use a relative path; most
-                # modern scanners will still treat this as a URL when opened from a browser context.
-                if base_url and ('localhost' in qr_url.lower() or '127.0.0.1' in qr_url):
-                    from urllib.parse import urlparse
-                    parsed = urlparse(qr_url)
-                    qr_url = parsed.path or qr_url
-                    if parsed.query:
-                        qr_url = f"{qr_url}?{parsed.query}"
-                    self.logger.warning(f"QR URL used a localhost base, converted to relative path: {qr_url}")
-                
-                # Log if using relative URL (no base_url)
-                if not base_url:
-                    self.logger.info(f"PREROLL QR: No base URL available; using relative URL: {qr_url}")
+                # If we detect a local host, raise an error (never allow local URLs for QR/menu)
+                if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
+                    raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)

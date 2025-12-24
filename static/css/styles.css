@@ -6710,14 +6710,14 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Font styling - Mac native style */
     font-size: 1.15em !important;
     font-weight: 500 !important; /* Mac uses medium weight, not bold */
-    color: #000000 !important; /* Dark text like Mac native */
+    color: #e0d6f6 !important; /* Light text for dark theme */
     line-height: 1.5 !important;
     letter-spacing: 0.3px !important; /* Mac native letter spacing */
     
-    /* Background - Mac native light, semi-transparent style */
-    background-color: rgba(255, 255, 255, 0.9) !important;
-    background: rgba(255, 255, 255, 0.9) !important;
-    border: 1px solid rgba(0, 0, 0, 0.15) !important; /* Subtle Mac-style border */
+    /* Background - Dark theme to match other dropdowns */
+    background-color: rgba(34, 34, 51, 0.55) !important;
+    background: rgba(34, 34, 51, 0.55) !important;
+    border: 1px solid rgba(160, 132, 232, 0.3) !important;
     border-radius: 6px !important; /* Mac native border radius */
     
     /* Subtle Mac-style shadow */
@@ -6732,8 +6732,8 @@ body.modal-open #mainContent.store-selection-disabled,
     text-overflow: ellipsis !important;
     overflow: visible !important;
     
-    /* Mac-style dropdown arrow (dark, subtle) */
-    background-image: url('data:image/svg+xml;utf8,<svg fill="%23000000" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    /* Mac-style dropdown arrow (light for dark theme) */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
     background-position: right 12px center !important;
     background-size: 16px 16px !important;
@@ -6748,24 +6748,24 @@ body.modal-open #mainContent.store-selection-disabled,
     transform: none !important;
     
     /* CRITICAL: Mac Safari needs explicit color override */
-    -webkit-text-fill-color: #000000 !important;
-    color: #000000 !important;
+    -webkit-text-fill-color: #e0d6f6 !important;
+    color: #e0d6f6 !important;
   }
   
-  /* OVERRIDE form-select-modern class for template select - Mac native style */
+  /* OVERRIDE form-select-modern class for template select - Dark theme */
   #templateSelect.form-select-modern,
   #templateSelectModal.form-select-modern {
     /* CRITICAL: Ensure Mac browsers respect all styling */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
-    background-color: rgba(255, 255, 255, 0.9) !important;
-    background-image: url('data:image/svg+xml;utf8,<svg fill="%23000000" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-color: rgba(34, 34, 51, 0.55) !important;
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
     background-position: right 12px center !important;
     background-size: 16px 16px !important;
-    color: #000000 !important;
-    -webkit-text-fill-color: #000000 !important;
+    color: #e0d6f6 !important;
+    -webkit-text-fill-color: #e0d6f6 !important;
   }
   
   /* Mac Safari/Chrome specific override - ensure custom styling is applied */
@@ -6774,61 +6774,61 @@ body.modal-open #mainContent.store-selection-disabled,
     #templateSelectModal {
       -webkit-appearance: none !important;
       appearance: none !important;
-      background-color: rgba(45, 34, 58, 0.95) !important;
-      color: #ffffff !important;
-      -webkit-text-fill-color: #ffffff !important;
+      background-color: rgba(34, 34, 51, 0.55) !important;
+      color: #e0d6f6 !important;
+      -webkit-text-fill-color: #e0d6f6 !important;
     }
   }
   
-  /* Template dropdown options - Mac native style matching PC */
+  /* Template dropdown options - Dark theme */
   #templateSelect option,
   #templateSelectModal option {
-    color: #000000 !important; /* Dark text like Mac native */
-    background-color: rgba(255, 255, 255, 0.95) !important; /* Light background like Mac */
-    background: rgba(255, 255, 255, 0.95) !important;
-    -webkit-background-color: rgba(255, 255, 255, 0.95) !important;
+    color: #e0d6f6 !important;
+    background-color: rgba(34, 34, 51, 0.95) !important;
+    background: rgba(34, 34, 51, 0.95) !important;
+    -webkit-background-color: rgba(34, 34, 51, 0.95) !important;
     font-size: 1.05em !important;
-    font-weight: 400 !important; /* Mac native uses regular weight */
+    font-weight: 400 !important;
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important;
     display: block !important;
-    padding: 8px 16px !important; /* Mac native padding */
+    padding: 8px 16px !important;
     line-height: 1.5 !important;
-    -webkit-text-fill-color: #000000 !important;
+    -webkit-text-fill-color: #e0d6f6 !important;
   }
   
-  /* Selected/checked option styling - Mac native style */
+  /* Selected/checked option styling - Dark theme */
   #templateSelect option:checked,
   #templateSelectModal option:checked,
   #templateSelect option[selected],
   #templateSelectModal option[selected] {
-    background-color: rgba(0, 122, 255, 0.1) !important; /* Mac blue highlight */
-    background: rgba(0, 122, 255, 0.1) !important;
-    -webkit-background-color: rgba(0, 122, 255, 0.1) !important;
-    color: #000000 !important;
-    -webkit-text-fill-color: #000000 !important;
+    background-color: rgba(160, 132, 232, 0.3) !important;
+    background: rgba(160, 132, 232, 0.3) !important;
+    -webkit-background-color: rgba(160, 132, 232, 0.3) !important;
+    color: #e0d6f6 !important;
+    -webkit-text-fill-color: #e0d6f6 !important;
     font-weight: 500 !important;
   }
   
   /* Hover state for options */
   #templateSelect option:hover,
   #templateSelectModal option:hover {
-    background-color: rgba(0, 122, 255, 0.15) !important;
-    background: rgba(0, 122, 255, 0.15) !important;
-    -webkit-background-color: rgba(0, 122, 255, 0.15) !important;
-    color: #000000 !important;
-    -webkit-text-fill-color: #000000 !important;
+    background-color: rgba(160, 132, 232, 0.2) !important;
+    background: rgba(160, 132, 232, 0.2) !important;
+    -webkit-background-color: rgba(160, 132, 232, 0.2) !important;
+    color: #e0d6f6 !important;
+    -webkit-text-fill-color: #e0d6f6 !important;
   }
   
   /* Focused option styling */
   #templateSelect option:focus,
   #templateSelectModal option:focus {
-    background-color: rgba(0, 122, 255, 0.2) !important;
-    background: rgba(0, 122, 255, 0.2) !important;
-    -webkit-background-color: rgba(0, 122, 255, 0.2) !important;
-    color: #000000 !important;
-    -webkit-text-fill-color: #000000 !important;
+    background-color: rgba(160, 132, 232, 0.25) !important;
+    background: rgba(160, 132, 232, 0.25) !important;
+    -webkit-background-color: rgba(160, 132, 232, 0.25) !important;
+    color: #e0d6f6 !important;
+    -webkit-text-fill-color: #e0d6f6 !important;
     outline: none !important;
   }
   
@@ -6837,9 +6837,9 @@ body.modal-open #mainContent.store-selection-disabled,
     #templateSelect option,
     #templateSelectModal option {
       -webkit-appearance: none !important;
-      background-color: rgba(255, 255, 255, 0.95) !important;
-      color: #000000 !important;
-      -webkit-text-fill-color: #000000 !important;
+      background-color: rgba(34, 34, 51, 0.95) !important;
+      color: #e0d6f6 !important;
+      -webkit-text-fill-color: #e0d6f6 !important;
     }
   }
   
@@ -7037,13 +7037,13 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Duplicate option styling removed - using the one above that matches PC styling */
 
   /* Template dropdown focus state - Match PC styling */
-  /* Template dropdown focus state - Mac native style matching PC */
+  /* Template dropdown focus state - Dark theme */
   #templateSelect:focus,
   #templateSelectModal:focus {
-    border-color: rgba(0, 122, 255, 0.5) !important; /* Mac blue focus color */
-    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+    border-color: rgba(160, 132, 232, 0.5) !important;
+    box-shadow: 0 0 0 3px rgba(160, 132, 232, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
     outline: none !important;
-    background-color: rgba(255, 255, 255, 1) !important; /* Solid white on focus */
+    background-color: rgba(34, 34, 51, 0.65) !important;
   }
 
   /* Mobile: let the select fill the column */
