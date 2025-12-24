@@ -4850,7 +4850,7 @@
     #highCbdFilter:active,
     #templateSelect:focus,
     #templateSelect:active {
-      background-color: rgba(255, 255, 255, 0.25) !important;
+      background-color: rgba(44, 34, 58, 0.95) !important;
       border-color: rgba(160, 132, 232, 0.8) !important;
       box-shadow: 0 0 0 3px rgba(160, 132, 232, 0.3), 0 6px 16px rgba(0, 0, 0, 0.4) !important;
       outline: none !important;
@@ -7419,7 +7419,20 @@
     // Mark as loaded immediately after script tag (synchronous scripts execute immediately)
     window.mainJsLoaded = true;
     console.log('✅ main.js script tag executed');
-    
+
+    // CRITICAL: Hydrate tags from cache IMMEDIATELY for instant page load
+    // This must happen right after main.js loads, before any other initialization
+    if (window.TagManager && typeof window.TagManager.hydrateAvailableTagsFromCache === 'function') {
+      try {
+        const hydrated = window.TagManager.hydrateAvailableTagsFromCache();
+        if (hydrated) {
+          console.log('⚡ INSTANT: Tags hydrated from cache immediately after main.js load');
+        }
+      } catch (err) {
+        console.warn('Cache hydration failed (non-critical):', err);
+      }
+    }
+
     // Check TagManager immediately after script loads (synchronous execution)
     (function checkTagManager() {
       if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {

@@ -9042,8 +9042,8 @@ def get_available_tags():
             cached_tags = cache.get(cache_key)
             if cached_tags:
                 logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
-                # PERFORMANCE: Skip alignment if tags already have lineage
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
+                # CRITICAL: Always align with DB lineage to ensure database values are used
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
                 safe_cached_tags = make_json_safe(aligned_cached_tags)
                 return jsonify({
                     'tags': safe_cached_tags,
@@ -9077,8 +9077,8 @@ def get_available_tags():
                 cache_key = get_session_cache_key('available_tags')
                 cached_tags = cache.get(cache_key)
             if cached_tags:
-                # PERFORMANCE: Skip alignment if tags already have lineage
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
+                # CRITICAL: Always align with DB lineage to ensure database values are used
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
                 safe_cached_tags = make_json_safe(aligned_cached_tags)
                 return jsonify({
                     'tags': safe_cached_tags,
@@ -9506,8 +9506,8 @@ def get_available_tags():
         # CRITICAL: Never return cached tags when Excel data exists
         if fast_load and cached_tags and not recently_updated_lineage and not has_excel_data:
             logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags)")
-            # PERFORMANCE: Skip alignment if tags already have lineage (most cached tags do)
-            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
+            # CRITICAL: Always align with DB lineage to ensure database values override Excel
+            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
             safe_cached_tags = make_json_safe(aligned_cached_tags)
             return jsonify({
                 'tags': safe_cached_tags,

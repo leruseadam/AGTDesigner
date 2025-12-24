@@ -1295,7 +1295,7 @@ const TagManager = {
         if (this.state.hydratedFromCache) {
             return false;
         }
-        
+
         // CRITICAL FIX: Don't load from cache if no Excel file is uploaded
         // Only hydrate cache when there's an actual Excel file loaded
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
@@ -1303,10 +1303,10 @@ const TagManager = {
             console.log('❌ No Excel file uploaded, skipping cache hydration');
             return false;
         }
-        
+
         // PATCH: Always use cache, even after recent lineage updates, but keep lineage update logic elsewhere intact.
         // (No-op: do not skip cache after recent lineage update)
-        
+
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
             verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
@@ -1315,7 +1315,7 @@ const TagManager = {
             this.state.simplifiedAvailableTagsActive = false;
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
-            
+
             // CRITICAL FIX: Hide splash IMMEDIATELY before rendering
             if (this.hideActionSplash) {
                 this.hideActionSplash();
@@ -1324,22 +1324,51 @@ const TagManager = {
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
             }
-            
-            // PERFORMANCE: Render tags INSTANTLY without requestAnimationFrame delay
-            this._updateAvailableTags(cachedTags, null);
-            verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
-            
-            // PERFORMANCE: Build filters INSTANTLY from cached tags
-            this.buildFilterOptionsFromTags(cachedTags);
 
-            // CRITICAL: Setup filter event listeners so filters work
-            // Wait a tiny bit to ensure DOM elements are rendered
-            setTimeout(() => {
-                if (typeof this.setupFilterEventListeners === 'function') {
-                    this.setupFilterEventListeners();
-                    console.log('✅ Filter event listeners attached after cache hydration');
+            // CRITICAL FIX: Check if DOM is ready before rendering
+            // If DOM is not ready, defer rendering until DOMContentLoaded
+            const availableContainer = document.getElementById('availableTags');
+            if (availableContainer) {
+                // DOM is ready - render immediately
+                this._updateAvailableTags(cachedTags, null);
+                verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+
+                // Build filters INSTANTLY from cached tags
+                this.buildFilterOptionsFromTags(cachedTags);
+
+                // Setup filter event listeners so filters work
+                setTimeout(() => {
+                    if (typeof this.setupFilterEventListeners === 'function') {
+                        this.setupFilterEventListeners();
+                        console.log('✅ Filter event listeners attached after cache hydration');
+                    }
+                }, 50);
+            } else {
+                // DOM not ready yet - defer rendering until DOM loads
+                console.log('⏳ DOM not ready, deferring render until DOMContentLoaded');
+                const renderCachedTags = () => {
+                    this._updateAvailableTags(cachedTags, null);
+                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
+
+                    // Build filters from cached tags
+                    this.buildFilterOptionsFromTags(cachedTags);
+
+                    // Setup filter event listeners
+                    setTimeout(() => {
+                        if (typeof this.setupFilterEventListeners === 'function') {
+                            this.setupFilterEventListeners();
+                            console.log('✅ Filter event listeners attached after cache hydration');
+                        }
+                    }, 50);
+                };
+
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', renderCachedTags, { once: true });
+                } else {
+                    // DOM is already loaded but container not found - try immediately
+                    renderCachedTags();
                 }
-            }, 50);
+            }
 
             // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
             // This makes page reloads instant while still updating in background
@@ -15198,20 +15227,10 @@ try {
         // Also set a flag to indicate TagManager is loaded
         window.tagManagerLoaded = true;
         console.log('✅ TagManager assigned to window.TagManager');
-        
-        // CRITICAL FIX: Hydrate from cache immediately for instant tag display on reload
-        // This runs synchronously before any API calls or async operations
-        try {
-            if (typeof TagManager.hydrateAvailableTagsFromCache === 'function') {
-                const hydrated = TagManager.hydrateAvailableTagsFromCache();
-                if (hydrated) {
-                    console.log('⚡ INSTANT: Tags hydrated from cache immediately on script load');
-                }
-            }
-        } catch (cacheError) {
-            console.warn('Cache hydration error (non-critical):', cacheError);
-        }
-        
+
+        // Note: Cache hydration now happens in the inline script in index.html
+        // right after this script loads, to ensure DOM is ready
+
         // Also expose helper functions immediately
         if (TagManager.debouncedUpdateAvailableTags) {
             window.updateAvailableTags = TagManager.debouncedUpdateAvailableTags.bind(TagManager);
@@ -15231,19 +15250,9 @@ try {
             window.TagManager = TagManager;
             window.tagManagerLoaded = true;
             console.log('✅ TagManager assigned to window.TagManager (fallback)');
-            
-            // CRITICAL FIX: Hydrate from cache immediately for instant tag display on reload
-            // This runs synchronously before any API calls or async operations
-            try {
-                if (typeof TagManager.hydrateAvailableTagsFromCache === 'function') {
-                    const hydrated = TagManager.hydrateAvailableTagsFromCache();
-                    if (hydrated) {
-                        console.log('⚡ INSTANT: Tags hydrated from cache immediately on script load');
-                    }
-                }
-            } catch (cacheError) {
-                console.warn('Cache hydration error (non-critical):', cacheError);
-            }
+
+            // Note: Cache hydration now happens in the inline script in index.html
+            // right after this script loads, to ensure DOM is ready
         }
     } catch (fallbackError) {
         console.error('❌ CRITICAL: Failed to assign TagManager even in fallback:', fallbackError);
