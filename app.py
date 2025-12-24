@@ -7117,6 +7117,8 @@ def clear_generation_cache():
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
     try:
+        import time
+        _start_time = time.time()
         logging.info("=== GENERATE LABELS ACTION START ===")
         logging.info(f"Generate labels request at {datetime.now().strftime('%H:%M:%S')}")
         logging.info(f"Request method: {request.method}")
@@ -7639,11 +7641,13 @@ def generate_labels():
                                 
                                 # Convert database records to the format expected by TemplateProcessor
                                 records = []
-                                for db_record in valid_db_records:
+                                # PERFORMANCE: Process records with minimal logging (only first 3)
+                                for idx, db_record in enumerate(valid_db_records):
                                     product_name_for_record = db_record.get('Product Name*', '')
-                                    logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
-                                    logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
-                                    
+                                    if idx < 3:  # Only log first 3 records for performance
+                                        logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                        logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
+
                                     # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                     processed_record = process_database_product_for_api(db_record)
                                     
@@ -7684,10 +7688,11 @@ def generate_labels():
                                         
                                         logging.info(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type")
                                     
-                                    # Extract price with logging
+                                    # Extract price with logging (only first 3 for performance)
                                     extracted_price = _extract_price_from_database_product(processed_record)
                                     formatted_price = _format_price_value(extracted_price)
-                                    logging.info(f"💰 PRICE EXTRACTION: Product '{product_name_for_record}' - Raw: '{extracted_price}', Formatted: '{formatted_price}'")
+                                    if idx < 3:
+                                        logging.info(f"💰 PRICE EXTRACTION: Product '{product_name_for_record}' - Raw: '{extracted_price}', Formatted: '{formatted_price}'")
                                     
                                     # Map database fields to template fields (using correct field names from database)
                                     record = {

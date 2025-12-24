@@ -105,23 +105,26 @@ class FastGenerationEngine:
         
         # Generate the document
         final_doc = self.template_processor.process_records(records)
-        
+        if final_doc is None:
+            logger.error("❌ FastGenerationEngine: process_records returned None (no document generated)")
+            raise RuntimeError("Failed to generate document: no valid records or template error.")
+
         # Cache the result
         buffer = BytesIO()
         final_doc.save(buffer)
         buffer.seek(0)
         _generation_cache[cache_key] = buffer.getvalue()
-        
+
         # Track timestamp for manual TTL
         if not HAS_CACHETOOLS:
             _cache_timestamps[cache_key] = time.time()
             # Clean up old entries if cache is too large
             if len(_generation_cache) > 100:
                 self._cleanup_cache()
-        
+
         generation_time = time.time() - start_time
         logger.info(f"⚡ Generation completed in {generation_time:.2f}s (cache hit rate: {self._get_hit_rate():.1f}%)")
-        
+
         # Return the document
         buffer.seek(0)
         return Document(buffer)
