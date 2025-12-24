@@ -3421,7 +3421,23 @@ const TagManager = {
             // Recreate the change handler (same logic as in createTagElement)
             const handleCheckboxChange = (e) => {
                 console.log(`🎯 Checkbox handler called for: ${tagName}, skipUndoTracking: ${this.state.skipUndoTracking}`);
-                
+
+                // CRITICAL FIX: Ensure tag lookup map is built before processing
+                if (!this._tagLookupMap || this._tagLookupMap.size === 0) {
+                    console.warn('⚠️ Tag lookup map not ready, rebuilding before processing checkbox...');
+                    this._tagLookupMap = new Map();
+                    (this.state.tags || []).forEach(t => {
+                        if (t && t['Product Name*']) {
+                            this._tagLookupMap.set(t['Product Name*'], t);
+                        }
+                    });
+                    (this.state.originalTags || []).forEach(t => {
+                        if (t && t['Product Name*'] && !this._tagLookupMap.has(t['Product Name*'])) {
+                            this._tagLookupMap.set(t['Product Name*'], t);
+                        }
+                    });
+                }
+
                 // CRITICAL FIX: Always allow checkbox clicks - clear drag attributes if they exist
                 if (e.target.hasAttribute('data-reordering')) {
                     e.target.removeAttribute('data-reordering');
@@ -3430,11 +3446,11 @@ const TagManager = {
                     e.target.removeAttribute('data-drag-disabled');
                     e.target.style.pointerEvents = 'auto';
                 }
-                
+
                 e.target.style.pointerEvents = 'auto';
                 e.target.removeAttribute('data-reordering');
                 e.target.removeAttribute('data-drag-disabled');
-                
+
                 const isChecked = e.target.checked;
                 const isInSelected = e.target.closest('#selectedTags') !== null;
                 
@@ -15715,11 +15731,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const isInitialized = window.TagManager.state.initialized;
             const isChecking = window.TagManager._checkingExistingData;
 
-            // Check if tags exist in cache before forcing reload
-            const hasCache = window.TagManager.loadAvailableTagsFromCache && window.TagManager.loadAvailableTagsFromCache();
+            // Check if tags are actually rendered in the DOM (more reliable than just checking cache)
+            const availableContainer = document.getElementById('availableTags');
+            const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
-            if (!hasTags && !hasCache && isInitialized && !isChecking) {
-                console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no cache found, attempting retry...');
+            if (!hasTags && !hasRenderedTags && isInitialized && !isChecking) {
+                console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no rendered tags found, attempting retry...');
                 // Reset flags to allow retry
                 window.TagManager._checkingExistingData = false;
                 window.TagManager.state.initialDataAttempts = 0;
@@ -15735,8 +15752,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     });
                 }
-            } else if (hasTags || hasCache) {
-                console.log('✅ SAFEGUARD: Tags already loaded or cached, skipping retry');
+            } else if (hasTags || hasRenderedTags) {
+                console.log('✅ SAFEGUARD: Tags already loaded or rendered, skipping retry');
             }
         }
     }, 5000);
@@ -15748,11 +15765,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const availableContainer = document.getElementById('availableTags');
             const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
-            // Check if tags exist in cache before forcing reload
-            const hasCache = window.TagManager.loadAvailableTagsFromCache && window.TagManager.loadAvailableTagsFromCache();
-
-            if (!hasTags && !hasRenderedTags && !hasCache) {
-                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no cache found - forcing direct fetch');
+            if (!hasTags && !hasRenderedTags) {
+                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no rendered tags found - forcing direct fetch');
                 // Force reset all flags
                 window.TagManager._checkingExistingData = false;
                 window.TagManager._fetchingAvailableTags = false;
@@ -15763,8 +15777,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         console.error('Critical safeguard fetch failed:', e);
                     });
                 }
-            } else if (hasTags || hasRenderedTags || hasCache) {
-                console.log('✅ 10s SAFEGUARD: Tags already loaded, rendered, or cached - skipping force fetch');
+            } else if (hasTags || hasRenderedTags) {
+                console.log('✅ 10s SAFEGUARD: Tags already loaded or rendered - skipping force fetch');
             }
         }
     }, 10000);
@@ -15792,19 +15806,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 window.TagManager._fetchingAvailableTags = false;
             }
             
-            // If tags aren't loaded and flags are reset, try loading again (but check cache first)
+            // If tags aren't loaded and flags are reset, try loading again (but check if rendered first)
             const hasTags = window.TagManager.state?.tags && window.TagManager.state.tags.length > 0;
-            const hasCache = window.TagManager.loadAvailableTagsFromCache && window.TagManager.loadAvailableTagsFromCache();
+            const availableContainer = document.getElementById('availableTags');
+            const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
-            if (!hasTags && !hasCache && !checkingStuck && !fetchingStuck) {
-                console.log('🔄 Page visible and no tags loaded or cached, attempting to load tags...');
+            if (!hasTags && !hasRenderedTags && !checkingStuck && !fetchingStuck) {
+                console.log('🔄 Page visible and no tags loaded or rendered, attempting to load tags...');
                 if (typeof window.TagManager.checkForExistingData === 'function') {
                     window.TagManager.checkForExistingData().catch(e => {
                         console.error('Visibility change retry failed:', e);
                     });
                 }
-            } else if (hasTags || hasCache) {
-                console.log('✅ VISIBILITY: Tags already loaded or cached, skipping reload');
+            } else if (hasTags || hasRenderedTags) {
+                console.log('✅ VISIBILITY: Tags already loaded or rendered, skipping reload');
             }
         }
     });
