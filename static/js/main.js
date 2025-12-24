@@ -1751,10 +1751,24 @@ const TagManager = {
         const doh = new Set();
         const highCbd = new Set();
 
+        // Exclusion logic for product types
+        const excludedTypesLower = [
+            'x-deactivated', 'deactivated', 'trade sample', 'sample', 'excluded', 'x-deactivated 1', 'x-deactivated 2'
+        ];
+
         tags.forEach(tag => {
             if (tag.Vendor) vendors.add(tag.Vendor);
             if (tag.ProductBrand || tag['Product Brand']) brands.add(tag.ProductBrand || tag['Product Brand']);
-            if (tag.ProductType || tag['Product Type*']) productTypes.add(tag.ProductType || tag['Product Type*']);
+            // Product Type - exclude deactivated and sample types
+            const pt = tag.ProductType || tag['Product Type*'];
+            if (pt && pt.trim()) {
+                const ptLower = pt.trim().toLowerCase();
+                if (!ptLower.includes('deactivated') &&
+                    !ptLower.includes('trade sample') &&
+                    !excludedTypesLower.some(ex => ptLower.includes(ex))) {
+                    productTypes.add(pt.trim());
+                }
+            }
             if (tag.Lineage) lineages.add(tag.Lineage);
             if (tag.WeightUnits || tag.CombinedWeight) weights.add(tag.WeightUnits || tag.CombinedWeight);
             if (tag.ProductStrain || tag['Product Strain']) strains.add(tag.ProductStrain || tag['Product Strain']);
