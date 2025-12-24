@@ -7432,13 +7432,22 @@
     // This must happen right after main.js loads, before any other initialization
     if (window.TagManager && typeof window.TagManager.hydrateAvailableTagsFromCache === 'function') {
       try {
+        console.log('⚡ Attempting to hydrate tags from cache...');
         const hydrated = window.TagManager.hydrateAvailableTagsFromCache();
         if (hydrated) {
           console.log('⚡ INSTANT: Tags hydrated from cache immediately after main.js load');
+        } else {
+          console.warn('⚠️ Cache hydration returned false - no cache available or cache check failed');
+          // Debug: Check what's in sessionStorage
+          const cacheKey = window.TagManager.getAvailableTagsCacheKey ? window.TagManager.getAvailableTagsCacheKey() : 'unknown';
+          console.log('📦 Cache key would be:', cacheKey);
+          console.log('📦 SessionStorage keys:', Object.keys(sessionStorage));
         }
       } catch (err) {
-        console.warn('Cache hydration failed (non-critical):', err);
+        console.error('❌ Cache hydration failed:', err);
       }
+    } else {
+      console.error('❌ TagManager or hydrateAvailableTagsFromCache not available');
     }
 
     // Check TagManager immediately after script loads (synchronous execution)

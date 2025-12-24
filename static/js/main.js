@@ -1249,19 +1249,68 @@ const TagManager = {
             if (!window.sessionStorage || !Array.isArray(tags) || tags.length === 0) {
                 return;
             }
+
+            // CRITICAL FIX: Reduce tag data size to fit in sessionStorage (5-10MB limit)
+            // Keep only essential fields needed for display and filtering
+            const essentialFields = [
+                'Product Name*', 'Vendor', 'Brand', 'Product Type', 'Weight', 'ProductType',
+                'canonical_lineage', 'currentLineage', 'Lineage', 'lineage',
+                'DOH Compliant', 'High CBD', 'THC%', 'CBD%', 'Total Cannabinoids',
+                'Subcategory' // For prerolls
+            ];
+
+            const compressedTags = tags.map(tag => {
+                const compressed = {};
+                essentialFields.forEach(field => {
+                    if (tag[field] !== undefined) {
+                        compressed[field] = tag[field];
+                    }
+                });
+                return compressed;
+            });
+
             const payload = {
                 timestamp: Date.now(),
-                tags
+                tags: compressedTags
             };
             const cacheKey = this.getAvailableTagsCacheKey();
-            
-            // CRITICAL FIX: Also save with a normalized key that ignores timestamp differences
-            // This allows cache to be found even if filename timestamp changes
-            const normalizedKey = this.getNormalizedCacheKey();
-            if (normalizedKey && normalizedKey !== cacheKey) {
-                sessionStorage.setItem(normalizedKey, JSON.stringify(payload));
+
+            const payloadStr = JSON.stringify(payload);
+            const sizeKB = (payloadStr.length / 1024).toFixed(1);
+
+            // Try to save to sessionStorage
+            try {
+                sessionStorage.setItem(cacheKey, payloadStr);
+                console.log(`💾 Cached ${tags.length} tags (${sizeKB}KB) with key: ${cacheKey}`);
+
+                // CRITICAL FIX: Also save with a normalized key that ignores timestamp differences
+                const normalizedKey = this.getNormalizedCacheKey();
+                if (normalizedKey && normalizedKey !== cacheKey) {
+                    sessionStorage.setItem(normalizedKey, payloadStr);
+                }
+            } catch (quotaError) {
+                console.warn(`⚠️ SessionStorage quota exceeded (${sizeKB}KB) - clearing old cache and retrying`);
+
+                // Clear old tag cache entries to make space
+                const keysToRemove = [];
+                for (let i = 0; i < sessionStorage.length; i++) {
+                    const key = sessionStorage.key(i);
+                    if (key && key.includes('agt_available_tags') && key !== cacheKey) {
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(key => sessionStorage.removeItem(key));
+                console.log(`🗑️ Cleared ${keysToRemove.length} old cache entries`);
+
+                // Retry save
+                try {
+                    sessionStorage.setItem(cacheKey, payloadStr);
+                    console.log(`✅ Cache saved after cleanup (${sizeKB}KB)`);
+                } catch (retryError) {
+                    console.error(`❌ Still cannot save cache after cleanup - data too large (${sizeKB}KB)`);
+                }
             }
-            
+
             // Verify tags have database lineage before caching
             const sampleTag = tags[0];
             if (sampleTag) {
@@ -1272,9 +1321,6 @@ const TagManager = {
                     Lineage: sampleTag.Lineage
                 });
             }
-            
-            sessionStorage.setItem(cacheKey, JSON.stringify(payload));
-            console.log(`💾 Cached ${tags.length} tags with key: ${cacheKey}`);
         } catch (error) {
             console.warn('❌ Failed to save cache:', error);
         }

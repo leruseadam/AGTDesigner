@@ -70,8 +70,10 @@
             // CRITICAL FIX: If tags are already hydrated from cache (e.g., by inline script),
             // skip loading entirely and return immediately
             const alreadyHydrated = this.state && this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
-            if (alreadyHydrated) {
-                console.log(`✅ Tags already hydrated from cache (${this.state.tags.length} tags), skipping load`);
+            const tagsAlreadyRendered = document.getElementById('availableTags')?.querySelectorAll('.tag-item').length > 0;
+
+            if (alreadyHydrated || tagsAlreadyRendered) {
+                console.log(`✅ Tags already ${alreadyHydrated ? 'hydrated from cache' : 'rendered in DOM'} (${alreadyHydrated ? this.state.tags.length : 'rendered'} tags), skipping load`);
                 // Still load selected tags and filters in background
                 Promise.allSettled([
                     this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
