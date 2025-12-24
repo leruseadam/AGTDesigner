@@ -1109,11 +1109,17 @@ const TagManager = {
     // CRITICAL FIX: Try multiple cache key variations to handle formatting differences
     tryMultipleCacheKeys() {
         try {
+            // CRITICAL FIX: Check both localStorage and sessionStorage
+            const storage = window.localStorage || window.sessionStorage;
+            if (!storage) {
+                return null;
+            }
+
             const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
                 window.currentStore || 'default';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
-            
+
             // Normalize store and file for matching
             const normalizeForMatching = (str) => {
                 return str
@@ -1122,10 +1128,10 @@ const TagManager = {
                     .replace(/\s*-\s*/g, '-') // Normalize " - " or " -" or "- " to "-"
                     .toLowerCase();
             };
-            
+
             const normalizedStore = normalizeForMatching(store);
             const normalizedFile = normalizeForMatching(file);
-            
+
             // Extract base filename without timestamp for fuzzy matching
             // Pattern: "A Greener Today-Bothell_inventory_12-18-2025_5_04 PM.xlsx" -> "A Greener Today-Bothell_inventory"
             const extractBaseFilename = (filename) => {
@@ -1135,10 +1141,10 @@ const TagManager = {
                 const base = withoutExt.replace(/_\d{1,2}_\d{2}\s*(AM|PM)$/i, '');
                 return base.trim();
             };
-            
+
             const baseFilename = extractBaseFilename(file);
             const normalizedBaseFilename = normalizeForMatching(baseFilename);
-            
+
             // Try multiple key variations
             const variations = [
                 `agt_available_tags_${store}_${file}`, // Original exact match
@@ -1147,24 +1153,25 @@ const TagManager = {
                 `agt_available_tags_${store.replace(/\s*-\s*/g, '-')}_${file.replace(/\s*-\s*/g, '-')}`, // Normalized hyphens
                 `agt_available_tags_${store.replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-')}_${file.replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-')}` // Fully normalized
             ];
-            
-            // Also list all available cache keys for debugging
+
+            // Also list all available cache keys for debugging (check both localStorage and sessionStorage)
             const allCacheKeys = [];
-            for (let i = 0; i < sessionStorage.length; i++) {
-                const key = sessionStorage.key(i);
+            for (let i = 0; i < storage.length; i++) {
+                const key = storage.key(i);
                 if (key && key.startsWith('agt_available_tags_')) {
                     allCacheKeys.push(key);
                 }
             }
+
             // Try each variation
             for (const key of variations) {
-                const raw = sessionStorage.getItem(key);
+                const raw = storage.getItem(key);
                 if (raw) {
                     verboseLog(`✅ Found cache with variation key: ${key}`);
                     return { key, raw };
                 }
             }
-            
+
             // CRITICAL FIX: If no exact match, try fuzzy matching by base filename
             // This handles cases where timestamp in filename differs but it's the same file
             for (const cacheKey of allCacheKeys) {
@@ -1175,11 +1182,11 @@ const TagManager = {
                     const cachedBaseFilename = extractBaseFilename(cachedFile);
                     const normalizedCachedBase = normalizeForMatching(cachedBaseFilename);
                     const normalizedCachedStore = normalizeForMatching(cachedStore);
-                    
+
                     // Match if store matches and base filename matches (ignoring timestamp)
                     if (normalizedCachedStore === normalizedStore && normalizedCachedBase === normalizedBaseFilename) {
                         verboseLog(`✅ Found cache with fuzzy match: ${cacheKey} (base filename matches)`);
-                        const raw = sessionStorage.getItem(cacheKey);
+                        const raw = storage.getItem(cacheKey);
                         if (raw) {
                             return { key: cacheKey, raw };
                         }
@@ -1196,28 +1203,42 @@ const TagManager = {
     loadAvailableTagsFromCache() {
         try {
             verboseLog('💾 Attempting to load tags from cache...');
-            if (!window.sessionStorage) {
+
+            // CRITICAL FIX: Use localStorage first (larger capacity), fallback to sessionStorage
+            const storage = window.localStorage || window.sessionStorage;
+            if (!storage) {
                 return null;
             }
-            
+
             // CRITICAL FIX: Don't load from cache if no Excel file is uploaded
             // Only load cache when there's an actual Excel file loaded
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
             if (!file || file === 'nofile' || file === '' || file === 'database') {
                 return null;
             }
-            
+
             const cacheKey = this.getAvailableTagsCacheKey();
-            let raw = sessionStorage.getItem(cacheKey);
-            
+            let raw = storage.getItem(cacheKey);
+
             // CRITICAL FIX: If exact key not found, try normalized key first (ignores timestamp)
             if (!raw) {
                 const normalizedKey = this.getNormalizedCacheKey();
                 if (normalizedKey && normalizedKey !== cacheKey) {
-                    raw = sessionStorage.getItem(normalizedKey);
+                    raw = storage.getItem(normalizedKey);
                 }
             }
-            
+
+            // CRITICAL FIX: If still not found in localStorage, try sessionStorage
+            if (!raw && window.sessionStorage) {
+                raw = sessionStorage.getItem(cacheKey);
+                if (!raw) {
+                    const normalizedKey = this.getNormalizedCacheKey();
+                    if (normalizedKey && normalizedKey !== cacheKey) {
+                        raw = sessionStorage.getItem(normalizedKey);
+                    }
+                }
+            }
+
             // CRITICAL FIX: If still not found, try multiple variations
             if (!raw) {
                 const fallbackResult = this.tryMultipleCacheKeys();
@@ -1236,7 +1257,7 @@ const TagManager = {
                 return null;
             }
             verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
-            
+
             return payload.tags;
         } catch (error) {
             console.warn('❌ Failed to load cache:', error);
@@ -1246,69 +1267,57 @@ const TagManager = {
 
     saveAvailableTagsToCache(tags) {
         try {
-            if (!window.sessionStorage || !Array.isArray(tags) || tags.length === 0) {
+            if (!Array.isArray(tags) || tags.length === 0) {
                 return;
             }
 
-            // CRITICAL FIX: Reduce tag data size to fit in sessionStorage (5-10MB limit)
-            // Keep only essential fields needed for display and filtering
-            const essentialFields = [
-                'Product Name*', 'Vendor', 'Brand', 'Product Type', 'Weight', 'ProductType',
-                'canonical_lineage', 'currentLineage', 'Lineage', 'lineage',
-                'DOH Compliant', 'High CBD', 'THC%', 'CBD%', 'Total Cannabinoids',
-                'Subcategory' // For prerolls
-            ];
+            // CRITICAL FIX: Use localStorage instead of sessionStorage for larger capacity
+            // localStorage: 10-50MB, sessionStorage: 5-10MB
+            const storage = window.localStorage || window.sessionStorage;
+            if (!storage) {
+                return;
+            }
 
-            const compressedTags = tags.map(tag => {
-                const compressed = {};
-                essentialFields.forEach(field => {
-                    if (tag[field] !== undefined) {
-                        compressed[field] = tag[field];
-                    }
-                });
-                return compressed;
-            });
+            // CRITICAL FIX: Clear old cache entries FIRST to make space
+            const cacheKey = this.getAvailableTagsCacheKey();
+            const keysToRemove = [];
+            for (let i = 0; i < storage.length; i++) {
+                const key = storage.key(i);
+                if (key && key.includes('agt_available_tags') && key !== cacheKey) {
+                    keysToRemove.push(key);
+                }
+            }
+            if (keysToRemove.length > 0) {
+                keysToRemove.forEach(key => storage.removeItem(key));
+                console.log(`🗑️ Cleared ${keysToRemove.length} old cache entries to make space`);
+            }
 
             const payload = {
                 timestamp: Date.now(),
-                tags: compressedTags
+                tags
             };
-            const cacheKey = this.getAvailableTagsCacheKey();
 
             const payloadStr = JSON.stringify(payload);
             const sizeKB = (payloadStr.length / 1024).toFixed(1);
+            const sizeMB = (payloadStr.length / (1024 * 1024)).toFixed(2);
 
-            // Try to save to sessionStorage
+            // Try to save to localStorage (falls back to sessionStorage if needed)
             try {
-                sessionStorage.setItem(cacheKey, payloadStr);
-                console.log(`💾 Cached ${tags.length} tags (${sizeKB}KB) with key: ${cacheKey}`);
+                storage.setItem(cacheKey, payloadStr);
+                console.log(`💾 Cached ${tags.length} tags (${sizeKB}KB / ${sizeMB}MB) with key: ${cacheKey}`);
 
                 // CRITICAL FIX: Also save with a normalized key that ignores timestamp differences
                 const normalizedKey = this.getNormalizedCacheKey();
                 if (normalizedKey && normalizedKey !== cacheKey) {
-                    sessionStorage.setItem(normalizedKey, payloadStr);
-                }
-            } catch (quotaError) {
-                console.warn(`⚠️ SessionStorage quota exceeded (${sizeKB}KB) - clearing old cache and retrying`);
-
-                // Clear old tag cache entries to make space
-                const keysToRemove = [];
-                for (let i = 0; i < sessionStorage.length; i++) {
-                    const key = sessionStorage.key(i);
-                    if (key && key.includes('agt_available_tags') && key !== cacheKey) {
-                        keysToRemove.push(key);
+                    try {
+                        storage.setItem(normalizedKey, payloadStr);
+                    } catch (e) {
+                        // Normalized key is optional, ignore errors
                     }
                 }
-                keysToRemove.forEach(key => sessionStorage.removeItem(key));
-                console.log(`🗑️ Cleared ${keysToRemove.length} old cache entries`);
-
-                // Retry save
-                try {
-                    sessionStorage.setItem(cacheKey, payloadStr);
-                    console.log(`✅ Cache saved after cleanup (${sizeKB}KB)`);
-                } catch (retryError) {
-                    console.error(`❌ Still cannot save cache after cleanup - data too large (${sizeKB}KB)`);
-                }
+            } catch (quotaError) {
+                console.warn(`⚠️ Storage quota exceeded (${sizeMB}MB) - cache too large, skipping`);
+                console.warn(`   Data size: ${sizeMB}MB for ${tags.length} tags`);
             }
 
             // Verify tags have database lineage before caching
