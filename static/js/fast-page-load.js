@@ -66,7 +66,20 @@
         // Replace with optimized version
         TagManager.checkForExistingData = async function() {
             console.log('⚡ Optimized checkForExistingData called');
-            
+
+            // CRITICAL FIX: If tags are already hydrated from cache (e.g., by inline script),
+            // skip loading entirely and return immediately
+            const alreadyHydrated = this.state && this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
+            if (alreadyHydrated) {
+                console.log(`✅ Tags already hydrated from cache (${this.state.tags.length} tags), skipping load`);
+                // Still load selected tags and filters in background
+                Promise.allSettled([
+                    this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
+                    this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
+                ]).catch(err => console.warn('Background load error:', err));
+                return;
+            }
+
             // CRITICAL FIX: Check for uploaded file FIRST before trying to load tags
             let hasFile = false;
             try {
