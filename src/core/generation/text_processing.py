@@ -215,16 +215,32 @@ def fix_description_spacing(desc: str) -> str:
 
 def make_nonbreaking_hyphens(text):
     """
-    Convert regular hyphens to non-breaking hyphens in text.
-    This prevents line breaks at hyphenated words.
+    Convert regular hyphens to non-breaking hyphens AND spaces around hyphens to non-breaking spaces.
+    This prevents line breaks at hyphenated words and around hyphens.
+
+    CRITICAL: For preroll templates, patterns like "Pre-Roll - 1g" must never break.
+    We replace:
+    - Regular hyphens (-) with non-breaking hyphens (U+2011)
+    - Spaces around hyphens with non-breaking spaces (U+00A0)
     """
     if not text or not isinstance(text, str):
         return text
-    
-    # Replace regular hyphens with non-breaking hyphens
-    # Use Unicode non-breaking hyphen (U+2011)
+
+    # CRITICAL FIX: Replace space-hyphen-space patterns with non-breaking versions
+    # Pattern: " - " becomes "\u00A0\u2011\u00A0" (nbsp + non-breaking hyphen + nbsp)
+    # This prevents "Pre-Roll - 1g" from breaking into "Pre-Roll -" and "1g"
+    import re
+    text = re.sub(r'\s+-\s+', '\u00A0\u2011\u00A0', text)
+
+    # Also handle space-hyphen (no trailing space): " -" becomes "\u00A0\u2011"
+    text = re.sub(r'\s+-(?=\S)', '\u00A0\u2011', text)
+
+    # Also handle hyphen-space (no leading space): "- " becomes "\u2011\u00A0"
+    text = re.sub(r'(?<=\S)-\s+', '\u2011\u00A0', text)
+
+    # Finally, replace any remaining standalone hyphens with non-breaking hyphens
     text = text.replace('-', '\u2011')
-    
+
     return text
 
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
