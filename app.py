@@ -8105,7 +8105,18 @@ def generate_labels():
         # PREROLL TEMPLATE: Group by unique vendor + description combination
         if template_type == 'preroll':
             logging.info(f"PREROLL: Starting grouping for {len(records)} preroll products...")
+            # Log sample records for debugging
+            if records:
+                for i, record in enumerate(records[:3]):
+                    logging.info(f"PREROLL INPUT {i+1}: Name={record.get('Product Name*', 'N/A')}, Type={record.get('Product Type*', 'N/A')}, Vendor={record.get('Vendor/Supplier*', 'N/A')}")
+            else:
+                logging.error(f"PREROLL: No records passed to grouping function!")
             records = generate_preroll_tags(records, cache)
+            # Log what came out of grouping
+            if records:
+                logging.info(f"PREROLL OUTPUT: Generated {len(records)} groups")
+                for i, record in enumerate(records[:3]):
+                    logging.info(f"PREROLL GROUP {i+1}: Name={record.get('Product Name*', 'N/A')}, Vendor={record.get('Vendor/Supplier*', 'N/A')}")
             # If preroll grouping produced no records (e.g., brand filtering removed all items),
             # bail out early with a clear error instead of letting downstream code hit None.save().
             if not records:
