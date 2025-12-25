@@ -868,7 +868,7 @@ def process_chunk(args):
         logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic expansion for {num_labels} labels")
     tpl = DocxTemplate(local_template_buffer)
     context = {}
-    image_width = Mm(8) if orientation == "mini" or orientation == "preroll" else Mm(9 if orientation == 'vertical' else 12)
+    image_width = Mm(10) if orientation == "preroll" else (Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12))
     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")

@@ -189,6 +189,42 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     background-position: right 12px center !important;
     background-size: 16px 16px !important;
 }
+    #templateSelect,
+    #templateSelectModal {
+        -webkit-appearance: none !important;
+        -moz-appearance: none !important;
+        appearance: none !important;
+        display: block !important;
+        box-sizing: border-box !important;
+        width: 320px !important;
+        min-width: 220px !important;
+        max-width: 100% !important;
+        min-height: 48px !important;
+        height: auto !important;
+        margin: 0.5rem 0 0.75rem 0 !important;
+        text-align: left !important;
+        text-align-last: left !important;
+        direction: ltr !important;
+        padding: 1rem 48px 1rem 1.25rem !important;
+        font-size: 1.1em !important;
+        font-weight: 600 !important;
+        color: #222 !important;
+        line-height: 1.5 !important;
+        letter-spacing: 0.1px !important;
+        background-color: rgba(255,255,255,0.97) !important;
+        border: 2px solid #00d4aa !important;
+        border-radius: 12px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.07) !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        white-space: nowrap !important;
+        text-overflow: ellipsis !important;
+        overflow: visible !important;
+        background-image: url('data:image/svg+xml;utf8,<svg fill="%2300d4aa" height="18" viewBox="0 0 24 24" width="18" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+        background-repeat: no-repeat !important;
+        background-position: right 16px center !important;
+        background-size: 18px 18px !important;
+    }
 
 /* Template dropdown options - Mac native style */
 #templateSelect option,
@@ -218,27 +254,23 @@ select:not(#templateSelect):not(#templateSelectModal) option {
 /* PC-specific: Ensure template dropdown is properly centered */
 @media (min-width: 992px) {
     /* Center the control-section container */
-    .control-section {
-        align-items: center !important;
-        display: flex !important;
-        flex-direction: column !important;
-        width: 100% !important;
-    }
-    
-    /* Ensure template dropdown is centered within control-section */
-    .control-section #templateSelect,
-    .control-section #templateSelectModal {
-        margin-left: auto !important;
-        margin-right: auto !important;
-        display: block !important;
-    }
-    
-    /* Center the control-panel itself */
-    .control-panel {
-        align-items: center !important;
-        display: flex !important;
-        flex-direction: column !important;
-    }
+        /* Remove forced centering for control-section and control-panel on large screens */
+        .control-section {
+            align-items: flex-start !important;
+            display: block !important;
+            width: 100% !important;
+        }
+        .control-panel {
+            align-items: flex-start !important;
+            display: block !important;
+            width: 100% !important;
+        }
+        .control-section #templateSelect,
+        .control-section #templateSelectModal {
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            display: block !important;
+        }
 }
 
 /* Disable all transitions globally for smooth performance on PC */
