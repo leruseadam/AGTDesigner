@@ -9432,11 +9432,25 @@ def get_available_tags():
                 safe_simple_tags = make_json_safe(simple_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags")
-                return jsonify({
-                    'tags': safe_simple_tags,
-                    'total_count': len(safe_simple_tags),
-                    'source': 'excel-simple'
-                })
+
+                # CRITICAL FIX: Wrap response in try-catch to handle OSError: write error
+                # This can happen if response is too large or client disconnects
+                try:
+                    response = jsonify({
+                        'tags': safe_simple_tags,
+                        'total_count': len(safe_simple_tags),
+                        'source': 'excel-simple'
+                    })
+                    # Log response size for debugging
+                    import sys
+                    response_size = sys.getsizeof(str(response.get_json()))
+                    logging.info(f"📊 Response size: {response_size / 1024 / 1024:.2f}MB for {len(safe_simple_tags)} tags")
+                    return response
+                except OSError as write_err:
+                    logging.error(f"❌ OSError writing response: {write_err}")
+                    logging.error(f"Response was {len(safe_simple_tags)} tags, may be too large")
+                    # Try to return a smaller error response
+                    return jsonify({'error': 'Response too large or connection error', 'tag_count': len(safe_simple_tags)}), 500
         except Exception as simple_err:
             logging.error(f"❌ SIMPLE PATH failed: {simple_err}")
             import traceback
