@@ -4672,10 +4672,14 @@ class ProductDatabase:
                 return None
             
             # Try exact match first (fastest) - also get strain for sativa hybrid check
+            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE "Product Name*" = ? OR "ProductName" = ?
-                ORDER BY id DESC
+                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" = ? OR p."ProductName" = ?
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -4709,11 +4713,15 @@ class ProductDatabase:
                 return lineage
             
             # Fallback: Case-insensitive and whitespace-insensitive match
+            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
-                   OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
-                ORDER BY id DESC
+                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
+                   OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -4738,10 +4746,14 @@ class ProductDatabase:
                 return lineage
             
             # Last resort: Partial match (in case product name has extra characters)
+            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
-                ORDER BY id DESC
+                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" LIKE ? OR p."ProductName" LIKE ?
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (f'%{product_name_norm}%', f'%{product_name_norm}%'))
             
@@ -4796,11 +4808,13 @@ class ProductDatabase:
                     logger.debug(f"Found vendor-specific lineage for {strain_name} + {brand}: {result[0]}")
                     return result[0]
                 
-                # Check products table for vendor/brand combination without relying on missing strain_id
-                # Match by normalized Product Strain text to the requested strain
+                # Check products table for vendor/brand combination
+                # CRITICAL FIX: Join with strains and prioritize sovereign_lineage
                 normalized_strain = self._normalize_strain_name(strain_name)
                 cursor.execute('''
-                    SELECT p."Lineage" FROM products p
+                    SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
                     WHERE LOWER(TRIM(COALESCE(p."Product Strain", ''))) = ?
                       AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
                     ORDER BY p.id DESC
@@ -4812,11 +4826,14 @@ class ProductDatabase:
                     logger.debug(f"Found product-specific lineage for {strain_name} + {vendor} + {brand}: {result[0]}")
                     return result[0]
             
-            # Fallback to canonical lineage from strains table
+            # Fallback to strain lineage from strains table (prioritizes sovereign_lineage)
             strain_info = self.get_strain_info(strain_name)
-            if strain_info and strain_info.get('canonical_lineage'):
-                logger.debug(f"Using canonical lineage for {strain_name}: {strain_info['canonical_lineage']}")
-                return strain_info['canonical_lineage']
+            if strain_info:
+                # CRITICAL FIX: Use display_lineage which prioritizes sovereign_lineage over canonical
+                lineage = strain_info.get('display_lineage') or strain_info.get('canonical_lineage')
+                if lineage:
+                    logger.debug(f"Using strain lineage for {strain_name}: {lineage}")
+                    return lineage
             
             return None
             
