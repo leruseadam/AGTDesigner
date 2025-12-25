@@ -1437,17 +1437,11 @@ const TagManager = {
     async _refreshLineageFromDatabase(tags) {
         const timestamp = Date.now();
         try {
-            // CRITICAL FIX: Check if lineage was recently updated
-            // If so, force database refresh instead of using fast_load
-            const lastLineageUpdate = localStorage.getItem('lastLineageUpdateTime');
-            const recentlyUpdated = lastLineageUpdate && (timestamp - parseInt(lastLineageUpdate)) < 300000; // 5 minutes
-            
-            // Use fast_load=0 if lineage was recently updated to ensure changes persist
-            const fastLoad = recentlyUpdated ? 0 : 1;
-            
-            if (recentlyUpdated) {
-                verboseLog('🔄 Recent lineage update detected - forcing database refresh');
-            }
+            // CRITICAL FIX: ALWAYS use fast_load=0 to get database lineage
+            // The whole point of this background refresh is to update colors with database lineage
+            // Using fast_load=1 skips lineage enrichment, leaving us with Excel lineage only
+            const fastLoad = 0;
+            verboseLog('🔄 Background refresh: forcing database lineage enrichment (fast_load=0)');
             
             const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=${fastLoad}`, {
                 signal: AbortSignal.timeout(5000) // 5 second timeout (reduced from 30s)
