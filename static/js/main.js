@@ -1515,18 +1515,41 @@ const TagManager = {
                     if (updatedCount > 0) {
                         verboseLog(`✅ Refreshed lineage for ${updatedCount} tags from database`);
                         // CRITICAL FIX: ALWAYS re-render to update database lineage colors/dropdowns
-                        // But preserve selections by immediately restoring them after render
+                        // But preserve selections by marking them as recently checked BEFORE re-render
                         const selectionsToRestore = this.state.persistentSelectedTags ? [...this.state.persistentSelectedTags] : [];
+
+                        // CRITICAL: Mark all current selections as recently checked BEFORE re-render
+                        // This prevents _restoreCheckboxStates from unchecking them during re-render
+                        if (selectionsToRestore.length > 0) {
+                            const availableContainer = document.getElementById('availableTags');
+                            if (availableContainer) {
+                                selectionsToRestore.forEach(tagName => {
+                                    const checkbox = availableContainer.querySelector(`.tag-checkbox[value="${tagName.replace(/"/g, '\\"')}"]`);
+                                    if (checkbox) {
+                                        checkbox.setAttribute('data-recently-checked', 'true');
+                                        verboseLog(`🔒 Marked "${tagName}" as recently checked before lineage re-render`);
+                                    }
+                                });
+                            }
+                        }
 
                         // Re-render with updated database lineage
                         this._updateAvailableTags(this.state.tags, null);
 
-                        // Immediately restore selections after re-render
+                        // Clear the recently-checked flags after re-render completes
                         if (selectionsToRestore.length > 0) {
-                            verboseLog(`🔄 Restoring ${selectionsToRestore.length} selections after lineage update`);
                             setTimeout(() => {
-                                this._restoreCheckboxStates();
-                            }, 100);
+                                const availableContainer = document.getElementById('availableTags');
+                                if (availableContainer) {
+                                    selectionsToRestore.forEach(tagName => {
+                                        const checkbox = availableContainer.querySelector(`.tag-checkbox[value="${tagName.replace(/"/g, '\\"')}"]`);
+                                        if (checkbox) {
+                                            checkbox.removeAttribute('data-recently-checked');
+                                        }
+                                    });
+                                }
+                                verboseLog(`✅ Restored ${selectionsToRestore.length} selections after lineage update`);
+                            }, 3000); // Match the 3-second timeout from checkbox handler
                         }
                     } else {
                         verboseLog(`✅ Lineage already up-to-date (verified ${freshTags.length} tags)`);
