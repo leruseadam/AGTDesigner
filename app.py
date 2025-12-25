@@ -8104,12 +8104,17 @@ def generate_labels():
 
         # PREROLL TEMPLATE: Group by unique vendor + description combination
         if template_type == 'preroll':
+            logging.info(f"PREROLL: Starting grouping for {len(records)} preroll products...")
             records = generate_preroll_tags(records, cache)
             # If preroll grouping produced no records (e.g., brand filtering removed all items),
             # bail out early with a clear error instead of letting downstream code hit None.save().
             if not records:
-                logging.error("PREROLL: No preroll groups generated after filtering/grouping")
-                return jsonify({'error': 'No preroll items found to generate. Please verify preroll data and allowed brands.'}), 400
+                logging.error(f"PREROLL: No preroll groups generated after filtering/grouping")
+                # CRITICAL FIX: Provide more helpful error message with troubleshooting steps
+                return jsonify({
+                    'error': 'No preroll items found to generate. This usually happens when: (1) Selected products are not prerolls, (2) Brand filtering excluded all items, or (3) Products no longer exist in database. Please try: (1) Verify selected products are prerolls, (2) Check brand filter settings, or (3) Re-upload your Excel file to refresh the database.'
+                }), 400
+            logging.info(f"✅ PREROLL: Successfully grouped into {len(records)} preroll groups")
         
         # For mini templates, log how many labels will be filled vs. left blank
         if template_type == 'mini':
@@ -22568,7 +22573,46 @@ def display_preroll_items(group_id):
             # Update group display name to include vendor
             if preroll_items:
                 group_display_name = f"{group_display_name} - {vendor_filter}"
-        
+
+        # CRITICAL FIX: If cache lookup failed, try database fallback
+        if not preroll_items:
+            logging.info("PREROLL ROUTE: Cache lookup failed, trying database fallback...")
+            try:
+                from src.core.generation.preroll_tag_generator import _get_preroll_group_from_database
+
+                # Try group_key first (with vendor), then group_id only
+                if vendor_filter:
+                    group_key = f"{group_id}|{vendor_filter}"
+                    preroll_items, group_info = _get_preroll_group_from_database(group_key=group_key)
+                    logging.info(f"PREROLL ROUTE: Database lookup for group_key '{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+
+                # If vendor-specific lookup failed or no vendor, try group_id only
+                if not preroll_items:
+                    preroll_items, group_info = _get_preroll_group_from_database(group_id=group_id)
+                    logging.info(f"PREROLL ROUTE: Database lookup for group_id '{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+
+                if preroll_items and group_info:
+                    logging.info(f"✅ PREROLL ROUTE: Successfully retrieved {len(preroll_items)} items from database for group '{group_id}'")
+                    # Update group display name from database
+                    if isinstance(group_info, dict):
+                        group_display_name = group_info.get('display_name', group_display_name)
+                        if vendor_filter:
+                            group_display_name = f"{group_display_name} - {vendor_filter}"
+
+                    # Restore to cache for future lookups
+                    if vendor_filter:
+                        group_key = f"{group_id}|{vendor_filter}"
+                        cache.set(f"preroll_group_latest_{group_key}", preroll_items, timeout=86400)
+                        if group_info:
+                            cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
+                    cache.set(f"preroll_group_latest_{group_id}", preroll_items, timeout=86400)
+                    if group_info:
+                        cache.set(f"preroll_group_info_latest_{group_id}", group_info, timeout=86400)
+
+                    logging.info(f"✅ PREROLL ROUTE: Restored preroll group data to cache from database")
+            except Exception as db_error:
+                logging.error(f"❌ PREROLL ROUTE: Database fallback failed: {db_error}")
+
         if not preroll_items:
             # Return error page if items not found
             return f"""
