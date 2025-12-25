@@ -620,7 +620,7 @@ class ProductDatabase:
                         "CBNV" TEXT,
                         "CBGVA" TEXT,
                         FOREIGN KEY (strain_id) REFERENCES strains (id),
-                        UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
+                        UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand", "Weight*")
                     )
                 ''')
                 
@@ -1092,7 +1092,7 @@ class ProductDatabase:
                     "qty" TEXT,  -- Alternative to "Quantity*"
                     "Source" TEXT,  -- Source of product data (Excel Import, JSON Match, etc.)
                     FOREIGN KEY (strain_id) REFERENCES strains (id),
-                    UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
+                    UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand", "Weight*")
                 )
             ''')
             
