@@ -5665,7 +5665,7 @@ class ExcelProcessor:
             
             # Remove excluded product types (minimal check)
             if 'Product Type*' in df.columns:
-                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
+                excluded_types = ["Samples - Educational", "Sample - Vendor"]
                 df = df[~df['Product Type*'].isin(excluded_types)]
                 df.reset_index(drop=True, inplace=True)
             
@@ -7907,7 +7907,7 @@ class ExcelProcessor:
             
             # Remove excluded product types (minimal check)
             if 'Product Type*' in df.columns:
-                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
+                excluded_types = ["Samples - Educational", "Sample - Vendor"]
                 df = df[~df['Product Type*'].isin(excluded_types)]
                 df.reset_index(drop=True, inplace=True)
             

@@ -1216,15 +1216,22 @@ class ProductDatabase:
             return None
 
     def update_all_canonical_lineages_to_mode(self):
-        """Update all strains' canonical_lineage to the mode lineage from the products table."""
+        """Update all strains' canonical_lineage to the mode lineage from the products table.
+        CRITICAL: Skips strains with sovereign_lineage (manual edits) to preserve user changes."""
         self.init_database()
         conn = self._get_connection()
         cursor = conn.cursor()
-        # Get all strains
-        cursor.execute('SELECT id, strain_name, canonical_lineage FROM strains')
+        # Get all strains WITHOUT sovereign lineage (don't overwrite manual edits)
+        cursor.execute('SELECT id, strain_name, canonical_lineage, sovereign_lineage FROM strains')
         strains = cursor.fetchall()
         updated = 0
-        for strain_id, strain_name, canonical_lineage in strains:
+        skipped = 0
+        for strain_id, strain_name, canonical_lineage, sovereign_lineage in strains:
+            # CRITICAL: Skip strains with sovereign lineage (manual edits)
+            if sovereign_lineage:
+                skipped += 1
+                logger.debug(f"Skipping '{strain_name}' - has sovereign lineage '{sovereign_lineage}'")
+                continue
             mode_lineage = self.get_mode_lineage(strain_id)
             if mode_lineage and mode_lineage != canonical_lineage:
                 cursor.execute('''
@@ -1233,7 +1240,7 @@ class ProductDatabase:
                 logger.info(f"Updated canonical_lineage for '{strain_name}' to '{mode_lineage}' (was '{canonical_lineage}')")
                 updated += 1
         conn.commit()
-        logger.info(f"Canonical lineage update complete. {updated} strains updated.")
+        logger.info(f"Canonical lineage update complete. {updated} strains updated, {skipped} skipped (sovereign lineage protected).")
 
     @timed_operation("add_or_update_strain")
     @retry_on_lock(max_retries=3, delay=0.5)
@@ -4522,27 +4529,28 @@ class ProductDatabase:
     
     @timed_operation("get_strain_lineage_map")
     def get_strain_lineage_map(self) -> Dict[str, str]:
-        """Get a mapping of normalized strain names to their canonical lineages."""
+        """Get a mapping of normalized strain names to their lineages, prioritizing sovereign (manual) lineages."""
         try:
             self.init_database()  # Ensure DB is initialized
-            
+
             cache_key = self._get_cache_key("strain_lineage_map")
-            
+
             # Check cache first
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
                 return cached_result
-            
+
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('SELECT normalized_name, canonical_lineage FROM strains WHERE canonical_lineage IS NOT NULL')
-            
+            # CRITICAL FIX: Prioritize sovereign_lineage (manual edits) over canonical_lineage (Excel data)
+            cursor.execute('SELECT normalized_name, COALESCE(sovereign_lineage, canonical_lineage) FROM strains WHERE COALESCE(sovereign_lineage, canonical_lineage) IS NOT NULL')
+
             lineage_map = {row[0]: row[1] for row in cursor.fetchall() if row[0] and row[1]}
-            
+
             # Cache the result for 10 minutes
             self._set_cache(cache_key, lineage_map, ttl=600)
             return lineage_map
-            
+
         except Exception as e:
             logger.error(f"Error getting strain lineage map: {e}")
             return {}

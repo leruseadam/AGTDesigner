@@ -3940,7 +3940,7 @@ class JSONMatcher:
             
             if self._product_table_has_column('strain_id'):
                 query = """
-                    SELECT p.*, s.canonical_lineage 
+                    SELECT p.*, COALESCE(s.sovereign_lineage, s.canonical_lineage) as canonical_lineage
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
                     WHERE p."Product Strain" LIKE ? OR s.strain_name LIKE ?

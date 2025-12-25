@@ -15307,7 +15307,7 @@ def product_similarity():
         with db_connection(product_db.db_path) as conn:
             # Get the base product
             base_product = pd.read_sql_query('''
-                SELECT p.*, s.canonical_lineage
+                SELECT p.*, COALESCE(s.sovereign_lineage, s.canonical_lineage) as canonical_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p.product_name LIKE ?
@@ -15322,24 +15322,24 @@ def product_similarity():
             # Find similar products based on filter type
             if filter_type == 'lineage':
                 similar_products = pd.read_sql_query('''
-                    SELECT p.*, s.canonical_lineage,
+                    SELECT p.*, COALESCE(s.sovereign_lineage, s.canonical_lineage) as canonical_lineage,
                            CASE WHEN p.product_name LIKE ? THEN 95
                                 WHEN p.vendor = ? THEN 85
                                 WHEN p.product_type = ? THEN 75
                                 ELSE 50 END as similarity_score
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
-                    WHERE s.canonical_lineage = ? AND p.product_name != ?
+                    WHERE COALESCE(s.sovereign_lineage, s.canonical_lineage) = ? AND p.product_name != ?
                     ORDER BY similarity_score DESC
                     LIMIT 10
-                ''', conn, params=[f'%{product_name}%', base['vendor'], base['product_type'], 
+                ''', conn, params=[f'%{product_name}%', base['vendor'], base['product_type'],
                                  base['canonical_lineage'], base['product_name']])
             
             elif filter_type == 'vendor':
                 similar_products = pd.read_sql_query('''
-                    SELECT p.*, s.canonical_lineage,
+                    SELECT p.*, COALESCE(s.sovereign_lineage, s.canonical_lineage) as canonical_lineage,
                            CASE WHEN p.product_name LIKE ? THEN 95
-                                WHEN s.canonical_lineage = ? THEN 85
+                                WHEN COALESCE(s.sovereign_lineage, s.canonical_lineage) = ? THEN 85
                                 WHEN p.product_type = ? THEN 75
                                 ELSE 50 END as similarity_score
                     FROM products p
@@ -15352,11 +15352,11 @@ def product_similarity():
             
             else:  # all similarities
                 similar_products = pd.read_sql_query('''
-                    SELECT p.*, s.canonical_lineage,
+                    SELECT p.*, COALESCE(s.sovereign_lineage, s.canonical_lineage) as canonical_lineage,
                            CASE WHEN p.product_name LIKE ? THEN 95
-                                WHEN p.vendor = ? AND s.canonical_lineage = ? THEN 90
+                                WHEN p.vendor = ? AND COALESCE(s.sovereign_lineage, s.canonical_lineage) = ? THEN 90
                                 WHEN p.vendor = ? THEN 80
-                                WHEN s.canonical_lineage = ? THEN 75
+                                WHEN COALESCE(s.sovereign_lineage, s.canonical_lineage) = ? THEN 75
                                 WHEN p.product_type = ? THEN 70
                                 ELSE 50 END as similarity_score
                     FROM products p
@@ -15391,7 +15391,7 @@ def advanced_search():
         with db_connection(product_db.db_path) as conn:
             # Build dynamic query based on search criteria
             query = '''
-                SELECT p.*, s.canonical_lineage
+                SELECT p.*, COALESCE(s.sovereign_lineage, s.canonical_lineage) as canonical_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE 1=1
