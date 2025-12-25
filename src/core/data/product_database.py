@@ -619,6 +619,7 @@ class ProductDatabase:
                         "CBGV" TEXT,
                         "CBNV" TEXT,
                         "CBGVA" TEXT,
+                        "sovereign_lineage" TEXT,  -- Manual lineage override for products without strains
                         FOREIGN KEY (strain_id) REFERENCES strains (id),
                         UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand", "Weight*")
                     )
@@ -1091,6 +1092,7 @@ class ProductDatabase:
                     "Quantity Received*" TEXT,  -- Alternative to "Quantity*"
                     "qty" TEXT,  -- Alternative to "Quantity*"
                     "Source" TEXT,  -- Source of product data (Excel Import, JSON Match, etc.)
+                    "sovereign_lineage" TEXT,  -- Manual lineage override for products without strains
                     FOREIGN KEY (strain_id) REFERENCES strains (id),
                     UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand", "Weight*")
                 )
@@ -4673,8 +4675,9 @@ class ProductDatabase:
             
             # Try exact match first (fastest) - also get strain for sativa hybrid check
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -4714,8 +4717,9 @@ class ProductDatabase:
             
             # Fallback: Case-insensitive and whitespace-insensitive match
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -4747,8 +4751,9 @@ class ProductDatabase:
             
             # Last resort: Partial match (in case product name has extra characters)
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id

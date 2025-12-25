@@ -11836,7 +11836,19 @@ def update_lineage():
         except Exception as e:
             logging.error(f"Error updating product lineage: {e}")
         
-        # Step 2: CRITICAL - Also update strain lineage if product has a strain
+        # Step 2: CRITICAL - Update products.sovereign_lineage for products WITHOUT strains
+        # This ensures lineage changes persist for products that aren't linked to strains
+        cursor.execute("""
+            UPDATE products
+            SET sovereign_lineage = ?
+            WHERE (\"Product Name*\" = ? OR ProductName = ?)
+            AND (strain_id IS NULL OR strain_id = 0)
+        """, (new_lineage, tag_name, tag_name))
+        products_without_strains_updated = cursor.rowcount
+        if products_without_strains_updated > 0:
+            logging.info(f"✅ Updated sovereign_lineage for {products_without_strains_updated} product(s) without strains")
+
+        # Step 3: CRITICAL - Also update strain lineage if product has a strain
         # This ensures the lineage persists because strain lineage is the source of truth
         cursor.execute("""
             SELECT DISTINCT s.id, s.strain_name
@@ -11859,7 +11871,7 @@ def update_lineage():
                 strains_updated += 1
                 logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{new_lineage}'")
         
-        # Step 3: Also update all products with the same strain (sovereign lineage propagation)
+        # Step 4: Also update all products with the same strain (sovereign lineage propagation)
         similar_products_updated = 0
         if strains_updated > 0:
             for strain_id, strain_name in strain_rows:
@@ -11876,7 +11888,7 @@ def update_lineage():
         conn.commit()
         total_updated = products_updated + strains_updated
 
-        # Step 4: Verify the update actually worked - CRITICAL for persistence
+        # Step 5: Verify the update actually worked - CRITICAL for persistence
         import time
 
 # CRITICAL FIX: Use direct database query instead of get_product_lineage
@@ -11887,8 +11899,9 @@ def update_lineage():
         
         try:
             # Check database directly to see what was actually stored
+            # CRITICAL: Also check products.sovereign_lineage for products without strains
             cursor.execute("""
-                SELECT p."Lineage", s.sovereign_lineage, s.canonical_lineage
+                SELECT p."Lineage", s.sovereign_lineage, s.canonical_lineage, p.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE (p."Product Name*" = ? OR p.ProductName = ? OR p.normalized_name = ?)
@@ -11898,8 +11911,8 @@ def update_lineage():
             db_row = cursor.fetchone()
             
             if db_row:
-                # Get the actual stored lineage (prefer strain lineage, fallback to product lineage)
-                db_lineage = db_row[1] or db_row[2] or db_row[0]  # sovereign_lineage, canonical_lineage, or product Lineage
+                # Get the actual stored lineage (priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage)
+                db_lineage = db_row[3] or db_row[1] or db_row[2] or db_row[0]  # product.sovereign_lineage, strain.sovereign_lineage, canonical_lineage, or product Lineage
                 if db_lineage:
                     verified_lineage = str(db_lineage).strip()
                     # CRITICAL FIX: More lenient verification - check if update succeeded AND lineage matches
