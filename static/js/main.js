@@ -4447,20 +4447,61 @@ const TagManager = {
             const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database';
             
             if (noFileUploaded) {
-                // Show helpful empty state with instructions
+                // Show prominent upload prompt when Excel is needed
                 availableTagsContainer.innerHTML = `
-                    <div style="text-align: center; padding: 3rem 2rem; color: var(--text-secondary, #6c757d);">
-                        <div style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;">📁</div>
-                        <h3 style="color: var(--text-primary, #ffffff); margin-bottom: 1rem; font-size: 1.5rem;">No Excel File Uploaded</h3>
-                        <p style="font-size: 1.1rem; margin-bottom: 1.5rem; max-width: 500px; margin-left: auto; margin-right: auto;">
-                            Upload an Excel inventory file to get started with tag generation.
+                    <div style="
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: 400px;
+                        padding: 3rem 2rem;
+                        background: linear-gradient(135deg, rgba(45, 34, 58, 0.3), rgba(60, 45, 75, 0.3));
+                        border-radius: 16px;
+                        margin: 2rem;
+                        border: 2px dashed rgba(160, 132, 232, 0.3);
+                    ">
+                        <div style="font-size: 4rem; margin-bottom: 1.5rem; opacity: 0.6;">📤</div>
+                        <h2 style="
+                            color: #ffffff;
+                            margin-bottom: 1rem;
+                            font-size: 2rem;
+                            font-weight: 700;
+                        ">Upload Excel File to Begin</h2>
+                        <p style="
+                            font-size: 1.2rem;
+                            margin-bottom: 2rem;
+                            max-width: 600px;
+                            text-align: center;
+                            color: rgba(255, 255, 255, 0.8);
+                            line-height: 1.6;
+                        ">
+                            Upload your Excel inventory file to load products and start generating price tags.
                         </p>
-                        <p style="font-size: 0.95rem; opacity: 0.8;">
-                            Click the <strong>"Upload Excel"</strong> button above to begin.
+                        <button onclick="document.getElementById('fileInput')?.click()" style="
+                            background: linear-gradient(135deg, #a084e8, #8b6fd8);
+                            border: none;
+                            color: white;
+                            padding: 1rem 2.5rem;
+                            font-size: 1.1rem;
+                            font-weight: 700;
+                            border-radius: 12px;
+                            cursor: pointer;
+                            box-shadow: 0 4px 16px rgba(160, 132, 232, 0.4);
+                            transition: all 0.3s ease;
+                        " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(160, 132, 232, 0.6)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 16px rgba(160, 132, 232, 0.4)';">
+                            📁 Choose Excel File
+                        </button>
+                        <p style="
+                            margin-top: 2rem;
+                            font-size: 0.95rem;
+                            color: rgba(255, 255, 255, 0.5);
+                        ">
+                            Supported formats: .xlsx, .xls
                         </p>
                     </div>
                 `;
-                
+
                 // Hide filters when no file uploaded
                 const filterBar = document.querySelector('.filter-bar');
                 if (filterBar) {
