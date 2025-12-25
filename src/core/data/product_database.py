@@ -1417,8 +1417,16 @@ class ProductDatabase:
             current_date = datetime.now().isoformat()
             
             # Get or create strain
-            strain_name = product_data.get('Product Strain', '')
+            strain_name = product_data.get('Product Strain', '').strip() if product_data.get('Product Strain') else ''
             strain_id = None
+
+            # CRITICAL FIX: If no Product Strain, extract strain from product name (classic types only)
+            # This ensures products without "Product Strain" field still get linked to strains
+            # so their lineage edits can be saved to the strains table
+            if not strain_name:
+                product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
+                strain_name = self._extract_strain_from_product_name(product_name, product_type)
+
             if strain_name:
                 # Normalize lineage before storing
                 normalized_lineage = self._normalize_lineage(product_data.get('Lineage'))
@@ -3359,11 +3367,75 @@ class ProductDatabase:
         """Normalize product name for consistent matching."""
         if not isinstance(product_name, str):
             return ""
-        
+
         # Use the existing normalization function
         from .excel_processor import normalize_name
         return normalize_name(product_name)
-    
+
+    def _extract_strain_from_product_name(self, product_name: str, product_type: str = None) -> str:
+        """Extract strain name from product name for classic product types.
+
+        Only extracts for classic types: flower, pre-roll, concentrate, etc.
+        Returns empty string for non-classic types (edibles, tinctures, topicals).
+        """
+        if not product_name or not isinstance(product_name, str):
+            return ''
+
+        # Define classic types (same as Excel processor)
+        classic_types = [
+            "flower", "pre-roll", "infused pre-roll", "concentrate",
+            "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+        ]
+
+        # Only extract for classic types
+        if product_type and product_type.lower() not in classic_types:
+            return ''
+
+        # Extract strain name from product name
+        # Common patterns:
+        # "Pocket Aces Badder by Super Mega Bussin' - 1g" -> "Pocket Aces"
+        # "Blue Dream Flower by Vendor - 3.5g" -> "Blue Dream"
+        # "OG Kush Pre-Roll - 1g x 5 Pack" -> "OG Kush"
+
+        import re
+
+        # Remove common suffixes and brand info
+        # Pattern: "StrainName ProductType by Brand - Weight"
+        name = product_name.strip()
+
+        # Remove " by [Brand]" part
+        name = re.sub(r'\s+by\s+.+$', '', name, flags=re.IGNORECASE)
+
+        # Remove weight info like " - 1g", " - 3.5g", etc.
+        name = re.sub(r'\s*-\s*[\d.]+\s*g.*$', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\s*-\s*\d+\s*x\s*[\d.]+.*$', '', name, flags=re.IGNORECASE)
+
+        # Remove product type keywords
+        product_type_keywords = [
+            'badder', 'wax', 'crumble', 'sugar', 'sauce', 'diamonds', 'shatter',
+            'live resin', 'live rosin', 'cured resin', 'hash rosin',
+            'honey', 'butter', 'rocks', 'oil', 'distillate',
+            'flower', 'pre-roll', 'preroll', 'infused', 'vape', 'cartridge'
+        ]
+
+        for keyword in product_type_keywords:
+            # Remove keyword and anything after it (case-insensitive)
+            pattern = r'\s+' + re.escape(keyword) + r'.*$'
+            name = re.sub(pattern, '', name, flags=re.IGNORECASE)
+
+        # Clean up and return
+        strain_name = name.strip()
+
+        # Validate: must be at least 2 characters and not a common non-strain word
+        if len(strain_name) < 2:
+            return ''
+
+        non_strain_words = ['the', 'and', 'or', 'with', 'pack', 'box']
+        if strain_name.lower() in non_strain_words:
+            return ''
+
+        return strain_name
+
     def _decode_json_abbreviations(self, json_name: str) -> str:
         """Decode JSON abbreviations to full product names."""
         decoded = json_name.lower().strip()
