@@ -4430,8 +4430,16 @@ const TagManager = {
         const savedScroll = this._saveAvailableScrollPosition();
 
         const tags = filteredTags || originalTags;
-        
+
+        // CRITICAL FIX: Don't clear tags if they're already displayed and we're just getting an empty update
+        // This prevents tags from disappearing when background operations return empty results
         if (!tags || tags.length === 0) {
+            const currentTagCount = availableTagsContainer.querySelectorAll('.tag-item').length;
+            if (currentTagCount > 0) {
+                verboseLog(`⏭️ Skipping empty tag update - ${currentTagCount} tags already displayed`);
+                reenableScaling();
+                return;
+            }
             verboseLog('No tags provided, showing empty state');
             
             // CRITICAL FIX: Check if no Excel file is uploaded and show proper empty state
