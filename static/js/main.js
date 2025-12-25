@@ -10509,26 +10509,22 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
 
-        // PERFORMANCE: Check cache FIRST before showing splash for instant load
-        const cachedTags = this.loadAvailableTagsFromCache();
-        const hasFile = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-        const shouldShowSplash = !cachedTags || !cachedTags.length || !hasFile || hasFile === 'nofile' || hasFile === '' || hasFile === 'database';
-        
-        if (shouldShowSplash) {
-            // Only show splash if no cache available
+        // CRITICAL FIX: Try to hydrate from cache IMMEDIATELY before showing any splash
+        // This ensures tags appear instantly on page load if cache exists
+        const alreadyHydrated = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
+        const hydrated = alreadyHydrated || this.hydrateAvailableTagsFromCache();
+
+        if (hydrated) {
+            // Cache exists and hydrated - skip splash completely
+            console.log('⚡ Cache hydrated - tags displayed instantly, skipping splash');
+        } else {
+            // No cache - show splash
             console.log('⚡ No cache - showing splash');
             AppLoadingSplash.show();
             AppLoadingSplash.startAutoAdvance();
             AppLoadingSplash.updateProgress(10, 'Initializing...');
-        } else {
-            // Cache exists - skip splash for instant load
-            console.log('⚡ Cache detected - skipping splash for instant load');
         }
 
-        // CRITICAL FIX: Check if already hydrated from cache (may have been done by inline script)
-        // Then try to hydrate if not already done
-        const alreadyHydrated = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
-        const hydrated = alreadyHydrated || this.hydrateAvailableTagsFromCache();
         if (hydrated) {
             console.log(`⚡ INSTANT CACHE: Tags ${alreadyHydrated ? 'already' : ''} hydrated from cache, displayed immediately`);
             

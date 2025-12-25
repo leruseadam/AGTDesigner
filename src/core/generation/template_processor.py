@@ -2104,7 +2104,8 @@ class TemplateProcessor:
             image_path = process_doh_image(doh_upper, product_type)
             if image_path:
                 # Fast width selection - reduced by 1mm for all template types
-                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13}
+                # Preroll template uses half size (5.5mm) for DOH logo
+                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13, 'preroll': 5.5}
                 image_width = Mm(width_map.get(self.template_type, 11))
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
