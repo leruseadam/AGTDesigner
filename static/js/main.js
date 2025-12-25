@@ -1517,11 +1517,19 @@ const TagManager = {
                     
                     // Update state
                     this.state.tags = [...tagsToUpdate];
-                    
+
                     if (updatedCount > 0) {
                         verboseLog(`✅ Refreshed lineage for ${updatedCount} tags from database`);
-                        // Re-render with updated lineage
-                        this._updateAvailableTags(this.state.tags, null);
+                        // CRITICAL FIX: Only re-render if user doesn't have selections
+                        // If user has selections, skip re-render to prevent unchecking
+                        if (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0) {
+                            // No selections - safe to re-render
+                            this._updateAvailableTags(this.state.tags, null);
+                        } else {
+                            verboseLog(`⏭️ Skipping re-render - preserving ${this.state.persistentSelectedTags.length} user selections`);
+                            // Update lineage colors in-place without full re-render
+                            this._updateLineageColorsInPlace();
+                        }
                     } else {
                         verboseLog(`✅ Lineage already up-to-date (verified ${freshTags.length} tags)`);
                     }
@@ -1530,6 +1538,42 @@ const TagManager = {
         } catch (error) {
             console.warn('⚠️ Failed to refresh lineage from database:', error);
             throw error;
+        }
+    },
+
+    // Helper to update lineage colors in-place without full re-render
+    _updateLineageColorsInPlace() {
+        try {
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (!availableTagsContainer) return;
+
+            // Update data-lineage attributes on all tag items
+            const tagItems = availableTagsContainer.querySelectorAll('.tag-item');
+            tagItems.forEach(tagItem => {
+                const checkbox = tagItem.querySelector('.tag-checkbox');
+                if (!checkbox) return;
+
+                const tagName = checkbox.value;
+                if (!tagName) return;
+
+                // Find tag in state
+                const tag = this.state.tags.find(t =>
+                    (t['Product Name*'] === tagName) || (t.ProductName === tagName)
+                );
+
+                if (tag) {
+                    // Get updated lineage
+                    const lineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED')
+                        .toString().trim().toUpperCase();
+
+                    // Update data-lineage attribute (CSS will handle color change)
+                    tagItem.setAttribute('data-lineage', lineage);
+                }
+            });
+
+            verboseLog('✅ Updated lineage colors in-place without re-render');
+        } catch (error) {
+            console.warn('⚠️ Failed to update lineage colors in-place:', error);
         }
     },
 
