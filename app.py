@@ -6165,9 +6165,11 @@ def check_store_required():
             session_store = None
             session.pop('selected_store', None)
             session.pop('store_server_id', None)
-        session_dict = dict(session)
+        # CRITICAL FIX: Don't log full session - it contains massive preroll_original_records array
+        # that causes "OSError: Message too long" when logging
+        session_keys = list(session.keys())
         logging.info(f"SESSION DEBUG: selected_store={session_store}")
-        logging.info(f"SESSION DEBUG: full session={session_dict}")
+        logging.info(f"SESSION DEBUG: session keys={session_keys}")
         logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
         
         # Try to resolve the current store using all available strategies
