@@ -208,7 +208,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 2.1rem !important;
+    font-size: 1.5rem !important;
     font-weight: 700 !important;
     color: #fff !important;
     text-shadow: 0 2px 8px rgba(44,34,58,0.7), 0 1px 0 #222;
@@ -332,23 +332,23 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 
 /* Normal scaling for key UI elements */
 .tag-item, .tag-entry {
-  font-size: 2rem !important;
-  min-height: 2.8rem !important;
+  font-size: 16px !important; /* Reduced for better fit */
+  min-height: 2.5rem !important;
 }
 
 /* Force larger font size for all tag content globally */
 #availableTags .tag-item,
-  #availableTags .tag-entry,
-  #availableTags .tag-name,
-  #availableTags .tag-row,
-  #availableTags .tag-item *,
-  #selectedTags .tag-item,
-  #selectedTags .tag-entry,
-  #selectedTags .tag-name,
-  #selectedTags .tag-row,
-  #selectedTags .tag-item * {
-    font-size: 2rem !important;
-    line-height: 1.5 !important;
+#availableTags .tag-entry,
+#availableTags .tag-name,
+#availableTags .tag-row,
+#availableTags .tag-item *,
+#selectedTags .tag-item,
+#selectedTags .tag-entry,
+#selectedTags .tag-name,
+#selectedTags .tag-row,
+#selectedTags .tag-item * {
+  font-size: 16px !important;
+  line-height: 1.5 !important;
 }
 
 /* Highlight items with 5 or more units */
@@ -401,13 +401,13 @@ h6 { font-size: 1rem !important; font-weight: 600 !important; }
 
 /* Larger filter bar and dropdowns */
 .filter-bar, .filters-row {
-  font-size: 1.5rem !important;
+  font-size: 1.05rem !important;
 }
 
 .filter-bar select, .filter-bar .form-select, .filter-bar option {
-  font-size: 1.5rem !important;
-  padding: 0.7rem 1.2rem 0.8rem 1.2rem !important;
-  min-height: 3.2rem !important;
+  font-size: 1.05rem !important;
+  padding: 0.5rem 0.9rem 0.6rem 0.9rem !important;
+  min-height: 2.5rem !important;
   height: auto !important;
   line-height: 1.6 !important;
   overflow: visible !important;
