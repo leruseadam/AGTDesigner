@@ -3560,8 +3560,9 @@ const TagManager = {
                         this.state.persistentSelectedTags.push(tagName);
                         this.state._selectedTagsSet.add(tagName);
                         // Mark checkbox as recently checked to prevent race conditions
+                        // Extended timeout to 3 seconds to prevent premature unchecking during re-renders
                         checkbox.setAttribute('data-recently-checked', 'true');
-                        setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 1000);
+                        setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 3000);
                     }
                 } else {
                     const index = this.state.persistentSelectedTags.indexOf(tagName);
@@ -3682,13 +3683,17 @@ const TagManager = {
                     checkbox.checked = true;
                     restoredCount++;
                 } else if (!isSelected && checkbox.checked) {
-                    // CRITICAL FIX: Only uncheck if it's not in persistentSelectedTags
-                    // Don't uncheck if it might be a timing issue
-                    const shouldUncheck = !this.state.persistentSelectedTags.includes(tagName) && 
-                                         !persistentSet.has(tagName.toLowerCase());
+                    // CRITICAL FIX: Only uncheck if it's not in persistentSelectedTags AND not recently checked
+                    // Don't uncheck if it might be a timing issue or user just clicked it
+                    const wasRecentlyChecked = checkbox.hasAttribute('data-recently-checked');
+                    const shouldUncheck = !this.state.persistentSelectedTags.includes(tagName) &&
+                                         !persistentSet.has(tagName.toLowerCase()) &&
+                                         !wasRecentlyChecked;
                     if (shouldUncheck) {
                         checkbox.checked = false;
                         uncheckedCount++;
+                    } else if (wasRecentlyChecked) {
+                        verboseLog(`⏱️ Skipping uncheck for recently checked tag: ${tagName}`);
                     }
                 }
             }
@@ -5683,8 +5688,9 @@ const TagManager = {
                     this.state.persistentSelectedTags.push(displayName);
                     this.state._selectedTagsSet.add(displayName);
                     // CRITICAL FIX: Mark checkbox as recently checked to prevent race conditions
+                    // Extended timeout to 3 seconds to prevent premature unchecking during re-renders
                     checkbox.setAttribute('data-recently-checked', 'true');
-                    setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 1000);
+                    setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 3000);
                 }
             } else {
                 const index = this.state.persistentSelectedTags.indexOf(displayName);
