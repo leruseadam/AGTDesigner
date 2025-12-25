@@ -1520,15 +1520,19 @@ const TagManager = {
 
                     if (updatedCount > 0) {
                         verboseLog(`✅ Refreshed lineage for ${updatedCount} tags from database`);
-                        // CRITICAL FIX: Only re-render if user doesn't have selections
-                        // If user has selections, skip re-render to prevent unchecking
-                        if (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0) {
-                            // No selections - safe to re-render
-                            this._updateAvailableTags(this.state.tags, null);
-                        } else {
-                            verboseLog(`⏭️ Skipping re-render - preserving ${this.state.persistentSelectedTags.length} user selections`);
-                            // Update lineage colors in-place without full re-render
-                            this._updateLineageColorsInPlace();
+                        // CRITICAL FIX: ALWAYS re-render to update database lineage colors/dropdowns
+                        // But preserve selections by immediately restoring them after render
+                        const selectionsToRestore = this.state.persistentSelectedTags ? [...this.state.persistentSelectedTags] : [];
+
+                        // Re-render with updated database lineage
+                        this._updateAvailableTags(this.state.tags, null);
+
+                        // Immediately restore selections after re-render
+                        if (selectionsToRestore.length > 0) {
+                            verboseLog(`🔄 Restoring ${selectionsToRestore.length} selections after lineage update`);
+                            setTimeout(() => {
+                                this._restoreCheckboxStates();
+                            }, 100);
                         }
                     } else {
                         verboseLog(`✅ Lineage already up-to-date (verified ${freshTags.length} tags)`);
