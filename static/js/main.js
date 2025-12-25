@@ -3620,12 +3620,18 @@ const TagManager = {
     _restoreCheckboxStates() {
         // CRITICAL FIX: Always ensure checkboxes are enabled before restoring states
         this._ensureCheckboxesEnabled();
-        
+
         const availableTagsContainer = document.getElementById('availableTags');
         if (!availableTagsContainer) {
             return;
         }
-        
+
+        // CRITICAL FIX: If filters are being updated, skip restore to prevent interfering with user selections
+        if (this._isUpdatingFilters) {
+            verboseLog('⏭️ Skipping checkbox restore - filters are being updated');
+            return;
+        }
+
         // CRITICAL FIX: Ensure _selectedTagsSet is synced before restoring checkboxes
         if (!this.state._selectedTagsSet) {
             this.state._selectedTagsSet = new Set();
@@ -3638,12 +3644,12 @@ const TagManager = {
         if (setNeedsUpdate) {
             this.state._selectedTagsSet = currentSet;
         }
-        
+
         // CRITICAL FIX: Use case-insensitive matching to handle any case differences
         // CRITICAL FIX: Always restore checkbox states, even if persistentSelectedTags is empty
         // This ensures checkboxes are properly unchecked when undo/redo clears selections
         const persistentSet = new Set(persistentSelectedTags.map(name => name.toLowerCase()));
-        
+
         // CRITICAL FIX: Don't restore if we just generated (within last 5 seconds)
         // This prevents clearing checkboxes immediately after generation
         const now = Date.now();
