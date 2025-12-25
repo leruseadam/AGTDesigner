@@ -2984,13 +2984,23 @@ class TemplateProcessor:
                 except Exception:
                     base_url = ''
 
-                # If host_url is unavailable, allow an override via env
+                # If host_url is unavailable, try multiple fallbacks
                 if not base_url:
+                    # First try environment variable
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
 
-                # If still no base_url, raise an error (never allow relative URLs for QR/menu)
+                # If still no base_url, try Flask config
                 if not base_url:
-                    raise RuntimeError("No base URL available for QR/menu generation. Set QR_BASE_URL or ensure request.host_url is available.")
+                    try:
+                        from flask import current_app
+                        base_url = current_app.config.get('QR_BASE_URL', '').strip()
+                    except Exception:
+                        pass
+
+                # Last resort: use production URL as default
+                if not base_url:
+                    base_url = 'https://www.agtpricetags.com'
+                    self.logger.warning(f"No QR_BASE_URL configured, using default: {base_url}")
 
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
