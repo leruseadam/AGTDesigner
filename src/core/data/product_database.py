@@ -3892,28 +3892,40 @@ class ProductDatabase:
             
             # Update the product with new data
             # CRITICAL FIX: Check for sovereign_lineage FIRST - it takes absolute priority
-            # Only check strain_id if the column exists in the database
+            # Check BOTH products.sovereign_lineage AND strains.sovereign_lineage
             strain_id = None
             sovereign_lineage = None
-            
-            if self._products_has_column('strain_id'):
+
+            # STEP 1: Check if product itself has sovereign_lineage (highest priority)
+            if self._products_has_column('sovereign_lineage'):
+                try:
+                    cursor.execute('SELECT sovereign_lineage FROM products WHERE id = ?', (product_id,))
+                    product_sovereign_result = cursor.fetchone()
+                    if product_sovereign_result and product_sovereign_result[0]:
+                        sovereign_lineage = str(product_sovereign_result[0]).strip()
+                        logger.info(f"🔒 PRODUCT SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
+                except Exception as product_error:
+                    logger.warning(f"Could not check products.sovereign_lineage for product {product_id}: {product_error}")
+
+            # STEP 2: If no product sovereign lineage, check strain sovereign lineage
+            if not sovereign_lineage and self._products_has_column('strain_id'):
                 try:
                     cursor.execute('SELECT strain_id FROM products WHERE id = ?', (product_id,))
                     strain_id_result = cursor.fetchone()
                     strain_id = strain_id_result[0] if strain_id_result else None
-                    
+
                     if strain_id:
                         # Check if this strain has a manually-set sovereign_lineage
                         cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
                         sovereign_result = cursor.fetchone()
                         if sovereign_result and sovereign_result[0]:
                             sovereign_lineage = str(sovereign_result[0]).strip()
-                            logger.info(f"🔒 SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
+                            logger.info(f"🔒 STRAIN SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
                 except Exception as strain_error:
                     logger.warning(f"Could not check strain_id for product {product_id}: {strain_error}")
                     strain_id = None
-            
-            # If sovereign lineage exists, USE IT and ignore Excel lineage
+
+            # If sovereign lineage exists (from either product OR strain), USE IT and ignore Excel lineage
             if sovereign_lineage:
                 final_lineage = sovereign_lineage
                 logger.info(f"✅ LINEAGE PRIORITY: Using sovereign lineage '{final_lineage}' for product ID {product_id} (ignoring Excel)")

@@ -24,7 +24,11 @@
       "Bash(ls:*)",
       "Bash(echo:*)",
       "Bash(grep -rn \"add_picture\\\\|insert.*picture\\\\|Picture\" src/core/generation/*.py)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(for db in product_database*.db)",
+      "Bash(do echo \"Adding sovereign_lineage to $db...\")",
+      "Bash(done)",
+      "Bash(chmod:*)"
     ],
     "deny": [],
     "ask": []
