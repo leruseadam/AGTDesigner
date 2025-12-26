@@ -218,13 +218,27 @@ def make_nonbreaking_hyphens(text):
     Convert regular hyphens to non-breaking hyphens with non-breaking spaces.
     This prevents line breaks at hyphenated words and around hyphens.
 
-    CRITICAL: For patterns like "Moonboots - 7g", use non-breaking characters only.
+    CRITICAL: For patterns like "Moonboots - 7g", the entire "- 7g" must stay together.
     No zero-width joiners to avoid JSON parsing issues.
     """
     if not text or not isinstance(text, str):
         return text
 
     import re
+
+    # CRITICAL FIX: Make entire "- #g" or "- #oz" pattern unbreakable
+    # Find patterns like "- 7g", "- 1.5g", "- 3.5oz" and wrap with non-breaking spaces
+    def make_weight_suffix_unbreakable(match):
+        # Match captures: space, hyphen, space, number, unit
+        # Return with all spaces as non-breaking spaces
+        full = match.group(0)
+        # Replace ALL spaces with non-breaking spaces, hyphen with non-breaking hyphen
+        result = full.replace(' ', '\u00A0').replace('-', '\u2011')
+        return result
+
+    # Pattern: space + hyphen + space + number (with optional decimal) + unit
+    # This matches " - 7g", " - 1.5oz", etc.
+    text = re.sub(r'\s+-\s+(\d+\.?\d*[gmolz]+)\b', make_weight_suffix_unbreakable, text)
 
     # CRITICAL FIX: Replace space-hyphen-space patterns with non-breaking versions
     # Pattern: " - " becomes "\u00A0\u2011\u00A0" (nbsp + non-breaking hyphen + nbsp)
