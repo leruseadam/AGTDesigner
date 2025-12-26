@@ -264,7 +264,8 @@ def make_nonbreaking_weight_units(text):
     # CRITICAL FIX: Replace space before weight units with non-breaking space
     # This prevents "7 g" from splitting into "7" on one line and "g" on the next
     # Pattern: digit(s) + optional decimal + space + unit letter(s)
-    text = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)\b', r'\1\u00A0\2', text)
+    # NOTE: Cannot use r'' raw string with \u escape - must use normal string
+    text = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)\b', '\\1\u00A0\\2', text)
 
     return text
 
