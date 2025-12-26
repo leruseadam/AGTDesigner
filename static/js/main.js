@@ -3630,20 +3630,35 @@ const TagManager = {
                         setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 3000);
                     }
                 } else {
+                    console.log(`🔍 DESELECT: Attempting to remove "${tagName}"`);
+                    console.log('Before removal:', [...this.state.persistentSelectedTags]);
                     const index = this.state.persistentSelectedTags.indexOf(tagName);
                     if (index > -1) {
                         this.state.persistentSelectedTags.splice(index, 1);
                         this.state._selectedTagsSet.delete(tagName);
+                        console.log('After removal:', [...this.state.persistentSelectedTags]);
+                        console.log('✅ Successfully removed from persistentSelectedTags at index', index);
+
+                        // CRITICAL FIX: Remove the 'recently checked' attribute immediately on deselect
+                        // This allows _restoreCheckboxStates to properly uncheck the box
+                        checkbox.removeAttribute('data-recently-checked');
+
+                        // Mark as recently unchecked to prevent race conditions
+                        checkbox.setAttribute('data-recently-unchecked', 'true');
+                        setTimeout(() => checkbox.removeAttribute('data-recently-unchecked'), 3000);
+                    } else {
+                        console.log(`⚠️ Tag "${tagName}" not found in persistentSelectedTags (length: ${this.state.persistentSelectedTags.length})`);
                     }
                 }
                 
                 // Update the regular selectedTags set to match persistent ones
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                
+
                 // Update selected tags display
                 const selectedTagObjects = this.getSelectedTagObjects();
+                console.log(`📋 Updating selected tags display with ${selectedTagObjects.length} tags`);
                 this.updateSelectedTags(selectedTagObjects);
-                
+
                 // Also save to backend (non-blocking)
                 setTimeout(() => this.saveSelectionState('checkbox_change'), 50);
             };
@@ -3728,10 +3743,15 @@ const TagManager = {
         checkboxes.forEach(checkbox => {
             const tagName = checkbox.value;
             if (tagName) {
-                // CRITICAL FIX: Don't modify checkbox if it was recently checked by user
+                // CRITICAL FIX: Don't modify checkbox if it was recently checked OR unchecked by user
                 // This prevents race conditions on initial load and after generation
                 if (checkbox.hasAttribute('data-recently-checked')) {
+                    console.log(`⏱️ Skipping restore for recently checked tag: ${tagName}`);
                     return; // Skip this checkbox - user just checked it
+                }
+                if (checkbox.hasAttribute('data-recently-unchecked')) {
+                    console.log(`⏱️ Skipping restore for recently unchecked tag: ${tagName}`);
+                    return; // Skip this checkbox - user just unchecked it
                 }
                 
                 // CRITICAL FIX: After generation, only restore checked state, never uncheck
@@ -3754,17 +3774,20 @@ const TagManager = {
                     checkbox.checked = true;
                     restoredCount++;
                 } else if (!isSelected && checkbox.checked) {
-                    // CRITICAL FIX: Only uncheck if it's not in persistentSelectedTags AND not recently checked
+                    // CRITICAL FIX: Only uncheck if it's not in persistentSelectedTags AND not recently checked/unchecked
                     // Don't uncheck if it might be a timing issue or user just clicked it
                     const wasRecentlyChecked = checkbox.hasAttribute('data-recently-checked');
+                    const wasRecentlyUnchecked = checkbox.hasAttribute('data-recently-unchecked');
                     const shouldUncheck = !this.state.persistentSelectedTags.includes(tagName) &&
                                          !persistentSet.has(tagName.toLowerCase()) &&
-                                         !wasRecentlyChecked;
+                                         !wasRecentlyChecked &&
+                                         !wasRecentlyUnchecked;
                     if (shouldUncheck) {
+                        console.log(`🔄 _restoreCheckboxStates: Unchecking "${tagName}" because it's not in persistentSelectedTags`);
                         checkbox.checked = false;
                         uncheckedCount++;
                     } else if (wasRecentlyChecked) {
-                        verboseLog(`⏱️ Skipping uncheck for recently checked tag: ${tagName}`);
+                        console.log(`⏱️ _restoreCheckboxStates: Skipping uncheck for recently checked tag: ${tagName}`);
                     }
                 }
             }

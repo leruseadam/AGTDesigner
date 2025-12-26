@@ -1671,7 +1671,8 @@ class TemplateProcessor:
             # CRITICAL: Use record lineage first (already enriched with database value, no sativa hybrid override)
             # Only query database if record lineage is missing
             db_lineage = None
-            record_lineage = record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
+            # Priority: sovereign_lineage > Lineage > canonical_lineage > lineage
+            record_lineage = record.get('sovereign_lineage') or record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
             if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
                 # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
                 db_lineage = str(record_lineage).strip()
@@ -1687,18 +1688,23 @@ class TemplateProcessor:
                     try:
                         conn = product_db._get_connection()
                         cursor = conn.cursor()
+                        # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
                         cursor.execute('''
-                            SELECT "Lineage", "canonical_lineage"
+                            SELECT sovereign_lineage, "Lineage", "canonical_lineage"
                             FROM products
                             WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
                             ORDER BY id DESC
                             LIMIT 1
                         ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
                         result = cursor.fetchone()
+                        # Priority: sovereign_lineage > Lineage > canonical_lineage
                         if result and result[0]:
                             db_lineage = str(result[0]).strip()
+                            self.logger.info(f"🔒 DOCX: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
                         elif result and result[1]:
                             db_lineage = str(result[1]).strip()
+                        elif result and result[2]:
+                            db_lineage = str(result[2]).strip()
                     except Exception as db_err:
                         self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
                         # Fallback to get_product_lineage if direct query fails
@@ -2225,7 +2231,8 @@ class TemplateProcessor:
                     # Only query database if record lineage is missing
                     product_name = record.get('Product Name*', record.get('ProductName', ''))
                     db_lineage = None
-                    record_lineage = record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
+                    # Priority: sovereign_lineage > Lineage > canonical_lineage > lineage
+                    record_lineage = record.get('sovereign_lineage') or record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
                     if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
                         # Use record lineage (already set correctly by enrichment)
                         db_lineage = str(record_lineage).strip()
@@ -2236,18 +2243,23 @@ class TemplateProcessor:
                         try:
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
+                            # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
                             cursor.execute('''
-                                SELECT "Lineage", "canonical_lineage"
+                                SELECT sovereign_lineage, "Lineage", "canonical_lineage"
                                 FROM products
                                 WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
                                 ORDER BY id DESC
                                 LIMIT 1
                             ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
                             result = cursor.fetchone()
+                            # Priority: sovereign_lineage > Lineage > canonical_lineage
                             if result and result[0]:
                                 db_lineage = str(result[0]).strip()
+                                self.logger.info(f"🔒 PREROLL: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
                             elif result and result[1]:
                                 db_lineage = str(result[1]).strip()
+                            elif result and result[2]:
+                                db_lineage = str(result[2]).strip()
                         except Exception as db_err:
                             self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
                             # Fallback to get_product_lineage if direct query fails
