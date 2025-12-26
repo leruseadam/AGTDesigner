@@ -228,19 +228,20 @@ def make_nonbreaking_hyphens(text):
 
     # CRITICAL FIX: Make entire "- #g" pattern unbreakable with soft hyphen break point
     # Use soft hyphen (U+00AD) to allow break BEFORE the hyphen, then make "- 7g" non-breaking
-    # Pattern: "Motorbreath - 7g" becomes "Motorbreath\u00AD\u2011\u00A07g"
-    # This allows: "Motorbreath" on line 1, "- 7g" on line 2 (all together)
+    # Pattern: "Blueberry - 3.5g" becomes "Blueberry\u00AD\u2011\u00A03.5g"
+    # This allows: "Blueberry" on line 1, "- 3.5g" on line 2 (all together)
     def make_weight_suffix_unbreakable(match):
-        # Get the full match like " - 7g"
-        full = match.group(0)
-        # Replace with: soft hyphen + non-breaking hyphen + non-breaking space + number+unit
-        # The soft hyphen allows a break point BEFORE the hyphen if needed
-        # Then the entire "- 7g" stays together on the next line
-        return '\u00AD\u2011\u00A0' + match.group(1)  # group(1) is the number+unit like "7g"
+        # Get group(1) which is the number+unit like "3.5g" or "3.5 g"
+        weight_part = match.group(1)
+        # Replace any space before unit with non-breaking space
+        # NOTE: Cannot use r'' raw string with \u escape - must use normal string
+        weight_part = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)', '\\1\u00A0\\2', weight_part)
+        # Return: soft hyphen + non-breaking hyphen + non-breaking space + weight
+        return '\u00AD\u2011\u00A0' + weight_part
 
-    # Pattern: space + hyphen + space + number (with optional decimal) + unit
-    # This matches " - 7g", " - 1.5oz", etc.
-    text = re.sub(r'\s+-\s+(\d+\.?\d*[gmolz]+)\b', make_weight_suffix_unbreakable, text)
+    # Pattern: space + hyphen + space + number (with optional decimal + optional space) + unit
+    # This matches " - 7g", " - 3.5g", " - 3.5 g", " - 1.5oz", etc.
+    text = re.sub(r'\s+-\s+(\d+\.?\d*\s*[gmolz]+)\b', make_weight_suffix_unbreakable, text)
 
     # CRITICAL FIX: Replace space-hyphen-space patterns with non-breaking versions
     # Pattern: " - " becomes "\u00A0\u2011\u00A0" (nbsp + non-breaking hyphen + nbsp)
