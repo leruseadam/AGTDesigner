@@ -3622,12 +3622,22 @@ const TagManager = {
                 
                 if (isChecked) {
                     if (!this.state._selectedTagsSet.has(tagName)) {
+                        console.log(`✅ ADDING TAG: "${tagName}" to persistentSelectedTags`);
+                        console.log('Before add:', [...this.state.persistentSelectedTags]);
                         this.state.persistentSelectedTags.push(tagName);
                         this.state._selectedTagsSet.add(tagName);
+                        console.log('After add:', [...this.state.persistentSelectedTags]);
+
                         // Mark checkbox as recently checked to prevent race conditions
                         // Extended timeout to 3 seconds to prevent premature unchecking during re-renders
                         checkbox.setAttribute('data-recently-checked', 'true');
-                        setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 3000);
+                        console.log(`🔒 Set data-recently-checked on "${tagName}" for 3 seconds`);
+                        setTimeout(() => {
+                            checkbox.removeAttribute('data-recently-checked');
+                            console.log(`🔓 Removed data-recently-checked from "${tagName}"`);
+                        }, 3000);
+                    } else {
+                        console.log(`ℹ️ Tag "${tagName}" already in selectedTagsSet, skipping add`);
                     }
                 } else {
                     console.log(`🔍 DESELECT: Attempting to remove "${tagName}"`);
