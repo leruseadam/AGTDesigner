@@ -1508,7 +1508,12 @@ def create_app():
     import flask
     app = flask.Flask(__name__, static_url_path='/static', static_folder='static')
     app.config.from_object('config.Config')
-    
+
+    # CRITICAL FIX: Prevent JSON encoding issues with Unicode characters
+    # Set JSON_AS_ASCII to False to allow Unicode characters (like zero-width joiners) in JSON
+    app.config['JSON_AS_ASCII'] = False
+    app.json.ensure_ascii = False
+
     # CRITICAL FIX: Ensure proper URL generation for reverse proxy setups
     # Set SERVER_NAME only if explicitly provided (don't set it to avoid URL generation issues)
     if os.environ.get('SERVER_NAME'):
