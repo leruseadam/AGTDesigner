@@ -226,18 +226,19 @@ def make_nonbreaking_hyphens(text):
 
     import re
 
-    # CRITICAL FIX: Make entire "- #g" pattern unbreakable with soft hyphen break point
-    # Use soft hyphen (U+00AD) to allow break BEFORE the hyphen, then make "- 7g" non-breaking
-    # Pattern: "Blueberry - 3.5g" becomes "Blueberry\u00AD\u2011\u00A03.5g"
-    # This allows: "Blueberry" on line 1, "- 3.5g" on line 2 (all together)
+    # CRITICAL FIX: Make entire "- #g" pattern unbreakable using only non-breaking spaces
+    # NO soft hyphen - it renders as visible hyphen creating double hyphens
+    # Pattern: "Blueberry - 3.5g" becomes "Blueberry\u00A0\u2011\u00A03.5g"
+    # tcFitText in docx_formatting.py will compress horizontally to make it fit
     def make_weight_suffix_unbreakable(match):
         # Get group(1) which is the number+unit like "3.5g" or "3.5 g"
         weight_part = match.group(1)
         # Replace any space before unit with non-breaking space
         # NOTE: Cannot use r'' raw string with \u escape - must use normal string
         weight_part = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)', '\\1\u00A0\\2', weight_part)
-        # Return: soft hyphen + non-breaking hyphen + non-breaking space + weight
-        return '\u00AD\u2011\u00A0' + weight_part
+        # Return: non-breaking space + non-breaking hyphen + non-breaking space + weight
+        # This keeps the entire "- 3.5g" as one unbreakable unit
+        return '\u00A0\u2011\u00A0' + weight_part
 
     # Pattern: space + hyphen + space + number (with optional decimal + optional space) + unit
     # This matches " - 7g", " - 3.5g", " - 3.5 g", " - 1.5oz", etc.
