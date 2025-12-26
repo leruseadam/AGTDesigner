@@ -1318,13 +1318,6 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                 tcPr.append(tcFitText)
                             tcFitText.set(qn('w:val'), '0')  # Disable fit text
 
-                            # CRITICAL FIX: Disable text wrapping in cells to prevent "7g" -> "7" | "g" splits
-                            # Add w:noWrap to prevent ANY text wrapping within the cell
-                            noWrap = tcPr.find(qn('w:noWrap'))
-                            if noWrap is None:
-                                noWrap = OxmlElement('w:noWrap')
-                                tcPr.append(noWrap)
-                            
                             # Set cell height to exact value
                             # ONLY set height if template_type was not provided (template-specific heights set above)
                             if not template_type:
