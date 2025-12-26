@@ -248,14 +248,15 @@ def make_nonbreaking_hyphens(text):
 def make_nonbreaking_weight_units(text):
     """
     Wrap number+unit combinations to prevent ANY breaking between digit and unit.
-    This prevents splits like "7g" -> "7" | "g".
+    Also makes "- 7g" patterns completely unbreakable.
+    This prevents splits like "7g" -> "7" | "g" or "- " | "7g".
 
-    Uses zero-width joiner (U+200D) to create unbreakable bond between digit and letter.
+    Uses zero-width joiner (U+200D) to create unbreakable bond between characters.
 
     Examples:
     - "7g" -> "7‍g" (zero-width joiner prevents break)
     - "7 g" -> "7\u00A0g" (non-breaking space)
-    - "Blueberry - 7g" -> "Blueberry - 7‍g" (prevents split)
+    - "Blueberry - 7g" -> "Blueberry ‍-‍ ‍7‍g" (entire "- 7g" is unbreakable)
     - "1.5g" -> "1.5‍g" (keeps together)
     """
     if not text or not isinstance(text, str):
@@ -263,12 +264,30 @@ def make_nonbreaking_weight_units(text):
 
     import re
 
+    # CRITICAL FIX: Make the entire "- #g" pattern unbreakable
+    # Pattern: hyphen + space + digit(s) + optional decimal + unit
+    # Replace ALL spaces/hyphens with zero-width joiners to create one unbreakable unit
+    # Example: "Moonboots - 7g" -> "Moonboots\u200D‍-‍\u200D7‍g"
+    def make_weight_pattern_unbreakable(match):
+        # Get the matched pattern like "- 7g"
+        full_match = match.group(0)
+        # Replace all spaces with ZWJ, add ZWJ around hyphen, add ZWJ between digit and unit
+        result = full_match.replace(' ', '\u200D')  # Remove spaces, add ZWJ
+        result = result.replace('-', '\u200D\u2011\u200D')  # Non-breaking hyphen with ZWJ
+        # Add ZWJ between final digit and unit letter
+        result = re.sub(r'(\d)([gmolz])', r'\1\u200D\2', result)
+        return result
+
+    # Match pattern: space/hyphen followed by number and unit
+    # This catches "- 7g", "- 1.5g", etc.
+    text = re.sub(r'[-\s]+(\d+\.?\d*\s*[gmolz]+)\b', make_weight_pattern_unbreakable, text)
+
     # CRITICAL FIX: Insert zero-width joiner (U+200D) between digit and unit letter
     # This tells Word/rendering engine these characters MUST stay together - no breaks allowed
     # Match: any digit followed immediately by g, m, l, o, or z (for g, mg, ml, oz, etc.)
     text = re.sub(r'(\d)([gmolz])\b', r'\1\u200D\2', text)
 
-    # Also replace any spaces before units with non-breaking spaces (for "7 g" format)
+    # Also replace any remaining spaces before units with non-breaking spaces (for "7 g" format)
     text = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)\b', r'\1\u00A0\2', text)
 
     return text
