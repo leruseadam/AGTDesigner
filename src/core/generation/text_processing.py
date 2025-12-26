@@ -243,6 +243,32 @@ def make_nonbreaking_hyphens(text):
 
     return text
 
+def make_nonbreaking_weight_units(text):
+    """
+    Replace spaces between numbers and weight units with non-breaking spaces.
+    This prevents splits like "7 g" -> "7" | "g".
+
+    Examples:
+    - "7g" -> "7g" (no change)
+    - "7 g" -> "7\u00A0g" (non-breaking space)
+    - "Blueberry - 7g" -> "Blueberry - 7g" (no change if already together)
+    - "Blueberry - 7 g" -> "Blueberry - 7\u00A0g" (non-breaking space before unit)
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    import re
+
+    # CRITICAL FIX: Replace space before weight units (g, mg, oz, ml, etc.) with non-breaking space
+    # This prevents "7 g" from splitting into "7" on one line and "g" on the next
+    # Pattern: digit(s) + optional space + unit letter(s)
+    text = re.sub(r'(\d+)\s+([gmol]+)\b', r'\1\u00A0\2', text)
+
+    # Also handle cases like "1.5 g" or "0.5g"
+    text = re.sub(r'(\d+\.?\d*)\s+([gmol]+)\b', r'\1\u00A0\2', text)
+
+    return text
+
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
     """Replace placeholder text with marked content in a document."""
     for table in doc.tables:
