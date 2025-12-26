@@ -215,48 +215,36 @@ def fix_description_spacing(desc: str) -> str:
 
 def make_nonbreaking_hyphens(text):
     """
-    Convert regular hyphens to non-breaking hyphens with non-breaking spaces.
-    This prevents line breaks at hyphenated words and around hyphens.
+    Make "- #g" patterns (hyphen + weight) completely unbreakable as one unit.
+    Allow line breaks BEFORE the hyphen, but keep the entire "- 3.5g" together.
 
-    CRITICAL: For patterns like "Moonboots - 7g", the entire "- 7g" must stay together.
-    No zero-width joiners to avoid JSON parsing issues.
+    Example: "Blueberry - 3.5g" can break as:
+      - "Blueberry" | "- 3.5g" (ALLOWED - break before hyphen)
+      - "Blueberry - 3.5" | "g" (FORBIDDEN - never split weight)
     """
     if not text or not isinstance(text, str):
         return text
 
     import re
 
-    # CRITICAL FIX: Make entire "- #g" pattern unbreakable, but allow break BEFORE the hyphen
-    # Use regular space before hyphen to allow "Pre-Roll" | "- 3.5g" break
-    # Pattern: "Pre-Roll - 3.5g" becomes "Pre-Roll \u2011\u00A03.5g"
-    # This allows line break before hyphen but keeps "- 3.5g" together
-    def make_weight_suffix_unbreakable(match):
-        # Get group(1) which is the number+unit like "3.5g" or "3.5 g"
-        weight_part = match.group(1)
-        # Replace any space before unit with non-breaking space
-        # NOTE: Cannot use r'' raw string with \u escape - must use normal string
-        weight_part = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)', '\\1\u00A0\\2', weight_part)
+    # CRITICAL: Match weight patterns like " - 7g", " - 3.5g", " - 1.5oz"
+    # Replace entire pattern with regular space + non-breaking hyphen + nbsp + weight (no spaces in weight)
+    # Pattern: "Blueberry - 3.5g" -> "Blueberry ‑\xa03.5g" (regular space before, then unbreakable "‑ 3.5g")
+    def make_weight_pattern_unbreakable(match):
+        weight = match.group(1)  # Captures "7g", "3.5g", "3.5 g", etc.
+        # Remove any space between number and unit
+        weight = re.sub(r'\s+', '', weight)
         # Return: regular space + non-breaking hyphen + non-breaking space + weight
-        # Regular space before hyphen allows break there: "Pre-Roll" | "- 3.5g"
-        # Non-breaking hyphen and nbsp keep "- 3.5g" as one unit
-        return ' \u2011\u00A0' + weight_part
+        return ' \u2011\u00A0' + weight
 
-    # Pattern: space + hyphen + space + number (with optional decimal + optional space) + unit
-    # This matches " - 7g", " - 3.5g", " - 3.5 g", " - 1.5oz", etc.
-    text = re.sub(r'\s+-\s+(\d+\.?\d*\s*[gmolz]+)\b', make_weight_suffix_unbreakable, text)
+    # Match: space + hyphen + space + number (with optional decimal) + optional space + unit
+    text = re.sub(r'\s+-\s+(\d+\.?\d*\s*[gmolz]+)\b', make_weight_pattern_unbreakable, text)
 
-    # CRITICAL FIX: Replace space-hyphen-space patterns with non-breaking versions
-    # Pattern: " - " becomes "\u00A0\u2011\u00A0" (nbsp + non-breaking hyphen + nbsp)
-    # This prevents "Moonboots - 7g" from breaking into "Moonboots -" and "7g"
+    # For other hyphens (not weight patterns), make them non-breaking too
+    # Replace remaining " - " with nbsp + non-breaking hyphen + nbsp
     text = re.sub(r'\s+-\s+', '\u00A0\u2011\u00A0', text)
 
-    # Also handle space-hyphen (no trailing space): " -" becomes "\u00A0\u2011"
-    text = re.sub(r'\s+-(?=\S)', '\u00A0\u2011', text)
-
-    # Also handle hyphen-space (no leading space): "- " becomes "\u2011\u00A0"
-    text = re.sub(r'(?<=\S)-\s+', '\u2011\u00A0', text)
-
-    # Finally, replace any remaining standalone hyphens with non-breaking hyphens
+    # Replace remaining hyphens with non-breaking hyphens
     text = text.replace('-', '\u2011')
 
     return text

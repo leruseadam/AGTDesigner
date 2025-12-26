@@ -2005,13 +2005,16 @@ class TemplateProcessor:
                             if clean_weight.startswith('\u2011'):
                                 # Replace non-breaking hyphen with regular hyphen
                                 clean_weight = clean_weight.replace('\u2011', '-', 1).replace('\u00A0', ' ')
+                            # CRITICAL FIX: Remove trailing hyphen from primary_text to prevent double hyphen
+                            # (e.g., "Pre-Roll-" + "- 0.5g" = "Pre-Roll-- 0.5g")
+                            primary_text_clean = primary_text.rstrip('-').rstrip()
                             if clean_weight.startswith('-'):
                                 # Weight already has hyphen, just append it with space
-                                desc_and_weight = f"{primary_text} {clean_weight}"
+                                desc_and_weight = f"{primary_text_clean} {clean_weight}"
                             else:
                                 # Add hyphen and space before weight
-                                desc_and_weight = f"{primary_text} - {clean_weight}"
-                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' with weight '{clean_weight}' -> '{desc_and_weight}'")
+                                desc_and_weight = f"{primary_text_clean} - {clean_weight}"
+                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text_clean}' with weight '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             # No weight available, use description only
                             desc_and_weight = primary_text

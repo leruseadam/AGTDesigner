@@ -28,7 +28,8 @@
       "Bash(for db in product_database*.db)",
       "Bash(do echo \"Adding sovereign_lineage to $db...\")",
       "Bash(done)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
