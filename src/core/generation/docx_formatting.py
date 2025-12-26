@@ -1311,12 +1311,13 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                 tcW.set(qn('w:w'), '2880')  # Fixed width in twips (2.0 inches = 2880 twips)
                                 tcW.set(qn('w:type'), 'dxa')  # Fixed width type
                             
-                            # Disable cell auto-sizing
+                            # CRITICAL FIX: Enable fit text to compress horizontally and prevent wrapping
+                            # This scales text to fit cell width without changing font size vertically
                             tcFitText = tcPr.find(qn('w:tcFitText'))
                             if tcFitText is None:
                                 tcFitText = OxmlElement('w:tcFitText')
                                 tcPr.append(tcFitText)
-                            tcFitText.set(qn('w:val'), '0')  # Disable fit text
+                            tcFitText.set(qn('w:val'), '1')  # Enable fit text to prevent "3.5g" wrapping
 
                             # Set cell height to exact value
                             # ONLY set height if template_type was not provided (template-specific heights set above)
