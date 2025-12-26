@@ -226,15 +226,17 @@ def make_nonbreaking_hyphens(text):
 
     import re
 
-    # CRITICAL FIX: Make entire "- #g" or "- #oz" pattern unbreakable
-    # Find patterns like "- 7g", "- 1.5g", "- 3.5oz" and wrap with non-breaking spaces
+    # CRITICAL FIX: Make entire "- #g" pattern unbreakable with soft hyphen break point
+    # Use soft hyphen (U+00AD) to allow break BEFORE the hyphen, then make "- 7g" non-breaking
+    # Pattern: "Motorbreath - 7g" becomes "Motorbreath\u00AD\u2011\u00A07g"
+    # This allows: "Motorbreath" on line 1, "- 7g" on line 2 (all together)
     def make_weight_suffix_unbreakable(match):
-        # Match captures: space, hyphen, space, number, unit
-        # Return with all spaces as non-breaking spaces
+        # Get the full match like " - 7g"
         full = match.group(0)
-        # Replace ALL spaces with non-breaking spaces, hyphen with non-breaking hyphen
-        result = full.replace(' ', '\u00A0').replace('-', '\u2011')
-        return result
+        # Replace with: soft hyphen + non-breaking hyphen + non-breaking space + number+unit
+        # The soft hyphen allows a break point BEFORE the hyphen if needed
+        # Then the entire "- 7g" stays together on the next line
+        return '\u00AD\u2011\u00A0' + match.group(1)  # group(1) is the number+unit like "7g"
 
     # Pattern: space + hyphen + space + number (with optional decimal) + unit
     # This matches " - 7g", " - 1.5oz", etc.
