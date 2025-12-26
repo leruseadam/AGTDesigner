@@ -215,31 +215,33 @@ def fix_description_spacing(desc: str) -> str:
 
 def make_nonbreaking_hyphens(text):
     """
-    Convert regular hyphens to non-breaking hyphens AND spaces around hyphens to non-breaking spaces.
+    Prevent line breaks at hyphens using zero-width joiners.
     This prevents line breaks at hyphenated words and around hyphens.
 
-    CRITICAL: For preroll templates, patterns like "Pre-Roll - 1g" must never break.
-    We replace:
-    - Regular hyphens (-) with non-breaking hyphens (U+2011)
-    - Spaces around hyphens with non-breaking spaces (U+00A0)
+    CRITICAL: For patterns like "Moonboots - 7g", the hyphen must NEVER break to a new line.
+    We use zero-width joiner (U+200D) to create unbreakable bonds around hyphens.
     """
     if not text or not isinstance(text, str):
         return text
 
-    # CRITICAL FIX: Replace space-hyphen-space patterns with non-breaking versions
-    # Pattern: " - " becomes "\u00A0\u2011\u00A0" (nbsp + non-breaking hyphen + nbsp)
-    # This prevents "Pre-Roll - 1g" from breaking into "Pre-Roll -" and "1g"
     import re
-    text = re.sub(r'\s+-\s+', '\u00A0\u2011\u00A0', text)
 
-    # Also handle space-hyphen (no trailing space): " -" becomes "\u00A0\u2011"
-    text = re.sub(r'\s+-(?=\S)', '\u00A0\u2011', text)
+    # CRITICAL FIX: Add zero-width joiners around hyphens to prevent ANY line breaks
+    # Pattern: " - " becomes " ‍-‍ " (space + ZWJ + hyphen + ZWJ + space)
+    # This creates unbreakable bonds that prevent "Moonboots -" | "7g" splits
 
-    # Also handle hyphen-space (no leading space): "- " becomes "\u2011\u00A0"
-    text = re.sub(r'(?<=\S)-\s+', '\u2011\u00A0', text)
+    # First handle space-hyphen-space patterns: " - "
+    text = re.sub(r'\s+-\s+', lambda m: f'\u00A0\u200D\u2011\u200D\u00A0', text)
 
-    # Finally, replace any remaining standalone hyphens with non-breaking hyphens
-    text = text.replace('-', '\u2011')
+    # Handle space-hyphen (no trailing space): " -"
+    text = re.sub(r'\s+-(?=\S)', lambda m: f'\u00A0\u200D\u2011\u200D', text)
+
+    # Handle hyphen-space (no leading space): "- "
+    text = re.sub(r'(?<=\S)-\s+', lambda m: f'\u200D\u2011\u200D\u00A0', text)
+
+    # Handle hyphens within words (no spaces): "Pre-Roll"
+    # Add zero-width joiners on both sides of hyphen
+    text = re.sub(r'(?<=\S)-(?=\S)', '\u200D\u2011\u200D', text)
 
     return text
 
