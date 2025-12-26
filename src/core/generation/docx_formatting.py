@@ -1349,6 +1349,12 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                     pPr.append(wordWrap)
                                 wordWrap.set(qn('w:val'), '1')  # Enable wrapping at word boundaries only
 
+                                # CRITICAL FIX: Suppress automatic hyphenation to prevent "3.5g" from breaking
+                                suppressAutoHyphens = pPr.find(qn('w:suppressAutoHyphens'))
+                                if suppressAutoHyphens is None:
+                                    suppressAutoHyphens = OxmlElement('w:suppressAutoHyphens')
+                                    pPr.append(suppressAutoHyphens)
+
                                 # CRITICAL FIX: Prevent text from overflowing or breaking mid-word
                                 # Use autoSpaceDE (disable auto-spacing) to prevent unexpected breaks
                                 autoSpaceDE = pPr.find(qn('w:autoSpaceDE'))
