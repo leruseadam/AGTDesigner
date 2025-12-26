@@ -11836,17 +11836,16 @@ def update_lineage():
         except Exception as e:
             logging.error(f"Error updating product lineage: {e}")
         
-        # Step 2: CRITICAL - Update products.sovereign_lineage for products WITHOUT strains
-        # This ensures lineage changes persist for products that aren't linked to strains
+        # Step 2: CRITICAL - Update products.sovereign_lineage for ALL matching products
+        # This ensures lineage changes persist for ALL products, whether or not they have strains
         cursor.execute("""
             UPDATE products
             SET sovereign_lineage = ?
-            WHERE (\"Product Name*\" = ? OR ProductName = ?)
-            AND (strain_id IS NULL OR strain_id = 0)
+            WHERE \"Product Name*\" = ? OR ProductName = ?
         """, (new_lineage, tag_name, tag_name))
-        products_without_strains_updated = cursor.rowcount
-        if products_without_strains_updated > 0:
-            logging.info(f"✅ Updated sovereign_lineage for {products_without_strains_updated} product(s) without strains")
+        products_sovereign_updated = cursor.rowcount
+        if products_sovereign_updated > 0:
+            logging.info(f"✅ Updated sovereign_lineage for {products_sovereign_updated} product(s)")
 
         # Step 3: CRITICAL - Also update strain lineage if product has a strain
         # This ensures the lineage persists because strain lineage is the source of truth
