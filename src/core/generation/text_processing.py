@@ -215,79 +215,55 @@ def fix_description_spacing(desc: str) -> str:
 
 def make_nonbreaking_hyphens(text):
     """
-    Prevent line breaks at hyphens using zero-width joiners.
+    Convert regular hyphens to non-breaking hyphens with non-breaking spaces.
     This prevents line breaks at hyphenated words and around hyphens.
 
-    CRITICAL: For patterns like "Moonboots - 7g", the hyphen must NEVER break to a new line.
-    We use zero-width joiner (U+200D) to create unbreakable bonds around hyphens.
+    CRITICAL: For patterns like "Moonboots - 7g", use non-breaking characters only.
+    No zero-width joiners to avoid JSON parsing issues.
     """
     if not text or not isinstance(text, str):
         return text
 
     import re
 
-    # CRITICAL FIX: Add zero-width joiners around hyphens to prevent ANY line breaks
-    # Pattern: " - " becomes " ‍-‍ " (space + ZWJ + hyphen + ZWJ + space)
-    # This creates unbreakable bonds that prevent "Moonboots -" | "7g" splits
+    # CRITICAL FIX: Replace space-hyphen-space patterns with non-breaking versions
+    # Pattern: " - " becomes "\u00A0\u2011\u00A0" (nbsp + non-breaking hyphen + nbsp)
+    # This prevents "Moonboots - 7g" from breaking into "Moonboots -" and "7g"
+    text = re.sub(r'\s+-\s+', '\u00A0\u2011\u00A0', text)
 
-    # First handle space-hyphen-space patterns: " - "
-    text = re.sub(r'\s+-\s+', lambda m: f'\u00A0\u200D\u2011\u200D\u00A0', text)
+    # Also handle space-hyphen (no trailing space): " -" becomes "\u00A0\u2011"
+    text = re.sub(r'\s+-(?=\S)', '\u00A0\u2011', text)
 
-    # Handle space-hyphen (no trailing space): " -"
-    text = re.sub(r'\s+-(?=\S)', lambda m: f'\u00A0\u200D\u2011\u200D', text)
+    # Also handle hyphen-space (no leading space): "- " becomes "\u2011\u00A0"
+    text = re.sub(r'(?<=\S)-\s+', '\u2011\u00A0', text)
 
-    # Handle hyphen-space (no leading space): "- "
-    text = re.sub(r'(?<=\S)-\s+', lambda m: f'\u200D\u2011\u200D\u00A0', text)
-
-    # Handle hyphens within words (no spaces): "Pre-Roll"
-    # Add zero-width joiners on both sides of hyphen
-    text = re.sub(r'(?<=\S)-(?=\S)', '\u200D\u2011\u200D', text)
+    # Finally, replace any remaining standalone hyphens with non-breaking hyphens
+    text = text.replace('-', '\u2011')
 
     return text
 
 def make_nonbreaking_weight_units(text):
     """
-    Wrap number+unit combinations to prevent ANY breaking between digit and unit.
-    Also makes "- 7g" patterns completely unbreakable.
-    This prevents splits like "7g" -> "7" | "g" or "- " | "7g".
+    Replace spaces between numbers and weight units with non-breaking spaces.
+    This prevents splits like "7 g" -> "7" | "g".
 
-    Uses zero-width joiner (U+200D) to create unbreakable bond between characters.
+    NO zero-width joiners - they cause JSON parsing errors.
+    Use only non-breaking spaces (U+00A0).
 
     Examples:
-    - "7g" -> "7‍g" (zero-width joiner prevents break)
+    - "7g" -> "7g" (no change if already together)
     - "7 g" -> "7\u00A0g" (non-breaking space)
-    - "Blueberry - 7g" -> "Blueberry ‍-‍ ‍7‍g" (entire "- 7g" is unbreakable)
-    - "1.5g" -> "1.5‍g" (keeps together)
+    - "Blueberry - 7g" -> "Blueberry - 7g" (hyphen handled separately)
+    - "1.5 g" -> "1.5\u00A0g" (non-breaking space)
     """
     if not text or not isinstance(text, str):
         return text
 
     import re
 
-    # CRITICAL FIX: Make the entire "- #g" pattern unbreakable
-    # Pattern: hyphen + space + digit(s) + optional decimal + unit
-    # Replace ALL spaces/hyphens with zero-width joiners to create one unbreakable unit
-    # Example: "Moonboots - 7g" -> "Moonboots\u200D‍-‍\u200D7‍g"
-    def make_weight_pattern_unbreakable(match):
-        # Get the matched pattern like "- 7g"
-        full_match = match.group(0)
-        # Replace all spaces with ZWJ, add ZWJ around hyphen, add ZWJ between digit and unit
-        result = full_match.replace(' ', '\u200D')  # Remove spaces, add ZWJ
-        result = result.replace('-', '\u200D\u2011\u200D')  # Non-breaking hyphen with ZWJ
-        # Add ZWJ between final digit and unit letter
-        result = re.sub(r'(\d)([gmolz])', r'\1\u200D\2', result)
-        return result
-
-    # Match pattern: space/hyphen followed by number and unit
-    # This catches "- 7g", "- 1.5g", etc.
-    text = re.sub(r'[-\s]+(\d+\.?\d*\s*[gmolz]+)\b', make_weight_pattern_unbreakable, text)
-
-    # CRITICAL FIX: Insert zero-width joiner (U+200D) between digit and unit letter
-    # This tells Word/rendering engine these characters MUST stay together - no breaks allowed
-    # Match: any digit followed immediately by g, m, l, o, or z (for g, mg, ml, oz, etc.)
-    text = re.sub(r'(\d)([gmolz])\b', r'\1\u200D\2', text)
-
-    # Also replace any remaining spaces before units with non-breaking spaces (for "7 g" format)
+    # CRITICAL FIX: Replace space before weight units with non-breaking space
+    # This prevents "7 g" from splitting into "7" on one line and "g" on the next
+    # Pattern: digit(s) + optional decimal + space + unit letter(s)
     text = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)\b', r'\1\u00A0\2', text)
 
     return text
