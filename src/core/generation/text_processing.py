@@ -245,27 +245,29 @@ def make_nonbreaking_hyphens(text):
 
 def make_nonbreaking_weight_units(text):
     """
-    Replace spaces between numbers and weight units with non-breaking spaces.
-    This prevents splits like "7 g" -> "7" | "g".
+    Wrap number+unit combinations to prevent ANY breaking between digit and unit.
+    This prevents splits like "7g" -> "7" | "g".
+
+    Uses zero-width joiner (U+200D) to create unbreakable bond between digit and letter.
 
     Examples:
-    - "7g" -> "7g" (no change)
+    - "7g" -> "7‍g" (zero-width joiner prevents break)
     - "7 g" -> "7\u00A0g" (non-breaking space)
-    - "Blueberry - 7g" -> "Blueberry - 7g" (no change if already together)
-    - "Blueberry - 7 g" -> "Blueberry - 7\u00A0g" (non-breaking space before unit)
+    - "Blueberry - 7g" -> "Blueberry - 7‍g" (prevents split)
+    - "1.5g" -> "1.5‍g" (keeps together)
     """
     if not text or not isinstance(text, str):
         return text
 
     import re
 
-    # CRITICAL FIX: Replace space before weight units (g, mg, oz, ml, etc.) with non-breaking space
-    # This prevents "7 g" from splitting into "7" on one line and "g" on the next
-    # Pattern: digit(s) + optional space + unit letter(s)
-    text = re.sub(r'(\d+)\s+([gmol]+)\b', r'\1\u00A0\2', text)
+    # CRITICAL FIX: Insert zero-width joiner (U+200D) between digit and unit letter
+    # This tells Word/rendering engine these characters MUST stay together - no breaks allowed
+    # Match: any digit followed immediately by g, m, l, o, or z (for g, mg, ml, oz, etc.)
+    text = re.sub(r'(\d)([gmolz])\b', r'\1\u200D\2', text)
 
-    # Also handle cases like "1.5 g" or "0.5g"
-    text = re.sub(r'(\d+\.?\d*)\s+([gmol]+)\b', r'\1\u00A0\2', text)
+    # Also replace any spaces before units with non-breaking spaces (for "7 g" format)
+    text = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)\b', r'\1\u00A0\2', text)
 
     return text
 
