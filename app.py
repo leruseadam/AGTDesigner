@@ -9150,21 +9150,22 @@ def get_available_tags():
         # The processor is not session-safe and can contain data from other users
         has_excel_data = file_exists and session_file_path
 
+        # DISABLED: Don't automatically load default file - prevents showing entire database
         # Fallback: if no session file, try default file for the selected store
-        if not has_excel_data:
-            try:
-                from src.core.data.excel_processor import get_default_upload_file
-                default_file = get_default_upload_file(store_name)
-                if default_file and os.path.exists(default_file):
-                    logging.info(f"ℹ️ No session file; using default store file: {default_file}")
-                    session['file_path'] = default_file
-                    session['uploaded_filename'] = os.path.basename(default_file)
-                    session.modified = True
-                    session_file_path = default_file
-                    has_excel_data = True
-                    file_exists = True
-            except Exception as default_err:
-                logging.warning(f"Default file fallback failed: {default_err}")
+        # if not has_excel_data:
+        #     try:
+        #         from src.core.data.excel_processor import get_default_upload_file
+        #         default_file = get_default_upload_file(store_name)
+        #         if default_file and os.path.exists(default_file):
+        #             logging.info(f"ℹ️ No session file; using default store file: {default_file}")
+        #             session['file_path'] = default_file
+        #             session['uploaded_filename'] = os.path.basename(default_file)
+        #             session.modified = True
+        #             session_file_path = default_file
+        #             has_excel_data = True
+        #             file_exists = True
+        #     except Exception as default_err:
+        #         logging.warning(f"Default file fallback failed: {default_err}")
 
         # CRITICAL: If file doesn't exist but session says it should, clear the stale session
         if not file_exists and session_file_path:
@@ -9222,77 +9223,10 @@ def get_available_tags():
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
 
-        # CRITICAL FIX: When no Excel file, don't use cache - only load if default Excel file exists
-        # This ensures we only show tags when there's an actual Excel file loaded
+        # CRITICAL FIX: When no Excel file, don't load default file - just return empty
+        # This prevents the entire database from showing up in the tag manager
         if not has_excel_data:
-            # Don't use cached tags - require actual Excel file
-            logging.info("⚡ No Excel file - skipping cache, will try default file only")
-            
-            # CRITICAL FIX: Try to load default Excel file for the store when no file uploaded
-            logging.info("⚡ No Excel file uploaded - attempting to load default file for store...")
-            if store_name:
-                try:
-                    from src.core.data.excel_processor import get_default_upload_file
-                    default_file = get_default_upload_file(store_name)
-                    if default_file and os.path.exists(default_file):
-                        logging.info(f"⚡ Found default file: {default_file} - loading it")
-                        from src.core.data.excel_processor import ExcelProcessor
-                        default_processor = ExcelProcessor(store_name=store_name)
-                        if default_processor.load_file(default_file):
-                            default_tags = default_processor.get_available_tags(filters=None)
-                            if default_tags and len(default_tags) > 0:
-                                # Update session with default file
-                                session['file_path'] = default_file
-                                session['uploaded_filename'] = os.path.basename(default_file)
-                                session.modified = True
-                                
-                                # Enrich with database lineage
-                                try:
-                                    product_db = get_product_database(store_name)
-                                    if product_db and default_tags:
-                                        product_names = [tag.get('Product Name*') for tag in default_tags if tag.get('Product Name*')]
-                                        lineage_map = {}
-                                        if product_names:
-                                            db_products = product_db.get_products_by_names(product_names)
-                                            for db_product in db_products:
-                                                name = db_product.get('Product Name*')
-                                                if name:
-                                                    lineage_value = db_product.get('Lineage') or db_product.get('lineage') or db_product.get('canonical_lineage')
-                                                    if lineage_value:
-                                                        lineage_map[name] = lineage_value
-                                        
-                                        # Apply lineage to tags
-                                        for tag in default_tags:
-                                            name = tag.get('Product Name*')
-                                            if name and name in lineage_map:
-                                                tag['Lineage'] = lineage_map[name]
-                                                tag['lineage'] = lineage_map[name]
-                                                tag['canonical_lineage'] = lineage_map[name]
-                                                tag['currentLineage'] = lineage_map[name]
-                                
-                                except Exception as enrich_err:
-                                    logging.warning(f"Failed to enrich default file tags with database lineage: {enrich_err}")
-                                
-                                logging.info(f"✅ Loaded {len(default_tags)} tags from default file")
-                                safe_default_tags = make_json_safe(default_tags)
-                                
-                                # Cache the tags
-                                if not prefer_db and not nocache:
-                                    try:
-                                        cache.set(cache_key, safe_default_tags, timeout=3600)
-                                    except Exception:
-                                        pass
-                                
-                                return jsonify({
-                                    'tags': safe_default_tags,
-                                    'total_count': len(safe_default_tags),
-                                    'source': 'default-file',
-                                    'message': f'Loaded {len(safe_default_tags)} tags from default Excel file'
-                                }), 200
-                except Exception as default_load_err:
-                    logging.warning(f"Failed to load default file: {default_load_err}")
-            
-            logging.info("⚡ No Excel file uploaded and no default file available - returning empty")
+            logging.info("⚡ No Excel file uploaded - returning empty tags (not loading default file)")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
