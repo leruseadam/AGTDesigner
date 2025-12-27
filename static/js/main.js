@@ -10253,8 +10253,10 @@ const TagManager = {
                         this.updateSelectedTags(localTagObjects);
                     }
                 } else {
-                    // Only clear if we truly have no selections locally or in backend
-                    this.updateSelectedTags([]);
+                    // CRITICAL FIX: Don't call updateSelectedTags([]) on initial load
+                    // This prevents clearing the display before user has had a chance to select anything
+                    verboseLog('No selections found in backend or local state - skipping updateSelectedTags call');
+                    // Don't call updateSelectedTags([]) - let the display remain as-is
                 }
                 return true;
             }
