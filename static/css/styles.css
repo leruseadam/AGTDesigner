@@ -6557,7 +6557,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Vendor (top-level) */
   .vendor-section > .vendor-header {
-    font-size: 1.4em !important; /* Slightly smaller than subcategory */
+    font-size: 1.5em !important; /* Slightly smaller than subcategory */
     font-weight: 700;
     margin-bottom: 0.4em;
     letter-spacing: 0.04em;
@@ -6570,7 +6570,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.d-flex,
   .vendor-section > .vendor-header.mb-2,
   .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.4em !important; /* Slightly smaller than subcategory */
+    font-size: 1.5em !important; /* Slightly smaller than subcategory */
     font-weight: 700 !important;
   }
 
@@ -6596,7 +6596,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1.125em; /* Increased by 0.125em (~2px) */
+    font-size: 1.25em; /* Increased by 0.125em (~2px) */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 2.2em;
@@ -6608,7 +6608,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 0.98em;
+    font-size: 1.1em;
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 3.2em;
