@@ -872,13 +872,24 @@ def process_chunk(args):
     tpl = DocxTemplate(local_template_buffer)
     context = {}
     image_width = Mm(10) if orientation == "preroll" else (Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12))
+
+    # PERFORMANCE: Cache image paths (called for every product)
     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
+    high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
+    high_thc_image_path = resource_path(os.path.join("templates", "HighTHC.png"))
+
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")
     
     # CRITICAL FIX: Only create labels for the products we have, not empty slots
     actual_num_labels = min(len(chunk), num_labels)
-    
+
+    # PERFORMANCE: Create single ExcelProcessor instance for entire chunk (not per product)
+    excel_processor = ExcelProcessor()
+
+    # PERFORMANCE: Pre-compute classic types set (used for every product)
+    classic_types_lower = set(ct.lower() for ct in CLASSIC_TYPES)
+
     # OPTIMIZATION: Pre-load all lineage and strain data in batch to avoid N+1 queries
     # This reduces 200+ queries for 100 products to just 2-3 queries total
     product_lineage_cache = {}
@@ -971,24 +982,15 @@ def process_chunk(args):
             if doh_value in ["NO", "NONE", "FALSE", ""] or raw_doh in ["No", "no", "NO", "NONE"]:
                 label_data["DOH"] = ""
             elif doh_value in ["YES", "DOH", "THC", "CBD"]:
-                # Map DOH value to appropriate image
+                # Map DOH value to appropriate image (using cached paths)
                 if doh_value == "CBD" or (doh_value == "YES" and product_type.startswith('high cbd')):
                     # Use High CBD image
-                    high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
-                    if DEBUG_ENABLED:
-                        logger.debug(f"Using HighCBD image: {high_cbd_image_path}")
                     label_data["DOH"] = InlineImage(tpl, high_cbd_image_path, width=image_width)
                 elif doh_value == "THC":
                     # Use High THC image
-                    high_thc_image_path = resource_path(os.path.join("templates", "HighTHC.png"))
-                    if DEBUG_ENABLED:
-                        logger.debug(f"Using HighTHC image: {high_thc_image_path}")
                     label_data["DOH"] = InlineImage(tpl, high_thc_image_path, width=image_width)
                 else:
                     # Use regular DOH image
-                    doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
-                    if DEBUG_ENABLED:
-                        logger.debug(f"Using DOH image: {doh_image_path}")
                     label_data["DOH"] = InlineImage(tpl, doh_image_path, width=image_width)
             else:
                 label_data["DOH"] = ""
@@ -1063,7 +1065,7 @@ def process_chunk(args):
             
             # Only add brand markers for non-classic types
             # Classic types should show lineage instead of brand
-            is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
+            is_classic_type = product_type in classic_types_lower
             
             if is_classic_type:
                 # For classic types, lineage will be set after database lookup below
@@ -1113,7 +1115,6 @@ def process_chunk(args):
                 description = make_nonbreaking_hyphens(description)
             
             # CRITICAL FIX: Use Excel processor's weight normalization with Excel-first priority
-            excel_processor = ExcelProcessor()
             weight_units = excel_processor._format_weight_units(row, excel_priority=True)
             
             # Preserve original ProductName; keep Description as the clean field
