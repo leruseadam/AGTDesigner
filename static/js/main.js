@@ -7928,8 +7928,9 @@ const TagManager = {
         const now = Date.now();
         const isGenerating = this.isGenerating === true;
         const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000; // 30 seconds
-        
-        if ((isGenerating || recentlyGenerated) && (!tags || tags.length === 0) && this.state.persistentSelectedTags.length > 0) {
+        const recentlySelected = this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 5000; // 5 seconds
+
+        if ((isGenerating || recentlyGenerated || recentlySelected) && (!tags || tags.length === 0) && this.state.persistentSelectedTags.length > 0) {
             verboseLog('🚫 BLOCKED: Prevented clearing selected tags during/after generation');
             // Force re-render with current selections instead
             const currentTags = this.state.persistentSelectedTags
@@ -7959,11 +7960,12 @@ const TagManager = {
         // CRITICAL FIX: If called with empty array but we have persistentSelectedTags, preserve them
         // This prevents selections from being cleared when updateSelectedTags([]) is called
         if (tags.length === 0 && this.state.persistentSelectedTags.length > 0) {
-            // CRITICAL FIX: If we just generated tags, NEVER clear them (extended protection)
+            // CRITICAL FIX: If we just generated tags or selected tags, NEVER clear them (extended protection)
             const now = Date.now();
             const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 30000; // 30 seconds
-            
-            if (recentlyGenerated) {
+            const recentlySelected = this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 5000; // 5 seconds
+
+            if (recentlyGenerated || recentlySelected) {
                 verboseLog('🚫 BLOCKED: Attempted to clear selected tags right after generation - preserving selections');
                 // Force re-render with current selections
                 const currentTags = this.state.persistentSelectedTags
