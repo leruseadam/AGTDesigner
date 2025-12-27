@@ -7924,6 +7924,12 @@ const TagManager = {
         // CRITICAL FIX: Removed console.time/timeEnd to prevent "Timer does not exist" errors
         // These were only for debugging and causing issues when called from lineage updates
 
+        // DEBUG: Log when called to track clearing issues
+        if (!tags || tags.length === 0) {
+            console.warn(`⚠️ _performUpdateSelectedTags called with ${tags ? 'empty array' : 'null/undefined'}. persistentSelectedTags: ${this.state.persistentSelectedTags?.length || 0}`);
+            console.trace('Call stack for empty updateSelectedTags:');
+        }
+
         // CRITICAL FIX: Block any clearing of tags if generation is in progress or just completed
         const now = Date.now();
         const isGenerating = this.isGenerating === true;
