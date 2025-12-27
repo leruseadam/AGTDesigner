@@ -1563,7 +1563,7 @@ def create_app():
         
         app.config['SESSION_TYPE'] = 'filesystem'
         app.config['SESSION_FILE_DIR'] = sessions_dir
-        app.config['SESSION_PERMANENT'] = False
+        app.config['SESSION_PERMANENT'] = True  # Enable session persistence to keep Excel uploads across browser restarts
         app.config['SESSION_USE_SIGNER'] = True
         app.config['SESSION_KEY_PREFIX'] = 'labelmaker:'
         app.config['SESSION_FILE_THRESHOLD'] = 500  # Max number of session files
