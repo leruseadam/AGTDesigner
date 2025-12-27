@@ -215,67 +215,16 @@ def fix_description_spacing(desc: str) -> str:
 
 def make_nonbreaking_hyphens(text):
     """
-    Make "- #g" patterns (hyphen + weight) completely unbreakable as one unit.
-    Allow line breaks BEFORE the hyphen, but keep the entire "- 3.5g" together.
-
-    Example: "Blueberry - 3.5g" can break as:
-      - "Blueberry" | "- 3.5g" (ALLOWED - break before hyphen)
-      - "Blueberry - 3.5" | "g" (FORBIDDEN - never split weight)
+    Convert regular hyphens to non-breaking hyphens in text.
+    This prevents line breaks at hyphenated words.
     """
     if not text or not isinstance(text, str):
         return text
-
-    import re
-
-    # CRITICAL: Match weight patterns like " - 7g", " - 3.5g", " - 1.5oz"
-    # Replace entire pattern with regular space + non-breaking hyphen + word joiner + weight (no spaces in weight)
-    # Pattern: "Blueberry - 3.5g" -> "Blueberry ‑⁠3.5g" (regular space before, then unbreakable "‑3.5g")
-    # Using Word Joiner (U+2060) which is specifically designed to prevent line breaks
-    def make_weight_pattern_unbreakable(match):
-        weight = match.group(1)  # Captures "7g", "3.5g", "3.5 g", etc.
-        # Remove any space between number and unit
-        weight = re.sub(r'\s+', '', weight)
-        # Return: regular space + non-breaking hyphen + word joiner + weight
-        return ' \u2011\u2060' + weight
-
-    # Match: space + hyphen + space + number (with optional decimal) + optional space + unit
-    text = re.sub(r'\s+-\s+(\d+\.?\d*\s*[gmolz]+)\b', make_weight_pattern_unbreakable, text)
-
-    # For other hyphens (not weight patterns), make them non-breaking too
-    # Replace remaining " - " with nbsp + non-breaking hyphen + nbsp
-    text = re.sub(r'\s+-\s+', '\u00A0\u2011\u00A0', text)
-
-    # Replace remaining hyphens with non-breaking hyphens
+    
+    # Replace regular hyphens with non-breaking hyphens
+    # Use Unicode non-breaking hyphen (U+2011)
     text = text.replace('-', '\u2011')
-
-    return text
-
-def make_nonbreaking_weight_units(text):
-    """
-    Replace spaces between numbers and weight units with Word Joiner.
-    This prevents splits like "7 g" -> "7" | "g".
-
-    Using Word Joiner (U+2060) which is specifically designed to prevent line breaks
-    while being invisible. This is stronger than non-breaking space (U+00A0).
-
-    Examples:
-    - "7g" -> "7g" (no change if already together)
-    - "7 g" -> "7⁠g" (word joiner - invisible but prevents break)
-    - "Blueberry - 7g" -> "Blueberry - 7g" (hyphen handled separately)
-    - "1.5 g" -> "1.5⁠g" (word joiner)
-    """
-    if not text or not isinstance(text, str):
-        return text
-
-    import re
-
-    # CRITICAL FIX: Replace space before weight units with Word Joiner (U+2060)
-    # This prevents "7 g" from splitting into "7" on one line and "g" on the next
-    # Word Joiner is invisible and specifically designed to prevent line breaks
-    # Pattern: digit(s) + optional decimal + space + unit letter(s)
-    # NOTE: Cannot use r'' raw string with \u escape - must use normal string
-    text = re.sub(r'(\d+\.?\d*)\s+([gmolz]+)\b', '\\1\u2060\\2', text)
-
+    
     return text
 
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
