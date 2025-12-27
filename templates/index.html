@@ -4921,7 +4921,12 @@
       display: flex;
       justify-content: center;
       align-items: center;
+      opacity: 1;
+      visibility: visible;
       transition: opacity 0.5s ease-out;
+      /* Prevent any size changes during loading */
+      min-width: 100%;
+      min-height: 100%;
     }
     
     /* CRITICAL FIX: Add lava background behind app loading splash */
@@ -4952,12 +4957,19 @@
       overflow: hidden;
       background: rgba(22, 33, 62, 0.95);
       border: 1px solid rgba(0, 212, 170, 0.2);
-      box-shadow: 
+      box-shadow:
         0 20px 40px rgba(0, 0, 0, 0.3),
         0 0 0 1px rgba(0, 212, 170, 0.1);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      transform: translateX(0);
+      transform: translateX(0) scale(1);
+      /* Prevent container from resizing */
+      min-width: 600px;
+      min-height: 400px;
+      max-width: 600px;
+      max-height: 400px;
+      flex-shrink: 0;
+      flex-grow: 0;
     }
 
     .app-loading-content {
@@ -5608,7 +5620,7 @@
                   <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0; min-height: 80px; justify-content: center;">
                     <!-- File Path Display (Above buttons) -->
                     <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
                         {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
                       </span>
                     </div>

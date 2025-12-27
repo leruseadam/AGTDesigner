@@ -30,7 +30,8 @@
       "Bash(done)",
       "Bash(chmod:*)",
       "Bash(git checkout:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []

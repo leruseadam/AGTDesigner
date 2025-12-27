@@ -4725,7 +4725,7 @@ const TagManager = {
         selectAllContainer.innerHTML = `
             <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
                 <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
-                <span class="text-secondary fw-semibold">SELECT ALL</span>
+                <span class="filter-subcategory-label mb-0">SELECT ALL</span>
             </label>
         `;
         tagList.appendChild(selectAllContainer);
@@ -5565,7 +5565,7 @@ const TagManager = {
         selectAllContainer.innerHTML = `
             <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
                 <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
-                <span class="text-secondary fw-semibold">SELECT ALL</span>
+                <span class="filter-subcategory-label mb-0">SELECT ALL</span>
             </label>
         `;
         listWrapper.appendChild(selectAllContainer);
@@ -8210,7 +8210,7 @@ const TagManager = {
             selectAllContainer.innerHTML = `
                 <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
                     <input type="checkbox" id="selectAllSelected" class="custom-checkbox">
-                    <span class="text-secondary fw-semibold">SELECT ALL</span>
+                    <span class="filter-subcategory-label mb-0">SELECT ALL</span>
                 </label>
             `;
             container.appendChild(selectAllContainer);
