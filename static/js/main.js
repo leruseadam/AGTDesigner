@@ -4498,7 +4498,9 @@ const TagManager = {
             
             // CRITICAL FIX: Check if no Excel file is uploaded and show proper empty state
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-            const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database';
+            // CRITICAL FIX: Also treat as "no file" if total tag count is 0 (not just filtered)
+            const hasNoTags = !this.state.tags || this.state.tags.length === 0;
+            const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database' || hasNoTags;
             
             if (noFileUploaded) {
                 // Show prominent upload prompt when Excel is needed
