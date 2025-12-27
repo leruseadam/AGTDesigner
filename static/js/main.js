@@ -3619,7 +3619,10 @@ const TagManager = {
                 if (!this.state._selectedTagsSet) {
                     this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags || []);
                 }
-                
+
+                // CRITICAL FIX: Mark selection time to prevent race conditions with fetchAndUpdateSelectedTags
+                this._lastTagSelectionTime = Date.now();
+
                 if (isChecked) {
                     if (!this.state._selectedTagsSet.has(tagName)) {
                         console.log(`✅ ADDING TAG: "${tagName}" to persistentSelectedTags`);
