@@ -2255,12 +2255,12 @@ body.modal-open #mainContent.store-selection-disabled,
     box-sizing: border-box !important;
   }
   
-  /* Ensure all text in inventory list uses readable size */
+  /* Ensure all text in inventory list uses readable size - matches selectedTags */
   #availableTags .tag-item,
   #availableTags .tag-entry,
   #availableTags .tag-name,
   #availableTags .tag-text {
-    font-size: 14px !important;
+    font-size: 18px !important;
   }
   
   /* Fix selected tags container height */
@@ -6407,7 +6407,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header {
     font-size: 1.3em !important; /* Slightly smaller than subcategory */
     font-weight: 700;
-    margin-bottom: 0.2em;
+    margin-bottom: 0.05em;
     letter-spacing: 0.04em;
     color: #e0d6f6;
   }
@@ -6436,7 +6436,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .brand-section > .brand-header {
     font-size: 1.4em; /* Larger for better visibility */
     font-weight: 600;
-    margin-bottom: 0.15em;
+    margin-bottom: 0.05em;
     margin-left: 1.2em;
     letter-spacing: 0.03em;
     color: #cbb6f6;
@@ -6446,7 +6446,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .product-type-section > .product-type-header {
     font-size: 1.25em; /* Increased by 0.125em (~2px) */
     font-weight: 500;
-    margin-bottom: 0.1em;
+    margin-bottom: 0.05em;
     margin-left: 2.2em;
     letter-spacing: 0.02em;
     color: #b3a1d8;
@@ -6466,8 +6466,8 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Add vertical spacing between all group headers */
   .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
-    margin-top: 0.15em;
-    margin-bottom: 0.15em;
+    margin-top: 0.05em;
+    margin-bottom: 0.05em;
   }
 
   /* Add spacing between checkboxes and text */
