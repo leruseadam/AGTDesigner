@@ -2855,7 +2855,7 @@ body.modal-open #mainContent.store-selection-disabled,
     max-width: 100%;
     /* Allow content to be visible - CRITICAL for dropdowns */
     overflow: visible !important;
-    margin-bottom: 0.5rem !important; /* Reduced from 0.75rem for compactness */
+    margin-bottom: 0.2rem !important; /* Compact spacing */
     padding-right: 8px !important; /* Extra padding to prevent dropdown cutoff */
   }
   
@@ -3159,7 +3159,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .control-panel .d-grid .btn-control,
   .btn-control {
     padding: 0.5rem 0.4rem !important; /* Compact padding to match undo/redo */
-    font-size: 0.1rem !important; /* Smaller font for compact buttons */
+    font-size: 0.85rem !important; /* Smaller font for compact buttons */
     font-weight: 650 !important;
     min-height: 42px !important; /* Compact height to match undo/redo */
     width: 70% !important; /* Reduced from 85% for less width */
@@ -3274,17 +3274,19 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Data & Analytics - Indigo/Blue (Analytics/View) - VIBRANT */
   .btn-control.btn-color-indigo,
-  .btn-control[onclick*="showProductDatabaseManager"] {
+  .btn-control[onclick*="showProductDatabaseManager"],
+  #redo-move-btn.btn-control {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(79, 70, 229, 0.5)) !important;
     border-color: rgba(99, 102, 241, 0.8) !important;
     color: #e0e7ff !important;
-    box-shadow: 
+    box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(99, 102, 241, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
   .btn-control.btn-color-indigo:hover,
-  .btn-control[onclick*="showProductDatabaseManager"]:hover {
+  .btn-control[onclick*="showProductDatabaseManager"]:hover,
+  #redo-move-btn.btn-control:hover {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(79, 70, 229, 0.6)) !important;
     border-color: rgba(99, 102, 241, 1) !important;
     color: #ffffff !important;
@@ -5968,7 +5970,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .tag-row {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.25rem;
       padding-left: 0.5rem !important;
   }
 
@@ -6007,7 +6009,8 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 0.9rem !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
@@ -6745,7 +6748,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
 
   .container-label, .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
-    line-height: 1.7 !important;
+    line-height: 1.3 !important;
   }
 
   #generateBtn {
@@ -9767,7 +9770,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Increase vendor title text size in tag lists */
   .vendor-header .vendor-title {
-    font-size: 1.525em !important; /* Increased by 0.125em (~2px) */
+    font-size: 1.3 !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
   }
 
@@ -9856,24 +9859,24 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Container-specific font sizing - using normalized viewport units */
   .tag-item .text-container {
-    font-size: clamp(9px, 0.8rem, 16px) !important;
+    font-size: clamp(9px, 1rem, 16px) !important;
     max-width: calc(100% - 40px) !important;
     padding-right: 8px !important;
   }
   
   .vendor-header .text-container {
     font-size: clamp(14px, 1.2rem, 20px) !important;
-    font-weight: 600 !important;
+    font-weight: 800 !important;
   }
   
   .brand-header .text-container {
     font-size: clamp(11px, 1rem, 19px) !important;
-    font-weight: 500 !important;
+    font-weight: 700 !important;
   }
   
   .product-type-header .text-container {
     font-size: clamp(10px, 1.05rem, 18px) !important;
-    font-weight: 500 !important;
+    font-weight: 700 !important;
   }
   
   .subcategory-header .text-container {
@@ -10106,7 +10109,7 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1px solid rgba(160, 132, 232, 0.25) !important;
     color: white !important;
     font-weight: 600 !important;
-    font-size: 1rem !important;
+    font-size: 1.1rem !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
     letter-spacing: 0.02em !important;
     transition: background 0.2s ease, color 0.2s ease !important;
