@@ -27,9 +27,9 @@
   --spacing-lg: 1.5rem;
   --spacing-xl: 2rem;
   
-  --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
+  --tag-list-height: max(var(--tag-list-min-height), calc(110vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
   --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-  --center-panel-height: 88rem;     /* Height of center control panel */
+  --center-panel-height: 85rem;     /* Height of center control panel */
   --tag-list-scroll-padding: 1rem;
 }
 
@@ -716,13 +716,13 @@ canvas#lava-lamp-canvas {
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(88rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(88rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
 }
 
@@ -730,7 +730,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(88rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
@@ -741,7 +741,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(88rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
@@ -786,10 +786,10 @@ body.modal-open #mainContent.store-selection-disabled,
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 72vh);
-    --center-panel-height: max(88rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
   @supports (height: 100dvh) {
-    :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(88rem, var(--tag-list-height)); }
+    :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(85rem, var(--tag-list-height)); }
   }
   .control-panel,
   .center-panel,
@@ -857,7 +857,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .control-section {
-  margin-top: 0 !important;
+  margin-top: 3rem !important;
 }
  
 .control-section {
@@ -2664,6 +2664,8 @@ body.modal-open #mainContent.store-selection-disabled,
     flex: 0 0 auto !important;
     width: auto !important;
     min-width: 260px !important;
+    margin-top: 3rem !important;
+    margin-bottom: 0.5rem !important;
   }
   
   /* Ensure tag list containers are responsive - ZOOM RESPONSIVE */
@@ -7498,11 +7500,11 @@ body.modal-open #mainContent.store-selection-disabled,
     -webkit-backdrop-filter: blur(20px) !important;
     border: var(--filter-border-width) solid rgba(160, 132, 232, 0.2) !important; /* Match glass-card border */
     border-radius: 16px !important; /* Reduced from 24px for compactness */
-    box-shadow: 
-      0 12px 40px rgba(0,0,0,0.15), 
+    box-shadow:
+      0 12px 40px rgba(0,0,0,0.15),
       0 4px 16px rgba(160,132,232,0.1),
       0 2px 8px rgba(160,132,232,0.08) !important; /* Match glass-card shadows */
-    margin: 0 0 0.75rem 0; /* Reduced bottom margin */
+    margin: 0 0 0.25rem 0; /* Reduced bottom margin from 0.75rem to 0.25rem */
     padding: 0.75rem 0.75rem 1rem 0.75rem !important; /* Increased bottom padding to prevent cutoff */
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important; /* Match glass-card transition */
     position: relative;
@@ -8038,7 +8040,7 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Make sidebar filter bar and filters slightly smaller */
   .sticky-filter-bar .form-label,
   .sticky-filter-bar .filter-label {
-    font-size: 0.92em !important;
+    font-size: 1.2em !important;
     padding: 0 0 0.15rem 0 !important; /* Increased bottom padding to prevent cutoff */
     line-height: 1.5 !important; /* Ensure proper line-height */
     overflow: visible !important; /* Prevent text cutoff */
@@ -8347,6 +8349,8 @@ body.modal-open #mainContent.store-selection-disabled,
   min-height: auto !important;
   max-height: none !important;
   overflow: visible !important;
+  margin-top: 3rem !important;
+  margin-bottom: 0.5rem !important;
   }
   
   [data-container-type="available"],
@@ -8467,6 +8471,8 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Make center column wider to accommodate buttons */
   [data-container-type="center"] {
     min-width: 140px !important;
+    margin-top: 3rem !important;
+    margin-bottom: 0.5rem !important;
   }
 
   /* Ultra-wide monitors (32"+ / ultrawide displays) */
@@ -10825,9 +10831,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
 /* Slightly lower the center column so it visually centers between the tag lists */
 [data-container-type="center"] {
-  margin-top: 10px !important;
+  margin-top: 3rem !important;
+  margin-bottom: 0.5rem !important;
   position: relative !important;
-  top: 5px !important;
 }
 
 /* Scale-to-fit support - REMOVED transform-origin from html/body to fix canvas positioning */
