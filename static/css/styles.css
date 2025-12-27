@@ -2959,29 +2959,6 @@ body.modal-open #mainContent.store-selection-disabled,
     align-items: center !important;
   }
   
-  /* Legacy: Professional center column buttons - Replaced by .btn-control class */
-  /* Keep minimal fallback styles for backwards compatibility */
-  .control-panel .btn-glass:not(.btn-control) {
-    padding: 0.6rem 1rem !important;
-    font-size: 0.85rem !important;
-    font-weight: 500 !important;
-    min-height: 40px !important;
-  }
-  
-  .control-panel .btn-glass:not(.btn-control):hover {
-    transform: translateY(-1px) !important;
-  }
-  
-  .control-panel .btn-glass .icon-btn {
-    gap: 8px !important;
-    display: inline-flex !important;
-    align-items: center !important;
-  }
-  
-  .control-panel .btn-glass svg {
-    width: 16px !important;
-    height: 16px !important;
-  }
 
   /* Center column specific spacing reductions */
   .help-button-container {
@@ -3182,7 +3159,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .control-panel .d-grid .btn-control,
   .btn-control {
     padding: 0.5rem 0.4rem !important; /* Compact padding to match undo/redo */
-    font-size: 0.85rem !important; /* Smaller font for compact buttons */
+    font-size: 0.1rem !important; /* Smaller font for compact buttons */
     font-weight: 650 !important;
     min-height: 42px !important; /* Compact height to match undo/redo */
     width: 70% !important; /* Reduced from 85% for less width */
@@ -3212,22 +3189,16 @@ body.modal-open #mainContent.store-selection-disabled,
   /* High specificity to ensure colors override base styles */
   
   /* Match JSON - Blue/Cyan (Data Import) - VIBRANT */
-  .control-panel .btn-control.btn-color-blue,
-  .control-panel .btn-glass.btn-control.btn-color-blue,
-  .control-panel .d-grid .btn-control.btn-color-blue,
   .btn-control.btn-color-blue,
   .btn-control[data-bs-target="#jsonMatchModal"] {
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5)) !important;
     border-color: rgba(59, 130, 246, 0.8) !important;
     color: #dbeafe !important;
-    box-shadow: 
+    box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(59, 130, 246, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-blue:hover,
-  .control-panel .btn-glass.btn-control.btn-color-blue:hover,
-  .control-panel .d-grid .btn-control.btn-color-blue:hover,
   .btn-control.btn-color-blue:hover,
   .btn-control[data-bs-target="#jsonMatchModal"]:hover {
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.6)) !important;
@@ -3237,24 +3208,18 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Undo - Orange/Amber (Action Reversal) - VIBRANT */
-  .control-panel .btn-control.btn-color-orange,
-  .control-panel .btn-glass.btn-control.btn-color-orange,
-  .control-panel .d-grid .btn-control.btn-color-orange,
   .btn-control.btn-color-orange,
   #undo-move-btn.btn-control {
     background: linear-gradient(135deg, rgba(251, 146, 60, 0.4), rgba(249, 115, 22, 0.5)) !important;
     border-color: rgba(251, 146, 60, 0.8) !important;
     color: #fed7aa !important;
-    box-shadow: 
+    box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(251, 146, 60, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-    padding: 0.5rem 0.4rem !important; /* Ensure consistent padding */
-    min-height: 42px !important; /* Ensure consistent height */
+    padding: 0.5rem 0.4rem !important;
+    min-height: 42px !important;
   }
-  .control-panel .btn-control.btn-color-orange:hover,
-  .control-panel .btn-glass.btn-control.btn-color-orange:hover,
-  .control-panel .d-grid .btn-control.btn-color-orange:hover,
   .btn-control.btn-color-orange:hover,
   #undo-move-btn.btn-control:hover {
     background: linear-gradient(135deg, rgba(251, 146, 60, 0.5), rgba(249, 115, 22, 0.6)) !important;
@@ -3264,28 +3229,22 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Clear & Reset - Red (Destructive Action) - VIBRANT */
-  .control-panel .btn-control.btn-color-red,
-  .control-panel .btn-glass.btn-control.btn-color-red,
-  .control-panel .d-grid .btn-control.btn-color-red,
   .btn-control.btn-color-red,
   #clear-filters-btn.btn-control {
     background: linear-gradient(135deg, rgba(239, 68, 68, 0.4), rgba(220, 38, 38, 0.5)) !important;
     border-color: rgba(239, 68, 68, 0.8) !important;
     color: #fee2e2 !important;
-    box-shadow: 
+    box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(239, 68, 68, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-    padding: 0.5rem 0.4rem !important; /* Ensure consistent padding with Undo/Redo */
-    min-height: 42px !important; /* Ensure consistent height with Undo/Redo */
-    height: auto !important; /* Allow natural height */
-    display: flex !important; /* Ensure flex display */
-    align-items: center !important; /* Center content vertically */
-    justify-content: center !important; /* Center content horizontally */
+    padding: 0.5rem 0.4rem !important;
+    min-height: 42px !important;
+    height: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
   }
-  .control-panel .btn-control.btn-color-red:hover,
-  .control-panel .btn-glass.btn-control.btn-color-red:hover,
-  .control-panel .d-grid .btn-control.btn-color-red:hover,
   .btn-control.btn-color-red:hover,
   #clear-filters-btn.btn-control:hover {
     background: linear-gradient(135deg, rgba(239, 68, 68, 0.5), rgba(220, 38, 38, 0.6)) !important;
@@ -3294,24 +3253,7 @@ body.modal-open #mainContent.store-selection-disabled,
     box-shadow: 0 4px 20px rgba(239, 68, 68, 0.6), 0 0 20px rgba(239, 68, 68, 0.5) !important;
   }
   
-  /* CRITICAL FIX: Ensure Clear button has same height as Undo/Redo - placed after all other rules */
-  .controls-buttons-container > #clear-filters-btn.btn-control.btn-color-red,
-  .controls-buttons-container > #clear-filters-btn.btn-glass.btn-control.btn-color-red,
-  #clear-filters-btn.btn-control.btn-color-red.btn-glass {
-    padding: 0.5rem 0.4rem !important; /* Match undo/redo padding exactly */
-    min-height: 42px !important; /* Match undo/redo height exactly */
-    height: auto !important; /* Allow natural height */
-    line-height: 1.5 !important; /* Ensure proper line height */
-    display: flex !important; /* Ensure flex display */
-    align-items: center !important; /* Center content vertically */
-    justify-content: center !important; /* Center content horizontally */
-    box-sizing: border-box !important; /* Include padding in height calculation */
-  }
-  
   /* Export Data - Green/Teal (Export/Download) - VIBRANT */
-  .control-panel .btn-control.btn-color-green,
-  .control-panel .btn-glass.btn-control.btn-color-green,
-  .control-panel .d-grid .btn-control.btn-color-green,
   .btn-control.btn-color-green,
   .btn-control[onclick*="downloadExcel"] {
     background: linear-gradient(135deg, rgba(20, 184, 166, 0.4), rgba(15, 118, 110, 0.5)) !important;
@@ -3322,9 +3264,6 @@ body.modal-open #mainContent.store-selection-disabled,
       0 0 12px rgba(20, 184, 166, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-green:hover,
-  .control-panel .btn-glass.btn-control.btn-color-green:hover,
-  .control-panel .d-grid .btn-control.btn-color-green:hover,
   .btn-control.btn-color-green:hover,
   .btn-control[onclick*="downloadExcel"]:hover {
     background: linear-gradient(135deg, rgba(20, 184, 166, 0.5), rgba(15, 118, 110, 0.6)) !important;
@@ -3334,9 +3273,6 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Data & Analytics - Indigo/Blue (Analytics/View) - VIBRANT */
-  .control-panel .btn-control.btn-color-indigo,
-  .control-panel .btn-glass.btn-control.btn-color-indigo,
-  .control-panel .d-grid .btn-control.btn-color-indigo,
   .btn-control.btn-color-indigo,
   .btn-control[onclick*="showProductDatabaseManager"] {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(79, 70, 229, 0.5)) !important;
@@ -3347,9 +3283,6 @@ body.modal-open #mainContent.store-selection-disabled,
       0 0 12px rgba(99, 102, 241, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-indigo:hover,
-  .control-panel .btn-glass.btn-control.btn-color-indigo:hover,
-  .control-panel .d-grid .btn-control.btn-color-indigo:hover,
   .btn-control.btn-color-indigo:hover,
   .btn-control[onclick*="showProductDatabaseManager"]:hover {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(79, 70, 229, 0.6)) !important;
@@ -3359,9 +3292,6 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Edit DB - Yellow/Amber (Edit Action) - VIBRANT */
-  .control-panel .btn-control.btn-color-yellow,
-  .control-panel .btn-glass.btn-control.btn-color-yellow,
-  .control-panel .d-grid .btn-control.btn-color-yellow,
   .btn-control.btn-color-yellow,
   .btn-control[onclick*="showDatabaseEditor"] {
     background: linear-gradient(135deg, rgba(234, 179, 8, 0.4), rgba(217, 119, 6, 0.5)) !important;
@@ -3372,9 +3302,6 @@ body.modal-open #mainContent.store-selection-disabled,
       0 0 12px rgba(234, 179, 8, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-yellow:hover,
-  .control-panel .btn-glass.btn-control.btn-color-yellow:hover,
-  .control-panel .d-grid .btn-control.btn-color-yellow:hover,
   .btn-control.btn-color-yellow:hover,
   .btn-control[onclick*="showDatabaseEditor"]:hover {
     background: linear-gradient(135deg, rgba(234, 179, 8, 0.5), rgba(217, 119, 6, 0.6)) !important;
@@ -3384,9 +3311,6 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Lineage Editor - Purple (Management Tool - matches theme) - VIBRANT */
-  .control-panel .btn-control.btn-color-purple,
-  .control-panel .btn-glass.btn-control.btn-color-purple,
-  .control-panel .d-grid .btn-control.btn-color-purple,
   .btn-control.btn-color-purple,
   .btn-control[onclick*="openLineageEditor"] {
     background: linear-gradient(135deg, rgba(139, 92, 246, 0.4), rgba(124, 58, 237, 0.5)) !important;
@@ -3397,9 +3321,6 @@ body.modal-open #mainContent.store-selection-disabled,
       0 0 12px rgba(139, 92, 246, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-purple:hover,
-  .control-panel .btn-glass.btn-control.btn-color-purple:hover,
-  .control-panel .d-grid .btn-control.btn-color-purple:hover,
   .btn-control.btn-color-purple:hover,
   .btn-control[onclick*="openLineageEditor"]:hover {
     background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(124, 58, 237, 0.6)) !important;
@@ -3516,9 +3437,6 @@ body.modal-open #mainContent.store-selection-disabled,
   .control-panel > *:not(:last-child) {
     margin-bottom: 0 !important;
   }
-  
-  /* Legacy button styles - replaced by .btn-control */
-  /* .control-panel .btn-sm styles are deprecated - use .btn-control instead */
   
   /* Tag items with dropdowns */
   .tag-row {
@@ -3721,7 +3639,7 @@ body.modal-open #mainContent.store-selection-disabled,
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 0.9rem !important;
+      font-size: 1rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -3830,8 +3748,6 @@ body.modal-open #mainContent.store-selection-disabled,
     border-color: rgba(160, 132, 232, 0.5) !important;
     background: rgba(255, 255, 255, 0.22) !important;
   }
-  
-  /* Legacy lineage dropdown option styling removed - now using lineage-specific colors with white text */
   
   /* DOH Dropdown Styling - wider for readability */
   .doh-dropdown,
@@ -4082,56 +3998,6 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: bold !important;
   }
 
-  /* CRITICAL FIX: Ensure CBD lineage colors override all other styles */
-  .tag-item[data-lineage="CBD"],
-  .tag-item[data-lineage="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3) !important;
-    font-weight: bold !important;
-  }
-
-  /* ULTRA-CRITICAL: Force lineage colors with maximum specificity - override everything */
-  div.tag-item[data-lineage="SATIVA"].tag-item {
-    background: rgba(237, 65, 35, 0.6) !important;
-    border-color: rgba(237, 65, 35, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="INDICA"].tag-item {
-    background: rgba(153, 0, 255, 0.6) !important;
-    border-color: rgba(153, 0, 255, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="HYBRID"].tag-item {
-    background: rgba(0, 153, 0, 0.6) !important;
-    border-color: rgba(0, 153, 0, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="HYBRID/SATIVA"].tag-item {
-    background: rgba(237, 65, 35, 0.6) !important;
-    border-color: rgba(237, 65, 35, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="HYBRID/INDICA"].tag-item {
-    background: rgba(153, 0, 255, 0.6) !important;
-    border-color: rgba(153, 0, 255, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="CBD"].tag-item,
-  div.tag-item[data-lineage="CBD_BLEND"].tag-item {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="MIXED"].tag-item {
-    background: rgba(0, 33, 245, 0.6) !important;
-    border-color: rgba(0, 33, 245, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="PARA"].tag-item,
-  div.tag-item[data-lineage="PARAPHERNALIA"].tag-item {
-    background: rgba(200, 50, 120, 0.8) !important;
-    border-color: rgba(200, 50, 120, 0.5) !important;
-  }
 
   /* JSON matched tag styling - subtle indicator without overriding lineage colors */
   .json-matched-tag {
@@ -4220,62 +4086,39 @@ body.modal-open #mainContent.store-selection-disabled,
       0 2px 4px rgba(200, 50, 120, 0.4) !important;
   }
   
-  /* Tag row styles (for table view) - matching tag-item styles */
-  .tag-row[data-lineage="SATIVA"] {
-    background: rgba(237, 65, 35, 0.6) !important;
-    border-color: rgba(237, 65, 35, 0.3);
-  }
-  
-  .tag-row[data-lineage="INDICA"] {
-    background: rgba(153, 0, 255, 0.6) !important;
-    border-color: rgba(153, 0, 255, 0.3);
-  }
-  
-  .tag-row[data-lineage="HYBRID"] {
-    background: rgba(0, 153, 0, 0.6) !important;
-    border-color: rgba(0, 153, 0, 0.3);
-  }
-  
+  /* Tag row styles (for table view) - consolidated with tag-item styles above */
+  .tag-row[data-lineage="SATIVA"],
   .tag-row[data-lineage="HYBRID/SATIVA"] {
     background: rgba(237, 65, 35, 0.6) !important;
     border-color: rgba(237, 65, 35, 0.3);
   }
-  
+
+  .tag-row[data-lineage="INDICA"],
   .tag-row[data-lineage="HYBRID/INDICA"] {
     background: rgba(153, 0, 255, 0.6) !important;
     border-color: rgba(153, 0, 255, 0.3);
   }
-  
-  .tag-row[data-lineage="CBD"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
-  }
-  
-  .tag-row[data-lineage="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
-  }
-  
-  .tag-row[data-lineage="MIXED"] {
-    background: rgba(0, 33, 245, 0.6) !important;
-    border-color: rgba(0, 33, 245, 0.3);
-  }
-  
-  .tag-row[data-lineage="PARA"] {
-    background: rgba(200, 50, 120, 0.8) !important;
-    border-color: rgba(200, 50, 120, 0.5) !important;
-  }
-  
-  .tag-row[data-lineage="PARAPHERNALIA"] {
-    background: rgba(200, 50, 120, 0.8) !important;
-    border-color: rgba(200, 50, 120, 0.5) !important;
+
+  .tag-row[data-lineage="HYBRID"] {
+    background: rgba(0, 153, 0, 0.6) !important;
+    border-color: rgba(0, 153, 0, 0.3);
   }
 
-  /* CRITICAL FIX: Ensure CBD lineage colors override all other styles for tag-row */
   .tag-row[data-lineage="CBD"],
   .tag-row[data-lineage="CBD_BLEND"] {
     background: rgba(241, 194, 50, 0.6) !important;
     border-color: rgba(241, 194, 50, 0.3) !important;
+  }
+
+  .tag-row[data-lineage="MIXED"] {
+    background: rgba(0, 33, 245, 0.6) !important;
+    border-color: rgba(0, 33, 245, 0.3);
+  }
+
+  .tag-row[data-lineage="PARA"],
+  .tag-row[data-lineage="PARAPHERNALIA"] {
+    background: rgba(200, 50, 120, 0.8) !important;
+    border-color: rgba(200, 50, 120, 0.5) !important;
   }
   
   /* Brand headers */
@@ -4838,7 +4681,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--primary-color);
     font-weight: 600;
     margin-bottom: 0.75rem;
-    font-size: 1.2rem !important;
+    font-size: 1.5rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
     position: relative;
@@ -6109,7 +5952,7 @@ body.modal-open #mainContent.store-selection-disabled,
       background: none !important;
       padding: 0 0.5rem 0 0 !important;
       margin-bottom: 0 !important;
-      font-size: 0.85rem !important;
+      font-size: 1.1rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.06em !important;
       color: #e0d7ff !important;
@@ -6157,14 +6000,14 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.2rem !important;
+    font-size: 1.5rem !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 0.78rem !important;
+    font-size: 0.9rem !important;
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
@@ -6326,15 +6169,6 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Force tag names to wrap and not truncate */
-  /* EMERGENCY FIX: Force CBD colors with maximum specificity */
-  .tag-item[data-lineage="CBD"],
-  .tag-item[data-lineage="CBD_BLEND"],
-  .tag-row[data-lineage="CBD"],
-  .tag-row[data-lineage="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3) !important;
-    font-weight: bold !important;
-  }
 
   .tag-item .tag-name,
   .tag-row .tag-name,
@@ -6557,9 +6391,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Vendor (top-level) */
   .vendor-section > .vendor-header {
-    font-size: 1.5em !important; /* Slightly smaller than subcategory */
+    font-size: 1.3em !important; /* Slightly smaller than subcategory */
     font-weight: 700;
-    margin-bottom: 0.4em;
+    margin-bottom: 0.2em;
     letter-spacing: 0.04em;
     color: #e0d6f6;
   }
@@ -6570,7 +6404,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.d-flex,
   .vendor-section > .vendor-header.mb-2,
   .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.5em !important; /* Slightly smaller than subcategory */
+    font-size: 1.1em !important; /* Slightly smaller than subcategory */
     font-weight: 700 !important;
   }
 
@@ -6580,7 +6414,7 @@ body.modal-open #mainContent.store-selection-disabled,
   #selectedTags .vendor-section > .vendor-header.d-flex,
   #selectedTags .vendor-section > .vendor-header.mb-2,
   #selectedTags .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.225em !important; /* Increased by 0.125em (~2px) */
+    font-size: 1.1em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
   }
 
@@ -6588,7 +6422,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .brand-section > .brand-header {
     font-size: 1.4em; /* Larger for better visibility */
     font-weight: 600;
-    margin-bottom: 0.3em;
+    margin-bottom: 0.15em;
     margin-left: 1.2em;
     letter-spacing: 0.03em;
     color: #cbb6f6;
@@ -6598,7 +6432,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .product-type-section > .product-type-header {
     font-size: 1.25em; /* Increased by 0.125em (~2px) */
     font-weight: 500;
-    margin-bottom: 0.2em;
+    margin-bottom: 0.1em;
     margin-left: 2.2em;
     letter-spacing: 0.02em;
     color: #b3a1d8;
@@ -6608,9 +6442,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 1.1em;
+    font-size: 1.5em;
     font-weight: 500;
-    margin-bottom: 0.2em;
+    margin-bottom: 0.1em;
     margin-left: 3.2em;
     letter-spacing: 0.01em;
     color: #a99cc7;
@@ -6618,8 +6452,8 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Add vertical spacing between all group headers */
   .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
-    margin-top: 0.5em;
-    margin-bottom: 0.5em;
+    margin-top: 0.15em;
+    margin-bottom: 0.15em;
   }
 
   /* Add spacing between checkboxes and text */
@@ -6909,150 +6743,6 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-right: auto !important;
   }
   
-  /* FORCE template select to be centered within control-section */
-  .control-section #templateSelect,
-  .control-section #templateSelectModal {
-    margin-left: auto !important;
-    margin-right: auto !important;
-    display: block !important;
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-  
-  /* Fix template dropdown on large monitors (Windows PC) */
-  @media (min-width: 1921px) {
-    #templateSelect,
-    #templateSelectModal {
-      font-size: 0.75em !important; /* Smaller font on large monitors */
-      margin: 0.5rem auto 0.75rem auto !important; /* Ensure centered */
-      margin-left: auto !important;
-      margin-right: auto !important;
-      display: block !important;
-      padding-left: 24px !important; /* Equal padding accounting for arrow */
-      padding-right: 24px !important; /* Equal padding accounting for arrow */
-      width: 100% !important;
-    }
-    
-    /* Force control-section to center on large monitors */
-    .control-section {
-      display: flex !important;
-      flex-direction: column !important;
-      align-items: center !important;
-      justify-content: center !important;
-    }
-  }
-  
-  /* PC-specific: Reduce template select font size on Windows/PC screens */
-  /* Target larger screens (typically PC monitors) - Mac screens are usually smaller */
-  @media screen and (min-width: 1400px) {
-    #templateSelect,
-    #templateSelectModal {
-      font-size: 0.75em !important; /* Smaller font size for PC */
-    }
-  }
-  
-  /* PC-specific: Ensure template dropdown is centered in control-section */
-  @media (min-width: 992px) {
-    /* CRITICAL: Override control-panel's stretch alignment to center content on PC */
-    .control-panel {
-      align-items: center !important;
-      display: flex !important;
-      flex-direction: column !important;
-      justify-content: flex-start !important;
-    }
-    
-    /* Center the control-section itself - ensure it centers its children */
-    .control-section {
-      align-items: center !important;
-      display: flex !important;
-      flex-direction: column !important;
-      width: 100% !important;
-      text-align: center !important;
-      justify-content: center !important;
-    }
-    
-    /* FORCE template dropdown to be centered - override everything */
-    .control-section #templateSelect,
-    .control-section #templateSelectModal,
-    .control-panel .control-section #templateSelect,
-    .control-panel .control-section #templateSelectModal {
-      display: block !important;
-      width: 70% !important;
-      max-width: 70% !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
-      text-align: center !important;
-      text-align-last: center !important;
-      transform: none !important;
-    }
-    
-    /* Ensure the center column container properly centers its children */
-    [data-container-type="center"] {
-      align-items: center !important;
-      text-align: center !important;
-    }
-    
-    /* Force center alignment for template select in center container */
-    [data-container-type="center"] #templateSelect,
-    [data-container-type="center"] #templateSelectModal {
-      margin-left: auto !important;
-      margin-right: auto !important;
-      text-align: center !important;
-      text-align-last: center !important;
-    }
-    
-    /* Ensure Template label is centered */
-    .control-section .filter-label,
-    .control-section label:first-child {
-      text-align: center !important;
-      width: 100% !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
-    }
-  }
-  
-  /* Override inline styles on template select */
-  #templateSelect[style*="width"],
-  #templateSelect[style*="max-width"] {
-    width: 100% !important;
-    max-width: 100% !important;
-    min-width: 180px !important;
-  }
-  
-  /* Override inline width constraints on center column to allow full width */
-  [data-container-type="center"][style*="max-width"],
-  [data-container-type="center"][style*="width"] {
-    max-width: none !important;
-    width: auto !important;
-  }
-  
-  /* Ensure control panel doesn't constrain width */
-  .control-panel[style*="max-width"] {
-    max-width: 100% !important;
-    width: 100% !important;
-  }
-
-  /* Duplicate option styling removed - using the one above that matches PC styling */
-
-  /* Template dropdown focus state - Match PC styling */
-  /* Template dropdown focus state - Dark theme */
-  #templateSelect:focus,
-  #templateSelectModal:focus {
-    border-color: rgba(160, 132, 232, 0.5) !important;
-    box-shadow: 0 0 0 3px rgba(160, 132, 232, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1) !important;
-    outline: none !important;
-    background-color: rgba(34, 34, 51, 0.65) !important;
-  }
-
-  /* Mobile: let the select fill the column */
-  @media (max-width: 576px) {
-    #templateSelect,
-    #templateSelectModal {
-      width: 100% !important;
-      max-width: 100% !important;
-      min-width: 0 !important;
-    }
-  }
 
   .container-label, .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
     line-height: 1.7 !important;
@@ -9651,34 +9341,6 @@ body.modal-open #mainContent.store-selection-disabled,
     -webkit-backdrop-filter: blur(10px) !important;
   }
 
-  /* Ensure modal backdrop is stable and not affected by background animation */
-  #strainLineageEditorModal + .modal-backdrop {
-    display: none !important; /* Hide backdrop entirely */
-    pointer-events: none !important; /* Disable click blocking */
-  }
-
-  /* Prevent body background animation from affecting modal */
-  body.modal-open #strainLineageEditorModal {
-    z-index: 10001 !important;
-  }
-
-  body.modal-open #strainLineageEditorModal + .modal-backdrop {
-    display: none !important; /* Hide backdrop entirely */
-    pointer-events: none !important; /* Disable click blocking */
-  }
-
-  /* Force modal to stay visible even during background transitions */
-  #strainLineageEditorModal.show {
-    display: block !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    z-index: 10001 !important;
-  }
-
-  #strainLineageEditorModal.show + .modal-backdrop {
-    display: none !important; /* Hide backdrop entirely */
-    pointer-events: none !important; /* Disable click blocking */
-  }
 
   /* Prevent any background animations from affecting modal content */
   #strainLineageEditorModal * {
@@ -10089,7 +9751,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.collapsible-header,
   .vendor-section > .vendor-header.align-items-center,
   .vendor-section > .vendor-header * {
-    font-size: 1.375em !important; /* Increased by 0.125em (~2px) */
+    font-size: 1.3em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
     line-height: 1.2 !important;
   }
@@ -10444,7 +10106,7 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1px solid rgba(160, 132, 232, 0.25) !important;
     color: white !important;
     font-weight: 600 !important;
-    font-size: 0.85rem !important;
+    font-size: 1rem !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
     letter-spacing: 0.02em !important;
     transition: background 0.2s ease, color 0.2s ease !important;
@@ -10471,7 +10133,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .product-type-header .collapse-icon,
   .subcategory-header .collapse-icon,
   .weight-header .collapse-icon {
-    font-size: 0.85rem !important;
+    font-size: 1.1rem !important;
     padding: 0 4px !important;
     min-width: 18px !important;
     min-height: 18px !important;
