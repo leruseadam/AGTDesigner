@@ -10307,7 +10307,14 @@ const TagManager = {
             }).filter(Boolean);
 
             verboseLog('Final tag objects:', finalTagObjects.length);
-            this.updateSelectedTags(finalTagObjects);
+
+            // CRITICAL FIX: Only call updateSelectedTags if we have tags to show
+            // Don't call with empty array as it clears the display unnecessarily
+            if (finalTagObjects.length > 0) {
+                this.updateSelectedTags(finalTagObjects);
+            } else {
+                verboseLog('Skipping updateSelectedTags - no tag objects to display');
+            }
             
             // Ensure drag and drop is working after fetching tags
             if (window.dragAndDropManager && finalTagObjects.length > 0) {
@@ -10334,8 +10341,9 @@ const TagManager = {
                     this.updateSelectedTags(localTagObjects);
                 }
             } else {
-                // Only clear if we have no local selections
-                this.updateSelectedTags([]);
+                // CRITICAL FIX: Don't call updateSelectedTags([]) on error
+                // This prevents clearing the display when fetch fails
+                verboseLog('No local selections to preserve after error - skipping updateSelectedTags call');
             }
             return false;
         }
