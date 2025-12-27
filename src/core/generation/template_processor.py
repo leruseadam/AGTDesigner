@@ -2869,30 +2869,27 @@ class TemplateProcessor:
                         self.logger.info(f"PREROLL DESC TRUNCATE: '{description}' -> '{universal_desc}'")
                         break
             
-            # CRITICAL FIX: Apply non-breaking hyphens and weight units to Description for preroll templates
+            # CRITICAL FIX: Apply non-breaking hyphens to Description for preroll templates
             # This ensures entries like "Pre-Roll - 1g" (without "Assorted") have non-breaking hyphens
-            # Do this after truncation so the final Description has non-breaking hyphens and weight units
+            # Do this after truncation so the final Description has non-breaking hyphens
             if self.template_type == 'preroll' and label_context.get('Description'):
-                from src.core.generation.text_processing import make_nonbreaking_hyphens, make_nonbreaking_weight_units
+                from src.core.generation.text_processing import make_nonbreaking_hyphens
                 original_description = label_context['Description']
                 label_context['Description'] = make_nonbreaking_hyphens(label_context['Description'])
-                label_context['Description'] = make_nonbreaking_weight_units(label_context['Description'])
                 self.logger.info(f"🔧 NON-BREAKING FORMATTING (PREROLL): Description '{original_description}' -> '{label_context['Description']}'")
 
         # CRITICAL FIX: Apply non-breaking hyphens to ProductName to prevent "Pre-Roll" splitting
         if label_context.get('ProductName'):
-            from src.core.generation.text_processing import make_nonbreaking_hyphens, make_nonbreaking_weight_units
+            from src.core.generation.text_processing import make_nonbreaking_hyphens
             original_product_name = label_context['ProductName']
             label_context['ProductName'] = make_nonbreaking_hyphens(label_context['ProductName'])
-            label_context['ProductName'] = make_nonbreaking_weight_units(label_context['ProductName'])
             self.logger.info(f"🔧 NON-BREAKING FORMATTING: ProductName '{original_product_name}' -> '{label_context['ProductName']}'")
 
-        # CRITICAL FIX: Also apply non-breaking hyphens and weight units to DescAndWeight
+        # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight
         if label_context.get('DescAndWeight'):
-            from src.core.generation.text_processing import make_nonbreaking_hyphens, make_nonbreaking_weight_units
+            from src.core.generation.text_processing import make_nonbreaking_hyphens
             original_desc_weight = label_context['DescAndWeight']
             label_context['DescAndWeight'] = make_nonbreaking_hyphens(label_context['DescAndWeight'])
-            label_context['DescAndWeight'] = make_nonbreaking_weight_units(label_context['DescAndWeight'])
             self.logger.info(f"🔧 NON-BREAKING FORMATTING: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
 
 
