@@ -10210,11 +10210,11 @@ const TagManager = {
         try {
             verboseLog('Fetching selected tags...');
             
-            // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 2 seconds)
-            // This prevents tags from disappearing right after selection on initial load
+            // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 10 seconds)
+            // This prevents tags from disappearing right after selection before backend sync completes
             const now = Date.now();
-            if (this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000) {
-                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent tag selection detected (within 2s)');
+            if (this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 10000) {
+                verboseLog('⏸️ Skipping fetchAndUpdateSelectedTags - recent tag selection detected (within 10s)');
                 return true; // Return success to avoid error handling
             }
             
@@ -10264,8 +10264,8 @@ const TagManager = {
             verboseLog(`Fetched ${selectedTags.length} selected tags from backend:`, selectedTags.map(tag => tag['Product Name*']));
 
             // CRITICAL FIX: Trust backend as source of truth on page load
-            // Only merge if we have recent local changes (within last 2 seconds)
-            const hasRecentLocalChanges = this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 2000;
+            // Only merge if we have recent local changes (within last 10 seconds)
+            const hasRecentLocalChanges = this._lastTagSelectionTime && (now - this._lastTagSelectionTime) < 10000;
             const hasRecentGeneration = this._lastGenerationTime && (now - this._lastGenerationTime) < 10000;
 
             let finalSelections;
@@ -10307,7 +10307,17 @@ const TagManager = {
             }).filter(Boolean);
 
             verboseLog('Final tag objects:', finalTagObjects.length);
-            this.updateSelectedTags(finalTagObjects);
+
+            // CRITICAL FIX: Only call updateSelectedTags if we have tags to show
+            // Prevent clearing the selected tags display when backend returns empty
+            if (finalTagObjects.length > 0) {
+                this.updateSelectedTags(finalTagObjects);
+            } else if (localSelections.length > 0) {
+                // We expected tags but got none - preserve local selections
+                verboseLog('⚠️ Expected tags but finalTagObjects is empty - preserving local display');
+            } else {
+                verboseLog('Skipping updateSelectedTags - no tags to display and no local selections');
+            }
             
             // Ensure drag and drop is working after fetching tags
             if (window.dragAndDropManager && finalTagObjects.length > 0) {
@@ -10333,10 +10343,9 @@ const TagManager = {
                 if (localTagObjects.length > 0) {
                     this.updateSelectedTags(localTagObjects);
                 }
-            } else {
-                // Only clear if we have no local selections
-                this.updateSelectedTags([]);
             }
+            // CRITICAL FIX: Never call updateSelectedTags([]) even on error
+            // The protection in _performUpdateSelectedTags will handle empty arrays
             return false;
         }
     },
