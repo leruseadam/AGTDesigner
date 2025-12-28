@@ -1671,8 +1671,8 @@ class TemplateProcessor:
             # CRITICAL: Use record lineage first (already enriched with database value, no sativa hybrid override)
             # Only query database if record lineage is missing
             db_lineage = None
-            # Priority: canonical_lineage > sovereign_lineage > Lineage > lineage (matches UI priority)
-            record_lineage = record.get('canonical_lineage') or record.get('sovereign_lineage') or record.get('Lineage') or record.get('lineage')
+            # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
+            record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
             if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
                 # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
                 db_lineage = str(record_lineage).strip()
@@ -2234,8 +2234,8 @@ class TemplateProcessor:
                     # Only query database if record lineage is missing
                     product_name = record.get('Product Name*', record.get('ProductName', ''))
                     db_lineage = None
-                    # Priority: canonical_lineage > sovereign_lineage > Lineage > lineage (matches UI priority)
-                    record_lineage = record.get('canonical_lineage') or record.get('sovereign_lineage') or record.get('Lineage') or record.get('lineage')
+                    # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
+                    record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
                     if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
                         # Use record lineage (already set correctly by enrichment)
                         db_lineage = str(record_lineage).strip()

@@ -1413,8 +1413,8 @@ def run_full_process_by_group(records, template_path, font_scheme):
     """Process all records using the template, grouped by strain color (lineage)."""
     if not records:
         return None
-    # Define canonical lineage order
-    lineage_order = list(LINEAGE_COLOR_MAP.keys())
+    # Define canonical lineage order (matches UI order)
+    lineage_order = ["SATIVA", "HYBRID/SATIVA", "HYBRID", "HYBRID/INDICA", "INDICA", "CBD", "MIXED", "PARAPHERNALIA"]
     def get_lineage(rec):
         # Check multiple possible field names for lineage
         possible_fields = ['Lineage', 'lineage', 'Product Lineage', 'ProductLineage', 'Strain Type', 'StrainType']
@@ -1487,8 +1487,8 @@ def generate_multiple_label_tables(records, template_path):
     Returns a BytesIO buffer with the final DOCX.
     """
     try:
-        # Sort records by canonical lineage order, then by name
-        lineage_order = list(LINEAGE_COLOR_MAP.keys())
+        # Sort records by canonical lineage order (matches UI order), then by name
+        lineage_order = ["SATIVA", "HYBRID/SATIVA", "HYBRID", "HYBRID/INDICA", "INDICA", "CBD", "MIXED", "PARAPHERNALIA"]
         def get_lineage(rec):
             possible_fields = ['Lineage', 'lineage', 'Product Lineage', 'ProductLineage', 'Strain Type', 'StrainType']
             lin = ''
