@@ -31,7 +31,8 @@
       "Bash(chmod:*)",
       "Bash(git checkout:*)",
       "Bash(git restore:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(open -a \"Google Chrome\" --args --new-window \"chrome://inspect/#devices\")"
     ],
     "deny": [],
     "ask": []

@@ -156,12 +156,12 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 }
 
 /* ========================================================================
-   LARGE MONITOR SETTINGS - DO NOT CHANGE FONT-SIZE VALUES
+   LARGE MONITOR SETTINGS - DISABLED FOR CONSISTENCY
    ========================================================================
-   These values MUST match the base html font-size above (16px).
-   Changing these causes zoom issues on large monitors.
+   Disabled to ensure consistent appearance across all desktop displays.
+   All desktops now use the base CSS rules defined above.
    ======================================================================== */
-@media (min-width: 1921px) {
+@media (min-width: 999999px) {
   html {
     font-size: 16px !important; /* LOCKED - must match base html font-size */
   }
@@ -236,7 +236,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   }
 }
 
-@media (min-width: 2560px) {
+@media (min-width: 999999px) {
   html {
     font-size: 12px !important;
   }
@@ -276,7 +276,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   }
 }
 
-@media (min-width: 3840px) {
+@media (min-width: 999999px) {
   html {
     font-size: 10px !important;
   }
