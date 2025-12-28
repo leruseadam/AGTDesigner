@@ -22466,15 +22466,20 @@ def display_preroll_items(group_id):
         # Format: group_key = "group_id|vendor"
         preroll_items = None
         if vendor_filter:
-            group_key = f"{group_id}|{vendor_filter}"
+            # CRITICAL FIX: Normalize vendor name for consistent cache key matching
+            # Remove extra spaces, normalize case for comparison
+            vendor_normalized = vendor_filter.strip()
+            group_key = f"{group_id}|{vendor_normalized}"
+
             # Try session-independent key first (most recent items for this vendor+group)
             preroll_items = cache.get(f"preroll_group_latest_{group_key}")
             logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
-            
+
             # If not found, try current session
             if not preroll_items:
                 current_session_id = session.get('session_id', 'default')
                 preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key}")
+                logging.info(f"PREROLL ROUTE: Cache lookup for session-specific 'preroll_group_{current_session_id}_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
         
         # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
         if not preroll_items:

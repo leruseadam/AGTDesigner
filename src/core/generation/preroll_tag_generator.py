@@ -432,12 +432,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # CRITICAL FIX: Also store with session-independent key so QR codes work across sessions
         # Use group_key (with vendor) to ensure vendor-specific QR codes work correctly
         cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
-        # Also store with original group_id for backward compatibility (may overwrite, but that's OK for QR codes)
-        cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
+        # CRITICAL FIX: DO NOT store with group_id alone - this causes incorrect products to show
+        # when multiple vendors have the same product category (e.g., two vendors both have "1g x 5 Pack")
+        # The vendor-specific cache key above is sufficient, and the route will use vendor filtering
+
         # Also store group info for display purposes
         cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
         cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
-        cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
         
         # CRITICAL FIX: Store in database for persistence across site refreshes
         try:

@@ -5117,6 +5117,20 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = brandSection.querySelectorAll('input[type="checkbox"]');
+
+                // CRITICAL FIX: Count how many tag checkboxes exist before processing
+                let tagCheckboxCount = 0;
+                checkboxes.forEach(cb => {
+                    if (cb.classList.contains('tag-checkbox')) tagCheckboxCount++;
+                });
+
+                // If no tag checkboxes found, this brand section has no visible products (due to filtering)
+                // Don't process - just return early
+                if (tagCheckboxCount === 0) {
+                    console.log('Brand select-all clicked but no tag checkboxes found - filters may be hiding all products');
+                    return;
+                }
+
                 checkboxes.forEach(checkbox => {
                     if (!checkbox.classList.contains('tag-checkbox')) {
                     checkbox.checked = isChecked;

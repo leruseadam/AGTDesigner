@@ -5084,7 +5084,8 @@ class ExcelProcessor:
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
-                        if ("trade sample" in v_lower or "deactivated" in v_lower):
+                        # CRITICAL FIX: Exclude "All" and other unwanted values
+                        if (v_lower == "all" or "trade sample" in v_lower or "deactivated" in v_lower):
                             continue
                         # Apply product type normalization (same as TYPE_OVERRIDES)
                         normalized_v = TYPE_OVERRIDES.get(v_lower, v)

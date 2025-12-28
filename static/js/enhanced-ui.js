@@ -1201,10 +1201,18 @@ document.addEventListener('DOMContentLoaded', function() {
   function scaleAppToFit() {
     // Prevent multiple simultaneous calls
     if (isScaling) return;
-    
+
     const main = document.getElementById('mainContent');
     const page = document.body;
     if (!main || !page) return;
+
+    // CRITICAL FIX: Disable auto-scaling for 1920x1080 displays to prevent unwanted zoom
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    if (viewportWidth === BASELINE_WIDTH && viewportHeight === BASELINE_HEIGHT) {
+      console.log('Viewport matches baseline (1920x1080) - skipping auto-scale');
+      return;
+    }
 
     isScaling = true;
 
