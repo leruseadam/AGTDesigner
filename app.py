@@ -19028,10 +19028,10 @@ def set_strain_lineage():
                 # Update products using strain_id if column exists
                 # Also update products with matching Product Strain for products without strain_id set
                 cursor.execute('''
-                    UPDATE products 
-                    SET lineage = ?,
+                    UPDATE products
+                    SET "Lineage" = ?,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE strain_id = ? 
+                    WHERE strain_id = ?
                        OR (strain_id IS NULL AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?)))
                 ''', (lineage, strain_id, strain_name))
                 
@@ -19046,8 +19046,8 @@ def set_strain_lineage():
             else:
                 # Fallback: Update products using Product Strain column if strain_id doesn't exist
                 cursor.execute('''
-                    UPDATE products 
-                    SET lineage = ?,
+                    UPDATE products
+                    SET "Lineage" = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
                 ''', (lineage, strain_name))
