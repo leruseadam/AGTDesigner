@@ -2263,6 +2263,37 @@ const TagManager = {
             console.warn('Failed to save selected tags to localStorage:', error);
         }
     },
+
+    async saveSelectedTagsToBackend() {
+        // CRITICAL FIX: Save selected tags to backend to prevent them from disappearing
+        // This ensures fetchAndUpdateSelectedTags gets the correct data from the backend
+        try {
+            const selectedTagNames = this.state.persistentSelectedTags || [];
+
+            if (selectedTagNames.length === 0) {
+                verboseLog('Skipping backend save - no tags selected');
+                return;
+            }
+
+            verboseLog(`💾 Saving ${selectedTagNames.length} selected tags to backend...`);
+
+            const response = await fetch('/api/selected-tags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected_tags: selectedTagNames })
+            });
+
+            if (!response.ok) {
+                console.warn(`⚠️ Failed to save selected tags to backend: ${response.status}`);
+                return;
+            }
+
+            const result = await response.json();
+            verboseLog('✅ Selected tags saved to backend:', result);
+        } catch (error) {
+            console.warn('⚠️ Error saving selected tags to backend:', error);
+        }
+    },
     
     loadSelectedTagsFromStorage() {
         try {
@@ -3672,8 +3703,12 @@ const TagManager = {
                 console.log(`📋 Updating selected tags display with ${selectedTagObjects.length} tags`);
                 this.updateSelectedTags(selectedTagObjects);
 
-                // Also save to backend (non-blocking)
-                setTimeout(() => this.saveSelectionState('checkbox_change'), 50);
+                // CRITICAL FIX: Save selected tags to backend immediately (non-blocking)
+                // This prevents tags from disappearing when fetchAndUpdateSelectedTags runs
+                setTimeout(() => {
+                    this.saveSelectedTagsToBackend();
+                    this.saveSelectionState('checkbox_change');
+                }, 50);
             };
             
             // Add click handler as fallback
@@ -5939,8 +5974,11 @@ const TagManager = {
                 }
             }
             
-            // State already saved above, just sync with backend
-            setTimeout(() => this.saveSelectionState('checkbox_selection'), 50);
+            // CRITICAL FIX: Save to backend and selection state for undo/redo (non-blocking)
+            setTimeout(() => {
+                this.saveSelectedTagsToBackend();
+                this.saveSelectionState('checkbox_selection');
+            }, 50);
         };
         
         // Store the handler on the element itself so we can reference it later
