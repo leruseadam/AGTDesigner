@@ -19028,10 +19028,10 @@ def set_strain_lineage():
                 # Update products using strain_id if column exists
                 # Also update products with matching Product Strain for products without strain_id set
                 cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?,
+                    UPDATE products 
+                    SET lineage = ?,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE strain_id = ?
+                    WHERE strain_id = ? 
                        OR (strain_id IS NULL AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?)))
                 ''', (lineage, strain_id, strain_name))
                 
@@ -19046,8 +19046,8 @@ def set_strain_lineage():
             else:
                 # Fallback: Update products using Product Strain column if strain_id doesn't exist
                 cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?,
+                    UPDATE products 
+                    SET lineage = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
                 ''', (lineage, strain_name))
@@ -19463,8 +19463,8 @@ def bulk_update_lineage():
                 
                 # Update products in database
                 cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?, updated_at = CURRENT_TIMESTAMP
+                    UPDATE products 
+                    SET lineage = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE strain_id = ?
                 ''', (lineage, strain_id))
                 
@@ -22466,20 +22466,15 @@ def display_preroll_items(group_id):
         # Format: group_key = "group_id|vendor"
         preroll_items = None
         if vendor_filter:
-            # CRITICAL FIX: Normalize vendor name for consistent cache key matching
-            # Remove extra spaces, normalize case for comparison
-            vendor_normalized = vendor_filter.strip()
-            group_key = f"{group_id}|{vendor_normalized}"
-
+            group_key = f"{group_id}|{vendor_filter}"
             # Try session-independent key first (most recent items for this vendor+group)
             preroll_items = cache.get(f"preroll_group_latest_{group_key}")
             logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
-
+            
             # If not found, try current session
             if not preroll_items:
                 current_session_id = session.get('session_id', 'default')
                 preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key}")
-                logging.info(f"PREROLL ROUTE: Cache lookup for session-specific 'preroll_group_{current_session_id}_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
         
         # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
         if not preroll_items:

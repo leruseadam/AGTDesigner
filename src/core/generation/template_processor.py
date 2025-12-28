@@ -1351,10 +1351,7 @@ class TemplateProcessor:
                 buffer.seek(0)
                 rendered_doc = Document(buffer)
                 self._remove_unmerged_placeholders(rendered_doc, len(chunk))
-
-                # CRITICAL: Hide ProductVendor for non-classic types
-                self._hide_productvendor_for_nonclassic_types(rendered_doc, chunk)
-
+                
             except Exception as render_error:
                 self.logger.error(f"DocxTemplate render failed: {render_error}")
                 self.logger.error(f"Context keys: {list(context.keys())}")
@@ -5705,85 +5702,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error removing unmerged placeholders: {e}")
 
-    def _hide_productvendor_for_nonclassic_types(self, doc, chunk):
-        """
-        Hide ProductVendor content for non-classic product types.
-        For classic types (flower, pre-roll, concentrate, etc.), ProductVendor is shown.
-        For non-classic types (edibles, tinctures, gummies, etc.), ProductVendor is hidden by removing the paragraph containing it.
-        """
-        try:
-            from src.core.generation.unified_font_sizing import CLASSIC_TYPES
-
-            # Build a map of label number to product type
-            label_product_types = {}
-            for i, record in enumerate(chunk):
-                product_type = (record.get('ProductType', '').lower() or
-                               record.get('Product Type*', '').lower())
-                label_num = i + 1
-                label_product_types[label_num] = product_type
-                if product_type not in CLASSIC_TYPES:
-                    self.logger.info(f"🔒 HIDE PRODUCTVENDOR: Label{label_num} is non-classic type '{product_type}' - will hide ProductVendor")
-
-            # Process each table in the document
-            for table in doc.tables:
-                cell_count = 0
-                for row in table.rows:
-                    for cell in row.cells:
-                        cell_count += 1
-
-                        # Determine which label this cell represents
-                        if cell_count > len(chunk):
-                            continue  # Skip empty cells
-
-                        product_type = label_product_types.get(cell_count, '')
-                        is_classic = product_type in CLASSIC_TYPES
-
-                        # For non-classic types, remove ProductVendor content
-                        if not is_classic and product_type:
-                            paragraphs_removed = self._remove_productvendor_from_cell(cell, cell_count)
-                            if paragraphs_removed > 0:
-                                self.logger.info(f"✅ HIDDEN: Removed {paragraphs_removed} ProductVendor paragraph(s) from Label{cell_count} ({product_type})")
-
-        except Exception as e:
-            self.logger.warning(f"Error hiding ProductVendor for non-classic types: {e}")
-
-    def _remove_productvendor_from_cell(self, cell, label_num):
-        """
-        Remove paragraphs containing ProductVendor from a cell for non-classic types.
-        Returns the number of paragraphs removed.
-        """
-        try:
-            paragraphs_removed = 0
-
-            # Look for paragraphs that contain the Lineage text followed by empty content
-            # (which would be where ProductVendor was supposed to go)
-            # In the vertical template, Lineage and ProductVendor are typically on the same line
-
-            for paragraph in list(cell.paragraphs):  # Create a copy to iterate safely
-                paragraph_text = paragraph.text
-
-                # Check if this paragraph previously had ProductVendor (now empty)
-                # Look for patterns like "Lineage     " where there's trailing whitespace
-                # or a paragraph that's completely empty after Lineage
-
-                # For vertical templates specifically, check if paragraph has Lineage and extra spacing
-                if 'LINEAGE_END' in paragraph_text or 'PRODUCTVENDOR' in paragraph_text:
-                    # This paragraph has marker remnants - check if we should clean it
-                    # Since ProductVendor was already set to empty, we just need to clean up spacing
-
-                    # Remove runs that are empty or contain only ProductVendor markers
-                    for run in list(paragraph.runs):
-                        if run.text and ('PRODUCTVENDOR' in run.text or
-                                        (run.text.strip() == '' and 'LINEAGE_END' not in run.text)):
-                            # Remove this run
-                            run.text = ''
-
-            return paragraphs_removed
-
-        except Exception as e:
-            self.logger.warning(f"Error removing ProductVendor from cell {label_num}: {e}")
-            return 0
-
     def _ensure_table_grids_exist(self, doc):
         """Ensure all tables have proper tblGrid elements."""
         try:
@@ -7016,8 +6934,8 @@ class TemplateProcessor:
                 return
             
             # Original single-line processing
-            # Set paragraph to left alignment so lineage stays on left and vendor goes to right via tab stop
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            # Set paragraph to right alignment for proper vendor right-alignment
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             
             # Add lineage with larger font size (left-aligned)
             if lineage_content and lineage_content.strip():
@@ -7260,7 +7178,7 @@ class TemplateProcessor:
                 # Extract vendor content
                 vendor_start_idx = full_text.find(vendor_start) + len(vendor_start)
                 vendor_end_idx = full_text.find(vendor_end)
-                vendor_content = full_text[vendor_start_idx:vendor_end_idx].strip()
+                vendor_content = full_text[vendor_start_idx:vendor_end_idx]
                 
                 # CRITICAL FIX: For classic types, don't combine lineage and vendor
                 # The lineage should only contain actual lineage content (SATIVA, INDICA, HYBRID)
