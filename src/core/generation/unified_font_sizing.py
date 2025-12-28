@@ -38,7 +38,7 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
                     'doh': [(5, 12), (10, 11), (float('inf'), 10)],
-                    'vendor': [(5, 6), (10, 5), (15, 4), (20, 3), (float('inf'), 2)],
+                    'vendor': [(5, 5), (10, 4.5), (15, 4), (20, 3), (float('inf'), 1)],
                     'qr': [(float('inf'), 24)],  # QR codes: Small size for mini template
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
@@ -64,7 +64,7 @@ def _load_font_sizing_config():
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'vendor': [(10, 10), (20, 9), (40, 8), (70, 7), (float('inf'), 6)],
+                    'vendor': [(10, 8), (20, 7), (40, 6), (70, 5), (float('inf'), 4)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
@@ -76,7 +76,7 @@ def _load_font_sizing_config():
                     'ratio': [(10, 14), (20, 12), (30, 10), (40, 9), (50, 8), (60, 7), (70, 6), (float('inf'), 5)],
                     'thc_cbd': [(10, 14), (float('inf'), 14)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'vendor': [(10, 10), (20, 9), (40, 8), (70, 7), (float('inf'), 6)],
+                    'vendor': [(10, 8), (20, 7), (40, 6), (70, 5), (float('inf'), 4)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for horizontal template  
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
                 },
@@ -246,6 +246,11 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         if len(long_words) >= 2:  # Multiple words with 9+ characters each
             final_size = 18 * scale_factor
             logger.debug(f"Double template description word length rule: text='{text}' has {len(long_words)} words with 9+ chars each: {long_words}, forcing 18pt font")
+            return Pt(final_size)
+        # NEW: Cap at 20pt for any single long word (like "Cheesecake")
+        elif any(len(word) >= 10 for word in words):
+            final_size = 20 * scale_factor
+            logger.debug(f"Double template description single long word rule: text='{text}' has word(s) with 10+ chars, capping at 20pt font")
             return Pt(final_size)
     
     # Get the appropriate configuration
