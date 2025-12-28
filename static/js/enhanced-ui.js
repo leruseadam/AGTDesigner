@@ -1153,7 +1153,14 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Scale the entire app to fit within the viewport
+// DISABLED FOR DESKTOP VIEWPORTS
 (function() {
+  // CRITICAL FIX: Disable all scaling for desktop viewports
+  if (window.innerWidth >= 1200) {
+    console.log('Desktop viewport - disabling applyGlobalZoom');
+    return;
+  }
+
   // Brute-force global zoom/transform fallback that always shows a change
   function applyGlobalZoom(scale) {
     const s = Math.max(0.6, Math.min(1, Number(scale) || 1));
