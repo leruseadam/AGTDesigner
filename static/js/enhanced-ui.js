@@ -1413,6 +1413,23 @@ document.addEventListener('DOMContentLoaded', function() {
 window.setAppScale = function(s) {
   const n = Number(s);
   if (!isFinite(n)) return;
+
+  // CRITICAL FIX: Disable manual scaling for desktop viewports
+  if (window.innerWidth >= 1200) {
+    console.log('Desktop viewport - ignoring setAppScale call');
+    // Reset any existing transforms
+    const html = document.documentElement;
+    const body = document.body;
+    html.style.removeProperty('zoom');
+    body.style.removeProperty('zoom');
+    body.style.removeProperty('transform');
+    body.style.removeProperty('-webkit-transform');
+    body.style.removeProperty('width');
+    body.style.removeProperty('height');
+    html.removeAttribute('data-app-scale');
+    return;
+  }
+
   (function(){
     const html = document.documentElement;
     const body = document.body;
@@ -1457,3 +1474,19 @@ function showToast(type, message) {
     }, 3000);
 }
 
+
+// CRITICAL FIX: Reset scaling on page load for desktop viewports
+(function() {
+  if (window.innerWidth >= 1200) {
+    console.log('Page load: Desktop viewport detected - resetting any cached scaling');
+    const html = document.documentElement;
+    const body = document.body;
+    html.style.removeProperty('zoom');
+    body.style.removeProperty('zoom');
+    body.style.removeProperty('transform');
+    body.style.removeProperty('-webkit-transform');
+    body.style.removeProperty('width');
+    body.style.removeProperty('height');
+    html.removeAttribute('data-app-scale');
+  }
+})();
