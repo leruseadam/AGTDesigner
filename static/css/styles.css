@@ -6840,6 +6840,16 @@ body.modal-open #mainContent.store-selection-disabled,
     width: 100% !important;
   }
 
+  /* CRITICAL: Center column should NEVER have a scrollbar */
+  [data-container-type="center"],
+  [data-container-type="center"] .glass-card,
+  [data-container-type="center"] .control-panel {
+    overflow: visible !important;
+    overflow-y: visible !important;
+    overflow-x: visible !important;
+    max-height: none !important;
+  }
+
   /* Duplicate option styling removed - using the one above that matches PC styling */
 
   /* Template dropdown focus state - Match PC styling */
