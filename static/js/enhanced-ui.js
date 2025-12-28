@@ -1206,11 +1206,26 @@ document.addEventListener('DOMContentLoaded', function() {
     const page = document.body;
     if (!main || !page) return;
 
-    // CRITICAL FIX: Disable auto-scaling for 1920x1080 displays to prevent unwanted zoom
+    // CRITICAL FIX: Disable auto-scaling to prevent unwanted zoom
+    // Only scale if viewport is significantly smaller (mobile/tablet sized)
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    if (viewportWidth === BASELINE_WIDTH && viewportHeight === BASELINE_HEIGHT) {
-      console.log('Viewport matches baseline (1920x1080) - skipping auto-scale');
+    console.log(`Viewport: ${viewportWidth}x${viewportHeight}, Baseline: ${BASELINE_WIDTH}x${BASELINE_HEIGHT}`);
+
+    // Disable scaling for desktop viewports (>1200px width)
+    if (viewportWidth >= 1200) {
+      console.log('Desktop viewport detected - disabling auto-scale to prevent zoom');
+      // Reset any existing transforms
+      const html = document.documentElement;
+      const body = document.body;
+      html.style.removeProperty('zoom');
+      body.style.removeProperty('zoom');
+      body.style.removeProperty('transform');
+      body.style.removeProperty('-webkit-transform');
+      body.style.removeProperty('width');
+      body.style.removeProperty('height');
+      html.removeAttribute('data-app-scale');
+      isScaling = false;
       return;
     }
 
