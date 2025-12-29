@@ -8388,14 +8388,9 @@ def generate_labels():
                                 record['lineage'] = db_lineage.lower() if db_lineage else ''
                                 record['canonical_lineage'] = db_lineage  # Also set canonical_lineage for consistency
                                 enriched_count += 1
-                                # Log if lineage changed or if it's a known sativa hybrid product (for debugging)
+                                # Only log if lineage changed (reduced logging for speed)
                                 if old_lineage_normalized != db_lineage_normalized:
-                                    logging.info(f"🔄 ENRICHMENT: Lineage update for '{product_name}': '{old_lineage}' → '{db_lineage}' (using database value)")
-                                elif 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                                    logging.info(f"✅ ENRICHMENT: Forced database lineage '{db_lineage}' for '{product_name}' (overriding any sativa hybrid override)")
-                            elif old_lineage:
-                                # No database lineage found, but record has lineage - log warning
-                                logging.warning(f"⚠️ ENRICHMENT: No database lineage found for '{product_name}', keeping existing: '{old_lineage}'")
+                                    logging.debug(f"🔄 ENRICHMENT: Lineage update for '{product_name}': '{old_lineage}' → '{db_lineage}'")
                         
                         if enriched_count > 0:
                             logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
