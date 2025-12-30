@@ -9545,8 +9545,10 @@ const TagManager = {
         // Track background-processing retries (reset on success)
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
-        // Only show splash if no existing tags AND no cache (prevents splash on instant cache load)
+        // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
+        // Show splash immediately so user knows something is happening
         if (!hasExistingTags && !hasCache) {
+            // Initial load - show full loading UI
             this.showActionSplash('Loading tags...');
             if (availableTagsContainer) {
                 availableTagsContainer.innerHTML = `
@@ -9558,20 +9560,26 @@ const TagManager = {
                     </div>
                 `;
             }
-        } else if (hasExistingTags && !hasCache) {
-            // For warm refreshes, just show the splash without clearing the current list.
+        } else if (hasExistingTags) {
+            // Reload/refresh - show splash to indicate loading is happening
             this.showActionSplash('Refreshing tags...');
+            // Also show loading indicator in container if it exists
+            if (availableTagsContainer) {
+                const existingContent = availableTagsContainer.innerHTML;
+                // Add a loading overlay or indicator
+                availableTagsContainer.style.opacity = '0.6';
+                availableTagsContainer.style.pointerEvents = 'none';
+            }
         }
-        // If cache exists, skip splash entirely for instant load
+        // If cache exists and no existing tags, skip splash for instant load
         
         // CRITICAL FIX: Add timeout to force hide splash if fetch takes too long
-        const splashTimeout = setTimeout(() => {
-            if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                console.log('⚡ Force hiding splash - tag fetch timeout (30s)');
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-        }, 30000); // 30 second timeout
+        let splashTimeout = null;
+        splashTimeout = setTimeout(() => {
+            console.warn('⚠️ Tag fetch taking longer than expected, but keeping splash visible...');
+            // Don't hide splash on timeout - let it stay visible until tags actually load
+            // This provides better UX feedback
+        }, 30000); // 30 second warning, but don't hide splash
         
         // CRITICAL FIX: Use try-finally to ensure flag is always reset
         try {
@@ -10108,7 +10116,34 @@ const TagManager = {
             
             verboseLog(`Successfully updated available tags: ${tags.length} tags`);
             verboseLog('=== fetchAndUpdateAvailableTags END ===');
-            // Note: Splash will be hidden by _waitForTagsToAppear() when tags appear
+            
+            // CRITICAL FIX: Clear splash timeout and hide splash after tags are loaded
+            if (splashTimeout) {
+                clearTimeout(splashTimeout);
+                splashTimeout = null;
+            }
+            if (safetyTimeout) {
+                clearTimeout(safetyTimeout);
+                safetyTimeout = null;
+            }
+            
+            // Hide splash after tags are loaded and rendered
+            // Use a small delay to ensure DOM is updated
+            setTimeout(() => {
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                // Restore container opacity if it was dimmed during reload
+                if (availableTagsContainer) {
+                    availableTagsContainer.style.opacity = '1';
+                    availableTagsContainer.style.pointerEvents = 'auto';
+                }
+            }, 100);
+            
             return true;
         } catch (error) {
             // CRITICAL: Clear safety timeout on error
