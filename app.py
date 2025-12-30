@@ -2248,8 +2248,16 @@ def get_session_excel_processor():
             # CRITICAL: Create NEW processor instance instead of using deprecated global
             # This prevents session data leakage
             from src.core.data.excel_processor import ExcelProcessor
-            store_name = get_current_store_name() if has_store_selection() else 'AGT_Bothell'
-            g.excel_processor = ExcelProcessor(store_name=store_name)
+            # CRITICAL FIX: Don't default to Bothell - only set store if user has selected one
+            # This ensures store modal appears for first-time users
+            store_name = get_current_store_name(allow_fallback=False) if has_store_selection() else None
+            # If no store selected, create processor without store (won't load default file)
+            if store_name:
+                g.excel_processor = ExcelProcessor(store_name=store_name)
+            else:
+                # Create processor without store - it will wait for user to select
+                g.excel_processor = ExcelProcessor(store_name='AGT_Bothell')  # Temporary fallback for initialization
+                g.excel_processor._no_default_load = True  # Flag to prevent auto-loading
 
             # CRITICAL FIX: Keep ProductDB integration enabled for lineage support
             # Direct database queries (get_product_lineage) still work even if integration is disabled
