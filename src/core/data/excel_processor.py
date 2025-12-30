@@ -7737,7 +7737,7 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': get_val('Product Brand'),
                 'ProductBrand': get_val('Product Brand'),
-                'Lineage': get_val('Lineage') or 'MIXED',
+                'Lineage': get_val('Lineage'),
                 'Product Type*': get_val('Product Type*'),
                 'Product Type': get_val('Product Type*'),
                 'Weight*': raw_weight,
@@ -7765,7 +7765,7 @@ class ExcelProcessor:
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
                 'productBrand': get_val('Product Brand'),
-                'lineage': get_val('Lineage') or 'MIXED',
+                'lineage': get_val('Lineage'),
                 'productType': get_val('Product Type*'),
                 'weight': raw_weight,
                 'weightWithUnits': weight_with_units,
