@@ -1346,12 +1346,75 @@ const TagManager = {
             return false;
         }
 
-        // CRITICAL FIX: Don't load from cache if no Excel file is uploaded
-        // Only hydrate cache when there's an actual Excel file loaded
+        // CRITICAL FIX: Load from cache OR database
+        // Check if there's an Excel file OR if we should load from database
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-        if (!file || file === 'nofile' || file === '' || file === 'database') {
-            console.log('❌ No Excel file uploaded, skipping cache hydration');
-            return false;
+        const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
+        
+        // If no Excel file but we have database, try to load from cache first, then fetch from database
+        if (shouldLoadFromDatabase) {
+            console.log('📊 No Excel file, checking cache for database tags...');
+            // Still try to load from cache (might have database tags cached)
+            const cachedTags = this.loadAvailableTagsFromCache();
+            if (cachedTags && cachedTags.length) {
+                console.log(`✅ Found ${cachedTags.length} cached tags from database`);
+                // Use the same rendering logic as below
+                verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
+                this.state.hydratedFromCache = true;
+                this.state.forceFullAvailableTagRender = true;
+                this.state.simplifiedAvailableTagsActive = false;
+                this.state.tags = [...cachedTags];
+                this.state.originalTags = [...cachedTags];
+
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+
+                const availableContainer = document.getElementById('availableTags');
+                if (availableContainer) {
+                    this._updateAvailableTags(cachedTags, null);
+                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+                    this.buildFilterOptionsFromTags(cachedTags);
+                    setTimeout(() => {
+                        if (typeof this.setupFilterEventListeners === 'function') {
+                            this.setupFilterEventListeners();
+                            console.log('✅ Filter event listeners attached after cache hydration');
+                        }
+                    }, 50);
+                } else {
+                    const renderCachedTags = () => {
+                        this._updateAvailableTags(cachedTags, null);
+                        verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
+                        this.buildFilterOptionsFromTags(cachedTags);
+                        setTimeout(() => {
+                            if (typeof this.setupFilterEventListeners === 'function') {
+                                this.setupFilterEventListeners();
+                                console.log('✅ Filter event listeners attached after cache hydration');
+                            }
+                        }, 50);
+                    };
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', renderCachedTags, { once: true });
+                    } else {
+                        renderCachedTags();
+                    }
+                }
+                return true;
+            } else {
+                // No cache, fetch from database
+                console.log('📊 No cache found, fetching tags from database...');
+                // Trigger fetch from database
+                if (typeof this.fetchAndUpdateAvailableTags === 'function') {
+                    this.fetchAndUpdateAvailableTags().catch(err => {
+                        console.error('Failed to fetch tags from database:', err);
+                    });
+                }
+                return false;
+            }
         }
 
         // PATCH: Always use cache, even after recent lineage updates, but keep lineage update logic elsewhere intact.
