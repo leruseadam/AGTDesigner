@@ -9145,22 +9145,24 @@ def get_available_tags():
         # The processor is not session-safe and can contain data from other users
         has_excel_data = file_exists and session_file_path
 
-        # DISABLED: Don't automatically load default file - prevents showing entire database
+        # ENABLED: Automatically load default file for the selected store
         # Fallback: if no session file, try default file for the selected store
-        # if not has_excel_data:
-        #     try:
-        #         from src.core.data.excel_processor import get_default_upload_file
-        #         default_file = get_default_upload_file(store_name)
-        #         if default_file and os.path.exists(default_file):
-        #             logging.info(f"ℹ️ No session file; using default store file: {default_file}")
-        #             session['file_path'] = default_file
-        #             session['uploaded_filename'] = os.path.basename(default_file)
-        #             session.modified = True
-        #             session_file_path = default_file
-        #             has_excel_data = True
-        #             file_exists = True
-        #     except Exception as default_err:
-        #         logging.warning(f"Default file fallback failed: {default_err}")
+        if not has_excel_data:
+            try:
+                from src.core.data.excel_processor import get_default_upload_file
+                default_file = get_default_upload_file(store_name)
+                if default_file and os.path.exists(default_file):
+                    logging.info(f"ℹ️ No session file; using default store file: {default_file}")
+                    session['file_path'] = default_file
+                    session['uploaded_filename'] = os.path.basename(default_file)
+                    session.modified = True
+                    session_file_path = default_file
+                    has_excel_data = True
+                    file_exists = True
+                else:
+                    logging.info(f"📁 No default file found for store: {store_name}")
+            except Exception as default_err:
+                logging.warning(f"Default file fallback failed: {default_err}")
 
         # CRITICAL: If file doesn't exist but session says it should, clear the stale session
         if not file_exists and session_file_path:
