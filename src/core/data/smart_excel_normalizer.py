@@ -213,28 +213,40 @@ class SmartExcelNormalizer:
     def _normalize_product_type(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         """Correct and standardize product types."""
         try:
+            from src.core.constants import CLASSIC_TYPES, TYPE_OVERRIDES
             product_type = str(product_data.get('Product Type*', '')).strip()
+            original_type = product_type
             
+            # Map using TYPE_OVERRIDES if available
+            if product_type.lower() in TYPE_OVERRIDES:
+                product_type = TYPE_OVERRIDES[product_type.lower()]
+            
+            # If missing/invalid, try to infer from product name
             if not product_type or product_type.lower() in ['nan', 'none', 'null']:
-                # Try to infer type from product name
                 product_name = str(product_data.get('Product Name*', ''))
                 inferred_type = self._infer_product_type(product_name)
                 if inferred_type:
+                    product_type = inferred_type
                     product_data['Product Type*'] = inferred_type
                     self.normalization_stats['types_corrected'] += 1
                     logger.info(f"Product type inferred: '{inferred_type}'")
+                else:
+                    logger.warning(f"Unmapped product type for product '{product_name}' (Excel type: '{original_type}')")
                 return product_data
             
             # Standardize product type
             standardized_type = self._standardize_product_type(product_type)
             
-            if standardized_type != product_type:
+            # Check if standardized type is a classic type
+            if standardized_type.lower() in CLASSIC_TYPES:
                 product_data['Product Type*'] = standardized_type
                 self.normalization_stats['types_corrected'] += 1
-                logger.info(f"Product type corrected: '{product_type}' → '{standardized_type}'")
-            
+                logger.info(f"Product type corrected: '{original_type}' → '{standardized_type}' (classic)")
+            else:
+                # Log unmapped types for review
+                logger.warning(f"Unmapped/non-classic product type: '{standardized_type}' (original: '{original_type}')")
+                product_data['Product Type*'] = standardized_type
             return product_data
-            
         except Exception as e:
             logger.warning(f"Failed to normalize product type: {e}")
             return product_data
@@ -306,20 +318,16 @@ class SmartExcelNormalizer:
         """Normalize price formatting."""
         try:
             price = str(product_data.get('Price*', product_data.get('Price', ''))).strip()
-            
             if not price or price.lower() in ['nan', 'none', 'null', '']:
+                logger.warning(f"Missing or invalid price for product: {product_data.get('Product Name*', '')}")
                 return product_data
-            
             # Clean price
             cleaned_price = self._clean_price(price)
-            
             if cleaned_price != price:
                 product_data['Price*'] = cleaned_price
                 self.normalization_stats['prices_normalized'] += 1
                 logger.info(f"Price normalized: '{price}' → '{cleaned_price}'")
-            
             return product_data
-            
         except Exception as e:
             logger.warning(f"Failed to normalize price: {e}")
             return product_data
