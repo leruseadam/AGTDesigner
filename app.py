@@ -9115,8 +9115,10 @@ def get_available_tags():
         
         # Log current database for this request
         try:
-            store_name = get_current_store_name()
-            cache_store_name = _normalize_store_key(store_name)
+            # CRITICAL FIX: Don't use fallback - only load for explicitly selected stores
+            # This prevents auto-loading Bothell before user selects a store
+            store_name = get_current_store_name(allow_fallback=False)
+            cache_store_name = _normalize_store_key(store_name) if store_name else None
             if store_name:
                 _dbg_db = get_product_database(store_name)
                 if _dbg_db:
@@ -9147,8 +9149,9 @@ def get_available_tags():
         has_excel_data = file_exists and session_file_path
 
         # ENABLED: Automatically load default file for the selected store
-        # Fallback: if no session file, try default file for the selected store
-        if not has_excel_data:
+        # CRITICAL: Only load default file if user has actually selected a store
+        # This ensures the store modal appears for first-time users
+        if not has_excel_data and store_name:
             try:
                 from src.core.data.excel_processor import get_default_upload_file
                 default_file = get_default_upload_file(store_name)
