@@ -1662,10 +1662,12 @@ class ExcelProcessor:
                     from src.core.constants import CLASSIC_TYPES
                     # Normalize all lineage values to ALL CAPS format
                     df["Lineage"] = df["Lineage"].apply(normalize_lineage)
+                    # CRITICAL FIX: Normalize Product Type before passing to optimized_lineage_assignment
+                    normalized_product_types = df["Product Type*"].astype(str).str.strip().str.lower()
                     df["Lineage"] = optimized_lineage_assignment(
-                        df, 
-                        df["Product Type*"], 
-                        df["Lineage"], 
+                        df,
+                        normalized_product_types,
+                        df["Lineage"],
                         CLASSIC_TYPES
                     )
                 
