@@ -1393,9 +1393,17 @@ class ProductDatabase:
             
             # CRITICAL FIX: Apply defaults for essential fields BEFORE validation
             # This ensures products are added even if vendor/product_type are missing
-            vendor_raw = product_data.get('Vendor/Supplier*', product_data.get('Vendor', ''))
+            # Check ALL vendor column name variations
+            vendor_raw = (product_data.get('Vendor/Supplier*', '') or 
+                          product_data.get('Vendor/Supplier', '') or 
+                          product_data.get('Vendor', '') or 
+                          product_data.get('vendor', '') or 
+                          product_data.get('Supplier', '') or 
+                          product_data.get('supplier', '') or 
+                          '')
             vendor = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
             product_data['Vendor/Supplier*'] = vendor  # Update product_data with default
+            product_data['Vendor'] = vendor  # Also set Vendor for compatibility
             
             product_type_raw = product_data.get('Product Type*', '')
             product_type = self._ensure_crucial_value(product_type_raw, 'Unknown', 'Product Type')
@@ -1740,12 +1748,30 @@ class ProductDatabase:
                 if 'Product Name*' in cols:
                     filtered_df['Product Name*'] = filtered_df['Product Name*'].astype(str).str.strip()
 
-                # Vendor
-                if 'Vendor/Supplier*' not in cols and 'Vendor' in cols:
-                    filtered_df['Vendor/Supplier*'] = filtered_df['Vendor']
+                # Vendor - check multiple column name variations
+                vendor_cols = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'vendor', 'Supplier', 'supplier']
+                vendor_found = None
+                for vcol in vendor_cols:
+                    if vcol in cols:
+                        vendor_found = vcol
+                        break
+                
+                if vendor_found and 'Vendor/Supplier*' not in cols:
+                    filtered_df['Vendor/Supplier*'] = filtered_df[vendor_found]
                     cols.add('Vendor/Supplier*')
+                    logger.info(f"📊 VENDOR MAPPING: Mapped '{vendor_found}' column to 'Vendor/Supplier*'")
+                
                 if 'Vendor/Supplier*' in cols:
                     filtered_df['Vendor/Supplier*'] = filtered_df['Vendor/Supplier*'].astype(str).str.strip()
+                    # Log vendor values to debug missing vendors
+                    non_empty_vendors = filtered_df['Vendor/Supplier*'].notna() & (filtered_df['Vendor/Supplier*'] != '')
+                    vendor_count = non_empty_vendors.sum()
+                    logger.info(f"📊 VENDOR CHECK: Found {vendor_count}/{len(filtered_df)} rows with vendor values")
+                    if vendor_count < len(filtered_df):
+                        empty_vendor_rows = filtered_df[~non_empty_vendors]
+                        if len(empty_vendor_rows) > 0:
+                            logger.warning(f"⚠️ VENDOR MISSING: {len(empty_vendor_rows)} rows have empty vendor values")
+                            logger.warning(f"   First few product names with missing vendors: {empty_vendor_rows['Product Name*'].head(3).tolist() if 'Product Name*' in empty_vendor_rows.columns else 'N/A'}")
 
                 # Product type
                 if 'Product Type*' not in cols and 'Product Type' in cols:
@@ -1846,8 +1872,17 @@ class ProductDatabase:
                         'Product Name*': row_dict.get('Product Name*', ''),
                         'Product Type*': self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type'),
                         'Lineage': row_dict.get('Lineage', ''),
-                        'Vendor/Supplier*': self._ensure_crucial_value(row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')), 'Unknown Vendor', 'Vendor'),
-                        'Vendor': self._ensure_crucial_value(row_dict.get('Vendor', row_dict.get('Vendor/Supplier*', '')), 'Unknown Vendor', 'Vendor'),
+                        # CRITICAL FIX: Check ALL vendor column name variations from Excel
+                        vendor_raw = (row_dict.get('Vendor/Supplier*', '') or 
+                                     row_dict.get('Vendor/Supplier', '') or 
+                                     row_dict.get('Vendor', '') or 
+                                     row_dict.get('vendor', '') or 
+                                     row_dict.get('Supplier', '') or 
+                                     row_dict.get('supplier', '') or 
+                                     '')
+                        vendor_value = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
+                        'Vendor/Supplier*': vendor_value,
+                        'Vendor': vendor_value,
                         'Product Brand': self._ensure_crucial_value(row_dict.get('Product Brand', ''), 'Unknown Brand', 'Product Brand'),
                         'Description': self._process_description(
                             row_dict.get('Product Name*', ''), 
@@ -1899,8 +1934,22 @@ class ProductDatabase:
                         'CBDA': row_dict.get('Total CBD', ''),
                         'CBN': row_dict.get('CBN', ''),
                         'Ratio_or_THC_CBD': row_dict.get('Ratio_or_THC_CBD', ''),
-                        'Vendor/Supplier*': row_dict.get('Vendor/Supplier*', ''),
-                        'Vendor/Supplier': row_dict.get('Vendor/Supplier', ''),
+                        # CRITICAL FIX: Check ALL vendor column name variations from Excel
+                        'Vendor/Supplier*': (row_dict.get('Vendor/Supplier*', '') or 
+                                             row_dict.get('Vendor/Supplier', '') or 
+                                             row_dict.get('Vendor', '') or 
+                                             row_dict.get('vendor', '') or 
+                                             row_dict.get('Supplier', '') or 
+                                             row_dict.get('supplier', '') or 
+                                             ''),
+                        'Vendor/Supplier': (row_dict.get('Vendor/Supplier', '') or 
+                                           row_dict.get('Vendor/Supplier*', '') or 
+                                           row_dict.get('Vendor', '') or 
+                                           ''),
+                        'Vendor': (row_dict.get('Vendor', '') or 
+                                  row_dict.get('Vendor/Supplier*', '') or 
+                                  row_dict.get('Vendor/Supplier', '') or 
+                                  ''),
                         'Product Name*': row_dict.get('Product Name*', ''),
                         'Product Name': row_dict.get('Product Name', ''),
                         'Quantity Received*': row_dict.get('Quantity Received*', ''),
@@ -2198,8 +2247,14 @@ class ProductDatabase:
                     count_before = cursor_temp.fetchone()[0]
                     cursor_temp.close()
                     
-                    # Log before attempting to add
-                    logger.info(f"🔍 Row {index + 1}: Attempting to add product '{product_name}' (Vendor: {vendor}, Type: {product_type}, Weight: {product_data.get('Weight*', 'N/A')})")
+                    # Log before attempting to add - show vendor source
+                    vendor_in_data = product_data.get('Vendor/Supplier*', '') or product_data.get('Vendor', '') or product_data.get('Vendor/Supplier', '')
+                    logger.info(f"🔍 Row {index + 1}: Attempting to add product '{product_name}'")
+                    logger.info(f"   Vendor in product_data: '{vendor_in_data}' -> Final vendor: '{vendor}'")
+                    logger.info(f"   Type: {product_type}, Weight: {product_data.get('Weight*', 'N/A')}")
+                    if not vendor_in_data or vendor_in_data in ['', 'Unknown Vendor', 'nan', 'none', 'null']:
+                        logger.warning(f"⚠️ VENDOR MISSING: Product '{product_name}' has no vendor in Excel data!")
+                        logger.warning(f"   Available vendor columns in row_dict: {[k for k in row_dict.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]}")
                     
                     try:
                         product_id = self.add_or_update_product(product_data)
