@@ -1861,7 +1861,12 @@ class ProductDatabase:
                         'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
                         'Product Strain': row_dict.get('Product Strain', ''),
                         'Quantity*': row_dict.get('Quantity*', ''),
-                        'DOH': row_dict.get('DOH Compliant (Yes/No)', row_dict.get('DOH', '')),
+                        # CRITICAL FIX: Check multiple DOH column names from Excel
+                        'DOH': (row_dict.get('DOH', '') or 
+                                row_dict.get('DOH Compliant (Yes/No)', '') or 
+                                row_dict.get('DOH Compliant*', '') or 
+                                row_dict.get('DOH*', '') or 
+                                ''),
                         'Concentrate Type': row_dict.get('Concentrate Type', ''),
                         'Ratio': self._extract_ratio_from_product_name(
                             row_dict.get('Product Name*', ''), 
@@ -4082,9 +4087,6 @@ class ProductDatabase:
                     final_lineage = incoming_lineage_clean  # Even if empty, use it
                     logger.info(f"⚠️ LINEAGE EMPTY: No lineage to preserve for product ID {product_id}")
             
-            # CRITICAL FIX: Excel values for DOH, Price, and Product Type always overwrite database
-            # These fields are the source of truth from Excel uploads
-            
             # Get available columns in the database
             cursor.execute("PRAGMA table_info(products)")
             available_columns = {row[1] for row in cursor.fetchall()}
@@ -4097,11 +4099,32 @@ class ProductDatabase:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
             normalized_name = self._normalize_product_name(product_name) if product_name else ''
             
+            # CRITICAL FIX: Excel values for DOH, Price, Lineage, and Product Type always overwrite database
+            # These fields are the source of truth from Excel uploads
+            excel_doh = product_data.get('DOH', '')
+            excel_price = product_data.get('Price', '')
+            excel_lineage = product_data.get('Lineage', '')
+            
             update_fields.append('"Product Type*" = ?')
             update_values.append(product_data.get('Product Type*'))
             
+            # Use Excel Lineage if available, otherwise use final_lineage
+            lineage_to_update = excel_lineage if excel_lineage else final_lineage
             update_fields.append('"Lineage" = ?')
-            update_values.append(final_lineage)
+            update_values.append(lineage_to_update)
+            if excel_lineage:
+                logger.info(f"🔄 UPDATING Lineage from Excel: '{excel_lineage}' for product '{product_name}'")
+            
+            # Force update DOH and Price from Excel if present
+            if excel_doh:
+                update_fields.append('"DOH" = ?')
+                update_values.append(excel_doh)
+                logger.info(f"🔄 UPDATING DOH from Excel: '{excel_doh}' for product '{product_name}'")
+            
+            if excel_price:
+                update_fields.append('"Price" = ?')
+                update_values.append(excel_price)
+                logger.info(f"🔄 UPDATING Price from Excel: '{excel_price}' for product '{product_name}'")
             
             if normalized_name and 'normalized_name' in available_columns:
                 update_fields.append('"normalized_name" = ?')
@@ -4116,7 +4139,7 @@ class ProductDatabase:
             # Add all other fields from product_data that exist in the database
             # Skip fields that are already handled above or are internal/metadata fields
             skip_fields = {
-                'Product Type*', 'Lineage', 'last_seen_date', 'updated_at',
+                'Product Type*', 'Lineage', 'DOH', 'Price', 'last_seen_date', 'updated_at',
                 'first_seen_date', 'created_at', 'total_occurrences', 'normalized_name',
                 'id', 'strain_id'  # These are handled separately or shouldn't be updated
             }
