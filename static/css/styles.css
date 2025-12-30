@@ -6737,8 +6737,8 @@ body.modal-open #mainContent.store-selection-disabled,
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
-    background: rgba(34, 34, 51, 0.55) !important;
-    background-image: url('data:image/svg+xml;utf8,<svg fill="%2300d4aa" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background: rgba(42, 32, 64, 0.9) !important;
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
     background-position: right 14px center !important;
     background-size: 18px 18px !important;
