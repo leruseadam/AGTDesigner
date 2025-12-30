@@ -12,6 +12,14 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 class SmartExcelNormalizer:
+        def debug_log_vendor_columns(self, product_data: Dict[str, Any]):
+            # Log all possible vendor/brand fields and their values for this product
+            vendor_fields = [
+                'Vendor/Supplier*', 'Vendor', 'vendor', 'Product Brand', 'Brand', 'brand'
+            ]
+            values = {field: product_data.get(field, None) for field in vendor_fields}
+            logger.debug(f"[VENDOR DEBUG] Product: {product_data.get('Product Name*', '')} | Vendor fields: {values}")
+
     """Comprehensive Excel data normalization for all product fields."""
     
     def __init__(self):
@@ -152,30 +160,30 @@ class SmartExcelNormalizer:
         return ' '.join(cleaned_words)
     
     def _normalize_brand(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Standardize brand names."""
+        """Standardize brand/vendor names using all possible aliases, no inference."""
         try:
-            brand = str(product_data.get('Product Brand', '')).strip()
-            
-            if not brand or brand.lower() in ['nan', 'none', 'null', '']:
-                # Try to extract brand from product name
-                product_name = str(product_data.get('Product Name*', ''))
-                extracted_brand = self._extract_brand_from_name(product_name)
-                if extracted_brand:
-                    product_data['Product Brand'] = extracted_brand
-                    self.normalization_stats['brands_standardized'] += 1
-                    logger.info(f"Brand extracted from name: '{extracted_brand}'")
+            self.debug_log_vendor_columns(product_data)
+            vendor_fields = [
+                'Vendor/Supplier*', 'Vendor', 'vendor', 'Product Brand', 'Brand', 'brand'
+            ]
+            brand = ''
+            for field in vendor_fields:
+                val = str(product_data.get(field, '')).strip()
+                if val and val.lower() not in ['nan', 'none', 'null', '']:
+                    brand = val
+                    break
+            if not brand:
+                logger.warning(f"No vendor/brand found for product: {product_data.get('Product Name*', '')}")
                 return product_data
-            
             # Standardize brand formatting
             standardized_brand = self._standardize_brand_format(brand)
-            
             if standardized_brand != brand:
                 product_data['Product Brand'] = standardized_brand
                 self.normalization_stats['brands_standardized'] += 1
                 logger.info(f"Brand standardized: '{brand}' → '{standardized_brand}'")
-            
+            else:
+                product_data['Product Brand'] = brand
             return product_data
-            
         except Exception as e:
             logger.warning(f"Failed to normalize brand: {e}")
             return product_data

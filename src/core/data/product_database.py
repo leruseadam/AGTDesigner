@@ -1631,8 +1631,16 @@ class ProductDatabase:
                     for col_name, col_value in product_data.items():
                         if col_name not in column_data_map:
                             # Only add if the column exists in the database
-                            if col_name in available_columns:
-                                column_data_map[col_name] = col_value
+                            # Also validate column name to prevent SQL injection
+                            if col_name in available_columns and isinstance(col_name, str):
+                                # Clean the value - convert None to empty string, handle NaN
+                                if col_value is None:
+                                    clean_value = ''
+                                elif isinstance(col_value, str) and col_value.lower() in ['nan', 'none', 'null']:
+                                    clean_value = ''
+                                else:
+                                    clean_value = col_value
+                                column_data_map[col_name] = clean_value
                     
                     # Only include columns that exist in the database
                     for col_name, col_value in column_data_map.items():
@@ -2076,16 +2084,25 @@ class ProductDatabase:
                     # Update the product data with the found name
                     product_data['Product Name*'] = str(product_name).strip()
                     
-                    # Additional validation: Skip rows with missing essential data
-                    vendor = product_data.get('Vendor', '').strip()
-                    product_type = product_data.get('Product Type*', '').strip()
+                    # CRITICAL FIX: Apply defaults BEFORE validation to prevent products from being skipped
+                    # This ensures products are added even if vendor/product_type are missing
+                    vendor_raw = product_data.get('Vendor/Supplier*', product_data.get('Vendor', ''))
+                    vendor = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
+                    product_data['Vendor/Supplier*'] = vendor
+                    product_data['Vendor'] = vendor
                     
+                    product_type_raw = product_data.get('Product Type*', '')
+                    product_type = self._ensure_crucial_value(product_type_raw, 'Unknown', 'Product Type')
+                    product_data['Product Type*'] = product_type
+                    
+                    # Additional validation: Skip rows with missing essential data (now with defaults applied)
+                    # This should never trigger now since we have defaults, but keeping as safety check
                     if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing vendor information")
+                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing vendor information (even after defaults)")
                         continue
                     
                     if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing product type")
+                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing product type (even after defaults)")
                         continue
                     
                     # Skip duplicate entries within the same upload (same name + vendor + type combination)
@@ -2187,16 +2204,20 @@ class ProductDatabase:
                         
                         if count_after > count_before:
                             stored_count += 1
+                            logger.info(f"✅ Row {index + 1}: STORED NEW product '{product_name}' (ID: {product_id})")
                         else:
                             updated_count += 1
+                            logger.info(f"🔄 Row {index + 1}: UPDATED existing product '{product_name}' (ID: {product_id})")
                     elif product_id is None:
-                        # Product was skipped as duplicate
+                        # Product was rejected (validation failed or duplicate)
                         skipped_duplicates += 1
-                        logger.info(f"Row {index + 1}: Skipped duplicate product '{product_name}'")
+                        logger.warning(f"⚠️ Row {index + 1}: Product '{product_name}' was rejected (returned None) - check validation logs above")
                         continue
                     else:
                         error_count += 1
-                        errors.append(f"Row {index + 1}: Failed to store product")
+                        error_msg = f"Row {index + 1}: Failed to store product '{product_name}' (product_id={product_id})"
+                        errors.append(error_msg)
+                        logger.error(f"❌ {error_msg}")
                         
                 except Exception as row_error:
                     error_count += 1

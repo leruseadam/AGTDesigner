@@ -5847,7 +5847,13 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Center align all table headers (except tag-name-header which stays left) */
-  .table thead th:not(.tag-name-header) {
+  .table thead th:not(.tag-name-header),
+  .table thead th:not(.tag-name-header) *,
+  table thead th:not(.tag-name-header),
+  .table-dark thead th:not(.tag-name-header),
+  .bg-dark thead th:not(.tag-name-header),
+  .table thead.bg-dark th:not(.tag-name-header),
+  .table-dark thead th:not(.tag-name-header) {
     text-align: center !important;
   }
   
@@ -5857,7 +5863,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--text-primary);
     font-weight: 600;
     padding: 12px 8px;
-    text-align: center;
+    text-align: center !important;
   }
   
   .database-view .table tbody td {
