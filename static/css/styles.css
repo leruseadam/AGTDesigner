@@ -6771,8 +6771,8 @@ body.modal-open #mainContent.store-selection-disabled,
     -webkit-background-color: rgba(34, 34, 51, 0.95) !important;
     font-size: 1em !important;
     font-weight: 400 !important;
-    text-align: left !important;
-    text-align-last: left !important;
+    text-align: center !important;
+    text-align-last: center !important;
     direction: ltr !important;
     display: block !important;
     padding: 8px 14px !important;
