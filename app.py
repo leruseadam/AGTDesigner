@@ -9346,7 +9346,7 @@ def get_available_tags():
                                 else:
                                     # Fallback: Use Excel Lineage field for canonical fields
                                     # This handles products that haven't been saved to database yet
-                                    excel_lineage = tag.get('Lineage')
+                                    excel_lineage = tag.get('Lineage') or 'MIXED'
                                     if excel_lineage:
                                         excel_lineage_clean = str(excel_lineage).strip().upper()
                                         tag['currentLineage'] = excel_lineage_clean
