@@ -9360,6 +9360,71 @@ def get_available_tags():
                             if enriched_count > 0:
                                 sample = [(t.get('Product Name*'), t.get('currentLineage')) for t in simple_tags[:3]]
                                 logging.info(f"📋 SIMPLE PATH: Sample enriched tags: {sample}")
+
+                        # CRITICAL FIX: Enrich tags with DOH data from database
+                        # This ensures DOH badges show up in preroll menus and other tag lists
+                        if product_names:
+                            try:
+                                logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database DOH data...")
+
+                                # Query DOH field from database for all products
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
+
+                                # Build lowercase lookup for O(1) matching (reuse from lineage enrichment)
+                                excel_lower_map = {name.lower().strip(): name for name in product_names}
+
+                                # SQLite has a parameter limit (typically 999) – chunk to avoid failures
+                                chunk_size = 400
+                                doh_map = {}
+                                total_doh_results = 0
+                                for chunk_start in range(0, len(product_names), chunk_size):
+                                    chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                    chunk_lower = [name.lower() for name in chunk]
+                                    placeholders = ','.join(['?' for _ in chunk_lower])
+                                    # Query DOH field (can be 'DOH', 'THC', 'CBD', 'Yes', 'No', etc.)
+                                    cursor.execute(f'''
+                                        SELECT "Product Name*", "DOH Compliant (Yes/No)"
+                                        FROM products
+                                        WHERE LOWER("Product Name*") IN ({placeholders})
+                                    ''', chunk_lower)
+                                    results = cursor.fetchall()
+                                    total_doh_results += len(results)
+
+                                    # Build DOH map with O(1) lookups
+                                    for row in results:
+                                        db_name = row[0]
+                                        db_doh = row[1]
+
+                                        if db_doh and str(db_doh).strip():
+                                            clean_doh = str(db_doh).strip().upper()
+                                            doh_map[db_name] = clean_doh
+                                            # O(1) lookup instead of O(n) loop
+                                            excel_key = db_name.lower().strip()
+                                            if excel_key in excel_lower_map:
+                                                doh_map[excel_lower_map[excel_key]] = clean_doh
+
+                                logging.info(f"📦 SIMPLE PATH: Database returned DOH for {len(doh_map)} products")
+                                if len(doh_map) > 0:
+                                    sample_doh = list(doh_map.items())[:2]
+                                    logging.info(f"📋 Sample DOH mappings: {sample_doh}")
+
+                                # Apply DOH data to tags
+                                doh_enriched_count = 0
+                                for tag in simple_tags:
+                                    product_name = tag.get('Product Name*')
+                                    if product_name and product_name in doh_map:
+                                        db_doh_clean = doh_map[product_name]
+                                        tag['DOH'] = db_doh_clean
+                                        tag['DOH Compliant (Yes/No)'] = db_doh_clean
+                                        doh_enriched_count += 1
+
+                                logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH data")
+                            except Exception as doh_enrich_err:
+                                logging.warning(f"Failed to enrich with database DOH data: {doh_enrich_err}")
+                                import traceback
+                                logging.warning(traceback.format_exc())
+
                 except Exception as enrich_err:
                     logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
                     import traceback

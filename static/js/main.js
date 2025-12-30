@@ -6322,14 +6322,14 @@ const TagManager = {
 
         
         // Add DOH and High CBD/THC images if applicable
-        // CRITICAL FIX: For JSON matched tags, prioritize the DOH field from the matched database data
+        // CRITICAL FIX: Check both DOH field variations for all tags
         let dohValue;
         if (isJsonMatched) {
             // For JSON matched tags, use the DOH field from the matched database data
             dohValue = (tag['DOH Compliant (Yes/No)'] || tag.DOH || '').toString().toUpperCase();
         } else {
-            // For regular tags, use the standard DOH field
-            dohValue = (tag.DOH || '').toString().toUpperCase();
+            // For regular tags, check both DOH field variations
+            dohValue = (tag['DOH Compliant (Yes/No)'] || tag.DOH || '').toString().toUpperCase();
         }
         const productTypeForImages = (tag['Product Type*'] || '').toString().toLowerCase();
         
