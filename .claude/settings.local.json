@@ -34,7 +34,8 @@
       "Bash(cp:*)",
       "Bash(open -a \"Google Chrome\" --args --new-window \"chrome://inspect/#devices\")",
       "Bash(test:*)",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": []

@@ -6339,6 +6339,74 @@ def debug_product_lineage():
         logging.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/update-lineage', methods=['POST'])
+def update_lineage():
+    """Update product lineage in the database (manual override)."""
+    try:
+        data = request.get_json() or {}
+        tag_name = data.get('tag_name') or data.get('Product Name*') or data.get('product_name')
+        new_lineage = data.get('lineage') or data.get('Lineage')
+        
+        if not tag_name or not new_lineage:
+            return jsonify({'error': 'tag_name and lineage are required'}), 400
+        
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not product_db:
+            return jsonify({'error': 'Database not available'}), 500
+        
+        # Normalize lineage
+        new_lineage_upper = str(new_lineage).strip().upper()
+        
+        # CRITICAL: Save to sovereign_lineage for manual overrides
+        # This ensures manual changes persist and take priority over Excel/database lineage
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        # Check if product exists
+        cursor.execute('''
+            SELECT id, "Lineage", sovereign_lineage
+            FROM products
+            WHERE "Product Name*" = ? OR "ProductName" = ? OR normalized_name = ?
+            ORDER BY id DESC
+            LIMIT 1
+        ''', (tag_name, tag_name, product_db._normalize_product_name(tag_name)))
+        
+        product = cursor.fetchone()
+        if not product:
+            return jsonify({'error': f'Product not found: {tag_name}'}), 404
+        
+        product_id, old_lineage, old_sovereign = product
+        
+        # Update both Lineage and sovereign_lineage
+        # sovereign_lineage is the manual override field that takes priority
+        cursor.execute('''
+            UPDATE products
+            SET "Lineage" = ?,
+                sovereign_lineage = ?,
+                updated_at = ?
+            WHERE id = ?
+        ''', (new_lineage_upper, new_lineage_upper, datetime.now().isoformat(), product_id))
+        
+        conn.commit()
+        
+        logging.info(f"✅ Updated lineage for '{tag_name}': '{old_lineage}' -> '{new_lineage_upper}' (sovereign_lineage: '{old_sovereign}' -> '{new_lineage_upper}')")
+        
+        return jsonify({
+            'success': True,
+            'tag_name': tag_name,
+            'old_lineage': old_lineage,
+            'new_lineage': new_lineage_upper,
+            'message': f'Lineage updated successfully'
+        })
+        
+    except Exception as e:
+        logging.error(f"Error updating lineage: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/debug-database', methods=['GET'])
 def debug_database():
     """Debug endpoint to check database state and session info."""
