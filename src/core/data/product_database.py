@@ -4075,8 +4075,8 @@ class ProductDatabase:
             ak_value = self._calculate_ak_value(product_data)
             
             # Update the product with new data
-            # PRIORITY: Excel data ALWAYS overwrites database values
-            # This ensures Excel is the source of truth
+            # PRIORITY: Sovereign (manual) lineage ALWAYS takes precedence over Excel
+            # Excel data overwrites database values ONLY if no sovereign lineage exists
             incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
             incoming_lineage_clean = str(incoming_lineage).strip() if incoming_lineage else ''
 
@@ -4084,12 +4084,24 @@ class ProductDatabase:
             has_valid_incoming_lineage = (incoming_lineage_clean and
                                         incoming_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
 
-            # ALWAYS use Excel lineage if it's valid
-            if has_valid_incoming_lineage:
+            # CRITICAL: Check if product has sovereign_lineage (manual override)
+            cursor.execute('SELECT "sovereign_lineage" FROM products WHERE id = ?', (product_id,))
+            sovereign_result = cursor.fetchone()
+            sovereign_lineage = sovereign_result[0] if sovereign_result and sovereign_result[0] else ''
+            sovereign_lineage_clean = str(sovereign_lineage).strip() if sovereign_lineage else ''
+            has_sovereign_lineage = (sovereign_lineage_clean and
+                                    sovereign_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
+
+            # If product has sovereign lineage, NEVER overwrite it with Excel data
+            if has_sovereign_lineage:
+                final_lineage = sovereign_lineage_clean
+                logger.info(f"🔒 SOVEREIGN LINEAGE PROTECTED: Keeping manual lineage '{final_lineage}' for product ID {product_id} (Excel update blocked)")
+            # Otherwise use Excel lineage if it's valid
+            elif has_valid_incoming_lineage:
                 final_lineage = incoming_lineage_clean
                 logger.info(f"✅ LINEAGE FROM EXCEL: Using Excel lineage '{final_lineage}' for product ID {product_id}")
             else:
-                # Only preserve DB lineage if Excel has no lineage
+                # Only preserve DB lineage if Excel has no lineage and no sovereign lineage
                 cursor.execute('SELECT "Lineage" FROM products WHERE id = ?', (product_id,))
                 current_db_lineage = cursor.fetchone()
                 current_lineage = current_db_lineage[0] if current_db_lineage and current_db_lineage[0] else ''
