@@ -64,7 +64,9 @@ def _load_font_sizing_config():
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'vendor': [(10, 5), (float('inf'), 5)],'vendor': [(10, 5), (20, 4), (float('inf'), 4)],
+                    'weight': [(15, 20), (25, 18), (35, 16), (float('inf'), 14)],
+                    'doh': [(15, 24), (25, 20), (float('inf'), 18)],
+                    'vendor': [(10, 5), (20, 4), (float('inf'), 4)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
@@ -76,15 +78,17 @@ def _load_font_sizing_config():
                     'ratio': [(10, 14), (20, 12), (30, 10), (40, 9), (50, 8), (60, 7), (70, 6), (float('inf'), 5)],
                     'thc_cbd': [(10, 14), (float('inf'), 14)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
+                    'weight': [(15, 18), (25, 16), (35, 14), (float('inf'), 12)],
+                    'doh': [(15, 22), (25, 18), (float('inf'), 16)],
                     'vendor': [(10, 5), (float('inf'), 5)],
-                    'qr': [(float('inf'), 45)],  # QR codes: Large size for horizontal template  
+                    'qr': [(float('inf'), 45)],  # QR codes: Large size for horizontal template
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
                 },
                 'preroll': {
                     # Preroll template: Copy all settings from mini template (identical font sizing)
                     'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
                     'brand': [(5, 9), (20, 8), (30, 6.5), (float('inf'), 6)],
-                    'price': [(1, 22), (2, 20), (float('inf'), 18)],
+                    'price': [(5, 20), (float('inf'), 17)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
                     'thc_cbd': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
