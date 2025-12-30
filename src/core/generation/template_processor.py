@@ -6972,6 +6972,12 @@ class TemplateProcessor:
             if vendor_content and vendor_content.strip():
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
+                # Get vendor font size using unified font sizing system
+                from src.core.generation.unified_font_sizing import get_font_size
+                vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
+                set_run_font_size(vendor_run, vendor_font_size)
+
+                # CRITICAL: Set vendor styling AFTER set_run_font_size to prevent it from being overridden
                 vendor_run.font.bold = True
                 vendor_run.font.italic = True  # Make vendor text italic
 
@@ -6982,11 +6988,6 @@ class TemplateProcessor:
                 # Ensure the color is applied by setting it explicitly
                 vendor_run.font.color.theme_color = None  # Clear any theme color
                 vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-                
-                # Get vendor font size using unified font sizing system
-                from src.core.generation.unified_font_sizing import get_font_size
-                vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
-                set_run_font_size(vendor_run, vendor_font_size)
             
             # Set tab stops to position vendor on the right (only if vendor content exists)
             if vendor_content:
@@ -7094,6 +7095,12 @@ class TemplateProcessor:
                 
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
+                # Get vendor font size using unified font sizing system
+                from src.core.generation.unified_font_sizing import get_font_size
+                vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
+                set_run_font_size(vendor_run, vendor_font_size)
+
+                # CRITICAL: Set vendor styling AFTER set_run_font_size to prevent it from being overridden
                 vendor_run.font.bold = True
                 vendor_run.font.italic = True  # Make vendor text italic
 
@@ -7104,11 +7111,6 @@ class TemplateProcessor:
                 # Ensure the color is applied by setting it explicitly
                 vendor_run.font.color.theme_color = None  # Clear any theme color
                 vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-                
-                # Get vendor font size using unified font sizing system
-                from src.core.generation.unified_font_sizing import get_font_size
-                vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
-                set_run_font_size(vendor_run, vendor_font_size)
                 
                 # Set tab stops to position vendor on the right
                 paragraph.paragraph_format.tab_stops.clear_all()
