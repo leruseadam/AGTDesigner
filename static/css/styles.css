@@ -6690,10 +6690,10 @@ body.modal-open #mainContent.store-selection-disabled,
     appearance: none !important;
 
     /* MATCH FILTER DROPDOWN STYLING - Same as vendor/brand/product type filters */
-    background: rgba(34, 34, 51, 0.55) !important;
-    color: #f7f8ff !important;
-    border: 3px solid #00d4aa !important;
-    box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
+    background: rgba(42, 32, 64, 0.9) !important;
+    color: #ffffff !important;
+    border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
+    box-shadow: none !important;
     border-radius: 10px !important;
     padding: 10px 36px 10px 14px !important;
     font-size: 1em !important;
@@ -6754,11 +6754,11 @@ body.modal-open #mainContent.store-selection-disabled,
     #templateSelectModal {
       -webkit-appearance: none !important;
       appearance: none !important;
-      background: rgba(34, 34, 51, 0.55) !important;
-      color: #f7f8ff !important;
-      -webkit-text-fill-color: #f7f8ff !important;
-      border: 3px solid #00d4aa !important;
-      box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
+      background: rgba(42, 32, 64, 0.9) !important;
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
+      border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
+      box-shadow: none !important;
     }
   }
   
