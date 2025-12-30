@@ -11519,7 +11519,13 @@ def get_selected_tags():
         if excel_processor.df is None or excel_processor.df.empty:
             logging.warning("DataFrame is empty when trying to get selected tags, returning empty array")
             return jsonify([])
-        
+
+        # CRITICAL FIX: Restore selected tags from session if excel_processor is empty
+        # This ensures tags persist across page reloads
+        if not excel_processor.selected_tags and session.get('selected_tags'):
+            excel_processor.selected_tags = session.get('selected_tags', [])
+            logging.info(f"✅ Restored {len(excel_processor.selected_tags)} selected tags from session")
+
         selected_tags = excel_processor.selected_tags
         selected_tag_objects = []
         

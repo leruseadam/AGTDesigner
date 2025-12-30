@@ -1405,14 +1405,8 @@ const TagManager = {
                 }
                 return true;
             } else {
-                // No cache, fetch from database
-                console.log('📊 No cache found, fetching tags from database...');
-                // Trigger fetch from database
-                if (typeof this.fetchAndUpdateAvailableTags === 'function') {
-                    this.fetchAndUpdateAvailableTags().catch(err => {
-                        console.error('Failed to fetch tags from database:', err);
-                    });
-                }
+                // No cache - return false so init() or fetchAndUpdateAvailableTags() can fetch from database
+                console.log('📊 No cache found - will fetch from database');
                 return false;
             }
         }
@@ -15555,6 +15549,36 @@ const TagManager = {
         }
         
         return processedTags;
+    },
+
+    // CRITICAL FIX: Add init function that loads tags automatically
+    async init() {
+        console.log('🚀 TagManager.init() called');
+        
+        // Mark as initialized
+        this.state.initialized = true;
+        
+        // Try to hydrate from cache first
+        const hydrated = this.hydrateAvailableTagsFromCache();
+        if (hydrated) {
+            console.log('✅ Tags loaded from cache in init()');
+            return true;
+        }
+        
+        // If no cache, fetch from database/API
+        console.log('📊 No cache found in init(), fetching tags from database...');
+        try {
+            const loaded = await this.fetchAndUpdateAvailableTags();
+            if (loaded) {
+                console.log('✅ Tags loaded from database in init()');
+            } else {
+                console.warn('⚠️ Tags not loaded in init()');
+            }
+            return loaded;
+        } catch (error) {
+            console.error('❌ Error loading tags in init():', error);
+            return false;
+        }
     }
 };
 
