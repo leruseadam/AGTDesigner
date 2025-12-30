@@ -1868,19 +1868,20 @@ class ProductDatabase:
                     if index < 5:
                         logger.info(f"[WEIGHT DEBUG] Final values - Weight: '{weight_value}' | Units: '{units_value}'")
                     
+                    # CRITICAL FIX: Check ALL vendor column name variations from Excel
+                    vendor_raw = (row_dict.get('Vendor/Supplier*', '') or 
+                                 row_dict.get('Vendor/Supplier', '') or 
+                                 row_dict.get('Vendor', '') or 
+                                 row_dict.get('vendor', '') or 
+                                 row_dict.get('Supplier', '') or 
+                                 row_dict.get('supplier', '') or 
+                                 '')
+                    vendor_value = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
+                    
                     product_data = {
                         'Product Name*': row_dict.get('Product Name*', ''),
                         'Product Type*': self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type'),
                         'Lineage': row_dict.get('Lineage', ''),
-                        # CRITICAL FIX: Check ALL vendor column name variations from Excel
-                        vendor_raw = (row_dict.get('Vendor/Supplier*', '') or 
-                                     row_dict.get('Vendor/Supplier', '') or 
-                                     row_dict.get('Vendor', '') or 
-                                     row_dict.get('vendor', '') or 
-                                     row_dict.get('Supplier', '') or 
-                                     row_dict.get('supplier', '') or 
-                                     '')
-                        vendor_value = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
                         'Vendor/Supplier*': vendor_value,
                         'Vendor': vendor_value,
                         'Product Brand': self._ensure_crucial_value(row_dict.get('Product Brand', ''), 'Unknown Brand', 'Product Brand'),
