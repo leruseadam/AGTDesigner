@@ -2328,7 +2328,8 @@ class TemplateProcessor:
             
             # Set ProductVendor to actual vendor/supplier for classic types
             # Get vendor from record, not from product_brand
-            vendor_val = record.get('Vendor') or record.get('Vendor/Supplier*') or record.get('ProductVendor', '')
+            # CRITICAL: Check Vendor/Supplier* first since Vendor column may be empty
+            vendor_val = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor', '')
             if vendor_val and str(vendor_val).lower() != 'nan':
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 if self.template_type == 'vertical':
@@ -2959,7 +2960,8 @@ class TemplateProcessor:
                            label_context.get('Product Type*', '').lower())
             
             # Only set vendor from record if ProductVendor wasn't already set by our logic
-            product_vendor = record.get('Vendor') or record.get('Vendor/Supplier*', '') or record.get('ProductVendor', '')
+            # CRITICAL: Check Vendor/Supplier* first since Vendor column may be empty
+            product_vendor = record.get('Vendor/Supplier*') or record.get('Vendor', '') or record.get('ProductVendor', '')
             # Handle NaN values in vendor data
             if pd.isna(product_vendor) or str(product_vendor).lower() == 'nan':
                 product_vendor = ''

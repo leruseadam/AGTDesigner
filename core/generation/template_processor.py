@@ -1873,7 +1873,7 @@ class TemplateProcessor:
             
             # Set ProductVendor to actual vendor/supplier for classic types
             # Get vendor from record, not from product_brand
-            vendor_val = record.get('Vendor') or record.get('Vendor/Supplier*') or record.get('ProductVendor', '')
+            vendor_val = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor', '')
             if vendor_val and str(vendor_val).lower() != 'nan':
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 if self.template_type == 'vertical':
