@@ -6695,16 +6695,17 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     box-shadow: none !important;
     border-radius: 10px !important;
-    padding: 10px 36px 10px 14px !important;
+    padding: 10px 14px !important;
+    padding-right: 36px !important;
     font-size: 1em !important;
     backdrop-filter: blur(8px) !important;
     -webkit-backdrop-filter: blur(8px) !important;
     transition: border 0.2s, box-shadow 0.2s !important;
 
-    /* Dropdown arrow - MATCH FILTER STYLE (teal) */
-    background-image: url('data:image/svg+xml;utf8,<svg fill="%2300d4aa" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    /* Dropdown arrow - purple to match filters */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
-    background-position: right 14px center !important;
+    background-position: center right 14px !important;
     background-size: 18px 18px !important;
 
     /* Layout and sizing */
@@ -6714,12 +6715,13 @@ body.modal-open #mainContent.store-selection-disabled,
     margin: 0.5rem auto 0.75rem auto !important;
     line-height: 1.5 !important;
 
-    /* Text alignment - centered */
+    /* Text alignment - FORCE centered */
     text-align: center !important;
     text-align-last: center !important;
     -webkit-text-align-last: center !important;
     -moz-text-align-last: center !important;
     direction: ltr !important;
+    text-indent: 0 !important;
 
     /* Prevent text wrapping */
     white-space: nowrap !important;
