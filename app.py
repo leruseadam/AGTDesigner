@@ -6166,10 +6166,11 @@ def check_store_required():
         # CRITICAL DEBUG: Check session data
         session_store = session.get('selected_store')
         if session_store and session.get('store_server_id') != SERVER_INSTANCE_ID:
-            logging.info("Session store from previous server instance detected in check-store-required; clearing")
-            session_store = None
-            session.pop('selected_store', None)
-            session.pop('store_server_id', None)
+            logging.info(f"Session store from previous server instance detected in check-store-required; updating server_id but keeping store: {session_store}")
+            # CRITICAL FIX: Don't clear the store - just update the server_id
+            # This prevents the modal from reappearing after server restart
+            session['store_server_id'] = SERVER_INSTANCE_ID
+            session.modified = True
         # CRITICAL FIX: Don't log full session - it contains massive preroll_original_records array
         # that causes "OSError: Message too long" when logging
         session_keys = list(session.keys())
