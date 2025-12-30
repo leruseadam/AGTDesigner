@@ -5697,11 +5697,12 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        'Lineage': result[6] or 'MIXED',  # lineage
+                        # CRITICAL: Prioritize sovereign_lineage (manual overrides) over regular Lineage
+                        'sovereign_lineage': result[9],  # CRITICAL: sovereign_lineage contains manual tag manager edits
+                        'Lineage': (result[9] if result[9] and str(result[9]).strip() not in ['', 'None', 'nan'] else result[6]) or 'MIXED',  # Use sovereign_lineage if available, otherwise use Lineage
                         'Product Strain': result[7],  # strain_name from Product Strain column
                         'strain_name': result[7],  # strain_name from Product Strain column
-                        'canonical_lineage': result[8],  # canonical_lineage from Lineage column
-                        'sovereign_lineage': result[9],  # CRITICAL: sovereign_lineage contains manual tag manager edits
+                        'canonical_lineage': (result[9] if result[9] and str(result[9]).strip() not in ['', 'None', 'nan'] else result[8]),  # Use sovereign_lineage if available, otherwise use Lineage
                         'total_occurrences': result[10],
                         'first_seen_date': result[11],
                         'last_seen_date': result[12],
