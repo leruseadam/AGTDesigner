@@ -7049,13 +7049,31 @@ class ExcelProcessor:
             if filtered_count == 0:
                 logger.warning("All data was JSON matched tags - nothing to store in database")
                 return {
-                    'stored': 0, 
-                    'updated': 0, 
-                    'errors': 0, 
+                    'stored': 0,
+                    'updated': 0,
+                    'errors': 0,
                     'excluded_json_matches': excluded_count,
                     'message': f'All {excluded_count} rows were JSON matched tags - excluded from database storage'
                 }
-            
+
+            # CRITICAL FIX: Infer lineage for products with empty lineage BEFORE saving to database
+            # This ensures new Excel uploads get proper lineage saved to DB
+            if 'Lineage' in filtered_df.columns and 'Product Name*' in filtered_df.columns:
+                from src.core.constants import VALID_LINEAGES
+                logger.info("Inferring lineage for products with empty lineage before database storage...")
+                inferred_count = 0
+                for idx in filtered_df.index:
+                    existing_lineage = str(filtered_df.at[idx, 'Lineage']).strip().upper() if pd.notna(filtered_df.at[idx, 'Lineage']) else ''
+                    # Only infer if lineage is empty or invalid
+                    if not existing_lineage or existing_lineage not in VALID_LINEAGES:
+                        product_name = str(filtered_df.at[idx, 'Product Name*']) if pd.notna(filtered_df.at[idx, 'Product Name*']) else ''
+                        product_type = str(filtered_df.at[idx, 'Product Type*']) if 'Product Type*' in filtered_df.columns and pd.notna(filtered_df.at[idx, 'Product Type*']) else None
+                        if product_name:
+                            inferred_lineage = self._infer_lineage_from_name(product_name, product_type)
+                            filtered_df.at[idx, 'Lineage'] = inferred_lineage
+                            inferred_count += 1
+                logger.info(f"Inferred lineage for {inferred_count}/{len(filtered_df)} products before database storage")
+
             # Use the product database's store_excel_data method
             try:
                 storage_result = product_db.store_excel_data(filtered_df, source_file)
