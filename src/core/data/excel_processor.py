@@ -294,12 +294,12 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
             # If no product name column, default edibles with CBD to MIXED
             result[edible_cbd] = 'MIXED'
         
-        # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
-        paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
+        # Paraphernalia products -> PARAPHERNALIA lineage (pink) - only if lineage is empty
+        paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False)) & empty_lineage_mask
         result[paraphernalia_mask] = 'PARAPHERNALIA'
-        
-        # Mixed products -> MIXED lineage (blue) - override existing lineage
-        mixed_mask = nonclassic_mask & (product_strain.str.contains('Mixed', case=False, na=False))
+
+        # Mixed products -> MIXED lineage (blue) - only if lineage is empty
+        mixed_mask = nonclassic_mask & (product_strain.str.contains('Mixed', case=False, na=False)) & empty_lineage_mask
         result[mixed_mask] = 'MIXED'
         
         # Default fallback for any remaining non-classic types

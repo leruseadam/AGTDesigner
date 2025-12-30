@@ -2100,8 +2100,31 @@ class TemplateProcessor:
         # Fast DOH image processing - only if needed
         # IMPORTANT: Only use the canonical DOH field for image decisions
         # Ignore legacy "DOH Compliant (Yes/No)" and any other variants
-        doh_value = label_context.get('DOH', '')
+        doh_value = label_context.get('DOH', '') or record.get('DOH', '')
         product_name = label_context.get('ProductName', 'Unknown')
+        
+        # CRITICAL FIX: If DOH is missing from record, query database directly
+        if not doh_value or str(doh_value).strip() in ['', 'None', 'nan']:
+            try:
+                from app import get_product_database, get_current_store_name
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                if product_db:
+                    conn = product_db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        SELECT "DOH" FROM products
+                        WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                        ORDER BY id DESC
+                        LIMIT 1
+                    ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
+                    result = cursor.fetchone()
+                    if result and result[0] and str(result[0]).strip() not in ['', 'None', 'nan']:
+                        doh_value = str(result[0]).strip()
+                        label_context['DOH'] = doh_value
+                        self.logger.info(f"🔍 DOH RETRIEVED FROM DB: '{product_name}' - DOH: '{doh_value}'")
+            except Exception as db_err:
+                self.logger.warning(f"Could not retrieve DOH from database: {db_err}")
 
         # CRITICAL DEBUG: Log DOH field processing with all possible sources
         self.logger.info(f"🔍 DOH DOCX GENERATION: Product '{product_name}' - DOH field: '{doh_value}' from record")

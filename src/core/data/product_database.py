@@ -1519,14 +1519,11 @@ class ProductDatabase:
                     cursor.execute("PRAGMA table_info(products)")
                     available_columns = {row[1] for row in cursor.fetchall()}
                     
-                    # CRITICAL: Check if strain has sovereign_lineage before using Excel lineage
+                    # CRITICAL FIX: For NEW products from Excel, ALWAYS use Excel lineage
+                    # Don't check sovereign_lineage - that's only for manual Tag Manager overrides
+                    # Excel is the source of truth for new products
                     lineage_to_use = self._normalize_lineage(product_data.get('Lineage'))
-                    if strain_id:
-                        cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
-                        sovereign_result = cursor.fetchone()
-                        if sovereign_result and sovereign_result[0]:
-                            lineage_to_use = str(sovereign_result[0]).strip()
-                            logger.info(f"🔒 NEW PRODUCT: Using sovereign lineage '{lineage_to_use}' for '{product_name}' (ignoring Excel)")
+                    logger.info(f"📊 NEW PRODUCT: Using Excel lineage '{lineage_to_use}' for '{product_name}'")
                     
                     # Build column list and values list based on what exists
                     columns_to_insert = []
@@ -4022,70 +4019,34 @@ class ProductDatabase:
             ak_value = self._calculate_ak_value(product_data)
             
             # Update the product with new data
-            # CRITICAL FIX: Check for sovereign_lineage FIRST - it takes absolute priority
-            # Check BOTH products.sovereign_lineage AND strains.sovereign_lineage
-            strain_id = None
-            sovereign_lineage = None
+            # PRIORITY: Excel data ALWAYS overwrites database values
+            # This ensures Excel is the source of truth
+            incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
+            incoming_lineage_clean = str(incoming_lineage).strip() if incoming_lineage else ''
 
-            # STEP 1: Check if product itself has sovereign_lineage (highest priority)
-            if self._products_has_column('sovereign_lineage'):
-                try:
-                    cursor.execute('SELECT sovereign_lineage FROM products WHERE id = ?', (product_id,))
-                    product_sovereign_result = cursor.fetchone()
-                    if product_sovereign_result and product_sovereign_result[0]:
-                        sovereign_lineage = str(product_sovereign_result[0]).strip()
-                        logger.info(f"🔒 PRODUCT SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
-                except Exception as product_error:
-                    logger.warning(f"Could not check products.sovereign_lineage for product {product_id}: {product_error}")
+            # Check if incoming lineage is valid (not empty/null)
+            has_valid_incoming_lineage = (incoming_lineage_clean and
+                                        incoming_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
 
-            # STEP 2: If no product sovereign lineage, check strain sovereign lineage
-            if not sovereign_lineage and self._products_has_column('strain_id'):
-                try:
-                    cursor.execute('SELECT strain_id FROM products WHERE id = ?', (product_id,))
-                    strain_id_result = cursor.fetchone()
-                    strain_id = strain_id_result[0] if strain_id_result else None
-
-                    if strain_id:
-                        # Check if this strain has a manually-set sovereign_lineage
-                        cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
-                        sovereign_result = cursor.fetchone()
-                        if sovereign_result and sovereign_result[0]:
-                            sovereign_lineage = str(sovereign_result[0]).strip()
-                            logger.info(f"🔒 STRAIN SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
-                except Exception as strain_error:
-                    logger.warning(f"Could not check strain_id for product {product_id}: {strain_error}")
-                    strain_id = None
-
-            # If sovereign lineage exists (from either product OR strain), USE IT and ignore Excel lineage
-            if sovereign_lineage:
-                final_lineage = sovereign_lineage
-                logger.info(f"✅ LINEAGE PRIORITY: Using sovereign lineage '{final_lineage}' for product ID {product_id} (ignoring Excel)")
+            # ALWAYS use Excel lineage if it's valid
+            if has_valid_incoming_lineage:
+                final_lineage = incoming_lineage_clean
+                logger.info(f"✅ LINEAGE FROM EXCEL: Using Excel lineage '{final_lineage}' for product ID {product_id}")
             else:
-                # No sovereign lineage - use normal Excel/database priority logic
-                incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
-                incoming_lineage_clean = str(incoming_lineage).strip() if incoming_lineage else ''
-                # Check if incoming lineage is valid (not empty/null)
-                has_valid_incoming_lineage = (incoming_lineage_clean and 
-                                            incoming_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
-                
-                # Get current database lineage to preserve it
+                # Only preserve DB lineage if Excel has no lineage
                 cursor.execute('SELECT "Lineage" FROM products WHERE id = ?', (product_id,))
                 current_db_lineage = cursor.fetchone()
                 current_lineage = current_db_lineage[0] if current_db_lineage and current_db_lineage[0] else ''
                 current_lineage_clean = str(current_lineage).strip() if current_lineage else ''
-                has_existing_lineage = (current_lineage_clean and 
+                has_existing_lineage = (current_lineage_clean and
                                       current_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
-                
-                # Determine final lineage: prefer incoming if valid, otherwise preserve existing
-                if has_valid_incoming_lineage:
-                    final_lineage = incoming_lineage_clean
-                    logger.info(f"✅ LINEAGE UPDATE: Using incoming lineage '{final_lineage}' for product ID {product_id}")
-                elif has_existing_lineage:
+
+                if has_existing_lineage:
                     final_lineage = current_lineage_clean
-                    logger.info(f"✅ LINEAGE PRESERVE: Preserving existing lineage '{final_lineage}' for product ID {product_id} (incoming was empty)")
+                    logger.info(f"✅ LINEAGE PRESERVE: Keeping existing DB lineage '{final_lineage}' for product ID {product_id} (Excel had no lineage)")
                 else:
-                    final_lineage = incoming_lineage_clean  # Even if empty, use it
-                    logger.info(f"⚠️ LINEAGE EMPTY: No lineage to preserve for product ID {product_id}")
+                    final_lineage = ''
+                    logger.info(f"⚠️ LINEAGE EMPTY: No lineage available for product ID {product_id}")
             
             # Get available columns in the database
             cursor.execute("PRAGMA table_info(products)")
@@ -4098,33 +4059,62 @@ class ProductDatabase:
             # Core fields that need special handling
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
             normalized_name = self._normalize_product_name(product_name) if product_name else ''
-            
-            # CRITICAL FIX: Excel values for DOH, Price, Lineage, and Product Type always overwrite database
-            # These fields are the source of truth from Excel uploads
+
+            # PRIORITY: Excel data ALWAYS overwrites database values
             excel_doh = product_data.get('DOH', '')
             excel_price = product_data.get('Price', '')
-            excel_lineage = product_data.get('Lineage', '')
-            
+
+            # Determine Price: ALWAYS use Excel if it has a value, otherwise preserve DB
+            has_excel_price = excel_price and str(excel_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
+
+            if has_excel_price:
+                final_price = excel_price
+                logger.info(f"💰 PRICE FROM EXCEL: Using Excel price '{final_price}' for product '{product_name}'")
+            else:
+                # Only preserve DB price if Excel has no price
+                cursor.execute('SELECT "Price" FROM products WHERE id = ?', (product_id,))
+                current_price_result = cursor.fetchone()
+                current_price = current_price_result[0] if current_price_result and current_price_result[0] else ''
+                has_db_price = current_price and str(current_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
+
+                if has_db_price:
+                    final_price = current_price
+                    logger.info(f"💰 PRICE PRESERVE: Keeping existing DB price '{final_price}' for product '{product_name}' (Excel had no price)")
+                else:
+                    final_price = ''
+                    logger.info(f"⚠️ PRICE EMPTY: No price available for product '{product_name}'")
+
+            # Determine DOH: ALWAYS use Excel if it has a value, otherwise preserve DB
+            has_excel_doh = excel_doh and str(excel_doh).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']
+
+            if has_excel_doh:
+                final_doh = excel_doh
+                logger.info(f"🏷️ DOH FROM EXCEL: Using Excel DOH '{final_doh}' for product '{product_name}'")
+            else:
+                # Only preserve DB DOH if Excel has no DOH
+                cursor.execute('SELECT "DOH" FROM products WHERE id = ?', (product_id,))
+                current_doh_result = cursor.fetchone()
+                current_doh = current_doh_result[0] if current_doh_result and current_doh_result[0] else ''
+                has_db_doh = current_doh and str(current_doh).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']
+
+                if has_db_doh:
+                    final_doh = current_doh
+                    logger.info(f"🏷️ DOH PRESERVE: Keeping existing DB DOH '{final_doh}' for product '{product_name}' (Excel had no DOH)")
+                else:
+                    final_doh = ''
+
+            # Update fields
             update_fields.append('"Product Type*" = ?')
             update_values.append(product_data.get('Product Type*'))
-            
-            # Use Excel Lineage if available, otherwise use final_lineage
-            lineage_to_update = excel_lineage if excel_lineage else final_lineage
+
             update_fields.append('"Lineage" = ?')
-            update_values.append(lineage_to_update)
-            if excel_lineage:
-                logger.info(f"🔄 UPDATING Lineage from Excel: '{excel_lineage}' for product '{product_name}'")
-            
-            # Force update DOH and Price from Excel if present
-            if excel_doh:
-                update_fields.append('"DOH" = ?')
-                update_values.append(excel_doh)
-                logger.info(f"🔄 UPDATING DOH from Excel: '{excel_doh}' for product '{product_name}'")
-            
-            if excel_price:
-                update_fields.append('"Price" = ?')
-                update_values.append(excel_price)
-                logger.info(f"🔄 UPDATING Price from Excel: '{excel_price}' for product '{product_name}'")
+            update_values.append(final_lineage)
+
+            update_fields.append('"Price" = ?')
+            update_values.append(final_price)
+
+            update_fields.append('"DOH" = ?')
+            update_values.append(final_doh)
             
             if normalized_name and 'normalized_name' in available_columns:
                 update_fields.append('"normalized_name" = ?')
