@@ -6742,10 +6742,10 @@ body.modal-open #mainContent.store-selection-disabled,
     background-repeat: no-repeat !important;
     background-position: right 14px center !important;
     background-size: 18px 18px !important;
-    color: #f7f8ff !important;
-    -webkit-text-fill-color: #f7f8ff !important;
-    border: 3px solid #00d4aa !important;
-    box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
+    box-shadow: none !important;
   }
   
   /* Mac Safari/Chrome specific override - ensure custom styling is applied */
