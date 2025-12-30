@@ -4790,10 +4790,10 @@ class TemplateProcessor:
                         from src.core.generation.unified_font_sizing import get_font_size
                         vendor_font_size = get_font_size(marker_data['content'], 'vendor', self.template_type, self.scale_factor)
                         set_run_font_size(run, vendor_font_size)
-                        # Set vendor text to italic and light gray color
+                        # Set vendor text to italic and gray color
                         run.font.italic = True
                         from docx.shared import RGBColor
-                        run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                        run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                         run.font.color.theme_color = None  # Clear any theme color
                     continue
                 elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
@@ -6974,14 +6974,14 @@ class TemplateProcessor:
                 vendor_run.font.name = "Arial"
                 vendor_run.font.bold = True
                 vendor_run.font.italic = True  # Make vendor text italic
-                
-                # Set vendor color to light gray (#CCCCCC)
+
+                # Set vendor color to gray (#808080)
                 from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
-                
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+
                 # Ensure the color is applied by setting it explicitly
                 vendor_run.font.color.theme_color = None  # Clear any theme color
-                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                 
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
@@ -7096,14 +7096,14 @@ class TemplateProcessor:
                 vendor_run.font.name = "Arial"
                 vendor_run.font.bold = True
                 vendor_run.font.italic = True  # Make vendor text italic
-                
-                # Set vendor color to light gray (#CCCCCC)
+
+                # Set vendor color to gray (#808080)
                 from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
-                
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+
                 # Ensure the color is applied by setting it explicitly
                 vendor_run.font.color.theme_color = None  # Clear any theme color
-                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                 
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
