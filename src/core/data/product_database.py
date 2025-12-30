@@ -1397,10 +1397,17 @@ class ProductDatabase:
                     logger.debug(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
-            # Additional validation for essential fields
-            vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
-            product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
+            # CRITICAL FIX: Apply defaults for essential fields BEFORE validation
+            # This ensures products are added even if vendor/product_type are missing
+            vendor_raw = product_data.get('Vendor/Supplier*', product_data.get('Vendor', ''))
+            vendor = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
+            product_data['Vendor/Supplier*'] = vendor  # Update product_data with default
             
+            product_type_raw = product_data.get('Product Type*', '')
+            product_type = self._ensure_crucial_value(product_type_raw, 'Unknown', 'Product Type')
+            product_data['Product Type*'] = product_type  # Update product_data with default
+            
+            # Additional validation for essential fields (now with defaults applied)
             if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_missing_vendor += 1
                 if self._rejected_missing_vendor % 10 == 1:
@@ -1450,13 +1457,14 @@ class ProductDatabase:
                 # Normalize vendor and brand for better matching
                 vendor_value = product_data.get(get_canonical_field('Vendor/Supplier*'), '')
                 brand_value = product_data.get(get_canonical_field('Product Brand'), '')
+                weight_value = product_data.get('Weight*', '')
                 
-                # First check exact match (name + vendor + brand)
+                # First check exact match (name + vendor + brand + weight) - matches UNIQUE constraint
                 cursor.execute('''
                     SELECT id, total_occurrences, "Product Name*"
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (normalized_name, vendor_value, brand_value))
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ?
+                ''', (normalized_name, vendor_value, brand_value, weight_value))
                 
                 existing = cursor.fetchone()
                 
@@ -1629,12 +1637,47 @@ class ProductDatabase:
                     placeholders = ', '.join(['?' for _ in values_to_insert])
                     
                     insert_query = f'INSERT INTO products ({columns_str}) VALUES ({placeholders})'
-                    cursor.execute(insert_query, values_to_insert)
-                    
-                    product_id = cursor.lastrowid
-                    conn.commit()
-                    logger.info(f"✅ ADDED NEW product '{product_name}' (ID: {product_id}, Vendor: {vendor_value}, Brand: {brand_value})")
-                    return product_id
+                    try:
+                        cursor.execute(insert_query, values_to_insert)
+                        product_id = cursor.lastrowid
+                        conn.commit()
+                        logger.info(f"✅ ADDED NEW product '{product_name}' (ID: {product_id}, Vendor: {vendor_value}, Brand: {brand_value})")
+                        return product_id
+                    except sqlite3.IntegrityError as e:
+                        # Handle UNIQUE constraint violation - product already exists with same name/vendor/brand/weight
+                        if "UNIQUE constraint failed" in str(e) or "unique constraint" in str(e).lower():
+                            logger.warning(f"⚠️ UNIQUE constraint violation for '{product_name}' (Vendor: {vendor_value}, Brand: {brand_value}) - attempting to find and update existing product")
+                            conn.rollback()
+                            
+                            # Try to find the existing product by the UNIQUE constraint fields
+                            weight_value = product_data.get('Weight*', '')
+                            cursor.execute('''
+                                SELECT id, total_occurrences, "Product Name*"
+                                FROM products 
+                                WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ?
+                            ''', (normalized_name, vendor_value, brand_value, weight_value))
+                            
+                            existing = cursor.fetchone()
+                            if existing:
+                                product_id, occurrences, existing_name = existing
+                                logger.info(f"Found existing product via UNIQUE constraint: '{existing_name}' (ID: {product_id}) - UPDATING")
+                                try:
+                                    self._update_existing_product(cursor, product_id, product_data)
+                                    conn.commit()
+                                    logger.info(f"Successfully updated product '{existing_name}' after UNIQUE constraint violation")
+                                    return product_id
+                                except Exception as update_error:
+                                    logger.error(f"Failed to update product after UNIQUE constraint: {update_error}")
+                                    conn.rollback()
+                                    raise
+                            else:
+                                logger.error(f"UNIQUE constraint violation but could not find existing product: {e}")
+                                raise
+                        else:
+                            # Other integrity errors
+                            logger.error(f"Integrity error inserting product '{product_name}': {e}")
+                            conn.rollback()
+                            raise
                 
         except Exception as e:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
