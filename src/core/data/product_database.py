@@ -1375,26 +1375,20 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                # Log only the first occurrence, then every 100th to avoid spam
-                if self._rejected_blank_names == 1 or self._rejected_blank_names % 100 == 1:
-                    logger.debug(
-                        f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})"
-                    )
+                logger.warning(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
                 return None
             
             # Check for invalid values
             if str(product_name).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_invalid_names += 1
-                if self._rejected_invalid_names % 10 == 1:
-                    logger.debug(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
+                logger.warning(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
                 return None
             
             # RELAXED VALIDATION: Allow single character names for vertical template compatibility
             # Check for minimum length (at least 1 character instead of 2)
             if len(str(product_name).strip()) < 1:
                 self._rejected_short_names += 1
-                if self._rejected_short_names % 10 == 1:
-                    logger.debug(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
+                logger.warning(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
             # CRITICAL FIX: Apply defaults for essential fields BEFORE validation
@@ -1407,18 +1401,8 @@ class ProductDatabase:
             product_type = self._ensure_crucial_value(product_type_raw, 'Unknown', 'Product Type')
             product_data['Product Type*'] = product_type  # Update product_data with default
             
-            # Additional validation for essential fields (now with defaults applied)
-            if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
-                self._rejected_missing_vendor += 1
-                if self._rejected_missing_vendor % 10 == 1:
-                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
-                return None
-            
-            if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
-                self._rejected_missing_type += 1
-                if self._rejected_missing_type % 10 == 1:
-                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
-                return None
+            # Validation removed - defaults are always applied above, so vendor and product_type will never be empty
+            # Products will always be added with at least 'Unknown Vendor' and 'Unknown' product type
             
             normalized_name = self._normalize_product_name(product_name)
             current_date = datetime.now().isoformat()
@@ -1725,8 +1709,29 @@ class ProductDatabase:
                 logger.warning("No data to store - DataFrame is empty")
                 return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
             
-            # Filter out JSON matched tags to prevent duplicate storage
+            # CRITICAL FIX: Store ALL Excel data - don't filter it out
+            # The filter should ONLY exclude products that are EXPLICITLY JSON matched tags
+            # Excel uploads should ALWAYS be stored
             filtered_df = self._filter_json_matched_tags(df)
+            
+            # CRITICAL: If filtering removed everything, check if this is Excel data
+            # Excel data should NEVER be filtered out completely
+            if filtered_df.empty and not df.empty:
+                logger.warning(f"⚠️ Filter removed all {len(df)} rows - checking if this is Excel data")
+                # Check if any rows have Excel indicators
+                has_excel_indicators = False
+                if 'Source' in df.columns:
+                    excel_mask = df['Source'].astype(str).str.contains('Excel|Upload|Import', case=False, na=False)
+                    has_excel_indicators = excel_mask.any()
+                
+                # If this looks like Excel data, don't filter it
+                if has_excel_indicators or 'Source' not in df.columns:
+                    logger.warning(f"⚠️ This appears to be Excel data - storing ALL {len(df)} rows (bypassing filter)")
+                    filtered_df = df.copy()
+                else:
+                    logger.warning(f"⚠️ All rows were filtered as JSON matched tags - nothing to store")
+            
+            logger.info(f"📊 Excel storage: {len(df)} original rows → {len(filtered_df)} rows to store")
 
             # CRITICAL NORMALIZATION: map common column aliases used by different upload paths
             try:
@@ -2055,14 +2060,16 @@ class ProductDatabase:
                     }
                     
                     # CRITICAL FIX: Include ALL remaining Excel columns that aren't already in product_data
-                    # This ensures no data from Excel is lost
+                    # This ensures no data from Excel is lost - store EVERYTHING from Excel
                     for col_name, col_value in row_dict.items():
                         if col_name not in product_data:
-                            # Only include non-null values to avoid cluttering with empty fields
-                            if col_value is not None and str(col_value).strip() not in ['', 'nan', 'none', 'null', 'NaN', 'None']:
-                                product_data[col_name] = col_value
-                            elif col_value is not None:  # Include even if empty, but not if None
-                                product_data[col_name] = str(col_value).strip() if isinstance(col_value, str) else col_value
+                            # Include ALL values from Excel, even if empty (they might be needed)
+                            if col_value is not None:
+                                # Convert to string and clean, but keep the value
+                                clean_value = str(col_value).strip() if isinstance(col_value, str) else col_value
+                                # Don't skip empty strings - they might be meaningful
+                                product_data[col_name] = clean_value
+                            # If None, skip it (but empty strings are OK)
                     
                     # Skip rows without product name - check multiple possible column names
                     product_name = (product_data.get('ProductName') or 
@@ -2076,8 +2083,8 @@ class ProductDatabase:
                         logger.warning(f"Row {index + 1}: Skipping blank/invalid product name: '{product_name}'")
                         continue
                     
-                    # Skip rows with only whitespace or special characters
-                    if str(product_name).strip() == '' or len(str(product_name).strip()) < 2:
+                    # Skip rows with only whitespace (allow 1 character minimum)
+                    if str(product_name).strip() == '' or len(str(product_name).strip()) < 1:
                         logger.warning(f"Row {index + 1}: Skipping product name too short or only whitespace: '{product_name}'")
                         continue
                     
@@ -2095,15 +2102,7 @@ class ProductDatabase:
                     product_type = self._ensure_crucial_value(product_type_raw, 'Unknown', 'Product Type')
                     product_data['Product Type*'] = product_type
                     
-                    # Additional validation: Skip rows with missing essential data (now with defaults applied)
-                    # This should never trigger now since we have defaults, but keeping as safety check
-                    if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing vendor information (even after defaults)")
-                        continue
-                    
-                    if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
-                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing product type (even after defaults)")
-                        continue
+                    # Validation removed - defaults are always applied above, so products will never be skipped for missing vendor/product_type
                     
                     # Skip duplicate entries within the same upload (same name + vendor + type combination)
                     duplicate_key = f"{product_name}|{vendor}|{product_type}"
@@ -2195,34 +2194,69 @@ class ProductDatabase:
                     cursor_temp = conn.cursor()
                     cursor_temp.execute("SELECT COUNT(*) FROM products")
                     count_before = cursor_temp.fetchone()[0]
+                    cursor_temp.close()
                     
-                    product_id = self.add_or_update_product(product_data)
+                    # Log before attempting to add
+                    logger.info(f"🔍 Row {index + 1}: Attempting to add product '{product_name}' (Vendor: {vendor}, Type: {product_type}, Weight: {product_data.get('Weight*', 'N/A')})")
                     
-                    if product_id:
-                        cursor_temp.execute("SELECT COUNT(*) FROM products")
-                        count_after = cursor_temp.fetchone()[0]
-                        
-                        if count_after > count_before:
-                            stored_count += 1
-                            logger.info(f"✅ Row {index + 1}: STORED NEW product '{product_name}' (ID: {product_id})")
+                    try:
+                        product_id = self.add_or_update_product(product_data)
+                    
+                        if product_id:
+                            cursor_temp = conn.cursor()
+                            cursor_temp.execute("SELECT COUNT(*) FROM products")
+                            count_after = cursor_temp.fetchone()[0]
+                            cursor_temp.close()
+                            
+                            if count_after > count_before:
+                                stored_count += 1
+                                logger.info(f"✅ Row {index + 1}: STORED NEW product '{product_name}' (ID: {product_id})")
+                            else:
+                                updated_count += 1
+                                logger.info(f"🔄 Row {index + 1}: UPDATED existing product '{product_name}' (ID: {product_id})")
+                        elif product_id is None:
+                            # Product was rejected (validation failed or duplicate)
+                            skipped_duplicates += 1
+                            logger.warning(f"⚠️ Row {index + 1}: Product '{product_name}' was rejected (returned None) - check validation logs above")
+                            continue
                         else:
-                            updated_count += 1
-                            logger.info(f"🔄 Row {index + 1}: UPDATED existing product '{product_name}' (ID: {product_id})")
-                    elif product_id is None:
-                        # Product was rejected (validation failed or duplicate)
-                        skipped_duplicates += 1
-                        logger.warning(f"⚠️ Row {index + 1}: Product '{product_name}' was rejected (returned None) - check validation logs above")
-                        continue
-                    else:
+                            error_count += 1
+                            error_msg = f"Row {index + 1}: Failed to store product '{product_name}' (product_id={product_id})"
+                            errors.append(error_msg)
+                            logger.error(f"❌ {error_msg}")
+                    except Exception as add_error:
                         error_count += 1
-                        error_msg = f"Row {index + 1}: Failed to store product '{product_name}' (product_id={product_id})"
+                        error_msg = f"Row {index + 1}: Exception adding product '{product_name}': {str(add_error)}"
                         errors.append(error_msg)
                         logger.error(f"❌ {error_msg}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+                        continue
                         
                 except Exception as row_error:
                     error_count += 1
-                    errors.append(f"Row {index + 1}: {str(row_error)}")
-                    logger.error(f"Error processing row {index + 1}: {row_error}")
+                    error_msg = f"Row {index + 1}: {str(row_error)}"
+                    errors.append(error_msg)
+                    logger.error(f"❌ ERROR processing row {index + 1} for product '{product_name}': {row_error}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    # Don't continue - try to add the product anyway with minimal data
+                    try:
+                        # Try to add with just the essentials
+                        minimal_product_data = {
+                            'Product Name*': product_name,
+                            'Vendor/Supplier*': vendor if 'vendor' in locals() else 'Unknown Vendor',
+                            'Product Type*': product_type if 'product_type' in locals() else 'Unknown',
+                            'Weight*': product_data.get('Weight*', '1'),
+                            'Units': product_data.get('Units', 'g'),
+                            'Price': product_data.get('Price', '0.00')
+                        }
+                        fallback_id = self.add_or_update_product(minimal_product_data)
+                        if fallback_id:
+                            stored_count += 1
+                            logger.info(f"✅ FALLBACK: Added product '{product_name}' with minimal data after error")
+                    except Exception as fallback_error:
+                        logger.error(f"❌ FALLBACK also failed for '{product_name}': {fallback_error}")
                     continue
             
             # Calculate excluded counts
@@ -2557,12 +2591,22 @@ class ProductDatabase:
             for col in json_match_indicators:
                 if col in filtered_df.columns:
                     if col == 'Source':
-                        # Look for JSON match indicators in Source column
-                        json_match_mask |= filtered_df[col].astype(str).str.contains(
-                            'JSON Match|AI Match|JSON|AI|Match|Generated', 
+                        # CRITICAL FIX: Only filter products EXPLICITLY marked as JSON matched
+                        # Don't filter Excel uploads - they should always be stored
+                        # Look for JSON match indicators BUT exclude Excel/Upload sources
+                        json_match_indicators = filtered_df[col].astype(str).str.contains(
+                            'JSON Match|AI Match|Generated Tag', 
                             case=False, 
                             na=False
                         )
+                        # Exclude Excel/Upload sources from filtering - these should ALWAYS be stored
+                        excel_sources = filtered_df[col].astype(str).str.contains(
+                            'Excel|Upload|Import', 
+                            case=False, 
+                            na=False
+                        )
+                        # Only mark as JSON match if it's JSON match AND not Excel
+                        json_match_mask |= (json_match_indicators & ~excel_sources)
                     else:
                         # Look for non-null values in other JSON match columns
                         json_match_mask |= filtered_df[col].notna()

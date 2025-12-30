@@ -1787,12 +1787,29 @@ class TemplateProcessor:
         else:
             # CRITICAL FIX: For new products without proper type, infer from product name
             product_name = record.get('ProductName', '')
-            if any(keyword in product_name.lower() for keyword in ['flower', 'bud', 'nug', 'herb']):
+            name_lower = product_name.lower()
+
+            # 1) High‑signal concentrate patterns
+            if any(keyword in name_lower for keyword in ['live rosin', 'hash rosin', 'solventless', 'rosin']):
+                product_type = 'solventless concentrate'
+                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'solventless concentrate' (from name)")
+
+            # 2) Vape / disposable patterns
+            elif any(keyword in name_lower for keyword in ['disposable vape', 'disposable cart', 'vape cart', 'cartridge', 'vape pen']):
+                product_type = 'vape cartridge'
+                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'vape cartridge' (from name)")
+
+            # 3) Classic flower keywords
+            elif any(keyword in name_lower for keyword in ['flower', 'bud', 'nug', 'herb']):
                 product_type = 'flower'
                 self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
-            elif any(keyword in product_name.lower() for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
+
+            # 4) Pre‑roll patterns
+            elif any(keyword in name_lower for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
                 product_type = 'pre-roll'
                 self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
+
+            # 5) Fallback – keep previous behaviour
             else:
                 product_type = 'flower'  # Default to flower for new products
                 self.logger.info(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
