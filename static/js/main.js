@@ -3124,13 +3124,22 @@ const TagManager = {
         const vendorGroups = new Map();
         let skippedTags = 0;
         
-        // CRITICAL FIX: Never drop products here – the backend is the source of truth
-        // Previously, we attempted to deduplicate "duplicate" products based on
-        // productName|vendor|brand|weight. That caused legitimate products (for example,
-        // different DOH statuses or other attributes sharing those fields) to disappear
-        // from the UI. To guarantee that **all** products are visible in the selector,
-        // we now trust the backend and work with the full tag list.
-        const uniqueTags = tags;
+        // CRITICAL FIX: Deduplicate by Product Name + Vendor + Price
+        // This prevents true duplicates from showing in the list while keeping
+        // products with different attributes (DOH, etc.) that share name/vendor
+        const seen = new Set();
+        const uniqueTags = tags.filter(tag => {
+            const productName = tag['Product Name*'] || tag.ProductName || tag.displayName || '';
+            const vendor = tag.Vendor || tag.vendor || '';
+            const price = tag.Price || tag.price || '';
+            const key = `${productName}|${vendor}|${price}`.toLowerCase();
+
+            if (seen.has(key)) {
+                return false; // Skip duplicate
+            }
+            seen.add(key);
+            return true; // Keep first occurrence
+        });
         
         // Debug: Log the first few tags to see their structure
         if (uniqueTags.length > 0) {
