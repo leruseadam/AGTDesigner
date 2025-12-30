@@ -9184,19 +9184,32 @@ def get_available_tags():
         
         # CRITICAL FIX: If processor was cleared after lineage update, try to reload from session file path
         # This prevents tags from disappearing after lineage updates
-        if not has_excel_data and session_file_path and os.path.exists(session_file_path):
-            try:
-                logging.info(f"🔄 Processor was cleared - reloading from session file: {session_file_path}")
-                from src.core.data.excel_processor import ExcelProcessor
-                reloaded_processor = ExcelProcessor(store_name=store_name)
-                if reloaded_processor.load_file(session_file_path):
-                    if reloaded_processor.df is not None and not reloaded_processor.df.empty:
-                        has_excel_data = True
-                        g.excel_processor = reloaded_processor
-                        reloaded_processor._last_loaded_file = session_file_path
-                        logging.info(f"✅ Reloaded Excel processor from session file: {len(reloaded_processor.df)} rows")
-            except Exception as reload_err:
-                logging.warning(f"Failed to reload processor from session file: {reload_err}")
+        if not has_excel_data and session_file_path:
+            # Check if file exists
+            file_actually_exists = os.path.exists(session_file_path) if session_file_path else False
+
+            if file_actually_exists:
+                try:
+                    logging.info(f"🔄 Processor was cleared - reloading from session file: {session_file_path}")
+                    from src.core.data.excel_processor import ExcelProcessor
+                    reloaded_processor = ExcelProcessor(store_name=store_name)
+                    if reloaded_processor.load_file(session_file_path):
+                        if reloaded_processor.df is not None and not reloaded_processor.df.empty:
+                            has_excel_data = True
+                            g.excel_processor = reloaded_processor
+                            reloaded_processor._last_loaded_file = session_file_path
+                            file_exists = True  # Update file_exists flag
+                            logging.info(f"✅ Reloaded Excel processor from session file: {len(reloaded_processor.df)} rows")
+                        else:
+                            logging.warning(f"⚠️ Reloaded processor has empty DataFrame")
+                    else:
+                        logging.warning(f"⚠️ Reloaded processor load_file returned False")
+                except Exception as reload_err:
+                    logging.warning(f"Failed to reload processor from session file: {reload_err}")
+                    import traceback
+                    logging.warning(traceback.format_exc())
+            else:
+                logging.info(f"📁 Session file doesn't exist, will try to load tags from database: {session_file_path}")
 
         # CRITICAL FIX: Include upload timestamp in cache key to ensure each upload has unique cache
         # This prevents serving stale data from previous uploads or other sessions
@@ -9218,15 +9231,77 @@ def get_available_tags():
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
 
-        # CRITICAL FIX: When no Excel file, don't load default file - just return empty
-        # This prevents the entire database from showing up in the tag manager
+        # CRITICAL FIX: When no Excel file, try to load from database
+        # This ensures tags persist after lineage updates even if Excel processor was cleared
         if not has_excel_data:
-            logging.info("⚡ No Excel file uploaded - returning empty tags (not loading default file)")
+            logging.info("⚡ No Excel file in memory - attempting to load tags from database")
+
+            # Try to load tags from database for current store
+            try:
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # Get all products from database
+                    conn = product_db._get_connection()
+                    cursor = conn.cursor()
+
+                    # Fetch all products (limit to reasonable amount to avoid memory issues)
+                    cursor.execute('''
+                        SELECT "Product Name*", "Product Type*", "Vendor/Supplier*",
+                               "Product Brand", "Weight*", "Price", "Lineage", "DOH",
+                               "THC test result", "CBD test result", "Units",
+                               "Description", "Quantity*", id
+                        FROM products
+                        ORDER BY "last_seen_date" DESC
+                        LIMIT 5000
+                    ''')
+                    rows = cursor.fetchall()
+
+                    if rows:
+                        # Convert database rows to tag format
+                        db_tags = []
+                        for row in rows:
+                            tag = {
+                                'Product Name*': row[0],
+                                'Product Type*': row[1],
+                                'Vendor/Supplier*': row[2],
+                                'Product Brand': row[3],
+                                'Weight*': row[4],
+                                'Price': row[5],
+                                'Lineage': row[6],
+                                'DOH': row[7],
+                                'THC test result': row[8],
+                                'CBD test result': row[9],
+                                'Units': row[10],
+                                'Description': row[11],
+                                'Quantity*': row[12],
+                                'id': row[13]
+                            }
+                            db_tags.append(tag)
+
+                        logging.info(f"✅ Loaded {len(db_tags)} tags from database")
+                        safe_tags = make_json_safe(db_tags)
+                        return jsonify({
+                            'tags': safe_tags,
+                            'total_count': len(safe_tags),
+                            'source': 'database-fallback',
+                            'message': f'Loaded {len(safe_tags)} products from database'
+                        }), 200
+                    else:
+                        logging.info("📭 No products found in database")
+                else:
+                    logging.warning("⚠️ Product database not available")
+            except Exception as db_load_err:
+                logging.error(f"Failed to load tags from database: {db_load_err}")
+                import traceback
+                logging.error(traceback.format_exc())
+
+            # Final fallback - return empty
+            logging.info("⚡ No Excel file and database load failed - returning empty tags")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
-                'source': 'empty-no-excel',
-                'message': 'No file uploaded. Please upload an Excel file to get started.'
+                'source': 'empty-no-data',
+                'message': 'No file uploaded and no products in database. Please upload an Excel file to get started.'
             }), 200
 
         # CRITICAL: Validate that the session file matches the selected store
