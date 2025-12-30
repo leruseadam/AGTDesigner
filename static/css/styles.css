@@ -551,6 +551,7 @@ p, span, div {
   padding: 0.85rem !important;
   font-size: 1.15rem !important;
   vertical-align: middle !important;
+  text-align: center !important;
 }
 
 #detailedJsonMatchModal .btn {
@@ -5845,12 +5846,18 @@ body.modal-open #mainContent.store-selection-disabled,
     overflow: hidden;
   }
   
+  /* Center align all table headers (except tag-name-header which stays left) */
+  .table thead th:not(.tag-name-header) {
+    text-align: center !important;
+  }
+  
   .database-view .table thead th {
     background: rgba(160, 132, 232, 0.2);
     border-bottom: 1px solid rgba(160, 132, 232, 0.3);
     color: var(--text-primary);
     font-weight: 600;
     padding: 12px 8px;
+    text-align: center;
   }
   
   .database-view .table tbody td {
@@ -7815,6 +7822,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .database-comprehensive-info .table th {
     color: #ffffff !important;
     border-color: rgba(255, 255, 255, 0.2) !important;
+    text-align: center !important;
   }
   
   .database-comprehensive-info .table-hover tbody tr:hover {

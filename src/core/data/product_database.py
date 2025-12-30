@@ -1626,6 +1626,14 @@ class ProductDatabase:
                         'CBD test result': product_data.get('CBD test result', ''),
                     }
                     
+                    # CRITICAL FIX: Include ALL remaining fields from product_data that aren't already in column_data_map
+                    # This ensures all Excel columns are included, not just the hardcoded ones
+                    for col_name, col_value in product_data.items():
+                        if col_name not in column_data_map:
+                            # Only add if the column exists in the database
+                            if col_name in available_columns:
+                                column_data_map[col_name] = col_value
+                    
                     # Only include columns that exist in the database
                     for col_name, col_value in column_data_map.items():
                         if col_name in available_columns:
@@ -2037,6 +2045,16 @@ class ProductDatabase:
                         'CY': row_dict.get('CY', ''),
                         'CZ': row_dict.get('CZ', '')
                     }
+                    
+                    # CRITICAL FIX: Include ALL remaining Excel columns that aren't already in product_data
+                    # This ensures no data from Excel is lost
+                    for col_name, col_value in row_dict.items():
+                        if col_name not in product_data:
+                            # Only include non-null values to avoid cluttering with empty fields
+                            if col_value is not None and str(col_value).strip() not in ['', 'nan', 'none', 'null', 'NaN', 'None']:
+                                product_data[col_name] = col_value
+                            elif col_value is not None:  # Include even if empty, but not if None
+                                product_data[col_name] = str(col_value).strip() if isinstance(col_value, str) else col_value
                     
                     # Skip rows without product name - check multiple possible column names
                     product_name = (product_data.get('ProductName') or 
@@ -4001,69 +4019,70 @@ class ProductDatabase:
             
             # CRITICAL FIX: Excel values for DOH, Price, and Product Type always overwrite database
             # These fields are the source of truth from Excel uploads
-            cursor.execute('''
-                UPDATE products SET
-                    "Product Type*" = ?,
-                    "Lineage" = ?,
-                    "Vendor/Supplier*" = ?,
-                    "Product Brand" = ?,
-                    "Description" = ?,
-                    "Weight*" = ?,
-                    "Units" = ?,
-                    "Price" = ?,
-                    "Product Strain" = ?,
-                    "Quantity*" = ?,
-                    "DOH" = ?,
-                    "Concentrate Type" = ?,
-                    "Ratio" = ?,
-                    "JointRatio" = ?,
-                    "THC test result" = ?,
-                    "CBD test result" = ?,
-                    "Total THC" = ?,
-                    "THCA" = ?,
-                    "CBDA" = ?,
-                    "THC" = ?,
-                    "CBD" = ?,
-                    "AI" = ?,
-                    "AJ" = ?,
-                    "AK" = ?,
-                    "last_seen_date" = ?,
-                    "updated_at" = ?
-                WHERE id = ?
-            ''', (
-                product_data.get('Product Type*'),  # Excel Product Type (High THC/CBD) overwrites DB
-                final_lineage,
-                product_data.get('Vendor/Supplier*'),
-                product_data.get('Product Brand'),
-                product_data.get('Description'),
-                product_data.get('Weight*'),
-                product_data.get('Units'),
-                product_data.get('Price'),  # Excel Price overwrites DB
-                self._calculate_product_strain_original(
-                    product_data.get('Product Type*', ''),
-                    product_data.get('Product Name*', ''),
-                    product_data.get('Description', ''),
-                    product_data.get('Ratio', '')
-                ),
-                product_data.get('Quantity*', ''),
-                product_data.get('DOH', ''),  # Excel DOH overwrites DB
-                product_data.get('Concentrate Type', ''),
-                product_data.get('Ratio', ''),
-                product_data.get('JointRatio', ''),
-                product_data.get('THC test result', ''),
-                product_data.get('CBD test result', ''),
-                product_data.get('Total THC', ''),
-                product_data.get('THCA', ''),
-                product_data.get('CBDA', ''),
-                product_data.get('THC', ''),
-                product_data.get('CBD', ''),
-                self._calculate_ai_value(product_data),
-                product_data.get('THC Content', ''),
-                self._calculate_ak_value(product_data),
-                current_date,
-                current_date,
-                product_id
-            ))
+            
+            # Get available columns in the database
+            cursor.execute("PRAGMA table_info(products)")
+            available_columns = {row[1] for row in cursor.fetchall()}
+            
+            # Build dynamic UPDATE statement to include ALL fields from product_data
+            update_fields = []
+            update_values = []
+            
+            # Core fields that need special handling
+            product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
+            normalized_name = self._normalize_product_name(product_name) if product_name else ''
+            
+            update_fields.append('"Product Type*" = ?')
+            update_values.append(product_data.get('Product Type*'))
+            
+            update_fields.append('"Lineage" = ?')
+            update_values.append(final_lineage)
+            
+            if normalized_name and 'normalized_name' in available_columns:
+                update_fields.append('"normalized_name" = ?')
+                update_values.append(normalized_name)
+            
+            update_fields.append('"last_seen_date" = ?')
+            update_values.append(current_date)
+            
+            update_fields.append('"updated_at" = ?')
+            update_values.append(current_date)
+            
+            # Add all other fields from product_data that exist in the database
+            # Skip fields that are already handled above or are internal/metadata fields
+            skip_fields = {
+                'Product Type*', 'Lineage', 'last_seen_date', 'updated_at',
+                'first_seen_date', 'created_at', 'total_occurrences', 'normalized_name',
+                'id', 'strain_id'  # These are handled separately or shouldn't be updated
+            }
+            
+            for col_name, col_value in product_data.items():
+                if col_name in skip_fields:
+                    continue
+                # Only include if column exists in database
+                if col_name in available_columns:
+                    update_fields.append(f'"{col_name}" = ?')
+                    # Handle special calculated fields
+                    if col_name == 'AI':
+                        update_values.append(self._calculate_ai_value(product_data))
+                    elif col_name == 'AK':
+                        update_values.append(self._calculate_ak_value(product_data))
+                    elif col_name == 'AJ':
+                        update_values.append(product_data.get('THC Content', ''))
+                    elif col_name == 'Product Strain':
+                        update_values.append(self._calculate_product_strain_original(
+                            product_data.get('Product Type*', ''),
+                            product_data.get('Product Name*', ''),
+                            product_data.get('Description', ''),
+                            product_data.get('Ratio', '')
+                        ))
+                    else:
+                        update_values.append(col_value)
+            
+            # Build and execute the UPDATE query
+            update_query = f'UPDATE products SET {", ".join(update_fields)} WHERE id = ?'
+            update_values.append(product_id)
+            cursor.execute(update_query, update_values)
             
             # CRITICAL: Ensure lineage change is logged (commit handled by caller)
             logger.info(f"✅ Successfully updated product ID {product_id} with lineage '{final_lineage}'")
