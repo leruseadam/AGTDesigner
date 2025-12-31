@@ -554,12 +554,13 @@
     }
     
     function checkStoreRequired(onStoreConfirmed) {
-      // CRITICAL FIX: Don't check again if store was already confirmed
+      // CRITICAL FIX: Don't check again if store was already confirmed AND we have a valid store
       // This prevents the modal from reappearing after uploads or page reloads
-      // SIMPLE FIX: If store was just confirmed in this session, skip the check
+      // SIMPLE FIX: If store was just confirmed in this session AND sessionStorage has a valid store, skip the check
       // This prevents modal from showing twice after selecting a store
-      if (window.storeConfirmed) {
-        console.log('✅ Store already confirmed in this session, skipping check');
+      const hasValidSessionStore = sessionStorage.getItem('selected_store') && sessionStorage.getItem('selected_store').trim() !== '';
+      if (window.storeConfirmed && hasValidSessionStore) {
+        console.log('✅ Store already confirmed in this session with valid session store, skipping check');
         // CRITICAL FIX: Even if store is already confirmed, still call the callback to ensure TagManager initializes
         if (typeof onStoreConfirmed === 'function') {
           console.log('🔄 Store already confirmed - calling callback to ensure TagManager initializes');
@@ -595,11 +596,14 @@
         return;
       }
       
-      // Keep both hidden while checking backend
+      // Keep both hidden while checking backend - BUT ONLY if store isn't already confirmed
+      // This prevents the greying out effect when store is already active
+      const storeAlreadyActive = window.storeConfirmed || sessionStorage.getItem('store_just_selected');
+
       if (modalElement) {
         modalElement.style.display = 'none';
       }
-      if (mainContent) {
+      if (mainContent && !storeAlreadyActive) {
         mainContent.style.pointerEvents = 'none';
         mainContent.classList.add('store-selection-disabled');
       }
@@ -686,8 +690,8 @@
               mainContent.style.visibility = 'visible';
               mainContent.style.pointerEvents = '';
               mainContent.classList.remove('store-selection-disabled');
-              mainContent.classList.add('store-selected');
-              setTimeout(() => mainContent.classList.add('loaded'), 100);
+              // Add both classes immediately to prevent opacity:0 flicker
+              mainContent.classList.add('store-selected', 'loaded');
             }
             
             // Clear blocking flag if it exists
@@ -5261,12 +5265,17 @@
 
     .main-content.store-selected {
       display: block !important;
-      opacity: 0;
+      opacity: 1; /* Default to visible to prevent flickering */
+    }
+
+    .main-content.store-selected:not(.loaded) {
+      opacity: 0; /* Only fade in on first load */
       transition: opacity 0.5s ease-in;
     }
 
     .main-content.store-selected.loaded {
       opacity: 1;
+      transition: none; /* No transition once loaded to prevent flicker */
     }
     
     /* Store modal backdrop - ensure it's visible and ON TOP */
