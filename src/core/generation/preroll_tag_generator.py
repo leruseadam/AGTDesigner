@@ -295,10 +295,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         except Exception:
             price_tier = str(price).strip() if price else 'N/A'
         
-        # CRITICAL FIX: Group by category AND vendor to preserve all vendors
-        # This creates one label per vendor per product category
-        # Each vendor gets their own label even if they have the same product category
-        group_key = f"{group_id}|{vendor_clean}" if vendor_clean else group_id
+        # Group by category ONLY - do NOT include vendor in grouping
+        # This ensures all products with the same description are in one list
+        # regardless of which vendor they come from
+        group_key = group_id
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {
