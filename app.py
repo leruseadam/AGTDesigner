@@ -11941,14 +11941,55 @@ def update_lineage():
 
         # Step 3: CRITICAL - Also update strain lineage if product has a strain
         # This ensures the lineage persists because strain lineage is the source of truth
-        cursor.execute("""
-            SELECT DISTINCT s.id, s.strain_name
-            FROM products p
-            JOIN strains s ON p.strain_id = s.id
-            WHERE (p."Product Name*" = ? OR p.ProductName = ?)
-            AND p.strain_id IS NOT NULL
-        """, (tag_name, tag_name))
-        strain_rows = cursor.fetchall()
+        # Check which column name exists in the strains table
+        cursor.execute("PRAGMA table_info(strains)")
+        strain_columns = [row[1] for row in cursor.fetchall()]
+        
+        # Use the correct column name (handle both "strain_name" and "Strain Name")
+        strain_name_col = 'strain_name'  # Default
+        if 'Strain Name' in strain_columns:
+            strain_name_col = '"Strain Name"'
+        elif 'strain_name' not in strain_columns:
+            # Try to find any column that might be the strain name
+            for col in strain_columns:
+                if 'strain' in col.lower() and 'name' in col.lower():
+                    strain_name_col = f'"{col}"' if ' ' in col else col
+                    break
+        
+        # Query with the correct column name - try multiple approaches
+        strain_rows = []
+        try:
+            # First try with strain_name (most common)
+            cursor.execute("""
+                SELECT DISTINCT s.id, s.strain_name
+                FROM products p
+                JOIN strains s ON p.strain_id = s.id
+                WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+                AND p.strain_id IS NOT NULL
+            """, (tag_name, tag_name))
+            strain_rows = cursor.fetchall()
+        except Exception:
+            try:
+                # Try with "Strain Name" (quoted, with space)
+                cursor.execute("""
+                    SELECT DISTINCT s.id, s."Strain Name"
+                    FROM products p
+                    JOIN strains s ON p.strain_id = s.id
+                    WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+                    AND p.strain_id IS NOT NULL
+                """, (tag_name, tag_name))
+                strain_rows = cursor.fetchall()
+            except Exception as col_error:
+                # Fallback: just get strain IDs if column name issue
+                logging.warning(f"Could not query strain_name column, using fallback: {col_error}")
+                cursor.execute("""
+                    SELECT DISTINCT s.id
+                    FROM products p
+                    JOIN strains s ON p.strain_id = s.id
+                    WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+                    AND p.strain_id IS NOT NULL
+                """, (tag_name, tag_name))
+                strain_rows = [(row[0], 'Unknown') for row in cursor.fetchall()]
         
         strains_updated = 0
         for strain_id, strain_name in strain_rows:
@@ -13070,7 +13111,12 @@ def _get_filter_options_from_database(store_name=None):
             if product_type and str(product_type).strip():
                 pt_clean = str(product_type).strip()
                 pt_lower = pt_clean.lower()
-                if ("deactivated" in pt_lower or "trade sample" in pt_lower or pt_lower in excluded_types_lower):
+                # Explicitly check for deactivated patterns (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.)
+                is_deactivated = ("deactivated" in pt_lower or 
+                                 pt_lower == "x-deactivated 1" or 
+                                 pt_lower == "x-deactivated 2" or
+                                 pt_lower.startswith("x-deactivated"))
+                if (is_deactivated or "trade sample" in pt_lower or pt_lower in excluded_types_lower):
                     continue
                 product_types.add(pt_clean)
             
@@ -13122,12 +13168,23 @@ def _get_filter_options_from_database(store_name=None):
             return [v for v in lst if v and str(v).strip() and str(v).strip().lower() != 'nan']
         options = {k: clean_list(v) for k, v in options.items()}
         # Remove deactivated/sample product types from dropdowns
+        def should_include_product_type(pt):
+            """Check if product type should be included in dropdown (exclude deactivated/sample types)"""
+            if not pt or not pt.strip():
+                return False
+            pt_lower = pt.strip().lower()
+            # Explicitly check for deactivated patterns (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.)
+            is_deactivated = ("deactivated" in pt_lower or 
+                             pt_lower == "x-deactivated 1" or 
+                             pt_lower == "x-deactivated 2" or
+                             pt_lower.startswith("x-deactivated"))
+            not_trade_sample = "trade sample" not in pt_lower
+            not_excluded = pt_lower not in excluded_types_lower
+            return not is_deactivated and not_trade_sample and not_excluded
+        
         options['productType'] = [
             pt for pt in options.get('productType', [])
-            if pt and pt.strip() and
-               ("deactivated" not in pt.lower()) and
-               ("trade sample" not in pt.lower()) and
-               (pt.lower() not in excluded_types_lower)
+            if should_include_product_type(pt)
         ]
         
         # CRITICAL FIX: Process High CBD filter the same way as Excel processor
@@ -22837,7 +22894,7 @@ def display_preroll_items(group_id):
             # Determine DOH badge styling
             doh_badge = ''
             if doh and doh in ['DOH', 'YES', 'THC', 'CBD']:
-                doh_badge = f'<span class="detail doh-badge">✅ DOH</span>'
+                doh_badge = f'<span class="detail doh-badge"><img src="/static/img/DOH.png" alt="DOH" style="height: 16px; width: auto; vertical-align: middle; margin-right: 4px;"> DOH</span>'
 
             items_html += f"""
             <div class="item-card">

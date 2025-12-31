@@ -153,7 +153,10 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     /* Text alignment - left like other filters */
     text-align: left !important;
     text-align-last: left !important;
+    -webkit-text-align-last: left !important;
+    -moz-text-align-last: left !important;
     direction: ltr !important;
+    text-indent: 0 !important;
 
     /* Padding - match filter dropdowns */
     padding: 1rem 48px 1rem 1.25rem !important;
@@ -200,7 +203,10 @@ select:not(#templateSelect):not(#templateSelectModal) option {
         margin: 0 auto !important;
         text-align: left !important;
         text-align-last: left !important;
+        -webkit-text-align-last: left !important;
+        -moz-text-align-last: left !important;
         direction: ltr !important;
+        text-indent: 0 !important;
         padding: 1rem 48px 1rem 1.25rem !important;
         font-size: 18px !important;
         font-weight: 700 !important;
