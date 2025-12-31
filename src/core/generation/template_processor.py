@@ -3066,7 +3066,6 @@ class TemplateProcessor:
             except:
                 # If unwrapping fails, check if it's just empty markers
                 if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
-                    import re
                     match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))
                     if not match or not match.group(1).strip():
                         vendor_is_empty = True
