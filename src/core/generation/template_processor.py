@@ -4835,16 +4835,29 @@ class TemplateProcessor:
                         # Set vendor text to italic and gray color
                         run.font.italic = True
                         from docx.shared import RGBColor
+                        # Set gray color at both run level and XML level for consistency
                         run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                         run.font.color.theme_color = None  # Clear any theme color
+                        # Also set color at XML level to ensure it sticks
+                        rPr = run._element.get_or_add_rPr()
+                        color = rPr.find(qn('w:color'))
+                        if color is None:
+                            color = OxmlElement('w:color')
+                            rPr.append(color)
+                        color.set(qn('w:val'), '808080')  # Gray color in hex without #
                     continue
                 elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                     product_type = self.label_context['ProductType']
                 else:
                     product_type = None
                 
-                # Special handling for ProductStrain marker - use unified font sizing system
+                # Special handling for ProductStrain marker - use unified font sizing system and left alignment
                 if marker_name in ('PRODUCTSTRAIN', 'STRAIN'):
+                    # Left-align PRODUCTSTRAIN markers
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    # Ensure consistent spacing above strain section for equal margins
+                    paragraph.paragraph_format.space_before = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
                     strain_content = str(marker_data.get('content') or '').strip()
                     for run in paragraph.runs:
                         run_text = run.text or ''
@@ -7023,13 +7036,17 @@ class TemplateProcessor:
                 vendor_run.font.bold = True
                 vendor_run.font.italic = True  # Make vendor text italic
 
-                # Set vendor color to gray (#808080)
+                # Set vendor color to gray (#808080) at both run level and XML level
                 from docx.shared import RGBColor
                 vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-
-                # Ensure the color is applied by setting it explicitly
                 vendor_run.font.color.theme_color = None  # Clear any theme color
-                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+                # Also set color at XML level to ensure it sticks
+                rPr = vendor_run._element.get_or_add_rPr()
+                color = rPr.find(qn('w:color'))
+                if color is None:
+                    color = OxmlElement('w:color')
+                    rPr.append(color)
+                color.set(qn('w:val'), '808080')  # Gray color in hex without #
             
             # Set tab stops to position vendor on the right (only if vendor content exists)
             if vendor_content:
@@ -7146,13 +7163,17 @@ class TemplateProcessor:
                 vendor_run.font.bold = True
                 vendor_run.font.italic = True  # Make vendor text italic
 
-                # Set vendor color to gray (#808080)
+                # Set vendor color to gray (#808080) at both run level and XML level
                 from docx.shared import RGBColor
                 vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-
-                # Ensure the color is applied by setting it explicitly
                 vendor_run.font.color.theme_color = None  # Clear any theme color
-                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+                # Also set color at XML level to ensure it sticks
+                rPr = vendor_run._element.get_or_add_rPr()
+                color = rPr.find(qn('w:color'))
+                if color is None:
+                    color = OxmlElement('w:color')
+                    rPr.append(color)
+                color.set(qn('w:val'), '808080')  # Gray color in hex without #
                 
                 # Set tab stops to position vendor on the right
                 paragraph.paragraph_format.tab_stops.clear_all()
