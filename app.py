@@ -7156,13 +7156,14 @@ def generate_labels():
             json.dumps(request_data, sort_keys=True).encode()
         ).hexdigest()
         
-        # Check if this exact request is already being processed
-        if hasattr(generate_labels, '_processing_requests'):
-            if request_fingerprint in generate_labels._processing_requests:
-                logging.warning(f"Duplicate generation request detected for fingerprint: {request_fingerprint}")
-                return jsonify({'error': 'This generation request is already being processed. Please wait.'}), 429
-        else:
+        # Initialize processing requests set if it doesn't exist
+        if not hasattr(generate_labels, '_processing_requests'):
             generate_labels._processing_requests = set()
+        
+        # Check if this exact request is already being processed
+        if request_fingerprint in generate_labels._processing_requests:
+            logging.warning(f"Duplicate generation request detected for fingerprint: {request_fingerprint}")
+            return jsonify({'error': 'This generation request is already being processed. Please wait.'}), 429
         
         # Mark this request as being processed
         generate_labels._processing_requests.add(request_fingerprint)
@@ -8589,8 +8590,36 @@ def generate_labels():
     
     finally:
         # Clean up request fingerprint to allow future requests
-        if hasattr(generate_labels, '_processing_requests') and 'request_fingerprint' in locals():
-            generate_labels._processing_requests.discard(request_fingerprint)
+        # Always try to clean up, even if an exception occurred early
+        try:
+            if hasattr(generate_labels, '_processing_requests'):
+                # Use a try-except to safely access the variable
+                try:
+                    # Check if request_fingerprint exists in the current scope
+                    fingerprint_to_clean = request_fingerprint if 'request_fingerprint' in locals() else None
+                    if fingerprint_to_clean:
+                        generate_labels._processing_requests.discard(fingerprint_to_clean)
+                        logging.debug(f"Cleaned up request fingerprint: {fingerprint_to_clean}")
+                    else:
+                        # If we can't find the fingerprint, clear all old entries (safety measure)
+                        # This prevents permanent hangs if cleanup fails
+                        current_size = len(generate_labels._processing_requests)
+                        if current_size > 10:  # Only clear if there are many stuck entries
+                            logging.warning(f"Clearing {current_size} stuck request fingerprints to prevent hangs")
+                            generate_labels._processing_requests.clear()
+                except NameError:
+                    # Variable doesn't exist in this scope, which is fine if exception occurred early
+                    logging.debug("Request fingerprint variable not in scope (likely early exception)")
+        except Exception as cleanup_error:
+            # Don't let cleanup errors prevent the function from completing
+            logging.warning(f"Error cleaning up request fingerprint: {cleanup_error}")
+            # Last resort: clear all if cleanup consistently fails
+            try:
+                if hasattr(generate_labels, '_processing_requests'):
+                    generate_labels._processing_requests.clear()
+                    logging.warning("Cleared all processing requests as last resort cleanup")
+            except:
+                pass
 
 
 
@@ -11941,58 +11970,73 @@ def update_lineage():
 
         # Step 3: CRITICAL - Also update strain lineage if product has a strain
         # This ensures the lineage persists because strain lineage is the source of truth
-        # Check which column name exists in the strains table
-        cursor.execute("PRAGMA table_info(strains)")
-        strain_columns = [row[1] for row in cursor.fetchall()]
-        
-        # Use the correct column name (handle both "strain_name" and "Strain Name")
-        strain_name_col = 'strain_name'  # Default
-        if 'Strain Name' in strain_columns:
-            strain_name_col = '"Strain Name"'
-        elif 'strain_name' not in strain_columns:
-            # Try to find any column that might be the strain name
-            for col in strain_columns:
-                if 'strain' in col.lower() and 'name' in col.lower():
-                    strain_name_col = f'"{col}"' if ' ' in col else col
-                    break
-        
-        # Query with the correct column name - try multiple approaches
         strain_rows = []
         try:
-            # First try with strain_name (most common)
-            cursor.execute("""
-                SELECT DISTINCT s.id, s.strain_name
-                FROM products p
-                JOIN strains s ON p.strain_id = s.id
-                WHERE (p."Product Name*" = ? OR p.ProductName = ?)
-                AND p.strain_id IS NOT NULL
-            """, (tag_name, tag_name))
-            strain_rows = cursor.fetchall()
-        except Exception:
-            try:
-                # Try with "Strain Name" (quoted, with space)
-                cursor.execute("""
-                    SELECT DISTINCT s.id, s."Strain Name"
-                    FROM products p
-                    JOIN strains s ON p.strain_id = s.id
-                    WHERE (p."Product Name*" = ? OR p.ProductName = ?)
-                    AND p.strain_id IS NOT NULL
-                """, (tag_name, tag_name))
-                strain_rows = cursor.fetchall()
-            except Exception as col_error:
-                # Fallback: just get strain IDs if column name issue
-                logging.warning(f"Could not query strain_name column, using fallback: {col_error}")
-                cursor.execute("""
-                    SELECT DISTINCT s.id
-                    FROM products p
-                    JOIN strains s ON p.strain_id = s.id
-                    WHERE (p."Product Name*" = ? OR p.ProductName = ?)
-                    AND p.strain_id IS NOT NULL
-                """, (tag_name, tag_name))
-                strain_rows = [(row[0], 'Unknown') for row in cursor.fetchall()]
+            # Check if strains table exists and get column info
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
+            if not cursor.fetchone():
+                logging.warning("strains table does not exist, skipping strain lineage update")
+            else:
+                # Check which column name exists in the strains table
+                cursor.execute("PRAGMA table_info(strains)")
+                strain_columns = [row[1] for row in cursor.fetchall()]
+                logging.debug(f"Strains table columns: {strain_columns}")
+                
+                # Query with the correct column name - try multiple approaches
+                try:
+                    # First try with strain_name (most common)
+                    cursor.execute("""
+                        SELECT DISTINCT s.id, s.strain_name
+                        FROM products p
+                        JOIN strains s ON p.strain_id = s.id
+                        WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+                        AND p.strain_id IS NOT NULL
+                    """, (tag_name, tag_name))
+                    strain_rows = cursor.fetchall()
+                    logging.debug(f"Successfully queried with strain_name, got {len(strain_rows)} rows")
+                except Exception as e1:
+                    logging.debug(f"Query with strain_name failed: {e1}, trying 'Strain Name'")
+                    try:
+                        # Try with "Strain Name" (quoted, with space)
+                        cursor.execute("""
+                            SELECT DISTINCT s.id, s."Strain Name"
+                            FROM products p
+                            JOIN strains s ON p.strain_id = s.id
+                            WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+                            AND p.strain_id IS NOT NULL
+                        """, (tag_name, tag_name))
+                        strain_rows = cursor.fetchall()
+                        logging.debug(f"Successfully queried with 'Strain Name', got {len(strain_rows)} rows")
+                    except Exception as e2:
+                        logging.warning(f"Both strain_name queries failed. strain_name: {e1}, 'Strain Name': {e2}")
+                        # Fallback: just get strain IDs if column name issue
+                        try:
+                            cursor.execute("""
+                                SELECT DISTINCT s.id
+                                FROM products p
+                                JOIN strains s ON p.strain_id = s.id
+                                WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+                                AND p.strain_id IS NOT NULL
+                            """, (tag_name, tag_name))
+                            strain_rows = [(row[0], 'Unknown') for row in cursor.fetchall()]
+                            logging.debug(f"Fallback query succeeded, got {len(strain_rows)} rows")
+                        except Exception as fallback_error:
+                            logging.error(f"All strain queries failed, including fallback: {fallback_error}")
+                            strain_rows = []
+        except Exception as strain_query_error:
+            logging.error(f"Error checking/querying strains table: {strain_query_error}")
+            import traceback
+            logging.error(traceback.format_exc())
+            strain_rows = []
         
         strains_updated = 0
-        for strain_id, strain_name in strain_rows:
+        for strain_row in strain_rows:
+            # Handle both (id, name) tuples and single id values
+            if len(strain_row) == 2:
+                strain_id, strain_name = strain_row
+            else:
+                strain_id = strain_row[0]
+                strain_name = 'Unknown'
             # Update both sovereign_lineage and canonical_lineage
             cursor.execute("""
                 UPDATE strains 
@@ -12022,7 +12066,7 @@ def update_lineage():
                 cursor.execute("""
                     UPDATE products
                     SET Lineage = ?, sovereign_lineage = ?
-                    WHERE LOWER(TRIM(strain_name)) = LOWER(TRIM(?))
+                    WHERE LOWER(TRIM("Product Strain")) = LOWER(TRIM(?))
                     AND (strain_id IS NULL OR strain_id != ?)
                     AND "Product Type*" IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
                 """, (new_lineage, new_lineage, strain_name, strain_id))
@@ -12196,8 +12240,13 @@ def update_lineage():
     except Exception as e:
         logging.error(f"❌ Lineage update error: {e}")
         import traceback
-        logging.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        error_traceback = traceback.format_exc()
+        logging.error(error_traceback)
+        # Provide more helpful error message for column name issues
+        error_msg = str(e)
+        if 'no such column' in error_msg.lower() and 'strain' in error_msg.lower():
+            error_msg = f"Database schema issue: {error_msg}. The strains table may use a different column name. Please check your database schema."
+        return jsonify({'success': False, 'error': f'Failed to update lineage: {error_msg}'}), 500
 
 
 @app.route('/api/update-strain-lineage', methods=['POST'])
@@ -13168,10 +13217,10 @@ def _get_filter_options_from_database(store_name=None):
             return [v for v in lst if v and str(v).strip() and str(v).strip().lower() != 'nan']
         options = {k: clean_list(v) for k, v in options.items()}
         # Remove deactivated/sample product types from dropdowns
-        def should_include_product_type(pt):
-            """Check if product type should be included in dropdown (exclude deactivated/sample types)"""
+        filtered_product_types = []
+        for pt in options.get('productType', []):
             if not pt or not pt.strip():
-                return False
+                continue
             pt_lower = pt.strip().lower()
             # Explicitly check for deactivated patterns (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.)
             is_deactivated = ("deactivated" in pt_lower or 
@@ -13180,12 +13229,9 @@ def _get_filter_options_from_database(store_name=None):
                              pt_lower.startswith("x-deactivated"))
             not_trade_sample = "trade sample" not in pt_lower
             not_excluded = pt_lower not in excluded_types_lower
-            return not is_deactivated and not_trade_sample and not_excluded
-        
-        options['productType'] = [
-            pt for pt in options.get('productType', [])
-            if should_include_product_type(pt)
-        ]
+            if not is_deactivated and not_trade_sample and not_excluded:
+                filtered_product_types.append(pt)
+        options['productType'] = filtered_product_types
         
         # CRITICAL FIX: Process High CBD filter the same way as Excel processor
         # Check if any product types start with "high cbd"
