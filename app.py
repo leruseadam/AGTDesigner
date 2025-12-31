@@ -6180,17 +6180,32 @@ def check_store_required():
         logging.info(f"SESSION DEBUG: session keys={session_keys}")
         logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
         
-        # Try to resolve the current store using all available strategies
-        # (session → IP-mapped cache → smart database fallback)
-        current_store = get_current_store_name(allow_fallback=False)
-        logging.info(f"get_current_store_name() returned: {current_store}")
+        # CRITICAL FIX: Only use session store, not IP cache, to determine if modal should show
+        # This ensures the modal shows unless user explicitly selected a store in this session
+        # IP cache is only used as a convenience fallback, not to skip the modal
+        current_store = None
+        
+        # Only check session - don't use IP cache to skip modal
+        if session.get('selected_store'):
+            current_store = session.get('selected_store')
+            logging.info(f"Store found in session: {current_store}")
+        else:
+            # Check IP cache but don't auto-apply it - just log it for reference
+            ip_address = get_client_ip()
+            if ip_address is not None:
+                with _ip_store_lock:
+                    if ip_address in _ip_store_selections:
+                        store_data = _ip_store_selections[ip_address]
+                        if is_store_selection_valid(ip_address, store_data):
+                            logging.info(f"IP cache has store {store_data['store']} but not using it to skip modal")
+                            # Don't set current_store - let modal show so user can confirm/change
         
         # Log the low-level selection flag for debugging but do not gate on it
         has_selection = has_store_selection()
         logging.info(f"has_store_selection() returned: {has_selection}")
         
         if not current_store:
-            logging.info(f"No store resolved for IP {ip_address}, requiring selection")
+            logging.info(f"No store in session for IP {ip_address}, requiring selection")
             return {
                 'success': True,
                 'requires_store': True,
@@ -6202,11 +6217,11 @@ def check_store_required():
                 }
             }
         
-        # If we found a store, make sure it is persisted in the session for future requests
+        # If we found a store in session, make sure it is persisted
         session['selected_store'] = current_store
         session.modified = True
         
-        logging.info(f"Store found for IP {ip_address}: {current_store}")
+        logging.info(f"Store found in session for IP {ip_address}: {current_store}")
         return {
             'success': True,
             'requires_store': False,
