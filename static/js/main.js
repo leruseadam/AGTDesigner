@@ -10138,6 +10138,7 @@ const TagManager = {
                     AppLoadingSplash.complete();
                 }
                 // Restore container opacity if it was dimmed during reload
+                const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
                     availableTagsContainer.style.opacity = '1';
                     availableTagsContainer.style.pointerEvents = 'auto';
