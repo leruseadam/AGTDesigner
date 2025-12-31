@@ -4536,6 +4536,12 @@ const TagManager = {
         });
         
         verboseLog('✅ Rendered', tags.length, 'JSON matched tags with HIERARCHY (same as Selected Tags)');
+        
+        // Update available tags count badge
+        setTimeout(() => {
+            const availableTagItems = availableTagsContainer.querySelectorAll('.tag-item');
+            this.updateTagCount('available', availableTagItems.length);
+        }, 100);
     },
 
     // Internal function that actually updates the available tags
@@ -5025,6 +5031,12 @@ const TagManager = {
                         // Hide loading splash only after tags actually appear in DOM
                         this._waitForTagsToAppear();
                         
+                        // Update available tags count badge
+                        setTimeout(() => {
+                            const availableTagItems = availableTagsContainer.querySelectorAll('.tag-item');
+                            this.updateTagCount('available', availableTagItems.length);
+                        }, 100);
+                        
                         // CRITICAL FIX: Re-enable scaling after rendering completes
                         if (window.setTagRenderingState) {
                             setTimeout(() => {
@@ -5098,6 +5110,10 @@ const TagManager = {
                     
                     // Hide loading splash
                     this._waitForTagsToAppear();
+                    
+                    // Update available tags count badge
+                    const availableTagItems = availableTagsContainer.querySelectorAll('.tag-item');
+                    this.updateTagCount('available', availableTagItems.length);
                     
                     // CRITICAL FIX: Re-enable scaling after rendering completes
                     if (window.setTagRenderingState) {

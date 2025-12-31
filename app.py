@@ -887,22 +887,26 @@ def get_current_store_name(allow_fallback=True):
         if session.get('selected_store'):
             return session.get('selected_store')
         
-        # Fallback to IP-based selection
-        ip_address = get_client_ip()
-        if ip_address is not None:
-            with _ip_store_lock:
-                if ip_address in _ip_store_selections:
-                    store_data = _ip_store_selections[ip_address]
-                    # Check if the selection is still valid (not expired)
-                    if is_store_selection_valid(ip_address, store_data):
-                        # Store selection is valid - use it regardless of server instance
-                        # Also save to session for consistency
-                        session['selected_store'] = store_data['store']
-                        session['store_server_id'] = SERVER_INSTANCE_ID
-                        return store_data['store']
-                    else:
-                        # Remove expired selection
-                        del _ip_store_selections[ip_address]
+        # CRITICAL FIX: Don't use IP cache to auto-populate session in check_store_required context
+        # Only use IP cache if explicitly allowed (for other use cases)
+        # In check_store_required, we want to force modal if session doesn't have proper flags
+        if allow_fallback:
+            # Fallback to IP-based selection (only when allow_fallback is True)
+            ip_address = get_client_ip()
+            if ip_address is not None:
+                with _ip_store_lock:
+                    if ip_address in _ip_store_selections:
+                        store_data = _ip_store_selections[ip_address]
+                        # Check if the selection is still valid (not expired)
+                        if is_store_selection_valid(ip_address, store_data):
+                            # Store selection is valid - use it regardless of server instance
+                            # Also save to session for consistency
+                            session['selected_store'] = store_data['store']
+                            session['store_server_id'] = SERVER_INSTANCE_ID
+                            return store_data['store']
+                        else:
+                            # Remove expired selection
+                            del _ip_store_selections[ip_address]
         
         if allow_fallback:
             # Simpler fallback: default to Bothell instead of auto-picking largest DB (avoids surprise switches)
@@ -6158,13 +6162,24 @@ def clear_store():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/check-store-required', methods=['GET'])
-@cached_route(ttl=15, vary_by=['session_id'])
+# CRITICAL: Don't cache this endpoint - we need fresh checks every time
+# @cached_route(ttl=15, vary_by=['session_id'])  # DISABLED - causes modal to be skipped
 def check_store_required():
     """Check if store selection is required for the current IP address."""
     try:
         ip_address = get_client_ip()
         logging.info(f"Check store required for IP: {ip_address}")
         logging.info(f"Store selections in memory: {list(_ip_store_selections.keys())}")
+        
+        # CRITICAL FIX: Check for force_store_modal parameter FIRST to force modal display
+        force_modal = request.args.get('force_store_modal', 'false').lower() == 'true'
+        if force_modal:
+            logging.info("🔧 Force store modal parameter detected - clearing ALL session store data")
+            session.pop('selected_store', None)
+            session.pop('store_server_id', None)
+            session.pop('store_just_selected', None)
+            session.pop('store_selected_timestamp', None)
+            session.modified = True
         
         # CRITICAL DEBUG: Check session data
         session_store = session.get('selected_store')
@@ -6173,17 +6188,10 @@ def check_store_required():
             # Clear the session store to force user to select store again after server restart
             session.pop('selected_store', None)
             session.pop('store_server_id', None)
+            session.pop('store_just_selected', None)
+            session.pop('store_selected_timestamp', None)
             session.modified = True
             session_store = None  # Update local variable so logic below works correctly
-        
-        # CRITICAL FIX: Check for force_store_modal parameter to force modal display
-        force_modal = request.args.get('force_store_modal', 'false').lower() == 'true'
-        if force_modal:
-            logging.info("🔧 Force store modal parameter detected - clearing session store")
-            session.pop('selected_store', None)
-            session.pop('store_server_id', None)
-            session.modified = True
-            session_store = None
         
         # CRITICAL FIX: Don't log full session - it contains massive preroll_original_records array
         # that causes "OSError: Message too long" when logging
@@ -6193,78 +6201,133 @@ def check_store_required():
         logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
         logging.info(f"SESSION DEBUG: force_modal={force_modal}")
         
-        # CRITICAL FIX: Only use session store if it was explicitly set in this session
-        # Check if there's a flag indicating the store was just selected
+        # CRITICAL FIX: Always require modal unless store was just selected with proper flags
+        # This ensures modal shows for all existing sessions that don't have the new flags
         store_just_selected = session.get('store_just_selected', False)
         current_store = None
         
-        # Only use session store if it was just selected (user confirmed it)
+        # CRITICAL FIX: Always require modal unless store was selected VERY recently (within last 2 minutes)
+        # This ensures modal shows on every page load unless user just selected store
+        # Only use session store if BOTH conditions are met:
+        # 1. store_just_selected flag is True (explicit selection)
+        # 2. Has a valid VERY recent timestamp (within last 2 minutes, not 10)
         if session_store and store_just_selected:
-            current_store = session_store
-            logging.info(f"Store found in session and was just selected: {current_store}")
-        elif session_store:
-            # Store exists in session but wasn't just selected - might be stale
-            # Check if it's from a recent selection (within last 5 minutes)
             store_timestamp = session.get('store_selected_timestamp')
             if store_timestamp:
                 try:
                     from datetime import datetime, timedelta
                     timestamp = datetime.fromisoformat(store_timestamp)
-                    if datetime.now() - timestamp < timedelta(minutes=5):
+                    # CRITICAL: Only accept stores selected within last 2 minutes
+                    if datetime.now() - timestamp < timedelta(minutes=2):
                         current_store = session_store
-                        logging.info(f"Store found in session (recent selection): {current_store}")
+                        logging.info(f"✅ Store found in session with valid flags (selected {datetime.now() - timestamp} ago): {current_store}")
                     else:
-                        logging.info(f"Store in session is stale (older than 5 minutes), requiring new selection")
+                        logging.info(f"⚠️ Store timestamp expired (older than 2 minutes), requiring new selection")
+                        # Clear all store-related session data
                         session.pop('selected_store', None)
                         session.pop('store_selected_timestamp', None)
+                        session.pop('store_just_selected', None)
+                        session.pop('store_server_id', None)
                         session.modified = True
-                except:
+                except Exception as e:
                     # If timestamp parsing fails, treat as stale
-                    logging.info(f"Store timestamp invalid, requiring new selection")
+                    logging.info(f"⚠️ Store timestamp invalid ({e}), requiring new selection")
                     session.pop('selected_store', None)
                     session.pop('store_selected_timestamp', None)
+                    session.pop('store_just_selected', None)
+                    session.pop('store_server_id', None)
                     session.modified = True
             else:
                 # No timestamp - treat as stale
-                logging.info(f"Store in session has no timestamp, requiring new selection")
+                logging.info(f"⚠️ Store in session has no timestamp, requiring new selection")
                 session.pop('selected_store', None)
+                session.pop('store_just_selected', None)
+                session.pop('store_server_id', None)
                 session.modified = True
+        elif session_store:
+            # Store exists but missing required flags - clear it to force modal
+            logging.info(f"⚠️ Store in session missing required flags (store_just_selected={store_just_selected}), clearing to force modal")
+            session.pop('selected_store', None)
+            session.pop('store_selected_timestamp', None)
+            session.pop('store_just_selected', None)
+            session.pop('store_server_id', None)
+            session.modified = True
         
         # Log the low-level selection flag for debugging but do not gate on it
         has_selection = has_store_selection()
         logging.info(f"has_store_selection() returned: {has_selection}")
+        logging.info(f"FINAL DECISION: current_store={current_store}, will require_store={current_store is None}")
         
         if not current_store:
-            logging.info(f"No store in session for IP {ip_address}, requiring selection")
+            logging.warning(f"⚠️ NO VALID STORE - Requiring store selection for IP {ip_address}")
+            # CRITICAL: Make sure session is completely cleared
+            session.pop('selected_store', None)
+            session.pop('store_just_selected', None)
+            session.pop('store_selected_timestamp', None)
+            session.pop('store_server_id', None)
+            session.modified = True
+            
+            # Double-check session is cleared
+            remaining_store = session.get('selected_store')
+            if remaining_store:
+                logging.error(f"❌ ERROR: Session still has store after clearing: {remaining_store}")
+                # Force clear again
+                session.clear()
+                session.modified = True
+            
+            logging.info(f"✅ Session cleared, returning requires_store=True")
+            return {
+                'success': True,
+                'requires_store': True,  # CRITICAL: Must be True to show modal
+                'store': None,
+                'debug': {
+                    'session_store': session_store,
+                    'ip_address': ip_address,
+                    'has_selection': has_selection,
+                    'cleared_session': True,
+                    'current_store_after_check': current_store
+                }
+            }
+        
+        # If we found a store in session, make sure it is persisted with timestamp
+        # (This should already be set, but ensure it's there)
+        if current_store:
+            session['selected_store'] = current_store
+            if not session.get('store_just_selected'):
+                session['store_just_selected'] = True
+            if not session.get('store_selected_timestamp'):
+                from datetime import datetime
+                session['store_selected_timestamp'] = datetime.now().isoformat()
+            session.modified = True
+            
+            logging.info(f"✅ Store found in session for IP {ip_address}: {current_store}")
+            return {
+                'success': True,
+                'requires_store': False,  # CRITICAL: Must be False when store exists
+                'store': current_store,
+                'debug': {
+                    'session_store': session_store,
+                    'ip_address': ip_address,
+                    'has_selection': has_selection,
+                    'current_store_validated': True
+                }
+            }
+        else:
+            # This should never happen, but safety check
+            logging.error(f"❌ ERROR: current_store is None but we reached this point!")
+            session.pop('selected_store', None)
+            session.pop('store_just_selected', None)
+            session.pop('store_selected_timestamp', None)
+            session.modified = True
             return {
                 'success': True,
                 'requires_store': True,
                 'store': None,
                 'debug': {
-                    'session_store': session_store,
-                    'ip_address': ip_address,
-                    'has_selection': has_selection
+                    'error': 'Unexpected state - no store found',
+                    'ip_address': ip_address
                 }
             }
-        
-        # If we found a store in session, make sure it is persisted with timestamp
-        session['selected_store'] = current_store
-        session['store_just_selected'] = True
-        from datetime import datetime
-        session['store_selected_timestamp'] = datetime.now().isoformat()
-        session.modified = True
-        
-        logging.info(f"Store found in session for IP {ip_address}: {current_store}")
-        return {
-            'success': True,
-            'requires_store': False,
-            'store': current_store,
-            'debug': {
-                'session_store': session_store,
-                'ip_address': ip_address,
-                'has_selection': has_selection
-            }
-        }
         
     except Exception as e:
         logging.error(f"Error checking store requirement: {str(e)}")

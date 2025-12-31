@@ -370,14 +370,30 @@
         console.log('🔄 Reloading page to show first-time experience...');
         // Reload page after clearing to show modal
         setTimeout(() => {
-          window.location.href = window.location.pathname;
+          window.location.href = window.location.pathname + '?force_store_modal=true';
         }, 500);
       })
       .catch(error => {
         console.error('❌ Error clearing store:', error);
-        // Reload anyway
-        window.location.href = window.location.pathname;
+        // Reload anyway with force flag
+        window.location.href = window.location.pathname + '?force_store_modal=true';
       });
+    };
+    
+    // Helper to force show store modal immediately
+    window.forceShowStoreModalNow = function() {
+      console.log('🔧 Force showing store modal immediately...');
+      // Clear all flags
+      window.storeConfirmed = false;
+      sessionStorage.removeItem('store_just_selected');
+      sessionStorage.removeItem('selected_store');
+      sessionStorage.removeItem('store_selected_timestamp');
+      // Show modal
+      if (typeof showStoreSelectionModal === 'function') {
+        showStoreSelectionModal(true);
+      } else {
+        console.error('showStoreSelectionModal function not available');
+      }
     };
 
     function showStoreSelectionModal(forceClear = false) {
@@ -653,9 +669,14 @@
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
       
-      fetch(`/api/check-store-required?${cacheBust}`, {
+      fetch(`/api/check-store-required?${cacheBust}&_=${Date.now()}`, {
         credentials: 'same-origin',
         cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
         signal: controller.signal
       })
         .then(response => {
@@ -690,6 +711,14 @@
           if (!data) return; // Skip if error was handled (timeout)
           console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
           console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
+          console.log('DEBUG INFO:', data.debug || 'no debug info');
+          
+          // CRITICAL: Check requires_store flag first
+          if (data.requires_store === true) {
+            console.log('🔴 REQUIRES_STORE IS TRUE - Modal should show!');
+          } else {
+            console.log('🟢 REQUIRES_STORE IS FALSE - Modal should NOT show');
+          }
           
           // Clear logic: show content if user has a store, otherwise show modal
           const userHasStore = (data.success && !data.requires_store && data.store);
@@ -697,6 +726,7 @@
           
           // CRITICAL FIX: Ensure we have a valid store before proceeding
           const hasValidStore = userHasStore && data.store && data.store.trim() !== '';
+          console.log('HAS VALID STORE?', hasValidStore);
           
           if (hasValidStore) {
             // USER HAS STORE - Show content, hide modal
@@ -817,9 +847,13 @@
             window.STORE_MODAL_BLOCKING = true;
             
             if (modalElement) {
+              console.log('🔴 SHOWING MODAL - Setting display and classes...');
               modalElement.style.display = 'block';
+              modalElement.style.visibility = 'visible';
+              modalElement.style.opacity = '1';
               modalElement.classList.add('show');
               modalElement.setAttribute('aria-hidden', 'false');
+              modalElement.setAttribute('aria-modal', 'true');
               document.body.classList.add('modal-open');
               document.body.style.overflow = 'hidden';
               
@@ -830,22 +864,59 @@
                 backdrop.className = 'modal-backdrop fade show';
                 backdrop.style.zIndex = '1040';
                 document.body.appendChild(backdrop);
+                console.log('✅ Added modal backdrop');
               }
               
               // CRITICAL FIX: Try to show modal using Bootstrap if available
               if (typeof bootstrap !== 'undefined') {
                 try {
+                  console.log('🔴 Using Bootstrap to show modal...');
                   const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement, {
                     backdrop: 'static',
                     keyboard: false
                   });
                   modalInstance.show();
+                  console.log('✅ Bootstrap modal.show() called');
                 } catch (bootstrapError) {
                   console.warn('⚠️ Bootstrap modal show failed, using fallback:', bootstrapError);
+                  // Fallback: ensure modal is visible
+                  modalElement.style.display = 'block';
+                  modalElement.style.visibility = 'visible';
+                  modalElement.style.zIndex = '9999';
                 }
+              } else {
+                console.warn('⚠️ Bootstrap not available, using manual display');
+                // Ensure modal is visible without Bootstrap
+                modalElement.style.display = 'block';
+                modalElement.style.visibility = 'visible';
+                modalElement.style.zIndex = '9999';
               }
+              
+              // Double-check modal is visible after a short delay
+              setTimeout(() => {
+                const isVisible = modalElement.offsetParent !== null || 
+                                 modalElement.style.display !== 'none' ||
+                                 modalElement.classList.contains('show');
+                console.log('🔍 Modal visibility check:', {
+                  offsetParent: modalElement.offsetParent !== null,
+                  display: modalElement.style.display,
+                  hasShowClass: modalElement.classList.contains('show'),
+                  isVisible: isVisible
+                });
+                if (!isVisible) {
+                  console.error('❌ Modal is not visible! Forcing display...');
+                  modalElement.style.display = 'block';
+                  modalElement.style.visibility = 'visible';
+                  modalElement.style.opacity = '1';
+                  modalElement.style.zIndex = '9999';
+                  modalElement.classList.add('show');
+                }
+              }, 100);
             } else {
               console.error('❌ Modal element not found when trying to show store selection modal');
+              console.error('❌ Attempting to find modal element...');
+              const foundModal = document.getElementById('storeSelectionModal');
+              console.error('❌ Found modal element:', foundModal !== null);
             }
             
             if (mainContent) {
@@ -5767,6 +5838,7 @@
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">CURRENT INVENTORY</h5>
+                  <span class="badge badge-modern" id="availableTagsCount">(0)</span>
                 </div>
                 <div class="search-input-container">
                   <input type="text" id="availableTagsSearch" class="form-control form-control-modern" placeholder="Search available tags...">
@@ -6059,6 +6131,22 @@
     (function() {
       console.log('🚀 FIRST SCRIPT - Modal control starting (checking backend)');
       
+      // CRITICAL: Clear stale sessionStorage on page load
+      // Only keep sessionStorage if it was set in the last 30 seconds (very recent)
+      const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
+      if (sessionTimestamp) {
+        const timestamp = parseInt(sessionTimestamp, 10);
+        const age = Date.now() - timestamp;
+        if (age > 30000) { // 30 seconds
+          console.log('🧹 Clearing stale sessionStorage (older than 30 seconds)');
+          sessionStorage.removeItem('selected_store');
+          sessionStorage.removeItem('store_just_selected');
+          sessionStorage.removeItem('store_selected_timestamp');
+        } else {
+          console.log('✅ sessionStorage is recent (age:', age, 'ms)');
+        }
+      }
+      
       // CRITICAL: Hide main content initially until we know store status
       const mainContent = document.getElementById('mainContent');
       if (mainContent) {
@@ -6067,19 +6155,34 @@
       }
       
       // Always check backend for store selection (don't rely on sessionStorage)
-      const cacheBust = `ts=${Date.now()}`;
+      // CRITICAL: Add force_store_modal parameter to ensure fresh check
+      const cacheBust = `ts=${Date.now()}&force_store_modal=false`;
       fetch(`/api/check-store-required?${cacheBust}`, {
         method: 'GET',
         credentials: 'same-origin',
-        cache: 'no-store'
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
       })
       .then(response => response.json())
       .then(data => {
         console.log('Backend store check response:', data);
+        console.log('🔍 Early check - requires_store:', data.requires_store, 'store:', data.store);
         
-        // Backend returns 'requires_store', not 'required'
-        const requiresStore = data.requires_store === true || data.required === true;
-        const storeName = data?.store || null;
+        // CRITICAL: Backend returns 'requires_store' - if true, we MUST show modal
+        // Only trust store if requires_store is explicitly false AND store exists
+        const requiresStore = data.requires_store === true;
+        const hasValidStore = data.requires_store === false && data.store && data.store.trim() !== '';
+        const storeName = hasValidStore ? data.store : null;
+        
+        console.log('🔍 Early check decision:', {
+          requiresStore: requiresStore,
+          hasValidStore: hasValidStore,
+          storeName: storeName
+        });
         
         const forceShowModal = () => {
           console.log('🔄 Forcing store modal to display...');
@@ -6139,16 +6242,47 @@
           }
         };
         
-        if (requiresStore || !storeName) {
-          console.log('❗ No store selected in backend - showing modal');
+        // CRITICAL: Check BOTH backend AND sessionStorage
+        // Even if backend has a store, if sessionStorage doesn't match, show modal
+        const sessionStore = sessionStorage.getItem('selected_store');
+        const sessionJustSelected = sessionStorage.getItem('store_just_selected') === 'true';
+        const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
+        
+        // Check if sessionStorage timestamp is recent (within 2 minutes)
+        let sessionStoreValid = false;
+        if (sessionStore && sessionJustSelected && sessionTimestamp) {
+          const timestamp = parseInt(sessionTimestamp, 10);
+          const age = Date.now() - timestamp;
+          sessionStoreValid = (age < 120000); // 2 minutes
+          console.log('🔍 sessionStorage check:', {
+            sessionStore,
+            sessionJustSelected,
+            sessionAge: age,
+            sessionStoreValid
+          });
+        }
+        
+        // CRITICAL FIX: Only show content if BOTH backend AND sessionStorage agree
+        // If requires_store is true OR store is missing OR sessionStorage doesn't match, show modal
+        if (requiresStore || !hasValidStore || !sessionStoreValid || sessionStore !== storeName) {
+          console.log('❗ No valid store match - showing modal');
+          console.log('❗ Details:', {
+            requiresStore,
+            hasValidStore,
+            backendStore: data.store,
+            sessionStore,
+            sessionStoreValid,
+            storesMatch: sessionStore === storeName
+          });
           forceShowModal();
           return;
         }
 
-        console.log('✅ Store available from backend:', storeName, '- showing content');
+        console.log('✅ Valid store match (backend + sessionStorage):', storeName, '- showing content');
+        // Ensure sessionStorage is set (should already be, but ensure it)
         sessionStorage.setItem('selected_store', storeName);
-        sessionStorage.removeItem('store_just_selected');
-        sessionStorage.removeItem('store_selected_timestamp');
+        sessionStorage.setItem('store_just_selected', 'true');
+        sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
 
         window.STORE_MODAL_BLOCKING = false;
 

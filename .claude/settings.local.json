@@ -35,7 +35,8 @@
       "Bash(open -a \"Google Chrome\" --args --new-window \"chrome://inspect/#devices\")",
       "Bash(test:*)",
       "Bash(git show:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(endpoint function: update_lineage\"\n- App fails to start ❌\n\nSolution \\(app.py, line 6350\\):\n- Removed first simple endpoint \\(lines 6350-6416\\)\n- Kept second comprehensive endpoint \\(line 11959\\)\n- Second version is better because it:\n  1. Updates product lineage via update_product_lineage\\(\\)\n  2. Updates sovereign_lineage for ALL matching products\n  3. Updates strain lineage if product has strains\n  4. Propagates lineage to all products with same strain\n  5. Includes verification step\n  6. Better error handling and logging\n\nChanges:\n- Deleted first update_lineage\\(\\) function\n- Added comment explaining removal\n- References comprehensive version at line ~11959\n\nResult:\n- No more Flask AssertionError\n- App starts successfully ✅\n- Lineage updates use comprehensive endpoint\n- Strains and products both updated correctly\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []

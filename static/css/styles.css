@@ -3895,7 +3895,7 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 10px 18px !important; /* Increased from default - bigger badge */
     border-radius: 20px !important;
     font-weight: 700 !important;
-    font-size: 1rem !important; /* Larger font size */
+    font-size: 1.2rem !important; /* Increased from 1rem for bigger badge */
     color: white !important;
     text-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
     box-shadow: 0 4px 12px rgba(160, 132, 232, 0.3) !important;
@@ -3905,6 +3905,13 @@ body.modal-open #mainContent.store-selection-disabled,
     align-items: center !important;
     justify-content: center !important;
     flex-shrink: 0 !important; /* Prevent shrinking */
+  }
+  
+  /* Selected tags count badge - make it bigger */
+  #selectedTagsCount {
+    font-size: 1.2rem !important;
+    font-weight: 700 !important;
+    padding: 8px 16px !important;
   }
   
 
@@ -4511,7 +4518,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Filter section */
 .filter-label {
-  font-size: 1.3rem;
+  font-size: 1.7rem !important; /* Increased from 1.3rem for bigger titles */
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 0.4rem;
@@ -8956,6 +8963,7 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 8px 16px;
     border-radius: 20px;
     font-weight: 700;
+    font-size: 1.2rem !important; /* Increased font size for quantity badge */
     text-shadow: 0 2px 4px rgba(0,0,0,0.3);
     box-shadow: 0 4px 12px rgba(160, 132, 232, 0.2);
   }
