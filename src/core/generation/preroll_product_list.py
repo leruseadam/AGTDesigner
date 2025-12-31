@@ -6,9 +6,10 @@ It creates a separate document listing all preroll items grouped by category.
 """
 
 import logging
+import os
 from typing import List, Dict, Any, Optional
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from flask import session
 from flask_caching import Cache
@@ -112,14 +113,39 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                     header_cells[2].text = 'Price'
                     header_cells[3].text = 'Weight'
                     header_cells[4].text = 'Lineage'
-                    header_cells[5].text = 'DOH'
-                    
-                    # Make header row bold
-                    for cell in header_cells:
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                run.font.bold = True
-                                run.font.size = Pt(11)
+
+                    # Add DOH logo to the last header cell instead of text
+                    doh_header_cell = header_cells[5]
+                    doh_logo_path = os.path.join(os.path.dirname(__file__), 'templates', 'DOH.png')
+
+                    # Clear any existing text in the DOH cell
+                    doh_header_cell.text = ''
+
+                    # Add the DOH logo image if it exists
+                    if os.path.exists(doh_logo_path):
+                        try:
+                            # Get the paragraph in the cell and add the image
+                            doh_paragraph = doh_header_cell.paragraphs[0]
+                            doh_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            run = doh_paragraph.add_run()
+                            run.add_picture(doh_logo_path, width=Inches(0.3))  # Tiny logo - 0.3 inches wide
+                            logging.info("PREROLL LIST: Added tiny DOH logo to header")
+                        except Exception as img_error:
+                            # Fallback to text if image fails
+                            doh_header_cell.text = 'DOH'
+                            logging.warning(f"PREROLL LIST: Failed to add DOH logo, using text: {img_error}")
+                    else:
+                        # Fallback to text if image doesn't exist
+                        doh_header_cell.text = 'DOH'
+                        logging.warning(f"PREROLL LIST: DOH logo not found at {doh_logo_path}, using text")
+
+                    # Make header row bold (except DOH cell which has image)
+                    for i, cell in enumerate(header_cells):
+                        if i != 5:  # Skip DOH cell since it has an image
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    run.font.bold = True
+                                    run.font.size = Pt(11)
                     
                     # Add items to table
                     for item in brand_items:
