@@ -347,7 +347,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 #selectedTags .tag-name,
 #selectedTags .tag-row,
 #selectedTags .tag-item * {
-  font-size: 22px !important;
+  font-size: 24px !important; /* Increased from 22px by 2px */
   line-height: 1.5 !important;
 }
 
@@ -2260,7 +2260,7 @@ body.modal-open #mainContent.store-selection-disabled,
   #availableTags .tag-entry,
   #availableTags .tag-name,
   #availableTags .tag-text {
-    font-size: 14px !important;
+    font-size: 16px !important; /* Increased from 14px by 2px */
   }
   
   /* Match selected tags font styling to available tags */
@@ -2268,7 +2268,7 @@ body.modal-open #mainContent.store-selection-disabled,
   #selectedTags .tag-entry,
   #selectedTags .tag-name,
   #selectedTags .tag-text {
-    font-size: 14px !important;
+    font-size: 16px !important; /* Increased from 14px by 2px */
   }
   
   /* Fix selected tags container height */
@@ -3741,14 +3741,14 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-left: 6px !important;
   }
   .vendor-header {
-      font-size: 1.5rem !important;
+      font-size: 1.625rem !important; /* Increased from 1.5rem (24px) to ~26px */
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 1.3rem !important;
+      font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -3975,7 +3975,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 30px !important;
     max-width: 40px !important;
     width: 35px !important;
-    font-size: 8px !important;
+    font-size: 7px !important; /* Reduced from 8px for smaller font */
     padding: 2px 6px 2px 3px !important;
     height: 14px !important;
     line-height: 1.0 !important;
@@ -4840,7 +4840,7 @@ body.modal-open #mainContent.store-selection-disabled,
     max-width: 60px;
     min-width: 40px;
     padding: 0.1rem 0.3rem;
-    font-size: 0.5em !important; /* Much smaller font size */
+    font-size: 0.4em !important; /* Reduced from 0.5em for smaller font */
     height: 1.6em;
     line-height: 1.2;
   }
@@ -4865,7 +4865,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--primary-color);
     font-weight: 600;
     margin-bottom: 0.75rem;
-    font-size: 1.5rem !important;
+    font-size: 1.625rem !important; /* Increased from 1.5rem (24px) to ~26px */
     margin-left: 0 !important;
     padding-left: 0 !important;
     position: relative;
@@ -4894,7 +4894,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--secondary-color);
     font-weight: 500;
     margin-bottom: 0.5rem;
-    font-size: 1.3rem !important;
+    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
     margin-left: 0 !important;
     padding-left: 0 !important;
     /* Ensure header stays above content */
@@ -4913,7 +4913,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--accent-color);
     font-weight: 500;
     margin-bottom: 0.25rem;
-    font-size: 1.3rem !important;
+    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
@@ -4936,7 +4936,7 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .weight-header {
-    font-size: 1.3rem !important;
+    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
     color: var(--text-muted);
     margin-bottom: 0.25rem;
     margin-left: 0 !important;
@@ -6196,14 +6196,14 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.5rem !important;
+    font-size: 1.625rem !important; /* Increased from 1.5rem (24px) to ~26px */
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.3rem !important;
+    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
@@ -6211,7 +6211,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Don't override with smaller size */
   }
   .lineage-dropdown-mini {
-    font-size: 0.5em !important; /* Much smaller font size */
+    font-size: 0.4em !important; /* Reduced from 0.5em for smaller font */
     padding: 2px 6px;
     min-width: 40px;
     max-width: 60px;
@@ -6277,7 +6277,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 60px !important;
     max-width: 70px !important;
     width: 65px !important;
-    font-size: 0.5em !important; /* Much smaller font size */
+    font-size: 0.4em !important; /* Reduced from 0.5em for smaller font */
     padding: 4px 14px 4px 4px !important; /* Right padding for arrow, left padding for text */
     background: rgba(255, 255, 255, 0.15) !important; /* Slightly more visible */
     color: white !important;
@@ -6327,7 +6327,7 @@ body.modal-open #mainContent.store-selection-disabled,
     gap: 4px !important;
   }
   .tag-name {
-      font-size: 14px !important; /* Normal font size */
+      font-size: 16px !important; /* Increased from 14px by 2px */
       line-height: 1.4 !important;
     white-space: normal !important;
     word-break: break-word !important;
@@ -6340,7 +6340,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .lineage-dropdown,
   .lineage-dropdown-mini,
   .form-select.lineage-dropdown {
-    font-size: 0.5em !important; /* Much smaller font size */
+    font-size: 0.4em !important; /* Reduced from 0.5em for smaller font */
     min-width: 60px !important;
     max-width: 70px !important;
     width: 65px !important;

@@ -1260,16 +1260,27 @@ class TemplateProcessor:
             chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
             self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
             
-            # OPTIMIZATION: Pre-load all brand and vendor data in batch to avoid N+1 queries
-            # This reduces 100+ queries for 100 products to just 2 queries total
+            # OPTIMIZATION: Pre-load all brand, vendor, lineage, and strain data in batch to avoid N+1 queries
+            # This reduces 200+ queries for 100 products to just 3-4 queries total
             product_brand_cache = {}
             product_vendor_cache = {}
+            product_lineage_cache = {}
+            strain_info_cache = {}
+            joint_ratio_cache = {}
             try:
                 from src.core.data.product_database import get_product_database
                 product_db = get_product_database()
                 if product_db:
                     product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
                     product_names = [n for n in product_names if n]
+                    
+                    # Collect unique strain names for batch loading
+                    strain_names = set()
+                    for r in chunk:
+                        strain = r.get('ProductStrain', '') or r.get('Product Strain', '')
+                        if strain:
+                            strain_names.add(strain)
+                    
                     if product_names:
                         try:
                             conn = product_db._get_connection()
@@ -1312,10 +1323,63 @@ class TemplateProcessor:
                                 pname, vendor = row_result
                                 if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_vendor_cache[pname] = str(vendor).strip()
+                            
+                            # Load lineage data (sovereign_lineage, Lineage, canonical_lineage)
+                            batch_lineage_query = f'''
+                                SELECT "Product Name*", sovereign_lineage, "Lineage", canonical_lineage
+                                FROM products
+                                WHERE "Product Name*" IN ({placeholders})
+                            '''
+                            cursor.execute(batch_lineage_query, product_names)
+                            for row_result in cursor.fetchall():
+                                pname, sov_lineage, lineage, canon_lineage = row_result
+                                # Priority: sovereign_lineage > Lineage > canonical_lineage
+                                if sov_lineage and str(sov_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                    product_lineage_cache[pname] = str(sov_lineage).strip()
+                                elif lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                    product_lineage_cache[pname] = str(lineage).strip()
+                                elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                    product_lineage_cache[pname] = str(canon_lineage).strip()
+                            
+                            # Load JointRatio data
+                            batch_joint_ratio_query = f'''
+                                SELECT "Product Name*", JointRatio
+                                FROM products
+                                WHERE "Product Name*" IN ({placeholders})
+                                AND JointRatio IS NOT NULL
+                                AND JointRatio != ""
+                            '''
+                            cursor.execute(batch_joint_ratio_query, product_names)
+                            for row_result in cursor.fetchall():
+                                pname, joint_ratio = row_result
+                                if joint_ratio and str(joint_ratio).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                    joint_ratio_cache[pname] = str(joint_ratio).strip()
+                            
+                            # Batch load strain info
+                            if strain_names:
+                                strain_placeholders = ','.join(['?'] * len(strain_names))
+                                batch_strain_query = f'''
+                                    SELECT strain_name, display_lineage, sovereign_lineage, canonical_lineage
+                                    FROM strains
+                                    WHERE strain_name IN ({strain_placeholders})
+                                '''
+                                cursor.execute(batch_strain_query, list(strain_names))
+                                for row_result in cursor.fetchall():
+                                    strain_name, display_lineage, sov_lineage, canon_lineage = row_result
+                                    strain_info = {}
+                                    # Priority: display_lineage > sovereign_lineage > canonical_lineage
+                                    if display_lineage and str(display_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                        strain_info['display_lineage'] = str(display_lineage).strip()
+                                    elif sov_lineage and str(sov_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                        strain_info['sovereign_lineage'] = str(sov_lineage).strip()
+                                    elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                        strain_info['canonical_lineage'] = str(canon_lineage).strip()
+                                    if strain_info:
+                                        strain_info_cache[strain_name] = strain_info
                         except Exception as batch_err:
-                            self.logger.warning(f"Batch brand/vendor query failed: {batch_err}")
+                            self.logger.warning(f"Batch data query failed: {batch_err}")
             except Exception as e:
-                self.logger.warning(f"Failed to pre-load brand/vendor data: {e}")
+                self.logger.warning(f"Failed to pre-load batch data: {e}")
             
             # Build context for each record in the chunk
             context = {}
@@ -1339,8 +1403,9 @@ class TemplateProcessor:
                 if self.template_type == 'inventory':
                     label_context = self._build_inventory_context(record)
                 else:
-                    # Pass brand and vendor cache to avoid N+1 queries
-                    label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache)
+                    # Pass all caches to avoid N+1 queries
+                    label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
+                                                               product_lineage_cache, strain_info_cache, joint_ratio_cache)
                 context[f'Label{i+1}'] = label_context
                 # Debug logging to check field values and order
                 product_name = record.get('ProductName', 'Unknown')
@@ -1603,7 +1668,14 @@ class TemplateProcessor:
             'QR': '',
         }
     
-    def _build_label_context(self, record, doc, product_brand_cache=None, product_vendor_cache=None):
+    def _build_label_context(self, record, doc, product_brand_cache=None, product_vendor_cache=None, 
+                             product_lineage_cache=None, strain_info_cache=None, joint_ratio_cache=None):
+        # Initialize caches to empty dicts if None
+        product_brand_cache = product_brand_cache or {}
+        product_vendor_cache = product_vendor_cache or {}
+        product_lineage_cache = product_lineage_cache or {}
+        strain_info_cache = strain_info_cache or {}
+        joint_ratio_cache = joint_ratio_cache or {}
         """Ultra-optimized label context building for maximum performance."""
         # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
@@ -1617,6 +1689,22 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
+        
+        # CRITICAL FIX: Read vendor directly from record first - it should already be in the Excel column
+        # Check label_context first (from dict copy), then record as fallback
+        vendor_from_record = None
+        vendor_field_names = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'ProductVendor', 'vendor']
+        for field_name in vendor_field_names:
+            # Check label_context first (already copied from record)
+            val = label_context.get(field_name) or record.get(field_name)
+            if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                vendor_from_record = str(val).strip()
+                self.logger.debug(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
+                break
+        
+        # Store vendor early so it's available throughout processing
+        if vendor_from_record:
+            label_context['_vendor_from_record'] = vendor_from_record
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
@@ -1860,19 +1948,15 @@ class TemplateProcessor:
                 product_name = record.get('ProductName') or record.get('Product Name*', '')
                 if product_name:
                     try:
-                        # Get JointRatio directly from database
-                        from src.core.data.product_database import get_product_database
-                        product_db = get_product_database()
-                        if product_db:
-                            conn = product_db._get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute('SELECT JointRatio FROM products WHERE "Product Name*" = ?', (product_name,))
-                            result = cursor.fetchone()
-                            if result and result[0]:
-                                joint_ratio = result[0]
-                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from database for '{product_name}'")
+                        # Use pre-loaded cache instead of individual query
+                        if joint_ratio_cache and product_name:
+                            joint_ratio = joint_ratio_cache.get(product_name)
+                            if joint_ratio:
+                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
+                            else:
+                                self.logger.debug(f"No JointRatio in cache for '{product_name}'")
                     except Exception as e:
-                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from database: {e}")
+                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from cache: {e}")
             
             self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
@@ -2291,73 +2375,41 @@ class TemplateProcessor:
                 lineage_val = str(lineage_text).strip().upper()
                 self.logger.info(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
             else:
-                # PRIORITY 2: Fallback to database lookup if record lineage is empty
-                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking database...")
-                try:
-                    from app import get_product_database, get_current_store_name
-                    store_name = get_current_store_name()
-                    product_db = get_product_database(store_name)
-                    
-                    # CRITICAL: Use record lineage first (already enriched, avoids sativa hybrid override)
-                    # Only query database if record lineage is missing
-                    product_name = record.get('Product Name*', record.get('ProductName', ''))
-                    db_lineage = None
-                    # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-                    record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-                    if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
-                        # Use record lineage (already set correctly by enrichment)
-                        db_lineage = str(record_lineage).strip()
-                        if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                            self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
-                    elif product_name:
-                        # Query database directly to avoid sativa hybrid override
-                        try:
-                            conn = product_db._get_connection()
-                            cursor = conn.cursor()
-                            # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
-                            cursor.execute('''
-                                SELECT sovereign_lineage, "Lineage", "canonical_lineage"
-                                FROM products
-                                WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                                ORDER BY id DESC
-                                LIMIT 1
-                            ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
-                            result = cursor.fetchone()
-                            # Priority: sovereign_lineage > Lineage > canonical_lineage
-                            if result and result[0]:
-                                db_lineage = str(result[0]).strip()
-                                self.logger.info(f"🔒 PREROLL: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
-                            elif result and result[1]:
-                                db_lineage = str(result[1]).strip()
-                            elif result and result[2]:
-                                db_lineage = str(result[2]).strip()
-                        except Exception as db_err:
-                            self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
-                            # Fallback to get_product_lineage if direct query fails
-                            db_lineage = product_db.get_product_lineage(product_name)
-                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                        lineage_val = str(db_lineage).strip().upper()
-                        self.logger.info(f"✅ Using database product lineage fallback: '{lineage_val}' for '{product_name}'")
-                    
-                    # If no product-level lineage, try strain-level
-                    if not lineage_val and product_strain:
-                        strain_info = product_db.get_strain_info(product_strain)
-                        if strain_info:
-                            preferred = (
-                                strain_info.get('display_lineage') or
-                                strain_info.get('sovereign_lineage') or
-                                strain_info.get('canonical_lineage')
-                            )
-                            if preferred:
-                                lineage_val = str(preferred).strip().upper()
-                                self.logger.info(f"✅ Using database strain lineage fallback: '{lineage_val}' for strain '{product_strain}'")
-                    
-                    if not lineage_val:
-                        self.logger.debug(f"No lineage found in record or database")
-                except Exception as e:
-                    # Default fallback if database lookup fails
-                    lineage_val = ""
-                    self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
+                # PRIORITY 2: Fallback to cache lookup if record lineage is empty
+                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking cache...")
+                db_lineage = None
+                # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
+                record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
+                if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                    # Use record lineage (already set correctly by enrichment)
+                    db_lineage = str(record_lineage).strip()
+                    if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
+                        self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
+                elif product_name and product_lineage_cache:
+                    # Use pre-loaded cache instead of individual query
+                    db_lineage = product_lineage_cache.get(product_name)
+                    if db_lineage:
+                        self.logger.info(f"✅ Using cached lineage '{db_lineage}' for '{product_name}'")
+                
+                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                    lineage_val = str(db_lineage).strip().upper()
+                    self.logger.info(f"✅ Using product lineage: '{lineage_val}' for '{product_name}'")
+                
+                # If no product-level lineage, try strain-level from cache
+                if not lineage_val and product_strain and strain_info_cache:
+                    strain_info = strain_info_cache.get(product_strain)
+                    if strain_info:
+                        preferred = (
+                            strain_info.get('display_lineage') or
+                            strain_info.get('sovereign_lineage') or
+                            strain_info.get('canonical_lineage')
+                        )
+                        if preferred:
+                            lineage_val = str(preferred).strip().upper()
+                            self.logger.info(f"✅ Using cached strain lineage: '{lineage_val}' for strain '{product_strain}'")
+                
+                if not lineage_val:
+                    self.logger.debug(f"No lineage found in record or cache")
             
             # CRITICAL FIX: Ensure classic types always have lineage data
             if not lineage_val or lineage_val.strip() == "":
@@ -2395,26 +2447,42 @@ class TemplateProcessor:
                 self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
             
             # Set ProductVendor to actual vendor/supplier for classic types
-            # Get vendor from record, not from product_brand
-            # CRITICAL: Check all possible vendor field names with comprehensive fallback
+            # CRITICAL: Try database cache first, then fallback to record
             vendor_val = None
-            vendor_fields = [
-                'Vendor/Supplier*',
-                'Vendor/Supplier',
-                'Vendor',
-                'ProductVendor',
-                'vendor',
-                'Vendor/Supplier *',  # Handle space variations
-                'Vendor/Supplier* ',  # Handle trailing space
-            ]
             
-            # Try each field name
-            for field in vendor_fields:
-                val = record.get(field)
-                if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                    vendor_val = val
-                    self.logger.debug(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}'")
-                    break
+            # PRIORITY 1: Try to enrich vendor from pre-loaded cache
+            try:
+                cached_vendor = product_vendor_cache.get(product_name, "")
+                if cached_vendor and str(cached_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                    vendor_val = cached_vendor
+                    self.logger.info(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
+            except Exception as e:
+                self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
+            
+            # PRIORITY 2: Use vendor we already read from record at the start
+            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
+                vendor_val = label_context.get('_vendor_from_record')
+                if vendor_val:
+                    self.logger.debug(f"✅ Using vendor from record: '{vendor_val}' for '{product_name}'")
+                else:
+                    # Fallback: try record fields directly
+                    vendor_fields = [
+                        'Vendor/Supplier*',
+                        'Vendor/Supplier',
+                        'Vendor',
+                        'ProductVendor',
+                        'vendor',
+                        'Vendor/Supplier *',  # Handle space variations
+                        'Vendor/Supplier* ',  # Handle trailing space
+                    ]
+                    
+                    # Try each field name
+                    for field in vendor_fields:
+                        val = record.get(field)
+                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                            vendor_val = val
+                            self.logger.debug(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}'")
+                            break
             
             # If still no vendor, log all available fields for debugging
             if not vendor_val or not str(vendor_val).strip():
@@ -3085,9 +3153,14 @@ class TemplateProcessor:
                     elif str(current_vendor).strip() == '':
                         vendor_is_empty = True
             
-            if vendor_is_empty:
-                # Try to enrich vendor from pre-loaded cache first
-                enriched_vendor = ""
+        if vendor_is_empty:
+            # PRIORITY 1: Use vendor we already read from record at the start
+            enriched_vendor = label_context.get('_vendor_from_record', '')
+            if enriched_vendor:
+                self.logger.debug(f"✅ Using vendor from record: '{enriched_vendor}' for '{product_name}'")
+            
+            # PRIORITY 2: Try to enrich vendor from pre-loaded cache if not in record
+            if not enriched_vendor:
                 try:
                     # Use cached vendor data (loaded in batch before loop)
                     enriched_vendor = product_vendor_cache.get(product_name, "")
@@ -3095,9 +3168,9 @@ class TemplateProcessor:
                         self.logger.info(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
                 except Exception as e:
                     self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-                
-                # If database enrichment failed, fallback to record
-                if not enriched_vendor:
+            
+            # PRIORITY 3: Fallback to record fields directly if still not found
+            if not enriched_vendor:
                     product_type = (label_context.get('ProductType', '').lower() or 
                                    label_context.get('Product Type*', '').lower())
                     
