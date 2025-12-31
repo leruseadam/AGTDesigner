@@ -9500,24 +9500,29 @@ def get_available_tags():
                             fallback_count = 0
                             for tag in simple_tags:
                                 product_name = tag.get('Product Name*')
+                                # CRITICAL FIX: Only set lineage if it's missing to prevent overwriting user changes
                                 if product_name and product_name in lineage_map:
-                                    # Use database lineage (product exists in database)
-                                    db_lineage_clean = lineage_map[product_name]
-                                    tag['currentLineage'] = db_lineage_clean
-                                    tag['canonical_lineage'] = db_lineage_clean
-                                    tag['Lineage'] = db_lineage_clean
-                                    tag['lineage'] = db_lineage_clean.lower()
-                                    enriched_count += 1
+                                    # Only use database lineage if tag doesn't already have canonical_lineage/currentLineage
+                                    if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                                        # Use database lineage (product exists in database)
+                                        db_lineage_clean = lineage_map[product_name]
+                                        tag['currentLineage'] = db_lineage_clean
+                                        tag['canonical_lineage'] = db_lineage_clean
+                                        tag['Lineage'] = db_lineage_clean
+                                        tag['lineage'] = db_lineage_clean.lower()
+                                        enriched_count += 1
                                 else:
                                     # Fallback: Use Excel Lineage field for canonical fields
                                     # This handles products that haven't been saved to database yet
-                                    excel_lineage = tag.get('Lineage')
-                                    if excel_lineage and str(excel_lineage).strip():
-                                        excel_lineage_clean = str(excel_lineage).strip().upper()
-                                        tag['currentLineage'] = excel_lineage_clean
-                                        tag['canonical_lineage'] = excel_lineage_clean
-                                        tag['lineage'] = excel_lineage_clean.lower()
-                                        fallback_count += 1
+                                    # Only set if lineage is missing
+                                    if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                                        excel_lineage = tag.get('Lineage')
+                                        if excel_lineage and str(excel_lineage).strip():
+                                            excel_lineage_clean = str(excel_lineage).strip().upper()
+                                            tag['currentLineage'] = excel_lineage_clean
+                                            tag['canonical_lineage'] = excel_lineage_clean
+                                            tag['lineage'] = excel_lineage_clean.lower()
+                                            fallback_count += 1
 
                             logging.info(f"✅ SIMPLE PATH: Enriched {enriched_count}/{len(simple_tags)} tags with database lineage, {fallback_count} with Excel fallback")
 
@@ -9779,12 +9784,15 @@ def get_available_tags():
                                 # Apply lineage to all tags
                                 for tag in excel_tags:
                                     product_name = tag.get('Product Name*')
+                                    # CRITICAL FIX: Only set lineage if it's missing to prevent overwriting user changes
                                     if product_name and product_name in lineage_map:
-                                        db_lineage_clean = lineage_map[product_name]
-                                        tag['currentLineage'] = db_lineage_clean
-                                        tag['canonical_lineage'] = db_lineage_clean
-                                        tag['Lineage'] = db_lineage_clean
-                                        tag['lineage'] = db_lineage_clean.lower()
+                                        # Only use database lineage if tag doesn't already have canonical_lineage/currentLineage
+                                        if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                                            db_lineage_clean = lineage_map[product_name]
+                                            tag['currentLineage'] = db_lineage_clean
+                                            tag['canonical_lineage'] = db_lineage_clean
+                                            tag['Lineage'] = db_lineage_clean
+                                            tag['lineage'] = db_lineage_clean.lower()
 
                                 logging.info(f"✅ Database lineage enrichment complete ({len(lineage_map)} products enriched)")
                     except Exception as enrich_err:
@@ -9910,12 +9918,15 @@ def get_available_tags():
                                 # Apply lineage to all tags
                                 for tag in excel_tags:
                                     product_name = tag.get('Product Name*')
+                                    # CRITICAL FIX: Only set lineage if it's missing to prevent overwriting user changes
                                     if product_name and product_name in lineage_map:
-                                        db_lineage_clean = lineage_map[product_name]
-                                        tag['currentLineage'] = db_lineage_clean
-                                        tag['canonical_lineage'] = db_lineage_clean
-                                        tag['Lineage'] = db_lineage_clean
-                                        tag['lineage'] = db_lineage_clean.lower()
+                                        # Only use database lineage if tag doesn't already have canonical_lineage/currentLineage
+                                        if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                                            db_lineage_clean = lineage_map[product_name]
+                                            tag['currentLineage'] = db_lineage_clean
+                                            tag['canonical_lineage'] = db_lineage_clean
+                                            tag['Lineage'] = db_lineage_clean
+                                            tag['lineage'] = db_lineage_clean.lower()
 
                                 logging.info(f"✅ Database lineage enrichment complete ({len(lineage_map)} products enriched)")
                     except Exception as enrich_err:
@@ -10243,16 +10254,14 @@ def get_available_tags():
                                     continue
                                 
                                 db_lin_clean = str(db_lin).strip().upper()
-                                # CRITICAL: Always update ALL lineage fields, even if they match
-                                # This ensures frontend gets fresh values even if cached had old lineage
-                                old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
-                                
-                                # CRITICAL FIX: Always update from database, even if values appear to match
-                                # Database is the source of truth - always use database values
-                                tag['currentLineage'] = db_lin_clean
-                                tag['canonical_lineage'] = db_lin_clean
-                                tag['Lineage'] = db_lin_clean
-                                tag['lineage'] = db_lin_clean.lower()
+                                # CRITICAL FIX: Only update lineage if it's missing to prevent overwriting user changes
+                                # Check if tag already has canonical_lineage/currentLineage set (user may have manually set it)
+                                if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                                    # Only set from database if lineage is missing
+                                    tag['currentLineage'] = db_lin_clean
+                                    tag['canonical_lineage'] = db_lin_clean
+                                    tag['Lineage'] = db_lin_clean
+                                    tag['lineage'] = db_lin_clean.lower()
                                 
                                 # Always count as updated to ensure frontend gets fresh data
                                 updated += 1
@@ -10295,15 +10304,17 @@ def get_available_tags():
                                                     db_lin_clean = str(db_lineage).strip().upper()
                                                     old_lineage = str(tag.get('Lineage','') or tag.get('currentLineage','') or tag.get('canonical_lineage','')).strip().upper()
                                                     
-                                                    tag['currentLineage'] = db_lin_clean
-                                                    tag['canonical_lineage'] = db_lin_clean
-                                                    tag['Lineage'] = db_lin_clean
-                                                    tag['lineage'] = db_lin_clean.lower()
-                                                    
-                                                    individual_updated_count += 1
-                                                    updated += 1
-                                                    if old_lineage != db_lin_clean:
-                                                        logging.debug(f"🔄 Lineage updated (individual query): '{name}' - '{old_lineage}' → '{db_lin_clean}'")
+                                                    # CRITICAL FIX: Only set lineage if it's missing to prevent overwriting user changes
+                                                    if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                                                        tag['currentLineage'] = db_lin_clean
+                                                        tag['canonical_lineage'] = db_lin_clean
+                                                        tag['Lineage'] = db_lin_clean
+                                                        tag['lineage'] = db_lin_clean.lower()
+                                                        
+                                                        individual_updated_count += 1
+                                                        updated += 1
+                                                        if old_lineage != db_lin_clean:
+                                                            logging.debug(f"🔄 Lineage updated (individual query): '{name}' - '{old_lineage}' → '{db_lin_clean}'")
                                             except Exception as individual_err:
                                                 logging.debug(f"Individual lineage query failed for '{name}': {individual_err}")
                                                 # Ensure fields are consistent even on error

@@ -3058,7 +3058,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Generate button - Professional and Prominent */
   .control-panel #generateBtn {
-    margin: 0.2rem auto !important;
+    margin: 1.5rem auto 0.2rem auto !important; /* Increased top margin for healthy gap from template select */
     padding: 0.7rem 1.2rem !important;
     font-size: 1.05rem !important;
     width: 100% !important;
