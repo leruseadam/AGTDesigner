@@ -1426,7 +1426,17 @@ class TemplateProcessor:
                 # Debug logging to check field values and order (only for first few labels to reduce overhead)
                 if i < 3:
                     product_name = record.get('ProductName', 'Unknown')
-                    self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
+                    product_type = record.get('ProductType', '') or record.get('Product Type*', '')
+                    product_vendor = label_context.get('ProductVendor', 'NOT_FOUND')
+                    # Unwrap vendor to see actual value
+                    if product_vendor != 'NOT_FOUND' and 'PRODUCTVENDOR_START' in str(product_vendor):
+                        try:
+                            from src.core.formatting.markers import unwrap_marker
+                            vendor_value = unwrap_marker(product_vendor, 'PRODUCTVENDOR')
+                            product_vendor = f"'{vendor_value}' (wrapped)"
+                        except:
+                            pass
+                    self.logger.info(f"🔍 CONTEXT DEBUG Label{i+1} -> {product_name} (type: {product_type}) - ProductVendor: {product_vendor}, ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}'")
             
             # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
             # to prevent Jinja template errors when template references missing labels
@@ -3421,7 +3431,8 @@ class TemplateProcessor:
             else:
                 self.logger.debug(f"FINAL: No JointRatio found for {product_type}")
 
-        # FINAL SAFETY CHECK: Ensure ProductVendor is set for classic types
+        # FINAL SAFETY CHECK: Ensure ProductVendor is ALWAYS set for classic types (even if empty)
+        # This ensures the template placeholder {{Label1.ProductVendor}} is always replaced
         product_type_final = (label_context.get('ProductType', '').lower() or
                              label_context.get('Product Type*', '').lower())
         from src.core.constants import CLASSIC_TYPES
@@ -3432,13 +3443,22 @@ class TemplateProcessor:
 
             # If empty, try one more time to get vendor from _vendor_from_record or record
             if vendor_is_empty:
-                fallback_vendor = label_context.get('_vendor_from_record') or record.get('Vendor/Supplier*') or record.get('Vendor')
-                if fallback_vendor and str(fallback_vendor).strip():
+                fallback_vendor = label_context.get('_vendor_from_record') or record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor')
+                if fallback_vendor and str(fallback_vendor).strip() and str(fallback_vendor).lower() not in ['nan', 'none', 'null', '']:
                     if self.template_type == 'vertical':
                         label_context['ProductVendor'] = str(fallback_vendor).strip()
                     else:
                         label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(fallback_vendor).strip()}PRODUCTVENDOR_END"
                     self.logger.info(f"✅ FINAL CHECK: Set ProductVendor to '{fallback_vendor}' for classic type (was empty)")
+                else:
+                    # CRITICAL: Always set ProductVendor to empty string if no vendor found
+                    # This ensures the template placeholder is replaced (not left as-is)
+                    label_context['ProductVendor'] = ""
+                    self.logger.warning(f"⚠️ FINAL CHECK: ProductVendor set to empty for classic type '{product_type_final}' (no vendor data found anywhere)")
+            # Ensure ProductVendor exists in context even if it wasn't empty
+            if 'ProductVendor' not in label_context:
+                label_context['ProductVendor'] = ""
+                self.logger.warning(f"⚠️ FINAL CHECK: ProductVendor was missing from context, set to empty")
 
         return label_context
 
