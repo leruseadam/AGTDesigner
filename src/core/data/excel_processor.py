@@ -6055,8 +6055,9 @@ class ExcelProcessor:
             'Capsule': '$25.00',
             'rso/co2 tankers': '$40.00'
         }
-        
-        return price_ranges.get(product_type, '$25.00')
+
+        # No default fallback - return empty if product type not recognized
+        return price_ranges.get(product_type, '')
     
     def _infer_weight_from_name(self, product_name, product_type):
         """Infer weight and units from product name and type."""
@@ -6703,8 +6704,8 @@ class ExcelProcessor:
                     'Quantity*': '1',
                     'Quantity': '1',
                     'Units': educated_guess.get("units", "g"),
-                    'Price': educated_guess.get("price", "25"),
-                    'Price* (Tier Name for Bulk)': educated_guess.get("price", "25"),
+                    'Price': educated_guess.get("price", ""),
+                    'Price* (Tier Name for Bulk)': educated_guess.get("price", ""),
                     'Source': f'Educated Guess ({educated_guess.get("confidence", "medium")})',
                     'Quantity Received*': '1',
                     'Weight Unit* (grams/gm or ounces/oz)': educated_guess.get("units", "g"),

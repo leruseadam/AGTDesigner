@@ -5215,7 +5215,7 @@ class JSONMatcher:
                                             'strain_name': best_match.strain_name,
                                             'lineage': strain_info.get('canonical_lineage', 'HYBRID'),
                                             'product_type': product_features.get('product_type', 'Core Flower'),
-                                            'price': '25',  # Default price
+                                            'price': '',  # No default price - must come from data
                                             'weight': extracted_weight,
                                             'units': 'g',
                                             'description': formatted_description,  # Use proper tag format
