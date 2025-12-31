@@ -152,6 +152,7 @@ class TemplateProcessor:
         self._expanded_template_buffer = self._expand_template_if_needed()
         self._dynamic_template_created = False  # Track if dynamic template was created
         self._last_dynamic_count = None  # Track last product count used to build dynamic buffer
+        self._vendor_fallback = None  # Vendor to use as fallback when records are vendor-filtered but individual records have missing vendor
         
         # Set chunk size based on template type with performance limits
         if not IS_PYTHONANYWHERE:
@@ -1069,6 +1070,28 @@ class TemplateProcessor:
         documents = []
         # FULLY DISABLE CHUNKING for horizontal, vertical, and double templates
         try:
+            # VENDOR FALLBACK: Detect if records were filtered by vendor (all have same vendor)
+            # If so, use that vendor as fallback for records with missing vendor
+            vendor_counts = {}
+            for record in records:
+                vendor = (record.get('Vendor') or record.get('Vendor/Supplier*') or 
+                         record.get('Vendor/Supplier') or record.get('ProductVendor', ''))
+                if vendor and not pd.isna(vendor) and str(vendor).strip() and str(vendor).lower() not in ['nan', 'none', 'null', '']:
+                    vendor_str = str(vendor).strip()
+                    vendor_counts[vendor_str] = vendor_counts.get(vendor_str, 0) + 1
+            
+            # If one vendor dominates (appears in >50% of records), use it as fallback
+            if vendor_counts:
+                total_with_vendor = sum(vendor_counts.values())
+                most_common_vendor = max(vendor_counts.items(), key=lambda x: x[1])
+                if most_common_vendor[1] >= total_with_vendor * 0.5 and most_common_vendor[1] >= 2:
+                    self._vendor_fallback = most_common_vendor[0]
+                    self.logger.info(f"✅ VENDOR FALLBACK: Detected vendor filtering - '{self._vendor_fallback}' appears in {most_common_vendor[1]}/{len(records)} records. Will use as fallback for missing vendors.")
+                else:
+                    self._vendor_fallback = None
+            else:
+                self._vendor_fallback = None
+            
             if self.template_type in ['horizontal', 'vertical', 'double']:
                 self.chunk_size = len(records)
                 self.logger.info(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
@@ -1767,6 +1790,11 @@ class TemplateProcessor:
                     vendor_from_record = str(val).strip()
                     self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
                     break
+        
+        # VENDOR FALLBACK: If vendor not found in record but we detected vendor filtering, use the fallback vendor
+        if not vendor_from_record and hasattr(self, '_vendor_fallback') and self._vendor_fallback:
+            vendor_from_record = self._vendor_fallback
+            self.logger.info(f"✅ VENDOR FALLBACK: Using detected vendor '{vendor_from_record}' for '{product_name}' (vendor was missing from record)")
         
         # Store vendor early so it's available throughout processing
         if vendor_from_record:
