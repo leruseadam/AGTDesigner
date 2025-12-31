@@ -755,10 +755,10 @@ def load_and_cleanup_on_startup():
 # Uncomment ONE of the following:
 
 # Force store selection on every server restart:
-# clear_all_on_startup()
+clear_all_on_startup()
 
 # OR keep 12-hour persistence across restarts:
-load_and_cleanup_on_startup()
+# load_and_cleanup_on_startup()
 
 # ------------------------------------------------------------------------------
 # Storage cleanup (uploads + stray DB files)
@@ -11971,7 +11971,7 @@ def update_lineage():
                     UPDATE products
                     SET Lineage = ?, sovereign_lineage = ?
                     WHERE strain_id = ?
-                    AND product_type IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
+                    AND "Product Type*" IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
                 """, (new_lineage, new_lineage, strain_id))
                 strain_linked_count = cursor.rowcount
 
@@ -11982,7 +11982,7 @@ def update_lineage():
                     SET Lineage = ?, sovereign_lineage = ?
                     WHERE LOWER(TRIM(strain_name)) = LOWER(TRIM(?))
                     AND (strain_id IS NULL OR strain_id != ?)
-                    AND product_type IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
+                    AND "Product Type*" IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
                 """, (new_lineage, new_lineage, strain_name, strain_id))
                 name_match_count = cursor.rowcount
 
