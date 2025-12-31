@@ -2594,7 +2594,7 @@ class TemplateProcessor:
             existing_vendor_has_content = False
             if existing_vendor and str(existing_vendor).strip():
                 try:
-                    from src.core.formatting.markers import unwrap_marker
+                    # unwrap_marker is already imported at the top of the file
                     unwrapped = unwrap_marker(str(existing_vendor), 'PRODUCTVENDOR')
                     if unwrapped and str(unwrapped).strip():
                         existing_vendor_has_content = True
