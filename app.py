@@ -18105,6 +18105,7 @@ def update_preroll_items_from_excel(df, session_id=None):
                 'vendor': str(row.get('Vendor', row.get('Vendor/Supplier*', ''))),
                 'strain': str(row.get('Product Strain', row.get('Strain', ''))),
                 'lineage': str(row.get('Lineage', '')),
+                'doh': str(row.get('DOH', row.get('DOH Compliant', ''))),
             }
             # Replace NaN values with empty strings
             for key, value in item.items():
@@ -22811,6 +22812,7 @@ def display_preroll_items(group_id):
             vendor = item.get('vendor', '')
             strain = item.get('strain', '')
             lineage = item.get('lineage', '').upper()
+            doh = item.get('doh', '').upper()
 
             # Determine lineage badge color and emoji
             lineage_class = ''
@@ -22831,6 +22833,11 @@ def display_preroll_items(group_id):
                 lineage_class = 'lineage-mixed'
                 lineage_emoji = '🌈'
 
+            # Determine DOH badge styling
+            doh_badge = ''
+            if doh and doh in ['DOH', 'YES', 'THC', 'CBD']:
+                doh_badge = f'<span class="detail doh-badge">✅ DOH</span>'
+
             items_html += f"""
             <div class="item-card">
                 <div class="item-number">{idx}</div>
@@ -22845,6 +22852,7 @@ def display_preroll_items(group_id):
                         {f'<span class="detail">⚖️ {weight}</span>' if weight else ''}
                         {f'<span class="detail">🏪 {vendor}</span>' if vendor else ''}
                         {f'<span class="detail">🌱 {strain}</span>' if strain else ''}
+                        {doh_badge}
                     </div>
                 </div>
             </div>
@@ -23000,6 +23008,12 @@ def display_preroll_items(group_id):
                     color: #333;
                     font-weight: 600;
                     box-shadow: 0 2px 6px rgba(255, 215, 0, 0.2);
+                }}
+                .doh-badge {{
+                    background: linear-gradient(135deg, #00d4aa 0%, #00b894 100%);
+                    color: white;
+                    font-weight: 600;
+                    box-shadow: 0 2px 6px rgba(0, 212, 170, 0.3);
                 }}
                 @media (max-width: 480px) {{
                     .header h1 {{ font-size: 24px; }}
