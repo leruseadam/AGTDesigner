@@ -9564,7 +9564,8 @@ const TagManager = {
             // Reload/refresh - show splash to indicate loading is happening
             this.showActionSplash('Refreshing tags...');
             // Also show loading indicator in container if it exists
-            if (availableTagsContainer) {
+            // BUT don't grey out on initial page load - only on refresh
+            if (availableTagsContainer && this._hasLoadedOnce) {
                 const existingContent = availableTagsContainer.innerHTML;
                 // Add a loading overlay or indicator
                 availableTagsContainer.style.opacity = '0.6';
@@ -10143,8 +10144,11 @@ const TagManager = {
                     availableTagsContainer.style.opacity = '1';
                     availableTagsContainer.style.pointerEvents = 'auto';
                 }
+
+                // Mark that tags have been loaded at least once
+                this._hasLoadedOnce = true;
             }, 100);
-            
+
             return true;
         } catch (error) {
             // CRITICAL: Clear safety timeout on error
