@@ -5979,6 +5979,8 @@ def set_store():
         # CRITICAL FIX: Save to Flask session first (most reliable on PythonAnywhere)
         session['selected_store'] = store_value
         session['store_server_id'] = SERVER_INSTANCE_ID
+        session['store_just_selected'] = True  # Flag to indicate store was just selected
+        session['store_selected_timestamp'] = datetime.now().isoformat()  # Timestamp for validation
         session.permanent = True  # Mark session as permanent to persist across browser restarts
         session.modified = True  # Force session to save
         logging.info(f"✅ Store saved to session: {store_value}")
@@ -6173,32 +6175,60 @@ def check_store_required():
             session.pop('store_server_id', None)
             session.modified = True
             session_store = None  # Update local variable so logic below works correctly
+        
+        # CRITICAL FIX: Check for force_store_modal parameter to force modal display
+        force_modal = request.args.get('force_store_modal', 'false').lower() == 'true'
+        if force_modal:
+            logging.info("🔧 Force store modal parameter detected - clearing session store")
+            session.pop('selected_store', None)
+            session.pop('store_server_id', None)
+            session.modified = True
+            session_store = None
+        
         # CRITICAL FIX: Don't log full session - it contains massive preroll_original_records array
         # that causes "OSError: Message too long" when logging
         session_keys = list(session.keys())
         logging.info(f"SESSION DEBUG: selected_store={session_store}")
         logging.info(f"SESSION DEBUG: session keys={session_keys}")
         logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
+        logging.info(f"SESSION DEBUG: force_modal={force_modal}")
         
-        # CRITICAL FIX: Only use session store, not IP cache, to determine if modal should show
-        # This ensures the modal shows unless user explicitly selected a store in this session
-        # IP cache is only used as a convenience fallback, not to skip the modal
+        # CRITICAL FIX: Only use session store if it was explicitly set in this session
+        # Check if there's a flag indicating the store was just selected
+        store_just_selected = session.get('store_just_selected', False)
         current_store = None
         
-        # Only check session - don't use IP cache to skip modal
-        if session.get('selected_store'):
-            current_store = session.get('selected_store')
-            logging.info(f"Store found in session: {current_store}")
-        else:
-            # Check IP cache but don't auto-apply it - just log it for reference
-            ip_address = get_client_ip()
-            if ip_address is not None:
-                with _ip_store_lock:
-                    if ip_address in _ip_store_selections:
-                        store_data = _ip_store_selections[ip_address]
-                        if is_store_selection_valid(ip_address, store_data):
-                            logging.info(f"IP cache has store {store_data['store']} but not using it to skip modal")
-                            # Don't set current_store - let modal show so user can confirm/change
+        # Only use session store if it was just selected (user confirmed it)
+        if session_store and store_just_selected:
+            current_store = session_store
+            logging.info(f"Store found in session and was just selected: {current_store}")
+        elif session_store:
+            # Store exists in session but wasn't just selected - might be stale
+            # Check if it's from a recent selection (within last 5 minutes)
+            store_timestamp = session.get('store_selected_timestamp')
+            if store_timestamp:
+                try:
+                    from datetime import datetime, timedelta
+                    timestamp = datetime.fromisoformat(store_timestamp)
+                    if datetime.now() - timestamp < timedelta(minutes=5):
+                        current_store = session_store
+                        logging.info(f"Store found in session (recent selection): {current_store}")
+                    else:
+                        logging.info(f"Store in session is stale (older than 5 minutes), requiring new selection")
+                        session.pop('selected_store', None)
+                        session.pop('store_selected_timestamp', None)
+                        session.modified = True
+                except:
+                    # If timestamp parsing fails, treat as stale
+                    logging.info(f"Store timestamp invalid, requiring new selection")
+                    session.pop('selected_store', None)
+                    session.pop('store_selected_timestamp', None)
+                    session.modified = True
+            else:
+                # No timestamp - treat as stale
+                logging.info(f"Store in session has no timestamp, requiring new selection")
+                session.pop('selected_store', None)
+                session.modified = True
         
         # Log the low-level selection flag for debugging but do not gate on it
         has_selection = has_store_selection()
@@ -6217,8 +6247,11 @@ def check_store_required():
                 }
             }
         
-        # If we found a store in session, make sure it is persisted
+        # If we found a store in session, make sure it is persisted with timestamp
         session['selected_store'] = current_store
+        session['store_just_selected'] = True
+        from datetime import datetime
+        session['store_selected_timestamp'] = datetime.now().isoformat()
         session.modified = True
         
         logging.info(f"Store found in session for IP {ip_address}: {current_store}")
@@ -9287,77 +9320,15 @@ def get_available_tags():
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
 
-        # CRITICAL FIX: When no Excel file, try to load from database
-        # This ensures tags persist after lineage updates even if Excel processor was cleared
+        # CRITICAL FIX: When no Excel file, return empty tags - DO NOT load from database
+        # User only wants tags from Excel file, not entire database
         if not has_excel_data:
-            logging.info("⚡ No Excel file in memory - attempting to load tags from database")
-
-            # Try to load tags from database for current store
-            try:
-                product_db = get_product_database(store_name)
-                if product_db:
-                    # Get all products from database
-                    conn = product_db._get_connection()
-                    cursor = conn.cursor()
-
-                    # Fetch all products (limit to reasonable amount to avoid memory issues)
-                    cursor.execute('''
-                        SELECT "Product Name*", "Product Type*", "Vendor/Supplier*",
-                               "Product Brand", "Weight*", "Price", "Lineage", "DOH",
-                               "THC test result", "CBD test result", "Units",
-                               "Description", "Quantity*", id
-                        FROM products
-                        ORDER BY "last_seen_date" DESC
-                        LIMIT 5000
-                    ''')
-                    rows = cursor.fetchall()
-
-                    if rows:
-                        # Convert database rows to tag format
-                        db_tags = []
-                        for row in rows:
-                            tag = {
-                                'Product Name*': row[0],
-                                'Product Type*': row[1],
-                                'Vendor/Supplier*': row[2],
-                                'Product Brand': row[3],
-                                'Weight*': row[4],
-                                'Price': row[5],
-                                'Lineage': row[6],
-                                'DOH': row[7],
-                                'THC test result': row[8],
-                                'CBD test result': row[9],
-                                'Units': row[10],
-                                'Description': row[11],
-                                'Quantity*': row[12],
-                                'id': row[13]
-                            }
-                            db_tags.append(tag)
-
-                        logging.info(f"✅ Loaded {len(db_tags)} tags from database")
-                        safe_tags = make_json_safe(db_tags)
-                        return jsonify({
-                            'tags': safe_tags,
-                            'total_count': len(safe_tags),
-                            'source': 'database-fallback',
-                            'message': f'Loaded {len(safe_tags)} products from database'
-                        }), 200
-                    else:
-                        logging.info("📭 No products found in database")
-                else:
-                    logging.warning("⚠️ Product database not available")
-            except Exception as db_load_err:
-                logging.error(f"Failed to load tags from database: {db_load_err}")
-                import traceback
-                logging.error(traceback.format_exc())
-
-            # Final fallback - return empty
-            logging.info("⚡ No Excel file and database load failed - returning empty tags")
+            logging.info("⚡ No Excel file in memory - returning empty tags (not loading from database)")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
-                'source': 'empty-no-data',
-                'message': 'No file uploaded and no products in database. Please upload an Excel file to get started.'
+                'source': 'empty-no-excel',
+                'message': 'No Excel file uploaded. Please upload an Excel file to see tags.'
             }), 200
 
         # CRITICAL: Validate that the session file matches the selected store

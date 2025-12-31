@@ -1708,52 +1708,40 @@ class TemplateProcessor:
         label_context = dict(record)
         
         # CRITICAL FIX: Read vendor directly from record first - it should already be in the Excel column
-        # Check label_context first (from dict copy), then record as fallback
+        # Check ALL possible vendor field variations, including case-insensitive matching
         vendor_from_record = None
+        
+        # First, get all vendor-related keys from the record (case-insensitive search)
+        vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
+        
+        # Standard vendor field names to check (in priority order)
         vendor_field_names = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'ProductVendor', 'vendor']
         
-        # Log all available vendor-related fields for debugging (only for first few products)
-        vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-        if vendor_related_keys and not hasattr(self, '_vendor_debug_count'):
-            self._vendor_debug_count = 0
-        if vendor_related_keys:
-            if not hasattr(self, '_vendor_debug_count'):
-                self._vendor_debug_count = 0
-            self._vendor_debug_count += 1
-            if self._vendor_debug_count <= 3:
-                self.logger.debug(f"🔍 VENDOR DEBUG: Available vendor-related fields for '{product_name}': {vendor_related_keys}")
-                for key in vendor_related_keys[:3]:  # Only log first 3 fields
-                    val = record.get(key)
-                    if val is not None:
-                        self.logger.debug(f"🔍 VENDOR DEBUG: Field '{key}' = '{val}' (type: {type(val).__name__})")
-        
+        # Try standard field names first
         for field_name in vendor_field_names:
-            # Check label_context first (already copied from record)
+            # Check both label_context (from dict copy) and record directly
             val = label_context.get(field_name) or record.get(field_name)
             if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
                 vendor_from_record = str(val).strip()
-                # Only log for first few products
-                if not hasattr(self, '_vendor_found_count'):
-                    self._vendor_found_count = 0
-                self._vendor_found_count += 1
-                if self._vendor_found_count <= 3:
-                    self.logger.info(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
+                self.logger.info(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
                 break
+        
+        # If not found in standard fields, check ALL vendor-related keys from record
+        if not vendor_from_record and vendor_related_keys:
+            for key in vendor_related_keys:
+                val = record.get(key)
+                if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                    vendor_from_record = str(val).strip()
+                    self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
+                    break
         
         # Store vendor early so it's available throughout processing
         if vendor_from_record:
             label_context['_vendor_from_record'] = vendor_from_record
-            if not hasattr(self, '_vendor_stored_count'):
-                self._vendor_stored_count = 0
-            self._vendor_stored_count += 1
-            if self._vendor_stored_count <= 3:
-                self.logger.info(f"✅ Stored vendor '{vendor_from_record}' in _vendor_from_record for '{product_name}'")
         else:
-            if not hasattr(self, '_vendor_missing_count'):
-                self._vendor_missing_count = 0
-            self._vendor_missing_count += 1
-            if self._vendor_missing_count <= 3:
-                self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Available vendor fields: {vendor_related_keys}")
+            # Log warning with all available keys for debugging
+            all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
+            self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Sample record keys: {all_keys_sample}")
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
@@ -2500,42 +2488,38 @@ class TemplateProcessor:
                 self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
             
             # Set ProductVendor to actual vendor/supplier for classic types
-            # CRITICAL: Try database cache first, then fallback to record
-            vendor_val = None
+            # CRITICAL: Use vendor from record FIRST (it's already in the Excel column)
+            vendor_val = label_context.get('_vendor_from_record')
             
-            # PRIORITY 1: Try to enrich vendor from pre-loaded cache
-            try:
-                cached_vendor = product_vendor_cache.get(product_name, "")
-                if cached_vendor and str(cached_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                    vendor_val = cached_vendor
-                    self.logger.info(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
-            except Exception as e:
-                self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-            
-            # PRIORITY 2: Use vendor we already read from record at the start
             if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
-                vendor_val = label_context.get('_vendor_from_record')
-                if vendor_val:
-                    self.logger.debug(f"✅ Using vendor from record: '{vendor_val}' for '{product_name}'")
-                else:
-                    # Fallback: try record fields directly
-                    vendor_fields = [
-                        'Vendor/Supplier*',
-                        'Vendor/Supplier',
-                        'Vendor',
-                        'ProductVendor',
-                        'vendor',
-                        'Vendor/Supplier *',  # Handle space variations
-                        'Vendor/Supplier* ',  # Handle trailing space
-                    ]
-                    
-                    # Try each field name
-                    for field in vendor_fields:
-                        val = record.get(field)
-                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                            vendor_val = val
-                            self.logger.debug(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}'")
-                            break
+                # PRIORITY 2: Try database cache as fallback
+                try:
+                    cached_vendor = product_vendor_cache.get(product_name, "")
+                    if cached_vendor and str(cached_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                        vendor_val = cached_vendor
+                        self.logger.info(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
+                except Exception as e:
+                    self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
+            
+            # PRIORITY 3: Final fallback - try record fields directly (in case _vendor_from_record wasn't set)
+            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
+                vendor_fields = [
+                    'Vendor/Supplier*',
+                    'Vendor/Supplier',
+                    'Vendor',
+                    'ProductVendor',
+                    'vendor',
+                    'Vendor/Supplier *',  # Handle space variations
+                    'Vendor/Supplier* ',  # Handle trailing space
+                ]
+                
+                # Try each field name
+                for field in vendor_fields:
+                    val = record.get(field)
+                    if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                        vendor_val = val
+                        self.logger.info(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}' (fallback)")
+                        break
             
             # If still no vendor, log all available fields for debugging
             if not vendor_val or not str(vendor_val).strip():
