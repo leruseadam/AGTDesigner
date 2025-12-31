@@ -4332,17 +4332,20 @@ class TemplateProcessor:
 
                 # CRITICAL FIX: Handle product vendor markers specially to preserve content
                 # Extract product vendor content before removing markers
+                vendor_content_extracted = None
                 vendor_match = re.search(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', cleaned, re.IGNORECASE)
                 if vendor_match:
-                    vendor_content = vendor_match.group(1)
-                    # Replace the full product vendor marker pattern with just the content
-                    cleaned = re.sub(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', vendor_content, cleaned, flags=re.IGNORECASE)
+                    vendor_content_extracted = vendor_match.group(1).strip()
+                    # Replace the full product vendor marker pattern with a placeholder temporarily
+                    # to protect it from being removed by cleanup patterns
+                    cleaned = re.sub(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', '<<<VENDOR_PLACEHOLDER>>>', cleaned, flags=re.IGNORECASE)
 
                 # Remove other marker patterns
                 for pattern in marker_patterns:
                     cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-                
+
                 # CRITICAL FIX: Remove partial marker remnants like "bis" from "PRODUCTBRAND_END"
+                # NOTE: Do this BEFORE restoring vendor content to avoid removing words like "VENDOR" from vendor names
                 partial_remnants = [
                     r'\bbis\b',                    # "bis" from PRODUCTBRAND_END
                     r'PRODUCTBRAND_END',           # PRODUCTBRAND_END remnants (specific first)
@@ -4357,14 +4360,14 @@ class TemplateProcessor:
                     r'\bVENDOR\b',                 # Any remaining VENDOR
                     # REMOVED: r'\bLINEAGE\b' - Don't remove LINEAGE as it might be part of content
                     # REMOVED: r'\bCBD\b' - Don't remove CBD as it's part of lineage content like "CBD Blend"
-                    
+
                     # CRITICAL FIX: Handle corrupted marker text patterns
                     r'PRODUCTSTRR_STARTCONSTELL',  # Corrupted PRODUCTBRAND_CENTER_START + CONSTELLATION
                     r'PRODUCTSTRR_',               # Corrupted PRODUCTBRAND_ patterns
                     r'STARTCONSTELL',              # Corrupted START + CONSTELLATION
                     r'CONSTELLATION\$\s*',         # CONSTELLATION$ remnants
                     r'\$.*',                       # Any $ symbol remnants (like VICE$Star)
-                    
+
                     r'\bTHC\b',                    # Any remaining THC
                     # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
                     r'\bWEIGHT\b',                 # Any remaining WEIGHT
@@ -4379,9 +4382,14 @@ class TemplateProcessor:
                     # r'\bC\b',                      # REMOVED: This could break legitimate words
                     # r'\bD\b',                      # REMOVED: This could break legitimate words
                 ]
-                
+
                 for remnant in partial_remnants:
                     cleaned = re.sub(remnant, '', cleaned, flags=re.IGNORECASE)
+
+                # CRITICAL: Restore vendor content after ALL cleanup to prevent removal
+                # This ensures vendor names containing words like "VENDOR" are preserved
+                if vendor_content_extracted:
+                    cleaned = cleaned.replace('<<<VENDOR_PLACEHOLDER>>>', vendor_content_extracted)
 
                 # Remove stray CENTER tokens left behind by split PRODUCTBRAND_CENTER markers.
                 # This specifically catches runs that only contain the marker fragment.
