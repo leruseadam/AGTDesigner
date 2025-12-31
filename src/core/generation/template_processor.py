@@ -4280,7 +4280,15 @@ class TemplateProcessor:
                     strain_content = strain_match.group(1)
                     # Replace the full product strain marker pattern with just the content
                     cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
-                
+
+                # CRITICAL FIX: Handle product vendor markers specially to preserve content
+                # Extract product vendor content before removing markers
+                vendor_match = re.search(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', cleaned, re.IGNORECASE)
+                if vendor_match:
+                    vendor_content = vendor_match.group(1)
+                    # Replace the full product vendor marker pattern with just the content
+                    cleaned = re.sub(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', vendor_content, cleaned, flags=re.IGNORECASE)
+
                 # Remove other marker patterns
                 for pattern in marker_patterns:
                     cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
