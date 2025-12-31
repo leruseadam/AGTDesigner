@@ -662,15 +662,14 @@ def is_store_selection_valid(ip_address, store_selection):
     """Check if store selection is still valid (within 12 hours)."""
     if not store_selection:
         return False
-    
-    # Invalidate selections from previous server instances
-    if store_selection.get('server_id') != SERVER_INSTANCE_ID:
-        return False
+
+    # Store selections persist across server restarts for 12 hours
+    # No need to invalidate based on server_id - time-based expiration is sufficient
 
     selection_time = store_selection.get('timestamp')
     if not selection_time:
         return False
-    
+
     try:
         selection_datetime = datetime.fromisoformat(selection_time)
         expiration_time = selection_datetime + timedelta(hours=12)
@@ -896,13 +895,11 @@ def get_current_store_name(allow_fallback=True):
                     store_data = _ip_store_selections[ip_address]
                     # Check if the selection is still valid (not expired)
                     if is_store_selection_valid(ip_address, store_data):
-                        if store_data.get('server_id') != SERVER_INSTANCE_ID:
-                            pass  # Ignore previous server instance selections
-                        else:
-                            # Also save to session for consistency
-                            session['selected_store'] = store_data['store']
-                            session['store_server_id'] = SERVER_INSTANCE_ID
-                            return store_data['store']
+                        # Store selection is valid - use it regardless of server instance
+                        # Also save to session for consistency
+                        session['selected_store'] = store_data['store']
+                        session['store_server_id'] = SERVER_INSTANCE_ID
+                        return store_data['store']
                     else:
                         # Remove expired selection
                         del _ip_store_selections[ip_address]
@@ -6086,8 +6083,7 @@ def get_store():
             if ip_address in _ip_store_selections:
                 store_data = _ip_store_selections[ip_address]
                 # Check if the selection is still valid (not expired)
-                if (datetime.now() - datetime.fromisoformat(store_data['timestamp']) < timedelta(hours=12) and
-                    store_data.get('server_id') == SERVER_INSTANCE_ID):
+                if is_store_selection_valid(ip_address, store_data):
                     logging.info(f"Found valid store selection: {store_data['store']}")
                     return jsonify({
                         'success': True,
@@ -6095,10 +6091,7 @@ def get_store():
                         'expires_at': (datetime.fromisoformat(store_data['timestamp']) + timedelta(hours=12)).isoformat()
                     })
                 else:
-                    reason = "expired"
-                    if store_data.get('server_id') != SERVER_INSTANCE_ID:
-                        reason = "different server instance"
-                    logging.info(f"Store selection invalid ({reason}) for IP {ip_address}; removing")
+                    logging.info(f"Store selection expired for IP {ip_address}; removing")
                     del _ip_store_selections[ip_address]
         
         # No valid selection found, return no store
@@ -11968,18 +11961,34 @@ def update_lineage():
                 strains_updated += 1
                 logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{new_lineage}'")
         
-        # Step 4: Also update all products with the same strain (sovereign lineage propagation)
+        # Step 4: CROSS-PRODUCT-TYPE SYNCING - Update products with same strain across CLASSIC TYPES only
+        # This syncs lineage across Flower, Preroll, Concentrate, and Edible (Classic Types only)
         similar_products_updated = 0
         if strains_updated > 0:
             for strain_id, strain_name in strain_rows:
+                # Update products linked to this strain_id (Classic Types only)
                 cursor.execute("""
-                    UPDATE products 
-                    SET Lineage = ?
+                    UPDATE products
+                    SET Lineage = ?, sovereign_lineage = ?
                     WHERE strain_id = ?
-                """, (new_lineage, strain_id))
-                similar_products_updated = cursor.rowcount
+                    AND product_type IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
+                """, (new_lineage, new_lineage, strain_id))
+                strain_linked_count = cursor.rowcount
+
+                # CRITICAL: Also update products with matching strain name but no strain_id link
+                # This catches products across different Classic Type categories (prerolls, concentrates, etc.)
+                cursor.execute("""
+                    UPDATE products
+                    SET Lineage = ?, sovereign_lineage = ?
+                    WHERE LOWER(TRIM(strain_name)) = LOWER(TRIM(?))
+                    AND (strain_id IS NULL OR strain_id != ?)
+                    AND product_type IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
+                """, (new_lineage, new_lineage, strain_name, strain_id))
+                name_match_count = cursor.rowcount
+
+                similar_products_updated = strain_linked_count + name_match_count
                 if similar_products_updated > 0:
-                    logging.info(f"✅ Updated {similar_products_updated} products with strain '{strain_name}' to lineage '{new_lineage}'")
+                    logging.info(f"✅ Updated {similar_products_updated} Classic Type products with strain '{strain_name}' (linked: {strain_linked_count}, name-matched: {name_match_count})")
         
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
