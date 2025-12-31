@@ -583,19 +583,30 @@
       window.checkingStoreRequired = true;
       
       console.log('=== CHECKING STORE REQUIREMENT ===');
-      
+
       const modalElement = document.getElementById('storeSelectionModal');
       const mainContent = document.getElementById('mainContent');
-      
+
       console.log('Modal element exists:', modalElement !== null);
-      
+
       if (!modalElement) {
         console.error('❌ Modal element not found! Retrying in 500ms...');
         window.checkingStoreRequired = false;
         setTimeout(checkStoreRequired, 500);
         return;
       }
-      
+
+      // Check for force_store_modal URL parameter
+      const urlParams = new URLSearchParams(window.location.search);
+      const forceModal = urlParams.get('force_store_modal') === 'true';
+
+      if (forceModal) {
+        console.log('🔧 Force store modal flag detected - showing modal immediately');
+        showStoreSelectionModal();
+        window.checkingStoreRequired = false;
+        return;
+      }
+
       // Keep both hidden while checking backend - BUT ONLY if store isn't already confirmed
       // This prevents the greying out effect when store is already active
       const storeAlreadyActive = window.storeConfirmed || sessionStorage.getItem('store_just_selected');
