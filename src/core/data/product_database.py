@@ -4040,11 +4040,13 @@ class ProductDatabase:
     def _update_existing_product(self, cursor, product_id, product_data):
         """Update an existing product with new data from Excel.
 
-        NEW PRIORITY SYSTEM:
-        - Database is the source of truth for existing products
-        - Excel data ONLY fills in missing/empty fields
-        - Excel does NOT overwrite existing database values
-        - Exception: sovereign_lineage always takes precedence
+        HYBRID PRIORITY SYSTEM:
+        - Price & DOH: Excel can overwrite (these change frequently in inventory)
+        - Lineage & Other Fields: Database takes precedence, Excel only fills gaps
+        - Exception: sovereign_lineage (manual edits) always wins over everything
+
+        This allows Excel to update volatile fields (prices, compliance status) while
+        preserving stable fields (lineage, product info) that are managed in database.
         """
         try:
             current_date = datetime.now().isoformat()
@@ -4137,44 +4139,48 @@ class ProductDatabase:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
             normalized_name = self._normalize_product_name(product_name) if product_name else ''
 
-            # NEW PRIORITY: Database data takes precedence, Excel only fills gaps
+            # PRIORITY SYSTEM:
+            # - Price and DOH: Excel can overwrite (these change frequently)
+            # - Other fields: Database takes precedence, Excel only fills gaps
             excel_doh = product_data.get('DOH', '')
             excel_price = product_data.get('Price', '')
 
-            # Determine Price: Prefer DATABASE, only use Excel if DB is empty
-            cursor.execute('SELECT "Price" FROM products WHERE id = ?', (product_id,))
-            current_price_result = cursor.fetchone()
-            current_price = current_price_result[0] if current_price_result and current_price_result[0] else ''
-            has_db_price = current_price and str(current_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
+            # Determine Price: ALWAYS use Excel if available (prices change frequently)
+            has_excel_price = excel_price and str(excel_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
 
-            if has_db_price:
-                final_price = current_price
-                logger.info(f"💰 PRICE FROM DB: Keeping existing database price '{final_price}' for product '{product_name}'")
+            if has_excel_price:
+                final_price = excel_price
+                logger.info(f"💰 PRICE FROM EXCEL: Using Excel price '{final_price}' for product '{product_name}'")
             else:
-                # Only use Excel price if DB has no price
-                has_excel_price = excel_price and str(excel_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
-                if has_excel_price:
-                    final_price = excel_price
-                    logger.info(f"💰 PRICE FROM EXCEL: Using Excel price '{final_price}' for product '{product_name}' (DB was empty)")
+                # Fall back to DB price if Excel has no price
+                cursor.execute('SELECT "Price" FROM products WHERE id = ?', (product_id,))
+                current_price_result = cursor.fetchone()
+                current_price = current_price_result[0] if current_price_result and current_price_result[0] else ''
+                has_db_price = current_price and str(current_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
+
+                if has_db_price:
+                    final_price = current_price
+                    logger.info(f"💰 PRICE FROM DB: Using database price '{final_price}' for product '{product_name}' (Excel had no price)")
                 else:
                     final_price = ''
                     logger.info(f"⚠️ PRICE EMPTY: No price available for product '{product_name}'")
 
-            # Determine DOH: Prefer DATABASE, only use Excel if DB is empty
-            cursor.execute('SELECT "DOH" FROM products WHERE id = ?', (product_id,))
-            current_doh_result = cursor.fetchone()
-            current_doh = current_doh_result[0] if current_doh_result and current_doh_result[0] else ''
-            has_db_doh = current_doh and str(current_doh).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']
+            # Determine DOH: ALWAYS use Excel if available (DOH status changes frequently)
+            has_excel_doh = excel_doh and str(excel_doh).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']
 
-            if has_db_doh:
-                final_doh = current_doh
-                logger.info(f"🏷️ DOH FROM DB: Keeping existing database DOH '{final_doh}' for product '{product_name}'")
+            if has_excel_doh:
+                final_doh = excel_doh
+                logger.info(f"🏷️ DOH FROM EXCEL: Using Excel DOH '{final_doh}' for product '{product_name}'")
             else:
-                # Only use Excel DOH if DB has no DOH
-                has_excel_doh = excel_doh and str(excel_doh).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']
-                if has_excel_doh:
-                    final_doh = excel_doh
-                    logger.info(f"🏷️ DOH FROM EXCEL: Using Excel DOH '{final_doh}' for product '{product_name}' (DB was empty)")
+                # Fall back to DB DOH if Excel has no DOH
+                cursor.execute('SELECT "DOH" FROM products WHERE id = ?', (product_id,))
+                current_doh_result = cursor.fetchone()
+                current_doh = current_doh_result[0] if current_doh_result and current_doh_result[0] else ''
+                has_db_doh = current_doh and str(current_doh).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']
+
+                if has_db_doh:
+                    final_doh = current_doh
+                    logger.info(f"🏷️ DOH FROM DB: Using database DOH '{final_doh}' for product '{product_name}' (Excel had no DOH)")
                 else:
                     final_doh = ''
 
