@@ -2431,7 +2431,13 @@ class TemplateProcessor:
                 self.logger.info(f"✅ BRAND UPDATED: Product '{product_name}' brand set to '{enriched_brand}' in context")
         
         # Check if it's a classic type
-        is_classic_type = product_type in classic_types
+        # CRITICAL: Ensure case-insensitive comparison
+        product_type_lower = product_type.lower() if product_type else ''
+        classic_types_lower = {t.lower() for t in classic_types}
+        is_classic_type = product_type_lower in classic_types_lower
+        # Debug logging for blunts and pre-rolls to diagnose vendor issues
+        if product_name and ('blunt' in product_name.lower() or 'pre-roll' in product_name.lower()):
+            self.logger.info(f"🔍 CLASSIC TYPE CHECK: '{product_name}' - product_type: '{product_type}', product_type_lower: '{product_type_lower}', is_classic: {is_classic_type}, classic_types includes blunt: {'blunt' in classic_types_lower}")
         
         if is_classic_type:
             # For classic types, Lineage should show strain lineage and ProductVendor should show brand
@@ -3232,7 +3238,11 @@ class TemplateProcessor:
         product_type_check = (label_context.get('ProductType', '').lower() or 
                              label_context.get('Product Type*', '').lower())
         from src.core.constants import CLASSIC_TYPES
-        is_classic_type_for_vendor = product_type_check in [t.lower() for t in CLASSIC_TYPES]
+        classic_types_lower = [t.lower() for t in CLASSIC_TYPES]
+        is_classic_type_for_vendor = product_type_check in classic_types_lower
+        # Debug logging for product types that should be classic but aren't matching
+        if product_name and ('blunt' in product_name.lower() or 'pre-roll' in product_name.lower()):
+            self.logger.info(f"🔍 VENDOR TYPE CHECK: '{product_name}' - product_type_check: '{product_type_check}', is_classic: {is_classic_type_for_vendor}, classic_types: {classic_types_lower}")
         
         # Only process vendor for classic types
         if is_classic_type_for_vendor:
