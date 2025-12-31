@@ -3421,6 +3421,25 @@ class TemplateProcessor:
             else:
                 self.logger.debug(f"FINAL: No JointRatio found for {product_type}")
 
+        # FINAL SAFETY CHECK: Ensure ProductVendor is set for classic types
+        product_type_final = (label_context.get('ProductType', '').lower() or
+                             label_context.get('Product Type*', '').lower())
+        from src.core.constants import CLASSIC_TYPES
+        if product_type_final in [t.lower() for t in CLASSIC_TYPES]:
+            # Check if ProductVendor is missing or empty
+            current_vendor = label_context.get('ProductVendor', '')
+            vendor_is_empty = not current_vendor or not str(current_vendor).strip()
+
+            # If empty, try one more time to get vendor from _vendor_from_record or record
+            if vendor_is_empty:
+                fallback_vendor = label_context.get('_vendor_from_record') or record.get('Vendor/Supplier*') or record.get('Vendor')
+                if fallback_vendor and str(fallback_vendor).strip():
+                    if self.template_type == 'vertical':
+                        label_context['ProductVendor'] = str(fallback_vendor).strip()
+                    else:
+                        label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(fallback_vendor).strip()}PRODUCTVENDOR_END"
+                    self.logger.info(f"✅ FINAL CHECK: Set ProductVendor to '{fallback_vendor}' for classic type (was empty)")
+
         return label_context
 
     def _generate_qr_code(self, product_name, doc, is_url=False):
