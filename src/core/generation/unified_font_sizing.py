@@ -38,7 +38,7 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
                     'doh': [(5, 12), (10, 11), (float('inf'), 10)],
-                    'vendor': [(10, 5), (float('inf'), 5)],
+                    'vendor': [(10, 6), (float('inf'), 5)],
                     'qr': [(float('inf'), 24)],  # QR codes: Small size for mini template
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
@@ -52,7 +52,7 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 20), (25, 16), (float('inf'), 13)],
-                    'vendor': [(10, 5), (float('inf'), 5)],
+                    'vendor': [(10, 6), (float('inf'), 5)],
                     'qr': [(float('inf'), 36)],  # QR codes: Medium size for double template
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
@@ -66,7 +66,7 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 20), (25, 18), (35, 16), (float('inf'), 14)],
                     'doh': [(15, 24), (25, 20), (float('inf'), 18)],
-                    'vendor': [(10, 5), (20, 4), (float('inf'), 4)],
+                    'vendor': [(10, 6), (float('inf'), 5)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
@@ -80,7 +80,7 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 18), (25, 16), (35, 14), (float('inf'), 12)],
                     'doh': [(15, 22), (25, 18), (float('inf'), 16)],
-                    'vendor': [(10, 5), (float('inf'), 5)],
+                    'vendor': [(10, 6), (float('inf'), 6)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for horizontal template
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
                 },
