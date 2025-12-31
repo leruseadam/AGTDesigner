@@ -600,26 +600,9 @@
     }
     
     function checkStoreRequired(onStoreConfirmed) {
-      // CRITICAL FIX: Don't check again if store was already confirmed AND we have a valid store
-      // This prevents the modal from reappearing after uploads or page reloads
-      // SIMPLE FIX: If store was just confirmed in this session AND sessionStorage has a valid store, skip the check
-      // This prevents modal from showing twice after selecting a store
-      const hasValidSessionStore = sessionStorage.getItem('selected_store') && sessionStorage.getItem('selected_store').trim() !== '';
-      if (window.storeConfirmed && hasValidSessionStore) {
-        console.log('✅ Store already confirmed in this session with valid session store, skipping check');
-        // CRITICAL FIX: Even if store is already confirmed, still call the callback to ensure TagManager initializes
-        if (typeof onStoreConfirmed === 'function') {
-          console.log('🔄 Store already confirmed - calling callback to ensure TagManager initializes');
-          setTimeout(() => {
-            try {
-              onStoreConfirmed();
-            } catch (initError) {
-              console.error('❌ Error in onStoreConfirmed callback:', initError);
-            }
-          }, 100);
-        }
-        return;
-      }
+      // Backend handles IP-based persistence (12 hour expiration)
+      // Frontend simply trusts the backend's /api/check-store-required response
+      // No frontend caching - always check with backend to get accurate IP-based store status
 
       // Prevent multiple simultaneous calls
       if (window.checkingStoreRequired) {
@@ -5730,20 +5713,20 @@
                   <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="margin-left: 0.5rem;">
                     <div class="filter-group">
                       <label for="vendorFilter" class="filter-label">VENDOR</label>
-                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
-                        <option value="All">All</option>
+                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="brandFilter" class="filter-label">BRAND</label>
-                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
-                        <option value="All">All</option>
+                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
-                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
-                        <option value="All">All</option>
+                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
@@ -5754,19 +5737,19 @@
                     </div>
                     <div class="filter-group">
                       <label for="weightFilter" class="filter-label">WEIGHT</label>
-                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
-                      <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 14px !important; line-height: 1.4 !important; min-width: 280px !important;">
+                      <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 14px !important; line-height: 1.4 !important; min-width: 280px !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
-                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
