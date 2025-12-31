@@ -14118,7 +14118,14 @@ const TagManager = {
                                 const extractedFilters = this._extractFiltersFromTags(tagsData.tags);
                                 this.updateFilters(extractedFilters);
                                 verboseLog('✅ Filters extracted from tags immediately:', extractedFilters);
-                                
+
+                                // CRITICAL: Reset all filters to "All" after new file upload
+                                // This ensures users see all products from the new file
+                                if (this.clearAllFilters) {
+                                    this.clearAllFilters();
+                                    verboseLog('✅ All filters reset to default after upload');
+                                }
+
                                 // CRITICAL FIX: Ensure filter row container is visible
                                 const filterRow = document.querySelector('.filter-row');
                                 if (filterRow) {
@@ -14126,7 +14133,7 @@ const TagManager = {
                                     filterRow.style.visibility = 'visible';
                                     verboseLog('✅ Filter row container made visible');
                                 }
-                                
+
                                 // CRITICAL FIX: Ensure filters are rendered after upload
                                 if (this.renderActiveFilters) {
                                     this.renderActiveFilters();
