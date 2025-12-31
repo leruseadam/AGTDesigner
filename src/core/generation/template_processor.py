@@ -1753,6 +1753,12 @@ class TemplateProcessor:
             else:
                 label_context['ProductVendor'] = f"PRODUCTVENDOR_START{vendor_from_record}PRODUCTVENDOR_END"
         else:
+            # CRITICAL FIX: Always initialize ProductVendor, even if empty, so fallback logic can detect and populate it
+            # Initialize as empty with markers so the fallback logic can properly detect it needs to be populated
+            if self.template_type == 'vertical':
+                label_context['ProductVendor'] = ''
+            else:
+                label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
             # Log warning with all available keys for debugging
             all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
             self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Sample record keys: {all_keys_sample}")
@@ -2590,8 +2596,12 @@ class TemplateProcessor:
                     self.logger.info(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
                 else:
                     # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
+                    # CRITICAL FIX: Set with markers when empty so fallback logic can detect and populate it
                     if not existing_vendor or not str(existing_vendor).strip():
-                        label_context['ProductVendor'] = ""
+                        if self.template_type == 'vertical':
+                            label_context['ProductVendor'] = ""
+                        else:
+                            label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
                         self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
@@ -2960,7 +2970,7 @@ class TemplateProcessor:
                 label_context['ProductStrain'] = ""
                 self.logger.debug(f"DEBUG: ProductStrain set to empty (no product_strain value) for template {self.template_type}")
             
-            # ProductVendor is not used for non-classic types - set to empty
+            # ProductVendor is not used for non-classic types - set to empty (intentional design)
             label_context['ProductVendor'] = ""
             self.logger.debug(f"ProductVendor set to empty for non-classic type '{product_type}' (not used for non-classic types)")
         
