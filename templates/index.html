@@ -348,7 +348,38 @@
       console.log('🔧 Forcing store modal to show via debug helper...');
       showStoreSelectionModal(true);
     };
-    
+
+    // Debug helper - simulate first load by clearing all store data and reloading
+    window.simulateFirstLoad = function() {
+      console.log('🔄 Simulating first load - clearing all store data...');
+
+      // Clear client-side storage
+      window.storeConfirmed = false;
+      sessionStorage.clear();
+      localStorage.clear();
+
+      // Clear server-side session
+      fetch('/api/clear-store', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin'
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('✅ Server store cleared:', data);
+        console.log('🔄 Reloading page to show first-time experience...');
+        // Reload page after clearing to show modal
+        setTimeout(() => {
+          window.location.href = window.location.pathname;
+        }, 500);
+      })
+      .catch(error => {
+        console.error('❌ Error clearing store:', error);
+        // Reload anyway
+        window.location.href = window.location.pathname;
+      });
+    };
+
     function showStoreSelectionModal(forceClear = false) {
       try {
         console.log('=== SHOWING STORE SELECTION MODAL ===');
