@@ -1717,19 +1717,27 @@ class TemplateProcessor:
         # Standard vendor field names to check (in priority order)
         vendor_field_names = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'ProductVendor', 'vendor']
         
-        # Try standard field names first
+        # Try standard field names first - check label_context FIRST (it's a dict copy of record)
         for field_name in vendor_field_names:
-            # Check both label_context (from dict copy) and record directly
-            val = label_context.get(field_name) or record.get(field_name)
+            # Check label_context first (already copied from record via dict(record))
+            val = label_context.get(field_name)
+            if val is None or pd.isna(val):
+                # Fallback to record if not in label_context
+                val = record.get(field_name)
+            
             if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
                 vendor_from_record = str(val).strip()
                 self.logger.info(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
                 break
         
-        # If not found in standard fields, check ALL vendor-related keys from record
+        # If not found in standard fields, check ALL vendor-related keys from BOTH label_context and record
         if not vendor_from_record and vendor_related_keys:
             for key in vendor_related_keys:
-                val = record.get(key)
+                # Check label_context first, then record
+                val = label_context.get(key)
+                if val is None or pd.isna(val):
+                    val = record.get(key)
+                
                 if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
                     vendor_from_record = str(val).strip()
                     self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
@@ -1738,6 +1746,12 @@ class TemplateProcessor:
         # Store vendor early so it's available throughout processing
         if vendor_from_record:
             label_context['_vendor_from_record'] = vendor_from_record
+            # Also set ProductVendor directly in label_context so it's available immediately
+            # This ensures vendor is preserved even if later logic tries to clear it
+            if self.template_type == 'vertical':
+                label_context['ProductVendor'] = vendor_from_record
+            else:
+                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{vendor_from_record}PRODUCTVENDOR_END"
         else:
             # Log warning with all available keys for debugging
             all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
@@ -2491,18 +2505,10 @@ class TemplateProcessor:
             # CRITICAL: Use vendor from record FIRST (it's already in the Excel column)
             vendor_val = label_context.get('_vendor_from_record')
             
+            # If _vendor_from_record wasn't set, try reading directly from record again
+            # This handles cases where vendor reading at the start might have failed
             if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
-                # PRIORITY 2: Try database cache as fallback
-                try:
-                    cached_vendor = product_vendor_cache.get(product_name, "")
-                    if cached_vendor and str(cached_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                        vendor_val = cached_vendor
-                        self.logger.info(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
-                except Exception as e:
-                    self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-            
-            # PRIORITY 3: Final fallback - try record fields directly (in case _vendor_from_record wasn't set)
-            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
+                # Try ALL possible vendor field variations directly from record
                 vendor_fields = [
                     'Vendor/Supplier*',
                     'Vendor/Supplier',
@@ -2513,13 +2519,36 @@ class TemplateProcessor:
                     'Vendor/Supplier* ',  # Handle trailing space
                 ]
                 
-                # Try each field name
+                # Also check label_context (from dict copy) in case field name doesn't match exactly
                 for field in vendor_fields:
-                    val = record.get(field)
+                    val = label_context.get(field) or record.get(field)
                     if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                        vendor_val = val
-                        self.logger.info(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}' (fallback)")
+                        vendor_val = str(val).strip()
+                        self.logger.info(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}' (direct read)")
+                        # Store it for later use
+                        label_context['_vendor_from_record'] = vendor_val
                         break
+                
+                # If still not found, check ALL vendor-related keys (case-insensitive)
+                if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
+                    vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
+                    for key in vendor_related_keys:
+                        val = record.get(key)
+                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                            vendor_val = str(val).strip()
+                            self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_val}' for '{product_name}' (case-insensitive match)")
+                            label_context['_vendor_from_record'] = vendor_val
+                            break
+            
+            # PRIORITY 2: Try database cache as fallback ONLY if record doesn't have it
+            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
+                try:
+                    cached_vendor = product_vendor_cache.get(product_name, "")
+                    if cached_vendor and str(cached_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                        vendor_val = cached_vendor
+                        self.logger.info(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
+                except Exception as e:
+                    self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
             
             # If still no vendor, log all available fields for debugging
             if not vendor_val or not str(vendor_val).strip():
@@ -2536,7 +2565,13 @@ class TemplateProcessor:
             if vendor_val is None or pd.isna(vendor_val) or str(vendor_val).lower() in ['nan', 'none', 'null', '']:
                 vendor_val = ''
             
-            if vendor_val and str(vendor_val).strip():
+            # CRITICAL: Check if ProductVendor was already set at the start (from _vendor_from_record)
+            # If so, preserve it - don't overwrite with empty
+            existing_vendor = label_context.get('ProductVendor', '')
+            if existing_vendor and str(existing_vendor).strip() and 'PRODUCTVENDOR_START' not in str(existing_vendor):
+                # ProductVendor was set at the start, keep it
+                self.logger.info(f"✅ Preserving ProductVendor set at start: '{existing_vendor}' for '{product_name}'")
+            elif vendor_val and str(vendor_val).strip():
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 if self.template_type == 'vertical':
                     label_context['ProductVendor'] = str(vendor_val).strip()
@@ -2554,8 +2589,10 @@ class TemplateProcessor:
                         label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(final_vendor).strip()}PRODUCTVENDOR_END"
                     self.logger.info(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
                 else:
-                    label_context['ProductVendor'] = ""
-                    self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
+                    # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
+                    if not existing_vendor or not str(existing_vendor).strip():
+                        label_context['ProductVendor'] = ""
+                        self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
             product_strain_value = record.get('ProductStrain') or record.get('Product Strain', '')
