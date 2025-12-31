@@ -7535,7 +7535,7 @@ class TemplateProcessor:
                         break
                 
                 if is_classic_lineage:
-                    # This is a classic type with lineage content - don't combine with vendor
+                    # This is a classic type with lineage content - show lineage AND vendor
                     # Extract just the lineage part if it contains additional brand info
                     lineage_only = lineage_content
                     for classic_lineage in classic_lineages:
@@ -7543,31 +7543,15 @@ class TemplateProcessor:
                             # Extract just the lineage part
                             lineage_only = lineage_content[:len(classic_lineage)]
                             break
-                    
+
                     # Update the lineage content to only show the lineage part
                     lineage_content = lineage_only
                     self.logger.debug(f"Extracted classic lineage only: '{lineage_content}' from '{full_text[lineage_start_idx:lineage_end_idx]}'")
-                    
-                    # Process only the lineage part, not combined with vendor
-                    paragraph.clear()
-                    run = paragraph.add_run()
-                    run.font.name = "Arial"
-                    run.font.bold = True
-                    
-                    # Get proper lineage font size using unified font sizing system
-                    product_type = None
-                    if hasattr(self, 'current_product_type'):
-                        product_type = self.current_product_type
-                    elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
-                        product_type = self.label_context['ProductType']
-                    
-                    from src.core.generation.unified_font_sizing import get_font_size
-                    lineage_font_size = get_font_size(lineage_content, 'lineage', self.template_type, self.scale_factor)
-                    set_run_font_size(run, lineage_font_size)
-                    
-                    run.text = lineage_content  # Use assignment instead of add_text to avoid duplication
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT  # Left-align classic lineage
-                    
+
+                    # CRITICAL FIX: Process lineage AND vendor using the combined function
+                    # This ensures vendor is displayed on classic types
+                    self._process_combined_lineage_vendor(paragraph, lineage_content, vendor_content)
+
                     # Mark as processed to prevent re-processing
                     paragraph._combined_lineage_vendor_processed = True
                     return True
