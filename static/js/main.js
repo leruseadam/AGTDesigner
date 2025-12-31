@@ -1938,7 +1938,8 @@ const TagManager = {
 
         // Exclusion logic for product types
         const excludedTypesLower = [
-            'x-deactivated', 'deactivated', 'trade sample', 'sample', 'excluded', 'x-deactivated 1', 'x-deactivated 2'
+            'x-deactivated', 'deactivated', 'trade sample', 'sample', 'excluded', 'x-deactivated 1', 'x-deactivated 2',
+            'x-deactivated 1', 'x-deactivated 2'  // Explicitly exclude these variations
         ];
 
         tags.forEach(tag => {
@@ -1948,7 +1949,12 @@ const TagManager = {
             const pt = tag.ProductType || tag['Product Type*'];
             if (pt && pt.trim()) {
                 const ptLower = pt.trim().toLowerCase();
-                if (!ptLower.includes('deactivated') &&
+                // Filter out deactivated (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.), trade sample, and excluded types
+                const isDeactivated = ptLower.includes('deactivated') || 
+                                     ptLower === 'x-deactivated 1' || 
+                                     ptLower === 'x-deactivated 2' ||
+                                     ptLower.startsWith('x-deactivated');
+                if (!isDeactivated &&
                     !ptLower.includes('trade sample') &&
                     !excludedTypesLower.some(ex => ptLower.includes(ex))) {
                     productTypes.add(pt.trim());
@@ -2249,8 +2255,12 @@ const TagManager = {
                 const productType = tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '';
                 if (productType && productType.trim()) {
                     const ptLower = productType.trim().toLowerCase();
-                    // Filter out deactivated, trade sample, and excluded types
-                    if (!ptLower.includes('deactivated') && 
+                    // Filter out deactivated (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.), trade sample, and excluded types
+                    const isDeactivated = ptLower.includes('deactivated') || 
+                                         ptLower === 'x-deactivated 1' || 
+                                         ptLower === 'x-deactivated 2' ||
+                                         ptLower.startsWith('x-deactivated');
+                    if (!isDeactivated && 
                         !ptLower.includes('trade sample') && 
                         !excludedTypesLower.includes(ptLower)) {
                         filterOptions.productType.add(productType.trim());
@@ -2285,7 +2295,12 @@ const TagManager = {
             filterOptionsArrays.productType = filterOptionsArrays.productType.filter(pt => {
                 if (!pt || !pt.trim()) return false;
                 const ptLower = pt.trim().toLowerCase();
-                return !ptLower.includes('deactivated') && 
+                // Check for deactivated patterns (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.)
+                const isDeactivated = ptLower.includes('deactivated') || 
+                                     ptLower === 'x-deactivated 1' || 
+                                     ptLower === 'x-deactivated 2' ||
+                                     ptLower.startsWith('x-deactivated');
+                return !isDeactivated && 
                        !ptLower.includes('trade sample') && 
                        !excludedTypesLower.includes(ptLower);
             });
@@ -2544,8 +2559,16 @@ const TagManager = {
                 // Always add product type options (show all types)
                 const productType = (tag['Product Type*'] || tag.productType || '').toString().trim();
                 if (productType) {
-                    const normalizedType = normalizeProductType(productType);
-                    if (normalizedType) availableOptions.productType.add(normalizedType);
+                    const ptLower = productType.toLowerCase();
+                    // Filter out deactivated (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.), trade sample types
+                    const isDeactivated = ptLower.includes('deactivated') || 
+                                         ptLower === 'x-deactivated 1' || 
+                                         ptLower === 'x-deactivated 2' ||
+                                         ptLower.startsWith('x-deactivated');
+                    if (!isDeactivated && !ptLower.includes('trade sample')) {
+                        const normalizedType = normalizeProductType(productType);
+                        if (normalizedType) availableOptions.productType.add(normalizedType);
+                    }
                 }
                 
                 // Always add lineage options (show all lineages)

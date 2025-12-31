@@ -2263,6 +2263,14 @@ body.modal-open #mainContent.store-selection-disabled,
     font-size: 14px !important;
   }
   
+  /* Match selected tags font styling to available tags */
+  #selectedTags .tag-item,
+  #selectedTags .tag-entry,
+  #selectedTags .tag-name,
+  #selectedTags .tag-text {
+    font-size: 14px !important;
+  }
+  
   /* Fix selected tags container height */
   #selectedTags {
     margin: 0 !important;
@@ -3740,7 +3748,7 @@ body.modal-open #mainContent.store-selection-disabled,
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 1.15rem !important;
+      font-size: 1.3rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -4857,7 +4865,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--primary-color);
     font-weight: 600;
     margin-bottom: 0.75rem;
-    font-size: 1.2rem !important;
+    font-size: 1.5rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
     position: relative;
@@ -4886,7 +4894,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--secondary-color);
     font-weight: 500;
     margin-bottom: 0.5rem;
-    font-size: 1rem;
+    font-size: 1.3rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
     /* Ensure header stays above content */
@@ -4905,7 +4913,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--accent-color);
     font-weight: 500;
     margin-bottom: 0.25rem;
-    font-size: 0.9rem;
+    font-size: 1.3rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
@@ -4928,7 +4936,7 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .weight-header {
-    font-size: 0.85rem;
+    font-size: 1.3rem !important;
     color: var(--text-muted);
     margin-bottom: 0.25rem;
     margin-left: 0 !important;
@@ -6195,7 +6203,7 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.1rem !important;
+    font-size: 1.3rem !important;
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
