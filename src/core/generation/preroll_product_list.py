@@ -76,16 +76,22 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                 display_name = group_info.get('display_name', f'Group {group_id}')
                 
                 # Filter items by allowed brands if configured
+                # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
                 filtered_items = group_items
-                if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
+                if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
                     allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
-                    original_item_count = len(filtered_items)
-                    filtered_items = [
-                        item for item in group_items
-                        if str(item.get('brand', '')).strip().lower() in allowed_brands_lower
-                    ]
-                    if len(filtered_items) < original_item_count:
-                        logging.info(f"PREROLL LIST: Filtered {original_item_count} items to {len(filtered_items)} items for group '{display_name}' based on allowed brands")
+                    if allowed_brands_lower:  # Only filter if we have valid brands after normalization
+                        original_item_count = len(filtered_items)
+                        filtered_items = [
+                            item for item in group_items
+                            if str(item.get('brand', '')).strip().lower() in allowed_brands_lower
+                        ]
+                        if len(filtered_items) < original_item_count:
+                            logging.info(f"PREROLL LIST: Filtered {original_item_count} items to {len(filtered_items)} items for group '{display_name}' based on allowed brands")
+                    else:
+                        logging.info(f"PREROLL LIST: PREROLL_ALLOWED_BRANDS is set but contains no valid brands, skipping filter for group '{display_name}'")
+                else:
+                    logging.debug(f"PREROLL LIST: PREROLL_ALLOWED_BRANDS is empty or None, including all items for group '{display_name}'")
                 
                 # Group items by brand within this category
                 items_by_brand = {}

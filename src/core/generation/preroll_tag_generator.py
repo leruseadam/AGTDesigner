@@ -177,6 +177,8 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
                 'display_name': f'Pre-Roll - {weight}g',
                 'category': f'Pre-Roll - {weight}g'
             }
+        # If no weight found but it's still a preroll, continue to pattern matching below
+        # This ensures prerolls without weights still get grouped
     
     # Default: use truncated description pattern
     # CRITICAL FIX: Check for infused prerolls FIRST before regular prerolls
@@ -225,30 +227,37 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         List of grouped representative records (one per category)
     """
     # Filter records by allowed brands if configured
-    if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
+    # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
+    if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
         original_count = len(records)
         # Normalize allowed brands to lowercase for case-insensitive matching
         allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
         
-        filtered_records = []
-        for record in records:
-            # Get brand from various possible fields
-            brand = (
-                record.get('Product Brand', '') or
-                record.get('ProductBrand', '') or
-                record.get('Brand', '') or
-                ''
-            )
-            brand_lower = str(brand).strip().lower()
+        if not allowed_brands_lower:
+            # If after normalization we have no valid brands, skip filtering
+            logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is set but contains no valid brands, skipping filter (allowing all brands)")
+        else:
+            filtered_records = []
+            for record in records:
+                # Get brand from various possible fields
+                brand = (
+                    record.get('Product Brand', '') or
+                    record.get('ProductBrand', '') or
+                    record.get('Brand', '') or
+                    ''
+                )
+                brand_lower = str(brand).strip().lower()
+                
+                # Check if brand is in allowed list
+                if brand_lower in allowed_brands_lower:
+                    filtered_records.append(record)
+                else:
+                    logging.info(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' (not in allowed brands: {PREROLL_ALLOWED_BRANDS})")
             
-            # Check if brand is in allowed list
-            if brand_lower in allowed_brands_lower:
-                filtered_records.append(record)
-            else:
-                logging.debug(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' (not in allowed brands)")
-        
-        records = filtered_records
-        logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} records to {len(records)} records matching allowed brands: {PREROLL_ALLOWED_BRANDS}")
+            records = filtered_records
+            logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} records to {len(records)} records matching allowed brands: {PREROLL_ALLOWED_BRANDS}")
+    else:
+        logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is empty or None, allowing all brands (no filtering applied)")
     
     # Save original records for QR page (before grouping)
     original_records_for_qr = [r.copy() for r in records]
@@ -262,6 +271,11 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     for record in records:
         description = record.get('Description', '')
         product_name = record.get('Product Name*', record.get('ProductName', ''))
+        
+        # CRITICAL: Ensure we have at least a product name to work with
+        if not product_name or not str(product_name).strip():
+            logging.warning(f"PREROLL GROUP: Skipping record with no product name: {record}")
+            continue
         
         # Identify the product group
         group_info = identify_preroll_product_group(description, product_name)
@@ -306,6 +320,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
+        logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_id}' (total in group: {len(grouped_records[group_key]['records'])})")
     
     # Step 2: Create representative records with group display names
     unique_records = []
@@ -384,19 +399,21 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         group_items = []
         for record in group_records_list:
             # Filter by allowed brands if configured
-            if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
-                brand = (
-                    record.get('Product Brand', '') or
-                    record.get('ProductBrand', '') or
-                    record.get('Brand', '') or
-                    ''
-                )
-                brand_lower = str(brand).strip().lower()
+            # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
+            if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
                 allowed_brands_lower = {b.lower().strip() for b in PREROLL_ALLOWED_BRANDS if b and str(b).strip()}
-                
-                if brand_lower not in allowed_brands_lower:
-                    logging.debug(f"PREROLL GROUP CACHE: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' from cache (not in allowed brands)")
-                    continue
+                if allowed_brands_lower:  # Only filter if we have valid brands after normalization
+                    brand = (
+                        record.get('Product Brand', '') or
+                        record.get('ProductBrand', '') or
+                        record.get('Brand', '') or
+                        ''
+                    )
+                    brand_lower = str(brand).strip().lower()
+                    
+                    if brand_lower not in allowed_brands_lower:
+                        logging.debug(f"PREROLL GROUP CACHE: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' from cache (not in allowed brands)")
+                        continue
             
             # Normalize DOH/DOH-compliant field so lists and QR views can display
             # a clean YES/NO status.
@@ -452,9 +469,21 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # Verify all records were grouped (every record should be in a group)
     total_grouped = sum(len(group_data['records']) for group_data in grouped_records.values())
     if total_grouped != original_count:
-        logging.warning(f"PREROLL GROUPING WARNING: {original_count} original records but only {total_grouped} were grouped. Some products may be missing!")
+        logging.error(f"PREROLL GROUPING ERROR: {original_count} original records but only {total_grouped} were grouped. {original_count - total_grouped} products are MISSING!")
+        # Log details about which records might be missing
+        grouped_product_names = set()
+        for group_data in grouped_records.values():
+            for record in group_data['records']:
+                product_name = record.get('Product Name*', record.get('ProductName', ''))
+                if product_name:
+                    grouped_product_names.add(str(product_name).strip())
+        
+        all_product_names = {record.get('Product Name*', record.get('ProductName', '')) for record in records if record.get('Product Name*') or record.get('ProductName')}
+        missing_names = all_product_names - grouped_product_names
+        if missing_names:
+            logging.error(f"PREROLL GROUPING ERROR: Missing products: {list(missing_names)[:10]}")  # Log first 10 missing
     else:
-        logging.info(f"PREROLL GROUPING: All {original_count} records successfully grouped")
+        logging.info(f"PREROLL GROUPING: All {original_count} records successfully grouped into {len(grouped_records)} groups")
     
     grouped_records_list = unique_records
     logging.info(f"PREROLL GROUPING: Grouped {original_count} records into {len(grouped_records_list)} product groups (one label per vendor per category)")
