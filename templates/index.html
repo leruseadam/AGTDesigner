@@ -342,12 +342,27 @@
         alert('Please refresh the page and try again.');
       };
     }
+
+    // Debug helper function - call from console: window.forceShowStoreModal()
+    window.forceShowStoreModal = function() {
+      console.log('🔧 Forcing store modal to show via debug helper...');
+      showStoreSelectionModal(true);
+    };
     
-    function showStoreSelectionModal() {
+    function showStoreSelectionModal(forceClear = false) {
       try {
         console.log('=== SHOWING STORE SELECTION MODAL ===');
+        console.log('forceClear:', forceClear);
         console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
-        
+
+        // If forceClear is true, clear all session flags first
+        if (forceClear) {
+          console.log('🧹 Clearing all store session flags...');
+          window.storeConfirmed = false;
+          sessionStorage.removeItem('store_just_selected');
+          sessionStorage.removeItem('selected_store');
+        }
+
         const modalElement = document.getElementById('storeSelectionModal');
         console.log('Modal element found:', modalElement !== null);
         if (!modalElement) {
@@ -600,9 +615,13 @@
       const urlParams = new URLSearchParams(window.location.search);
       const forceModal = urlParams.get('force_store_modal') === 'true';
 
+      console.log('URL search params:', window.location.search);
+      console.log('force_store_modal parameter:', urlParams.get('force_store_modal'));
+      console.log('forceModal boolean:', forceModal);
+
       if (forceModal) {
         console.log('🔧 Force store modal flag detected - showing modal immediately');
-        showStoreSelectionModal();
+        showStoreSelectionModal(true); // Pass true to force clear session flags
         window.checkingStoreRequired = false;
         return;
       }
