@@ -1072,25 +1072,27 @@ class TemplateProcessor:
         try:
             # VENDOR FALLBACK: Detect if records were filtered by vendor (all have same vendor)
             # If so, use that vendor as fallback for records with missing vendor
-            vendor_counts = {}
-            for record in records:
-                vendor = (record.get('Vendor') or record.get('Vendor/Supplier*') or 
-                         record.get('Vendor/Supplier') or record.get('ProductVendor', ''))
-                if vendor and not pd.isna(vendor) and str(vendor).strip() and str(vendor).lower() not in ['nan', 'none', 'null', '']:
-                    vendor_str = str(vendor).strip()
-                    vendor_counts[vendor_str] = vendor_counts.get(vendor_str, 0) + 1
-            
-            # If one vendor dominates (appears in >50% of records), use it as fallback
-            if vendor_counts:
-                total_with_vendor = sum(vendor_counts.values())
-                most_common_vendor = max(vendor_counts.items(), key=lambda x: x[1])
-                if most_common_vendor[1] >= total_with_vendor * 0.5 and most_common_vendor[1] >= 2:
-                    self._vendor_fallback = most_common_vendor[0]
-                    self.logger.info(f"✅ VENDOR FALLBACK: Detected vendor filtering - '{self._vendor_fallback}' appears in {most_common_vendor[1]}/{len(records)} records. Will use as fallback for missing vendors.")
-                else:
-                    self._vendor_fallback = None
-            else:
-                self._vendor_fallback = None
+            # PERFORMANCE: Sample first 50 records instead of checking all to speed up detection
+            self._vendor_fallback = None
+            if records:
+                vendor_counts = {}
+                sample_size = min(50, len(records))  # Sample first 50 records for speed
+                sample_records = records[:sample_size]
+                
+                for record in sample_records:
+                    vendor = (record.get('Vendor') or record.get('Vendor/Supplier*') or 
+                             record.get('Vendor/Supplier') or record.get('ProductVendor', ''))
+                    if vendor and not pd.isna(vendor) and str(vendor).strip() and str(vendor).lower() not in ['nan', 'none', 'null', '']:
+                        vendor_str = str(vendor).strip()
+                        vendor_counts[vendor_str] = vendor_counts.get(vendor_str, 0) + 1
+                
+                # If one vendor dominates (appears in >50% of sampled records), use it as fallback
+                if vendor_counts:
+                    total_with_vendor = sum(vendor_counts.values())
+                    most_common_vendor = max(vendor_counts.items(), key=lambda x: x[1])
+                    if most_common_vendor[1] >= total_with_vendor * 0.5 and most_common_vendor[1] >= 2:
+                        self._vendor_fallback = most_common_vendor[0]
+                        # Only log if we actually use it (reduces logging overhead)
             
             if self.template_type in ['horizontal', 'vertical', 'double']:
                 self.chunk_size = len(records)
@@ -1794,7 +1796,12 @@ class TemplateProcessor:
         # VENDOR FALLBACK: If vendor not found in record but we detected vendor filtering, use the fallback vendor
         if not vendor_from_record and hasattr(self, '_vendor_fallback') and self._vendor_fallback:
             vendor_from_record = self._vendor_fallback
-            self.logger.info(f"✅ VENDOR FALLBACK: Using detected vendor '{vendor_from_record}' for '{product_name}' (vendor was missing from record)")
+            # Reduced logging for performance - only log first few instances
+            if not hasattr(self, '_vendor_fallback_logged_count'):
+                self._vendor_fallback_logged_count = 0
+            if self._vendor_fallback_logged_count < 3:
+                self.logger.info(f"✅ VENDOR FALLBACK: Using detected vendor '{vendor_from_record}' for '{product_name}' (vendor was missing from record)")
+                self._vendor_fallback_logged_count += 1
         
         # Store vendor early so it's available throughout processing
         if vendor_from_record:
