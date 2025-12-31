@@ -4884,6 +4884,9 @@
       overflow: visible !important;
       text-overflow: clip !important;
       white-space: nowrap !important;
+      text-indent: 0 !important;
+      -webkit-text-align-last: left !important;
+      -moz-text-align-last: left !important;
       -webkit-appearance: none !important;
       -moz-appearance: none !important;
       appearance: none !important;
@@ -4932,13 +4935,6 @@
     #templateSelect:hover {
       background-color: rgba(255, 255, 255, 0.25) !important;
       border-color: rgba(160, 132, 232, 0.7) !important;
-    }
-
-    /* Center align template selection text on bigger monitors (PC) */
-    @media (min-width: 1024px) {
-      #templateSelect {
-        text-align: center !important;
-      }
     }
 
     /* Center the template dropdown in its container */
@@ -5812,7 +5808,7 @@
               <!-- Template Section -->
               <div class="control-section mb-2">
                 <label for="templateSelect" class="filter-label">TEMPLATE</label>
-                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: auto !important; min-width: 250px !important; max-width: 250px !important; margin: 0 auto !important; display: block !important;">
+                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 18px !important; line-height: 1.5 !important; width: auto !important; min-width: 250px !important; max-width: none !important; margin: 0 auto !important; display: block !important; overflow: visible !important; text-align: left !important;">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>

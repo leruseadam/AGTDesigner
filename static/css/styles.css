@@ -208,7 +208,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 1.625rem !important; /* Increased by 2px (1.5rem = 24px, 1.625rem = 26px) */
+    font-size: 1.9rem !important; /* Increased substantially */
     font-weight: 700 !important;
     color: #fff !important;
     text-shadow: none !important;
@@ -272,7 +272,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 38px !important; /* Increased by 2px for better readability */
+    font-size: 44px !important; /* Increased substantially */
   }
 }
 
@@ -312,7 +312,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 42px !important; /* Increased by 2px for better readability */
+    font-size: 48px !important; /* Increased substantially */
   }
 }
   
@@ -332,7 +332,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 
 /* Normal scaling for key UI elements */
 .tag-item, .tag-entry {
-  font-size: 18px !important; /* Increased by 2px for better readability */
+  font-size: 22px !important; /* Increased substantially */
   min-height: 2.5rem !important;
 }
 
@@ -347,7 +347,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 #selectedTags .tag-name,
 #selectedTags .tag-row,
 #selectedTags .tag-item * {
-  font-size: 18px !important;
+  font-size: 22px !important;
   line-height: 1.5 !important;
 }
 
@@ -401,11 +401,11 @@ h6 { font-size: 1rem !important; font-weight: 600 !important; }
 
 /* Larger filter bar and dropdowns */
 .filter-bar, .filters-row {
-  font-size: 1.6rem !important;
+  font-size: 1.3rem !important;
 }
 
 .filter-bar select, .filter-bar .form-select, .filter-bar option {
-  font-size: 1.6rem !important;
+  font-size: 1.3rem !important;
   padding: 0.5rem 0.9rem 0.6rem 0.9rem !important;
   min-height: 2.5rem !important;
   height: auto !important;
@@ -2076,7 +2076,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #2d223a !important;
     border-radius: 4px !important;
     padding: 6px 12px !important;
-    font-size: 1.05rem !important;
+    font-size: 1.3rem !important;
     font-weight: 500 !important;
     transition: all 0.3s ease !important;
     box-shadow: 
@@ -3740,7 +3740,7 @@ body.modal-open #mainContent.store-selection-disabled,
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 0.9rem !important;
+      font-size: 1.15rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -4503,7 +4503,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Filter section */
 .filter-label {
-  font-size: 1.05rem;
+  font-size: 1.3rem;
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 0.4rem;
@@ -4554,7 +4554,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-shadow: 0 1px 3px rgba(0,0,0,0.3);
     opacity: 1 !important;
     visibility: visible !important;
-    font-size: 0.9rem;
+    font-size: 1.15rem;
   }
 
   /* Select All container styling - Enhanced visibility */
@@ -4804,7 +4804,7 @@ body.modal-open #mainContent.store-selection-disabled,
     }
     
     .filter-bar label {
-      font-size: 1.15rem;
+      font-size: 0.95rem;
       color: #fff !important;
       margin-bottom: 0.2rem;
       font-weight: 600 !important;
@@ -4812,7 +4812,7 @@ body.modal-open #mainContent.store-selection-disabled,
     }
 
     .filter-bar select {
-      font-size: 1.25rem;
+      font-size: 1.05rem;
       padding: 0.5rem 8px 0.6rem 8px !important;
       margin-bottom: 0.5rem;
       height: auto !important;
@@ -5451,7 +5451,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 200px !important;
     max-width: 280px !important;
     width: 240px !important;
-    font-size: 1.6rem !important;
+    font-size: 1.3rem !important;
     background: rgba(45, 34, 58, 0.92);
     backdrop-filter: blur(15px) !important;
     -webkit-backdrop-filter: blur(15px) !important;
@@ -5473,7 +5473,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .filter-bar select {
     min-width: 160px !important;
     max-width: 250px !important;
-    font-size: 1.6rem !important;
+    font-size: 1.3rem !important;
     height: auto !important;
     min-height: 2.5rem !important;
     padding: 0.5rem 12px 0.6rem 12px !important;
@@ -5491,7 +5491,7 @@ body.modal-open #mainContent.store-selection-disabled,
   }
 
   .filter-bar label {
-    font-size: 1.5rem !important;
+    font-size: 1.25rem !important;
     color: #fff !important;
     font-weight: 600 !important;
     text-shadow: 0 2px 4px rgba(0,0,0,0.4) !important;
@@ -6188,14 +6188,14 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.2rem !important;
+    font-size: 1.5rem !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 0.78rem !important;
+    font-size: 1.1rem !important;
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
@@ -6588,7 +6588,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Vendor (top-level) */
   .vendor-section > .vendor-header {
-    font-size: 1.4em !important; /* Slightly smaller than before */
+    font-size: 1.65em !important; /* Increased substantially */
     font-weight: 700;
     margin-bottom: 0.4em;
     letter-spacing: 0.04em;
@@ -6601,7 +6601,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.d-flex,
   .vendor-section > .vendor-header.mb-2,
   .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.4em !important; /* Slightly smaller than before */
+    font-size: 1.65em !important; /* Increased substantially */
     font-weight: 700 !important;
   }
 
@@ -6617,7 +6617,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.175em; /* Increased by 0.125em (~2px) */
+    font-size: 1.4em; /* Increased substantially */
     font-weight: 600;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
@@ -6627,7 +6627,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1.125em; /* Increased by 0.125em (~2px) */
+    font-size: 1.35em; /* Increased substantially */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 2.2em;
@@ -6724,9 +6724,11 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     box-shadow: none !important;
     border-radius: 10px !important;
-    padding: 10px 14px !important;
+    padding: 14px 14px 16px 14px !important;
     padding-right: 36px !important;
     font-size: 1em !important;
+    min-height: auto !important;
+    height: auto !important;
     backdrop-filter: blur(8px) !important;
     -webkit-backdrop-filter: blur(8px) !important;
     transition: border 0.2s, box-shadow 0.2s !important;
@@ -6740,9 +6742,11 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Layout and sizing */
     display: block !important;
     box-sizing: border-box !important;
-    width: 100% !important;
+    width: auto !important;
+    min-width: 250px !important;
+    max-width: none !important;
     margin: 0.5rem auto 0.75rem auto !important;
-    line-height: 1.5 !important;
+    line-height: 1.6 !important;
 
     /* Text alignment - FORCE centered */
     text-align: center !important;
@@ -6752,10 +6756,10 @@ body.modal-open #mainContent.store-selection-disabled,
     direction: ltr !important;
     text-indent: 0 !important;
 
-    /* Prevent text wrapping */
-    white-space: nowrap !important;
-    text-overflow: ellipsis !important;
-    overflow: hidden !important;
+    /* Allow text to be visible - prevent cutoff */
+    white-space: normal !important;
+    text-overflow: clip !important;
+    overflow: visible !important;
 
     /* CRITICAL: Mac Safari needs explicit color override */
     -webkit-text-fill-color: #f7f8ff !important;
@@ -6806,9 +6810,14 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     direction: ltr !important;
     display: block !important;
-    padding: 8px 14px !important;
-    line-height: 1.5 !important;
+    padding: 10px 14px 12px 14px !important;
+    line-height: 1.6 !important;
     -webkit-text-fill-color: #f7f8ff !important;
+    white-space: normal !important;
+    text-overflow: clip !important;
+    overflow: visible !important;
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
   }
   
   /* Selected/checked option styling - MATCH FILTERS */
@@ -7684,7 +7693,7 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Filter labels styling - updated to match tag column headers */
   .sticky-filter-bar .form-label,
   .sticky-filter-bar .filter-category-label {
-    font-size: 1.15rem !important; /* Increased substantially */
+    font-size: 0.95rem !important; /* Increased moderately */
     font-weight: 700 !important; /* Match tag column header weight */
     color: #ffffff !important; /* Match tag column header color */
     margin-bottom: 0.4rem !important; /* Reduced from 0.75rem */
@@ -7726,7 +7735,7 @@ body.modal-open #mainContent.store-selection-disabled,
     max-width: none !important; /* Allow expansion to fit content */
     flex: 1 1 auto !important; /* Flex grow and shrink */
     box-sizing: border-box !important;
-    font-size: 1.3rem !important; /* Increased substantially */
+    font-size: 1.1rem !important; /* Increased moderately */
     line-height: 1.6 !important; /* Increased line-height to prevent cutoff */
   }
 
@@ -8168,7 +8177,7 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Make sidebar filter bar and filters slightly smaller */
   .sticky-filter-bar .form-label,
   .sticky-filter-bar .filter-label {
-    font-size: 1.4em !important;
+    font-size: 1.15em !important;
     padding: 0 0 0.15rem 0 !important; /* Increased bottom padding to prevent cutoff */
     line-height: 1.5 !important; /* Ensure proper line-height */
     overflow: visible !important; /* Prevent text cutoff */
@@ -8176,7 +8185,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .sticky-filter-bar select,
   .sticky-filter-bar .form-select,
   .sticky-filter-bar .form-select-sm {
-    font-size: 1.5em !important;
+    font-size: 1.25em !important;
     padding: 0.5rem 10px 0.6rem 10px !important; /* Significantly increased vertical padding to prevent cutoff */
     min-height: 2.5rem !important; /* Increased for better visibility */
     height: auto !important; /* Allow height to adjust to content */
@@ -8222,7 +8231,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .compact-filter {
       min-height: 2.5rem !important;
       height: auto !important;
-      font-size: 1.6em !important;
+      font-size: 1.3em !important;
       padding-top: 0.5rem !important;
       padding-bottom: 0.6rem !important;
       line-height: 1.6 !important;
@@ -8234,7 +8243,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .sticky-filter-bar .form-label {
       margin-bottom: 6px !important;
       margin-top: 6px !important;
-      font-size: 1.4em !important;
+      font-size: 1.15em !important;
       letter-spacing: 0.01em;
       font-weight: 700 !important;
       color: #e0e0ff !important;
