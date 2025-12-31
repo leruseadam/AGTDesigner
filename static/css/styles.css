@@ -5221,7 +5221,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .file-info-compact {
     color: #eae6f7;
     font-weight: 500;
-    font-size: 0.97rem;
+    font-size: 1.1rem;
     margin-left: 8px;
     margin-right: 2px;
     overflow: hidden;
@@ -7015,7 +7015,7 @@ body.modal-open #mainContent.store-selection-disabled,
     transform: translateY(-1px) scale(1.03);
   }
   .file-info-modern {
-    font-size: 0.82rem !important;
+    font-size: 0.95rem !important;
     gap: 2px !important;
     margin-left: 6px !important;
     min-width: 200px !important;

@@ -5745,7 +5745,7 @@
                   <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0; min-height: 80px; justify-content: center;">
                     <!-- File Path Display (Above buttons) -->
                     <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
                         {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
                       </span>
                     </div>
@@ -6047,7 +6047,7 @@
   <!-- Modals -->
   
   <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
-  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
+  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 10001 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
       <div class="modal-content glass-card">
         <div class="modal-header border-0" style="padding: 1.6rem 1.8rem 1rem;">
@@ -6208,7 +6208,7 @@
                     const backdrop = document.createElement('div');
                     backdrop.id = 'storeModalBackdrop';
                     backdrop.className = 'modal-backdrop fade show';
-                    backdrop.style.zIndex = '9998';
+                    backdrop.style.zIndex = '10000';
                     document.body.appendChild(backdrop);
                   }
                   if (modalInstance) {
