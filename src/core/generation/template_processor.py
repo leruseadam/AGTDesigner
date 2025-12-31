@@ -1431,12 +1431,13 @@ class TemplateProcessor:
                     # Unwrap vendor to see actual value
                     if product_vendor != 'NOT_FOUND' and 'PRODUCTVENDOR_START' in str(product_vendor):
                         try:
-                            from src.core.formatting.markers import unwrap_marker
                             vendor_value = unwrap_marker(product_vendor, 'PRODUCTVENDOR')
                             product_vendor = f"'{vendor_value}' (wrapped)"
                         except:
                             pass
-                    self.logger.info(f"🔍 CONTEXT DEBUG Label{i+1} -> {product_name} (type: {product_type}) - ProductVendor: {product_vendor}, ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}'")
+                    # Also check vendor from record directly
+                    vendor_from_record_debug = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor') or 'NOT_IN_RECORD'
+                    self.logger.info(f"🔍 CONTEXT DEBUG Label{i+1} -> {product_name} (type: {product_type}) - ProductVendor in context: {product_vendor}, Vendor in record: '{vendor_from_record_debug}', _vendor_from_record: '{label_context.get('_vendor_from_record', 'NOT_SET')}'")
             
             # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
             # to prevent Jinja template errors when template references missing labels
@@ -1771,7 +1772,13 @@ class TemplateProcessor:
                 label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
             # Log warning with all available keys for debugging
             all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
-            self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Sample record keys: {all_keys_sample}")
+            # Also log actual values from vendor fields to see if they're empty or have different names
+            vendor_field_values = {}
+            for field in vendor_field_names:
+                val = record.get(field)
+                if val is not None:
+                    vendor_field_values[field] = str(val)[:50]  # First 50 chars
+            self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Vendor field values: {vendor_field_values}, Sample record keys: {all_keys_sample}")
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
@@ -3488,6 +3495,19 @@ class TemplateProcessor:
             if 'ProductVendor' not in label_context:
                 label_context['ProductVendor'] = ""
                 self.logger.warning(f"⚠️ FINAL CHECK: ProductVendor was missing from context, set to empty")
+        
+        # FINAL DEBUG: Log ProductVendor value for blunts and pre-rolls before returning context
+        final_product_vendor = label_context.get('ProductVendor', 'NOT_SET')
+        product_name_final = label_context.get('ProductName', '') or label_context.get('Product Name*', '')
+        if product_name_final and ('blunt' in product_name_final.lower() or 'pre-roll' in product_name_final.lower()):
+            try:
+                if 'PRODUCTVENDOR_START' in str(final_product_vendor):
+                    final_vendor_unwrapped = unwrap_marker(str(final_product_vendor), 'PRODUCTVENDOR')
+                    self.logger.info(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_vendor_unwrapped}' (was wrapped)")
+                else:
+                    self.logger.info(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_product_vendor}'")
+            except Exception as e:
+                self.logger.warning(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_product_vendor}' (error unwrapping: {e})")
 
         return label_context
 
