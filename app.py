@@ -714,16 +714,16 @@ def clear_all_on_startup():
     with _ip_store_lock:
         count = len(_ip_store_selections)
         _ip_store_selections.clear()
-    
+
     # Delete the persistence file to prevent reload
     try:
         if os.path.exists(_store_selections_file):
             os.remove(_store_selections_file)
-            logging.info(f"Deleted store selections file on startup")
+            logging.warning(f"🔥 STARTUP: Deleted store selections file - {_store_selections_file}")
     except Exception as e:
         logging.warning(f"Failed to delete store selections file: {e}")
-    
-    logging.info(f"Cleared all {count} store selections on server startup - users must select store")
+
+    logging.warning(f"🔥 STARTUP: Cleared all {count} store selections - STORE MODAL WILL SHOW FOR ALL USERS")
 
 # OPTION 2: Load persisted selections and only clear expired ones (12-hour persistence)
 def load_and_cleanup_on_startup():
@@ -6167,11 +6167,12 @@ def check_store_required():
         # CRITICAL DEBUG: Check session data
         session_store = session.get('selected_store')
         if session_store and session.get('store_server_id') != SERVER_INSTANCE_ID:
-            logging.info(f"Session store from previous server instance detected in check-store-required; updating server_id but keeping store: {session_store}")
-            # CRITICAL FIX: Don't clear the store - just update the server_id
-            # This prevents the modal from reappearing after server restart
-            session['store_server_id'] = SERVER_INSTANCE_ID
+            logging.warning(f"🔥 Session store from previous server instance detected - CLEARING IT to force store modal: {session_store}")
+            # Clear the session store to force user to select store again after server restart
+            session.pop('selected_store', None)
+            session.pop('store_server_id', None)
             session.modified = True
+            session_store = None  # Update local variable so logic below works correctly
         # CRITICAL FIX: Don't log full session - it contains massive preroll_original_records array
         # that causes "OSError: Message too long" when logging
         session_keys = list(session.keys())
