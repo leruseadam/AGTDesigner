@@ -86,7 +86,7 @@ def _load_font_sizing_config():
                 },
                 'preroll': {
                     # Preroll template: Copy all settings from mini template (identical font sizing)
-                    'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
+                    'description': [(5, 18), (15, 17), (20, 16), (30, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
                     'brand': [(5, 9), (20, 8), (30, 6.5), (float('inf'), 6)],
                     'price': [(5, 20), (float('inf'), 17)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],

@@ -1768,6 +1768,23 @@ class TemplateProcessor:
                     self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
                     break
         
+        # FALLBACK: If vendor not found in record fields, try to extract from product name
+        # This handles cases where vendor is embedded in product name like "Product Name by 2727"
+        if not vendor_from_record and product_name:
+            product_name_lower = str(product_name).lower()
+            # Handle "by" format (e.g., "Product Name by Vendor")
+            if " by " in product_name_lower:
+                parts = product_name_lower.split(" by ", 1)
+                if len(parts) > 1:
+                    vendor_part = parts[1].strip()
+                    # Remove any trailing weight/size info (e.g., " - 1g", " - 7g", " - 1g x 5 Pack")
+                    if " - " in vendor_part:
+                        vendor_part = vendor_part.split(" - ")[0].strip()
+                    # Only use if it looks like a valid vendor (not empty, not just numbers/whitespace)
+                    if vendor_part and len(vendor_part) > 0:
+                        vendor_from_record = vendor_part
+                        self.logger.info(f"✅ FALLBACK: Extracted vendor '{vendor_from_record}' from product name '{product_name}' using 'by' pattern")
+        
         # Store vendor early so it's available throughout processing
         if vendor_from_record:
             label_context['_vendor_from_record'] = vendor_from_record
