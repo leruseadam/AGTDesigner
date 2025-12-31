@@ -640,18 +640,12 @@
         return;
       }
 
-      // Keep both hidden while checking backend - BUT ONLY if store isn't already confirmed
-      // This prevents the greying out effect when store is already active
-      const storeAlreadyActive = window.storeConfirmed || sessionStorage.getItem('store_just_selected');
-
+      // CRITICAL: Always check backend first - sessionStorage may be stale after server restart
+      // Don't trust client-side storage alone
       if (modalElement) {
         modalElement.style.display = 'none';
       }
-      if (mainContent && !storeAlreadyActive) {
-        mainContent.style.pointerEvents = 'none';
-        mainContent.classList.add('store-selection-disabled');
-      }
-      
+
       console.log('Fetching store status from backend...');
       const cacheBust = `ts=${Date.now()}`;
       
@@ -810,7 +804,15 @@
               store: data.store,
               userHasStore: userHasStore
             });
-            
+
+            // CRITICAL: Clear stale sessionStorage when backend says no store
+            // This handles the case where server restarted but browser has old sessionStorage
+            sessionStorage.removeItem('store_just_selected');
+            sessionStorage.removeItem('selected_store');
+            sessionStorage.removeItem('store_selected_timestamp');
+            window.storeConfirmed = false;
+            console.log('🧹 Cleared stale sessionStorage flags');
+
             // CRITICAL FIX: Set blocking flag BEFORE showing modal
             window.STORE_MODAL_BLOCKING = true;
             
