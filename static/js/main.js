@@ -15589,30 +15589,39 @@ const TagManager = {
 
     // CRITICAL FIX: Add init function that loads tags automatically
     async init() {
-        console.log('🚀 TagManager.init() called');
-        
-        // Mark as initialized
-        this.state.initialized = true;
-        
-        // Try to hydrate from cache first
-        const hydrated = this.hydrateAvailableTagsFromCache();
-        if (hydrated) {
-            console.log('✅ Tags loaded from cache in init()');
-            return true;
-        }
-        
-        // If no cache, fetch from database/API
-        console.log('📊 No cache found in init(), fetching tags from database...');
         try {
-            const loaded = await this.fetchAndUpdateAvailableTags();
-            if (loaded) {
-                console.log('✅ Tags loaded from database in init()');
-            } else {
-                console.warn('⚠️ Tags not loaded in init()');
+            console.log('🚀 TagManager.init() called');
+            
+            // Mark as initialized
+            this.state.initialized = true;
+            
+            // Try to hydrate from cache first
+            const hydrated = this.hydrateAvailableTagsFromCache();
+            if (hydrated) {
+                console.log('✅ Tags loaded from cache in init()');
+                return true;
             }
-            return loaded;
+            
+            // If no cache, fetch from database/API
+            console.log('📊 No cache found in init(), fetching tags from database...');
+            try {
+                const loaded = await this.fetchAndUpdateAvailableTags();
+                if (loaded) {
+                    console.log('✅ Tags loaded from database in init()');
+                } else {
+                    console.warn('⚠️ Tags not loaded in init()');
+                }
+                return loaded;
+            } catch (error) {
+                console.error('❌ Error loading tags in init():', error);
+                // Don't throw - allow app to continue even if tags fail to load
+                return false;
+            }
         } catch (error) {
-            console.error('❌ Error loading tags in init():', error);
+            console.error('❌ CRITICAL: Error in TagManager.init():', error);
+            console.error('Stack trace:', error.stack);
+            // Mark as initialized anyway to prevent infinite retry loops
+            this.state.initialized = true;
             return false;
         }
     }
