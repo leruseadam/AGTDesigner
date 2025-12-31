@@ -418,11 +418,14 @@
           return;
         }
         
+        // CRITICAL: Ensure modal is visible (remove any hidden states)
+        modalElement.style.visibility = 'visible';
+        modalElement.style.display = 'block';
+        
         // Check if Bootstrap is available
         if (typeof bootstrap === 'undefined') {
           console.error('❌ Bootstrap not available, using fallback method');
           // Fallback: Show modal manually if Bootstrap isn't loaded
-          modalElement.style.display = 'block';
           modalElement.classList.add('show');
           modalElement.setAttribute('aria-hidden', 'false');
           modalElement.setAttribute('aria-modal', 'true');
@@ -433,7 +436,7 @@
           if (!document.querySelector('.modal-backdrop')) {
             const backdrop = document.createElement('div');
             backdrop.className = 'modal-backdrop fade show';
-            backdrop.style.zIndex = '1040';
+            backdrop.style.zIndex = '10000';
             document.body.appendChild(backdrop);
           }
           
@@ -465,10 +468,12 @@
         try {
           const modalElement = document.getElementById('storeSelectionModal');
           if (modalElement) {
+            modalElement.style.visibility = 'visible';
             modalElement.style.display = 'block';
             modalElement.classList.add('show');
             modalElement.setAttribute('aria-hidden', 'false');
             document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
             console.log('✅ Modal shown using error fallback');
           }
         } catch (fallbackError) {
@@ -1059,8 +1064,23 @@
           }),
           // Defer analytics - load after page is interactive
           Promise.resolve({ error: 'Deferred' }),
-          // Only load available tags immediately (critical for UI)
-          fetchWithTimeout('/api/web/available-tags', 10000).catch(e => { console.error('Available tags failed:', e); return []; })
+          // Only load available tags immediately (critical for UI) - but only if a file is uploaded
+          (() => {
+            // Check if a file is uploaded before fetching tags
+            const fileInfoText = document.getElementById('fileInfoText');
+            const hasFile = fileInfoText && fileInfoText.textContent.trim() !== 'No file uploaded' && fileInfoText.textContent.trim() !== '';
+            const uploadedFilename = sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path');
+            
+            if (!hasFile && !uploadedFilename) {
+              console.log('⚠️ No file uploaded - skipping tag load');
+              return Promise.resolve([]);
+            }
+            
+            return fetchWithTimeout('/api/web/available-tags', 10000).catch(e => { 
+              console.error('Available tags failed:', e); 
+              return []; 
+            });
+          })()
         ])
         .then((results) => {
           console.log('All promises settled:', results);
@@ -6131,6 +6151,14 @@
     (function() {
       console.log('🚀 FIRST SCRIPT - Modal control starting (checking backend)');
       
+      // CRITICAL: Ensure store modal is hidden initially to prevent flash over loading splash
+      const modalElement = document.getElementById('storeSelectionModal');
+      if (modalElement) {
+        modalElement.style.display = 'none';
+        modalElement.style.visibility = 'hidden';
+        modalElement.classList.remove('show');
+      }
+      
       // CRITICAL: Clear stale sessionStorage on page load
       // Only keep sessionStorage if it was set in the last 30 seconds (very recent)
       const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
@@ -6190,6 +6218,15 @@
           window.STORE_MODAL_BLOCKING = true;
 
           const attemptShow = () => {
+            // CRITICAL: Wait for loading splash to be hidden before showing modal
+            const loadingSplash = document.getElementById('appLoadingSplash');
+            if (loadingSplash && loadingSplash.style.display !== 'none' && !loadingSplash.classList.contains('fade-out')) {
+              // Loading splash is still visible, wait a bit longer
+              console.log('⏳ Waiting for loading splash to hide before showing store modal...');
+              setTimeout(attemptShow, 200);
+              return;
+            }
+            
             if (typeof window.showStoreSelectionModal === 'function') {
               window.showStoreSelectionModal();
             } else {
@@ -6199,6 +6236,7 @@
                   const modalInstance = (typeof bootstrap !== 'undefined')
                     ? bootstrap.Modal.getOrCreateInstance(modalElement, { backdrop: 'static', keyboard: false })
                     : null;
+                  modalElement.style.visibility = 'visible';
                   modalElement.style.display = 'block';
                   modalElement.classList.add('show');
                   modalElement.setAttribute('aria-hidden', 'false');

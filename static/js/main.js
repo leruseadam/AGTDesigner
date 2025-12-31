@@ -1210,8 +1210,17 @@ const TagManager = {
                 return null;
             }
 
-            // CRITICAL FIX: Try to load cache even if no Excel file - database mode uses "nofile" as key
-            // This allows cache to work in both Excel mode and database-only mode
+            // CRITICAL FIX: Only load cache if a file is uploaded - don't load tags without Excel file
+            const uploadedFilename = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            const fileInfoText = document.getElementById('fileInfoText');
+            const hasFileInUI = fileInfoText && fileInfoText.textContent.trim() !== 'No file uploaded' && fileInfoText.textContent.trim() !== '';
+            
+            // Don't load tags if no file is uploaded
+            if (!uploadedFilename && !hasFileInUI) {
+                verboseLog('⚠️ No file uploaded - skipping cache load');
+                return null;
+            }
+            
             const cacheKey = this.getAvailableTagsCacheKey();
             let raw = storage.getItem(cacheKey);
 
@@ -1349,10 +1358,21 @@ const TagManager = {
         // CRITICAL FIX: Load from cache OR database
         // Check if there's an Excel file OR if we should load from database
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+        const fileInfoText = document.getElementById('fileInfoText');
+        const hasFileInUI = fileInfoText && fileInfoText.textContent.trim() !== 'No file uploaded' && fileInfoText.textContent.trim() !== '';
+        
+        // CRITICAL: Only load tags if a file is uploaded - don't load from database without Excel file
+        const hasFile = (file && file !== 'nofile' && file !== '' && file !== 'database') || hasFileInUI;
+        if (!hasFile) {
+            console.log('⚠️ No Excel file uploaded - skipping tag load');
+            return;
+        }
+        
         const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
         
         // If no Excel file but we have database, try to load from cache first, then fetch from database
-        if (shouldLoadFromDatabase) {
+        // BUT only if a file is actually uploaded (checked above)
+        if (shouldLoadFromDatabase && hasFileInUI) {
             console.log('📊 No Excel file, checking cache for database tags...');
             // Still try to load from cache (might have database tags cached)
             const cachedTags = this.loadAvailableTagsFromCache();
