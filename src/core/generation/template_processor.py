@@ -185,6 +185,9 @@ class TemplateProcessor:
         # Performance tracking
         self.start_time = time.time()
         self.chunk_count = 0
+        
+        # Template expansion cache - avoid re-expanding templates with same size
+        self._template_expansion_cache = {}
 
         # CRITICAL FIX: Disable chunking only for templates that support dynamic grids
         if self.template_type in ['horizontal', 'vertical', 'double']:
@@ -1238,27 +1241,40 @@ class TemplateProcessor:
         
         try:
             # CRITICAL FIX: Re-expand template with correct number of products to prevent blank labels
+            # OPTIMIZATION: Cache template expansions to avoid re-expanding for same size
             num_products = len(chunk)
+            cache_key = f"{self.template_type}_{num_products}"
             
-            # For all templates, re-expand with correct number of products
-            if self.template_type in ['horizontal', 'vertical']:
-                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
-                self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
-            elif self.template_type == 'double':
-                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
-                self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-            elif self.template_type == 'mini':
-                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
-                self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
-            
-            if hasattr(self._expanded_template_buffer, 'seek'):
-                self._expanded_template_buffer.seek(0)
+            if cache_key in self._template_expansion_cache:
+                # Use cached template expansion
+                self._expanded_template_buffer = self._template_expansion_cache[cache_key]
+                if hasattr(self._expanded_template_buffer, 'seek'):
+                    self._expanded_template_buffer.seek(0)
+            else:
+                # For all templates, re-expand with correct number of products
+                if self.template_type in ['horizontal', 'vertical']:
+                    self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
+                elif self.template_type == 'double':
+                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
+                elif self.template_type == 'mini':
+                    self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
+                
+                # Cache the expansion (create a copy since BytesIO is consumed)
+                if hasattr(self._expanded_template_buffer, 'getvalue'):
+                    cached_buffer = BytesIO(self._expanded_template_buffer.getvalue())
+                    self._template_expansion_cache[cache_key] = cached_buffer
+                    self._expanded_template_buffer.seek(0)
+                elif hasattr(self._expanded_template_buffer, 'seek'):
+                    self._expanded_template_buffer.seek(0)
             
             doc = DocxTemplate(self._expanded_template_buffer)
             
-            # Debug: Log the order of records in this chunk
-            chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
-            self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
+            # Debug: Log the order of records in this chunk (only for small chunks to reduce logging overhead)
+            if len(chunk) <= 10:
+                chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
+                self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
+            else:
+                self.logger.info(f"Processing chunk with {len(chunk)} records")
             
             # OPTIMIZATION: Pre-load all brand, vendor, lineage, and strain data in batch to avoid N+1 queries
             # This reduces 200+ queries for 100 products to just 3-4 queries total
@@ -1407,9 +1423,10 @@ class TemplateProcessor:
                     label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
                                                                product_lineage_cache, strain_info_cache, joint_ratio_cache)
                 context[f'Label{i+1}'] = label_context
-                # Debug logging to check field values and order
-                product_name = record.get('ProductName', 'Unknown')
-                self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
+                # Debug logging to check field values and order (only for first few labels to reduce overhead)
+                if i < 3:
+                    product_name = record.get('ProductName', 'Unknown')
+                    self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
             
             # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
             # to prevent Jinja template errors when template references missing labels
@@ -1694,17 +1711,49 @@ class TemplateProcessor:
         # Check label_context first (from dict copy), then record as fallback
         vendor_from_record = None
         vendor_field_names = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'ProductVendor', 'vendor']
+        
+        # Log all available vendor-related fields for debugging (only for first few products)
+        vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
+        if vendor_related_keys and not hasattr(self, '_vendor_debug_count'):
+            self._vendor_debug_count = 0
+        if vendor_related_keys:
+            if not hasattr(self, '_vendor_debug_count'):
+                self._vendor_debug_count = 0
+            self._vendor_debug_count += 1
+            if self._vendor_debug_count <= 3:
+                self.logger.debug(f"🔍 VENDOR DEBUG: Available vendor-related fields for '{product_name}': {vendor_related_keys}")
+                for key in vendor_related_keys[:3]:  # Only log first 3 fields
+                    val = record.get(key)
+                    if val is not None:
+                        self.logger.debug(f"🔍 VENDOR DEBUG: Field '{key}' = '{val}' (type: {type(val).__name__})")
+        
         for field_name in vendor_field_names:
             # Check label_context first (already copied from record)
             val = label_context.get(field_name) or record.get(field_name)
             if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
                 vendor_from_record = str(val).strip()
-                self.logger.debug(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
+                # Only log for first few products
+                if not hasattr(self, '_vendor_found_count'):
+                    self._vendor_found_count = 0
+                self._vendor_found_count += 1
+                if self._vendor_found_count <= 3:
+                    self.logger.info(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
                 break
         
         # Store vendor early so it's available throughout processing
         if vendor_from_record:
             label_context['_vendor_from_record'] = vendor_from_record
+            if not hasattr(self, '_vendor_stored_count'):
+                self._vendor_stored_count = 0
+            self._vendor_stored_count += 1
+            if self._vendor_stored_count <= 3:
+                self.logger.info(f"✅ Stored vendor '{vendor_from_record}' in _vendor_from_record for '{product_name}'")
+        else:
+            if not hasattr(self, '_vendor_missing_count'):
+                self._vendor_missing_count = 0
+            self._vendor_missing_count += 1
+            if self._vendor_missing_count <= 3:
+                self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Available vendor fields: {vendor_related_keys}")
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
@@ -2291,8 +2340,12 @@ class TemplateProcessor:
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
         
-        # CRITICAL DEBUG: Log brand field processing
-        self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
+        # CRITICAL DEBUG: Log brand field processing (only for first few products)
+        if not hasattr(self, '_brand_debug_count'):
+            self._brand_debug_count = 0
+        self._brand_debug_count += 1
+        if self._brand_debug_count <= 3:
+            self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
         
         # CRITICAL FIX: Check if brand is missing and apply fallback logic FIRST
         if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
@@ -2507,8 +2560,18 @@ class TemplateProcessor:
                     label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val).strip()}PRODUCTVENDOR_END"
                 self.logger.info(f"✅ Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
             else:
-                label_context['ProductVendor'] = ""
-                self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found in record)")
+                # CRITICAL: Even if vendor_val is empty, check _vendor_from_record one more time
+                # This catches cases where vendor reading at the start found it but it wasn't used above
+                final_vendor = label_context.get('_vendor_from_record', '')
+                if final_vendor and str(final_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                    if self.template_type == 'vertical':
+                        label_context['ProductVendor'] = str(final_vendor).strip()
+                    else:
+                        label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(final_vendor).strip()}PRODUCTVENDOR_END"
+                    self.logger.info(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
+                else:
+                    label_context['ProductVendor'] = ""
+                    self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
             product_strain_value = record.get('ProductStrain') or record.get('Product Strain', '')
