@@ -1260,9 +1260,10 @@ class TemplateProcessor:
             chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
             self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
             
-            # OPTIMIZATION: Pre-load all brand data in batch to avoid N+1 queries
-            # This reduces 100+ queries for 100 products to just 1 query total
+            # OPTIMIZATION: Pre-load all brand and vendor data in batch to avoid N+1 queries
+            # This reduces 100+ queries for 100 products to just 2 queries total
             product_brand_cache = {}
+            product_vendor_cache = {}
             try:
                 from src.core.data.product_database import get_product_database
                 product_db = get_product_database()
@@ -1274,6 +1275,8 @@ class TemplateProcessor:
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
                             placeholders = ','.join(['?'] * len(product_names))
+                            
+                            # Load brand data
                             batch_brand_query = f'''
                                 SELECT "Product Name*", "Product Brand"
                                 FROM products
@@ -1286,10 +1289,33 @@ class TemplateProcessor:
                                 pname, brand = row_result
                                 if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_brand_cache[pname] = str(brand).strip()
-                        except Exception as batch_brand_err:
-                            self.logger.warning(f"Batch brand query failed: {batch_brand_err}")
+                            
+                            # Load vendor data - try Vendor/Supplier* first, then Vendor, then ProductVendor
+                            batch_vendor_query = f'''
+                                SELECT "Product Name*", 
+                                       CASE 
+                                           WHEN "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' THEN "Vendor/Supplier*"
+                                           WHEN "Vendor" IS NOT NULL AND "Vendor" != '' THEN "Vendor"
+                                           WHEN "ProductVendor" IS NOT NULL AND "ProductVendor" != '' THEN "ProductVendor"
+                                           ELSE NULL
+                                       END as vendor
+                                FROM products
+                                WHERE "Product Name*" IN ({placeholders})
+                                AND (
+                                    ("Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '')
+                                    OR ("Vendor" IS NOT NULL AND "Vendor" != '')
+                                    OR ("ProductVendor" IS NOT NULL AND "ProductVendor" != '')
+                                )
+                            '''
+                            cursor.execute(batch_vendor_query, product_names)
+                            for row_result in cursor.fetchall():
+                                pname, vendor = row_result
+                                if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                    product_vendor_cache[pname] = str(vendor).strip()
+                        except Exception as batch_err:
+                            self.logger.warning(f"Batch brand/vendor query failed: {batch_err}")
             except Exception as e:
-                self.logger.warning(f"Failed to pre-load brand data: {e}")
+                self.logger.warning(f"Failed to pre-load brand/vendor data: {e}")
             
             # Build context for each record in the chunk
             context = {}
@@ -1313,8 +1339,8 @@ class TemplateProcessor:
                 if self.template_type == 'inventory':
                     label_context = self._build_inventory_context(record)
                 else:
-                    # Pass brand cache to avoid N+1 queries
-                    label_context = self._build_label_context(record, doc, product_brand_cache)
+                    # Pass brand and vendor cache to avoid N+1 queries
+                    label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache)
                 context[f'Label{i+1}'] = label_context
                 # Debug logging to check field values and order
                 product_name = record.get('ProductName', 'Unknown')
@@ -1577,11 +1603,13 @@ class TemplateProcessor:
             'QR': '',
         }
     
-    def _build_label_context(self, record, doc, product_brand_cache=None):
+    def _build_label_context(self, record, doc, product_brand_cache=None, product_vendor_cache=None):
         """Ultra-optimized label context building for maximum performance."""
         # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
             product_brand_cache = {}
+        if product_vendor_cache is None:
+            product_vendor_cache = {}
         # CRITICAL FIX: Log lineage value received in template processor
         lineage_value = record.get('Lineage', 'NOT_FOUND')
         product_name = record.get('ProductName', 'Unknown')
@@ -2368,18 +2396,46 @@ class TemplateProcessor:
             
             # Set ProductVendor to actual vendor/supplier for classic types
             # Get vendor from record, not from product_brand
-            # CRITICAL: Check Vendor/Supplier* first since Vendor column may be empty
-            vendor_val = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor', '')
-            if vendor_val and str(vendor_val).lower() != 'nan':
+            # CRITICAL: Check all possible vendor field names with comprehensive fallback
+            vendor_val = None
+            vendor_fields = [
+                'Vendor/Supplier*',
+                'Vendor/Supplier',
+                'Vendor',
+                'ProductVendor',
+                'vendor',
+                'Vendor/Supplier *',  # Handle space variations
+                'Vendor/Supplier* ',  # Handle trailing space
+            ]
+            
+            # Try each field name
+            for field in vendor_fields:
+                val = record.get(field)
+                if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                    vendor_val = val
+                    self.logger.debug(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}'")
+                    break
+            
+            # If still no vendor, log all available fields for debugging
+            if not vendor_val or not str(vendor_val).strip():
+                available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
+                self.logger.warning(f"⚠️ No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
+                self.logger.warning(f"⚠️ All record keys: {list(record.keys())[:20]}...")  # First 20 keys for debugging
+            
+            # Handle NaN values and empty strings
+            if vendor_val is None or pd.isna(vendor_val) or str(vendor_val).lower() in ['nan', 'none', 'null', '']:
+                vendor_val = ''
+            
+            if vendor_val and str(vendor_val).strip():
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 if self.template_type == 'vertical':
-                    label_context['ProductVendor'] = str(vendor_val)
+                    label_context['ProductVendor'] = str(vendor_val).strip()
                 else:
-                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val)}PRODUCTVENDOR_END"
-                self.logger.debug(f"Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}'")
+                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val).strip()}PRODUCTVENDOR_END"
+                self.logger.info(f"✅ Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
             else:
                 label_context['ProductVendor'] = ""
-                self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
+                self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found in record)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
             product_strain_value = record.get('ProductStrain') or record.get('Product Strain', '')
@@ -2993,19 +3049,88 @@ class TemplateProcessor:
             val = ' '.join(val.split())
             label_context['JointRatio'] = val
         
-        # Fast vendor handling - only override if ProductVendor wasn't already set by our logic
-        # This preserves the ProductVendor logic for classic types
-        if 'ProductVendor' not in label_context:
-            product_type = (label_context.get('ProductType', '').lower() or 
-                           label_context.get('Product Type*', '').lower())
+        # Fast vendor handling - set ProductVendor if it's missing or empty
+        # This ensures vendor is populated even if earlier logic didn't set it or set it to empty
+        current_vendor = label_context.get('ProductVendor', '')
+        vendor_is_empty = False
+        
+        # Check if ProductVendor is missing or empty
+        if not current_vendor or not str(current_vendor).strip():
+            vendor_is_empty = True
+        else:
+            # Unwrap markers to check if actual content is empty
+            try:
+                unwrapped = unwrap_marker(str(current_vendor), 'PRODUCTVENDOR')
+                if not unwrapped or not unwrapped.strip():
+                    vendor_is_empty = True
+            except:
+                # If unwrapping fails, check if it's just empty markers
+                if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
+                    import re
+                    match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))
+                    if not match or not match.group(1).strip():
+                        vendor_is_empty = True
+                elif str(current_vendor).strip() == '':
+                    vendor_is_empty = True
+        
+        if vendor_is_empty:
+            # Try to enrich vendor from pre-loaded cache first
+            enriched_vendor = ""
+            try:
+                # Use cached vendor data (loaded in batch before loop)
+                enriched_vendor = product_vendor_cache.get(product_name, "")
+                if enriched_vendor:
+                    self.logger.info(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
+            except Exception as e:
+                self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
             
-            # Only set vendor from record if ProductVendor wasn't already set by our logic
-            # CRITICAL: Check Vendor/Supplier* first since Vendor column may be empty
-            product_vendor = record.get('Vendor/Supplier*') or record.get('Vendor', '') or record.get('ProductVendor', '')
-            # Handle NaN values in vendor data
-            if pd.isna(product_vendor) or str(product_vendor).lower() == 'nan':
-                product_vendor = ''
-            label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
+            # If database enrichment failed, fallback to record
+            if not enriched_vendor:
+                product_type = (label_context.get('ProductType', '').lower() or 
+                               label_context.get('Product Type*', '').lower())
+                
+                # CRITICAL: Check all possible vendor field names with comprehensive fallback
+                product_vendor = None
+                vendor_fields = [
+                    'Vendor/Supplier*',
+                    'Vendor/Supplier',
+                    'Vendor',
+                    'ProductVendor',
+                    'vendor',
+                    'Vendor/Supplier *',  # Handle space variations
+                    'Vendor/Supplier* ',  # Handle trailing space
+                ]
+                
+                # Try each field name
+                for field in vendor_fields:
+                    val = record.get(field)
+                    if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                        product_vendor = val
+                        self.logger.debug(f"✅ FALLBACK: Found vendor in field '{field}': '{product_vendor}' for '{product_name}'")
+                        break
+                
+                # If still no vendor, log all available fields for debugging
+                if not product_vendor or not str(product_vendor).strip():
+                    available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
+                    self.logger.warning(f"⚠️ FALLBACK: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
+                
+                # Handle NaN values in vendor data
+                if product_vendor is None or pd.isna(product_vendor) or str(product_vendor).lower() in ['nan', 'none', 'null', '']:
+                    product_vendor = ''
+                enriched_vendor = product_vendor
+            
+            # Set vendor if we found one
+            if enriched_vendor and str(enriched_vendor).strip():
+                # For vertical template, don't wrap with markers since it uses simple placeholders
+                if self.template_type == 'vertical':
+                    label_context['ProductVendor'] = str(enriched_vendor).strip()
+                else:
+                    label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
+                self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}' (product_type: '{product_type}')")
+            else:
+                # No vendor found anywhere, set to empty
+                label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
+                self.logger.warning(f"⚠️ VENDOR MISSING: No vendor data found for '{product_name}'")
 
         # Generate QR code - special handling for preroll template
         product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
@@ -3278,14 +3403,9 @@ class TemplateProcessor:
                 # The dynamic template creation already handles empty cells properly
                 self.logger.info("Skipping blank cell clearing for dynamic mini template")
                 
-                # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells
-                for table in doc.tables:
-                    enforce_fixed_cell_dimensions(table, 'mini')
-                    self.logger.info("Applied fixed cell dimensions to mini template table")
-                
-                # CRITICAL: Enhanced table expansion prevention for mini template
-                doc = prevent_table_expansion_enhanced(doc, 'mini')
-                self.logger.info("Applied enhanced table expansion prevention to mini template")
+                # OPTIMIZATION: Skip expensive dimension enforcement here - will be done once at the end
+                # This avoids processing every cell/paragraph/run twice
+                self.logger.info("Skipping early dimension enforcement for mini template (will be done at end)")
                 
                 # Apply mini template specific font sizing
                 self._apply_mini_template_font_sizing(doc)
@@ -3310,14 +3430,9 @@ class TemplateProcessor:
                 # The dynamic template creation already handles empty cells properly
                 self.logger.info("Skipping blank cell clearing for dynamic preroll template")
                 
-                # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells (same as mini)
-                for table in doc.tables:
-                    enforce_fixed_cell_dimensions(table, 'preroll')
-                    self.logger.info("Applied fixed cell dimensions to preroll template table")
-                
-                # CRITICAL: Enhanced table expansion prevention for preroll template (same as mini)
-                doc = prevent_table_expansion_enhanced(doc, 'preroll')
-                self.logger.info("Applied enhanced table expansion prevention to preroll template")
+                # OPTIMIZATION: Skip expensive dimension enforcement here - will be done once at the end
+                # This avoids processing every cell/paragraph/run twice
+                self.logger.info("Skipping early dimension enforcement for preroll template (will be done at end)")
                 
                 # Apply preroll template specific font sizing (uses preroll config, not mini)
                 self._apply_mini_template_font_sizing(doc)  # This method now uses self.template_type
@@ -3437,16 +3552,8 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"DOH centering failed: {e}")
         
-        # CRITICAL: Final cell dimension enforcement to prevent any expansion
-        try:
-            for table in doc.tables:
-                enforce_fixed_cell_dimensions(table, self.template_type)
-                self.logger.info(f"Applied final fixed cell dimensions to {self.template_type} template table")
-        except Exception as e:
-            self.logger.warning(f"Final cell dimension enforcement failed: {e}")
-
-        
-        # CRITICAL: Enhanced table expansion prevention - additional layer of protection
+        # OPTIMIZATION: Only call prevent_table_expansion_enhanced once - it already does everything
+        # enforce_fixed_cell_dimensions does, plus more, so we don't need both
         try:
             doc = prevent_table_expansion_enhanced(doc, self.template_type)
             self.logger.info(f"Applied enhanced table expansion prevention to {self.template_type} template")
