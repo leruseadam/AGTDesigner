@@ -1736,10 +1736,24 @@ class TemplateProcessor:
                 # Fallback to record if not in label_context
                 val = record.get(field_name)
             
-            if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                vendor_from_record = str(val).strip()
-                self.logger.info(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
-                break
+            # CRITICAL: More thorough check - handle empty strings, None, NaN, and whitespace-only values
+            if val is not None:
+                # Check if it's NaN using pandas
+                if not pd.isna(val):
+                    val_str = str(val).strip()
+                    val_lower = val_str.lower()
+                    # Check if it's a valid non-empty value
+                    if val_str and val_lower not in ['nan', 'none', 'null', '']:
+                        vendor_from_record = val_str
+                        self.logger.info(f"✅ EARLY VENDOR EXTRACTION: Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
+                        break
+                    else:
+                        # Log why it was rejected
+                        self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' has value '{repr(val)}' (stripped: '{val_str}') which is empty/invalid for '{product_name}'")
+                else:
+                    self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' is NaN for '{product_name}'")
+            else:
+                self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' is None for '{product_name}'")
         
         # If not found in standard fields, check ALL vendor-related keys from BOTH label_context and record
         if not vendor_from_record and vendor_related_keys:
@@ -1776,8 +1790,11 @@ class TemplateProcessor:
             vendor_field_values = {}
             for field in vendor_field_names:
                 val = record.get(field)
-                if val is not None:
-                    vendor_field_values[field] = str(val)[:50]  # First 50 chars
+                vendor_field_values[field] = f"value={repr(val)}, type={type(val).__name__}, is_na={pd.isna(val) if hasattr(pd, 'isna') else 'N/A'}"
+            # Also check vendor-related keys
+            for key in vendor_related_keys:
+                val = record.get(key)
+                vendor_field_values[key] = f"value={repr(val)}, type={type(val).__name__}, is_na={pd.isna(val) if hasattr(pd, 'isna') else 'N/A'}"
             self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Vendor field values: {vendor_field_values}, Sample record keys: {all_keys_sample}")
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
