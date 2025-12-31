@@ -2590,8 +2590,26 @@ class TemplateProcessor:
             # CRITICAL: Check if ProductVendor was already set at the start (from _vendor_from_record)
             # If so, preserve it - don't overwrite with empty
             existing_vendor = label_context.get('ProductVendor', '')
-            if existing_vendor and str(existing_vendor).strip() and 'PRODUCTVENDOR_START' not in str(existing_vendor):
-                # ProductVendor was set at the start, keep it
+            # Check if existing_vendor has actual content (unwrap markers to check)
+            existing_vendor_has_content = False
+            if existing_vendor and str(existing_vendor).strip():
+                try:
+                    from src.core.formatting.markers import unwrap_marker
+                    unwrapped = unwrap_marker(str(existing_vendor), 'PRODUCTVENDOR')
+                    if unwrapped and str(unwrapped).strip():
+                        existing_vendor_has_content = True
+                except:
+                    # If unwrapping fails, check if it's just the plain value (no markers)
+                    if 'PRODUCTVENDOR_START' not in str(existing_vendor):
+                        existing_vendor_has_content = True
+                    else:
+                        # Has markers, check if content between markers is non-empty
+                        match = re.search(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', str(existing_vendor))
+                        if match and match.group(1).strip():
+                            existing_vendor_has_content = True
+            
+            if existing_vendor_has_content:
+                # ProductVendor was set at the start with content, keep it
                 self.logger.info(f"✅ Preserving ProductVendor set at start: '{existing_vendor}' for '{product_name}'")
             elif vendor_val and str(vendor_val).strip():
                 # For vertical template, don't wrap with markers since it uses simple placeholders
@@ -2613,7 +2631,8 @@ class TemplateProcessor:
                 else:
                     # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
                     # CRITICAL FIX: Set with markers when empty so fallback logic can detect and populate it
-                    if not existing_vendor or not str(existing_vendor).strip():
+                    # Use the same check as above to see if existing_vendor has content
+                    if not existing_vendor_has_content:
                         if self.template_type == 'vertical':
                             label_context['ProductVendor'] = ""
                         else:
