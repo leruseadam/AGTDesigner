@@ -2419,8 +2419,13 @@ class TemplateProcessor:
             # If still no vendor, log all available fields for debugging
             if not vendor_val or not str(vendor_val).strip():
                 available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                self.logger.warning(f"⚠️ No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-                self.logger.warning(f"⚠️ All record keys: {list(record.keys())[:20]}...")  # First 20 keys for debugging
+                self.logger.warning(f"⚠️ INITIAL EXTRACTION: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
+                # Log actual values from vendor fields for debugging
+                for field in vendor_fields:
+                    val = record.get(field)
+                    if val is not None:
+                        self.logger.warning(f"⚠️ INITIAL EXTRACTION: Field '{field}' has value: '{val}' (type: {type(val).__name__})")
+                self.logger.warning(f"⚠️ INITIAL EXTRACTION: Will try fallback logic later. All record keys: {list(record.keys())[:20]}...")  # First 20 keys for debugging
             
             # Handle NaN values and empty strings
             if vendor_val is None or pd.isna(vendor_val) or str(vendor_val).lower() in ['nan', 'none', 'null', '']:
@@ -3049,87 +3054,96 @@ class TemplateProcessor:
             val = ' '.join(val.split())
             label_context['JointRatio'] = val
         
-        # Fast vendor handling - set ProductVendor if it's missing or empty
+        # Fast vendor handling - set ProductVendor if it's missing or empty (ONLY for classic types)
         # This ensures vendor is populated even if earlier logic didn't set it or set it to empty
-        current_vendor = label_context.get('ProductVendor', '')
-        vendor_is_empty = False
+        # Non-classic types should NOT have ProductVendor
+        product_type_check = (label_context.get('ProductType', '').lower() or 
+                             label_context.get('Product Type*', '').lower())
+        from src.core.constants import CLASSIC_TYPES
+        is_classic_type_for_vendor = product_type_check in [t.lower() for t in CLASSIC_TYPES]
         
-        # Check if ProductVendor is missing or empty
-        if not current_vendor or not str(current_vendor).strip():
-            vendor_is_empty = True
-        else:
-            # Unwrap markers to check if actual content is empty
-            try:
-                unwrapped = unwrap_marker(str(current_vendor), 'PRODUCTVENDOR')
-                if not unwrapped or not unwrapped.strip():
-                    vendor_is_empty = True
-            except:
-                # If unwrapping fails, check if it's just empty markers
-                if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
-                    match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))
-                    if not match or not match.group(1).strip():
-                        vendor_is_empty = True
-                elif str(current_vendor).strip() == '':
-                    vendor_is_empty = True
-        
-        if vendor_is_empty:
-            # Try to enrich vendor from pre-loaded cache first
-            enriched_vendor = ""
-            try:
-                # Use cached vendor data (loaded in batch before loop)
-                enriched_vendor = product_vendor_cache.get(product_name, "")
-                if enriched_vendor:
-                    self.logger.info(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
-            except Exception as e:
-                self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
+        # Only process vendor for classic types
+        if is_classic_type_for_vendor:
+            current_vendor = label_context.get('ProductVendor', '')
+            vendor_is_empty = False
             
-            # If database enrichment failed, fallback to record
-            if not enriched_vendor:
-                product_type = (label_context.get('ProductType', '').lower() or 
-                               label_context.get('Product Type*', '').lower())
-                
-                # CRITICAL: Check all possible vendor field names with comprehensive fallback
-                product_vendor = None
-                vendor_fields = [
-                    'Vendor/Supplier*',
-                    'Vendor/Supplier',
-                    'Vendor',
-                    'ProductVendor',
-                    'vendor',
-                    'Vendor/Supplier *',  # Handle space variations
-                    'Vendor/Supplier* ',  # Handle trailing space
-                ]
-                
-                # Try each field name
-                for field in vendor_fields:
-                    val = record.get(field)
-                    if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                        product_vendor = val
-                        self.logger.debug(f"✅ FALLBACK: Found vendor in field '{field}': '{product_vendor}' for '{product_name}'")
-                        break
-                
-                # If still no vendor, log all available fields for debugging
-                if not product_vendor or not str(product_vendor).strip():
-                    available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                    self.logger.warning(f"⚠️ FALLBACK: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-                
-                # Handle NaN values in vendor data
-                if product_vendor is None or pd.isna(product_vendor) or str(product_vendor).lower() in ['nan', 'none', 'null', '']:
-                    product_vendor = ''
-                enriched_vendor = product_vendor
-            
-            # Set vendor if we found one
-            if enriched_vendor and str(enriched_vendor).strip():
-                # For vertical template, don't wrap with markers since it uses simple placeholders
-                if self.template_type == 'vertical':
-                    label_context['ProductVendor'] = str(enriched_vendor).strip()
-                else:
-                    label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
-                self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}' (product_type: '{product_type}')")
+            # Check if ProductVendor is missing or empty
+            if not current_vendor or not str(current_vendor).strip():
+                vendor_is_empty = True
             else:
-                # No vendor found anywhere, set to empty
-                label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
-                self.logger.warning(f"⚠️ VENDOR MISSING: No vendor data found for '{product_name}'")
+                # Unwrap markers to check if actual content is empty
+                try:
+                    unwrapped = unwrap_marker(str(current_vendor), 'PRODUCTVENDOR')
+                    if not unwrapped or not unwrapped.strip():
+                        vendor_is_empty = True
+                except:
+                    # If unwrapping fails, check if it's just empty markers
+                    if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
+                        match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))
+                        if not match or not match.group(1).strip():
+                            vendor_is_empty = True
+                    elif str(current_vendor).strip() == '':
+                        vendor_is_empty = True
+            
+            if vendor_is_empty:
+                # Try to enrich vendor from pre-loaded cache first
+                enriched_vendor = ""
+                try:
+                    # Use cached vendor data (loaded in batch before loop)
+                    enriched_vendor = product_vendor_cache.get(product_name, "")
+                    if enriched_vendor:
+                        self.logger.info(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
+                except Exception as e:
+                    self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
+                
+                # If database enrichment failed, fallback to record
+                if not enriched_vendor:
+                    product_type = (label_context.get('ProductType', '').lower() or 
+                                   label_context.get('Product Type*', '').lower())
+                    
+                    # CRITICAL: Check all possible vendor field names with comprehensive fallback
+                    product_vendor = None
+                    vendor_fields = [
+                        'Vendor/Supplier*',
+                        'Vendor/Supplier',
+                        'Vendor',
+                        'ProductVendor',
+                        'vendor',
+                        'Vendor/Supplier *',  # Handle space variations
+                        'Vendor/Supplier* ',  # Handle trailing space
+                    ]
+                    
+                    # Try each field name
+                    for field in vendor_fields:
+                        val = record.get(field)
+                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                            product_vendor = val
+                            self.logger.debug(f"✅ FALLBACK: Found vendor in field '{field}': '{product_vendor}' for '{product_name}'")
+                            break
+                    
+                    # If still no vendor, log all available fields for debugging
+                    if not product_vendor or not str(product_vendor).strip():
+                        available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
+                        self.logger.warning(f"⚠️ FALLBACK: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
+                    
+                    # Handle NaN values in vendor data
+                    if product_vendor is None or pd.isna(product_vendor) or str(product_vendor).lower() in ['nan', 'none', 'null', '']:
+                        product_vendor = ''
+                    enriched_vendor = product_vendor
+                
+                # Set vendor if we found one
+                if enriched_vendor and str(enriched_vendor).strip():
+                    # For vertical template, don't wrap with markers since it uses simple placeholders
+                    if self.template_type == 'vertical':
+                        label_context['ProductVendor'] = str(enriched_vendor).strip()
+                    else:
+                        label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
+                    self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}' (product_type: '{product_type}')")
+                else:
+                    # No vendor found anywhere, set to empty
+                    label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
+                    self.logger.warning(f"⚠️ VENDOR MISSING: No vendor data found for '{product_name}'")
+        # End of classic type vendor handling - non-classic types already have ProductVendor set to empty above
 
         # Generate QR code - special handling for preroll template
         product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
