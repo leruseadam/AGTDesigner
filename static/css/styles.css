@@ -3061,8 +3061,8 @@ body.modal-open #mainContent.store-selection-disabled,
     margin: 1.5rem auto 0.2rem auto !important; /* Increased top margin for healthy gap from template select */
     padding: 0.7rem 1.2rem !important;
     font-size: 1.05rem !important;
-    width: 100% !important;
-    max-width: 100% !important;
+    width: 70% !important; /* Match control buttons width */
+    max-width: 70% !important; /* Match control buttons width */
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
