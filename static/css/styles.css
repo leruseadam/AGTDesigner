@@ -211,7 +211,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
     font-size: 1.625rem !important; /* Increased by 2px (1.5rem = 24px, 1.625rem = 26px) */
     font-weight: 700 !important;
     color: #fff !important;
-    text-shadow: 0 2px 8px rgba(44,34,58,0.7), 0 1px 0 #222;
+    text-shadow: none !important;
   }
   
   /* Reduce padding and margins */

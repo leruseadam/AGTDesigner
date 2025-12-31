@@ -2813,6 +2813,7 @@ class ProductDatabase:
                     FROM products p
                     {join_clause}
                     WHERE p.normalized_name = ? AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
+                    ORDER BY p."Vendor/Supplier*" IS NOT NULL DESC, p.rowid DESC
                 ''', (normalized_name, vendor, brand))
             else:
                 cursor.execute(f'''
@@ -2822,6 +2823,7 @@ class ProductDatabase:
                     FROM products p
                     {join_clause}
                     WHERE p.normalized_name = ?
+                    ORDER BY p."Vendor/Supplier*" IS NOT NULL DESC, p.rowid DESC
                 ''', (normalized_name,))
             
             result = cursor.fetchone()
