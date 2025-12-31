@@ -3174,8 +3174,24 @@ body.modal-open #mainContent.store-selection-disabled,
     letter-spacing: 0.5px !important;
     text-transform: uppercase !important;
     color: rgba(160, 132, 232, 0.9) !important;
+    text-align: center !important;
   }
-  
+
+  /* Center filter dropdown text */
+  .control-panel .filter-select,
+  .control-panel #templateSelect {
+    text-align: center !important;
+    -webkit-text-align-last: center !important;
+    -moz-text-align-last: center !important;
+    text-align-last: center !important;
+  }
+
+  /* Center dropdown options */
+  .control-panel .filter-select option,
+  .control-panel #templateSelect option {
+    text-align: center !important;
+  }
+
   /* Enhanced Control Button Styling - Matching Generate Button */
   /* High specificity to override media query rules */
   /* Professional Center Column Buttons - Glass Morphism Design with Color Coding */
