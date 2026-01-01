@@ -9294,25 +9294,10 @@ def get_available_tags():
         # The processor is not session-safe and can contain data from other users
         has_excel_data = file_exists and session_file_path
 
-        # ENABLED: Automatically load default file for the selected store
-        # CRITICAL: Only load default file if user has actually selected a store
-        # This ensures the store modal appears for first-time users
+        # DISABLED: Do not automatically load default file - only load from user-uploaded Excel files
+        # User wants to only see tags from Excel files they upload, not from database/default files
         if not has_excel_data and store_name:
-            try:
-                from src.core.data.excel_processor import get_default_upload_file
-                default_file = get_default_upload_file(store_name)
-                if default_file and os.path.exists(default_file):
-                    logging.info(f"ℹ️ No session file; using default store file: {default_file}")
-                    session['file_path'] = default_file
-                    session['uploaded_filename'] = os.path.basename(default_file)
-                    session.modified = True
-                    session_file_path = default_file
-                    has_excel_data = True
-                    file_exists = True
-                else:
-                    logging.info(f"📁 No default file found for store: {store_name}")
-            except Exception as default_err:
-                logging.warning(f"Default file fallback failed: {default_err}")
+            logging.info(f"📁 No Excel file uploaded - will return empty tags (not loading default file or database)")
 
         # CRITICAL: If file doesn't exist but session says it should, clear the stale session
         if not file_exists and session_file_path:
@@ -9705,16 +9690,11 @@ def get_available_tags():
                 recently_updated_lineage = False
 
         # CRITICAL: Never return cached tags when Excel data exists
+        # CRITICAL: Only return cached tags if they came from Excel (has_excel_data must be true)
+        # User wants to only see tags from Excel files, not from database
         if fast_load and cached_tags and not recently_updated_lineage and not has_excel_data:
-            logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags)")
-            # CRITICAL: Always align with DB lineage to ensure database values override Excel
-            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
-            safe_cached_tags = make_json_safe(aligned_cached_tags)
-            return jsonify({
-                'tags': safe_cached_tags,
-                'total_count': len(safe_cached_tags),
-                'source': 'cache-fast'
-            })
+            logging.info(f"⚡ FAST-LOAD: Skipping cached tags - no Excel file uploaded (user wants Excel-only)")
+            cached_tags = None  # Clear cache to force empty return
         elif fast_load and cached_tags and has_excel_data:
             logging.warning(f"⚠️ CACHE BUG: cached_tags exists despite has_excel_data=True - clearing and continuing")
             cached_tags = None
