@@ -4937,76 +4937,67 @@ const TagManager = {
             verboseLog('Select All Available checkbox not found');
         }
 
-        // CRITICAL FIX: For JSON matched tags, skip organization entirely and render directly
-        const isJsonMatchedSession = tags.some(tag => tag.Source && tag.Source.includes('JSON Match'));
+        // Organize tags by vendor, brand, product type, weight (SAME HIERARCHY AS SELECTED TAGS)
+        // JSON matched tags now use the same rendering path as Excel tags for consistency
+        verboseLog('About to organize tags, tags length:', tags.length);
         
         let organizedTags;
-        if (isJsonMatchedSession) {
-            verboseLog('CRITICAL FIX: JSON matched session detected, skipping organization and rendering directly');
-            // For JSON matched tags, render them directly without organization
-            this.renderJsonMatchedTags(tags);
-            return;
-        } else {
-            // Organize tags by vendor, brand, product type, weight (SAME HIERARCHY AS SELECTED TAGS)
-            // This ensures JSON matched tags and all tags use: Vendor > Brand > Product Type > Weight
-            verboseLog('About to organize tags, tags length:', tags.length);
+        
+        // CRITICAL FIX: For large datasets, organize asynchronously to prevent UI freeze
+        const LARGE_DATASET_THRESHOLD = 500;
+        if (tags.length > LARGE_DATASET_THRESHOLD) {
+            verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
+            // Show loading indicator while organizing
+            availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
             
-            // CRITICAL FIX: For large datasets, organize asynchronously to prevent UI freeze
-            const LARGE_DATASET_THRESHOLD = 500;
-            if (tags.length > LARGE_DATASET_THRESHOLD) {
-                verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
-                // Show loading indicator while organizing
-                availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
-                
-                // Organize in next event loop tick to prevent blocking
-                setTimeout(() => {
-                    try {
-                        organizedTags = this.organizeBrandCategories(tags);
-                        verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
-                        verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
-                        // Continue with normal rendering flow
-                        this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
-                    } catch (error) {
-                        console.error('Error organizing tags:', error);
-                        // CRITICAL FIX: Fallback to simple list rendering if organization fails
-                        console.log('🔄 Falling back to simple list rendering due to organization error');
-                        const sortedSimple = [...tags].sort((a, b) => {
-                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                            return aName.localeCompare(bName);
-                        });
-                        this._renderTagsInBatches(sortedSimple, tagList);
-                        availableTagsContainer.innerHTML = '';
-                        availableTagsContainer.appendChild(tagList);
-                        this._restoreCheckboxStates();
-                        this._restoreAvailableScrollPosition(savedScroll);
-                        
-                        // CRITICAL FIX: Re-enable scaling after rendering completes
-                        if (window.setTagRenderingState) {
-                            setTimeout(() => {
-                                window.setTagRenderingState(false);
-                                // Trigger scale after rendering completes
-                                if (window.scaleAppToFitDebounced) {
-                                    window.scaleAppToFitDebounced(300);
-                                }
-                            }, 200);
-                        }
+            // Organize in next event loop tick to prevent blocking
+            setTimeout(() => {
+                try {
+                    organizedTags = this.organizeBrandCategories(tags);
+                    verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
+                    verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
+                    // Continue with normal rendering flow
+                    this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
+                } catch (error) {
+                    console.error('Error organizing tags:', error);
+                    // CRITICAL FIX: Fallback to simple list rendering if organization fails
+                    console.log('🔄 Falling back to simple list rendering due to organization error');
+                    const sortedSimple = [...tags].sort((a, b) => {
+                        const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                        const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                        return aName.localeCompare(bName);
+                    });
+                    this._renderTagsInBatches(sortedSimple, tagList);
+                    availableTagsContainer.innerHTML = '';
+                    availableTagsContainer.appendChild(tagList);
+                    this._restoreCheckboxStates();
+                    this._restoreAvailableScrollPosition(savedScroll);
+                    
+                    // CRITICAL FIX: Re-enable scaling after rendering completes
+                    if (window.setTagRenderingState) {
+                        setTimeout(() => {
+                            window.setTagRenderingState(false);
+                            // Trigger scale after rendering completes
+                            if (window.scaleAppToFitDebounced) {
+                                window.scaleAppToFitDebounced(300);
+                            }
+                        }, 200);
                     }
-                }, 0);
-                return; // Exit early, rendering will continue in callback
-            }
-            
-            // Small dataset - organize synchronously (fast enough)
-            try {
-                organizedTags = this.organizeBrandCategories(tags);
-                verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
-                verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
-            } catch (error) {
-                console.error('Error organizing tags:', error);
-                // Fallback to simple list if organization fails
-                availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
-                return;
-            }
+                }
+            }, 0);
+            return; // Exit early, rendering will continue in callback
+        }
+        
+        // Small dataset - organize synchronously (fast enough)
+        try {
+            organizedTags = this.organizeBrandCategories(tags);
+            verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
+            verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
+        } catch (error) {
+            console.error('Error organizing tags:', error);
+            // Fallback to simple list if organization fails
+            availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
+            return;
         }
         
         // Create vendor sections
