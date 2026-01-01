@@ -3806,7 +3806,7 @@ body.modal-open #mainContent.store-selection-disabled,
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     font-weight: 600 !important;
-    font-size: 8px !important;
+    font-size: 6px !important;
     padding: 2px 6px 2px 3px !important;
     transition: border-color 0.15s ease !important;
     text-align: center !important;
@@ -3836,7 +3836,7 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: 500 !important;
     text-align: center !important;
     padding: 2px 4px !important; /* Reduced padding for compact list */
-    font-size: 0.85rem !important; /* Smaller font */
+    font-size: 0.75rem !important; /* Smaller font */
     line-height: 1.2 !important; /* Tighter line height */
     text-shadow: none !important;
   }
@@ -3918,6 +3918,13 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 8px 16px !important;
   }
   
+  /* File path display - make text bigger */
+  #fileInfoText,
+  .file-path-display #fileInfoText {
+    font-size: 16px !important;
+    font-weight: 600 !important;
+  }
+  
 
   .doh-dropdown:focus, .form-select.doh-dropdown:focus {
     border-color: rgba(34, 197, 94, 0.5) !important;
@@ -3986,7 +3993,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 30px !important;
     max-width: 40px !important;
     width: 35px !important;
-    font-size: 7px !important; /* Reduced from 8px for smaller font */
+    font-size: 6px !important; /* Reduced from 7px for smaller font */
     padding: 2px 6px 2px 3px !important;
     height: 14px !important;
     line-height: 1.0 !important;
@@ -5415,7 +5422,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--text-primary);
     border-radius: 8px;
     padding: 6px 12px;
-    font-size: 0.9rem;
+    font-size: 0.65rem !important;
     transition: all 0.3s ease;
   }
   .lineage-dropdown:hover,
@@ -6288,7 +6295,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 60px !important;
     max-width: 70px !important;
     width: 65px !important;
-    font-size: 0.4em !important; /* Reduced from 0.5em for smaller font */
+    font-size: 0.3em !important; /* Reduced from 0.4em for smaller font */
     padding: 4px 14px 4px 4px !important; /* Right padding for arrow, left padding for text */
     background: rgba(255, 255, 255, 0.15) !important; /* Slightly more visible */
     color: white !important;
@@ -6351,7 +6358,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .lineage-dropdown,
   .lineage-dropdown-mini,
   .form-select.lineage-dropdown {
-    font-size: 0.4em !important; /* Reduced from 0.5em for smaller font */
+    font-size: 0.3em !important; /* Reduced from 0.4em for smaller font */
     min-width: 60px !important;
     max-width: 70px !important;
     width: 65px !important;
