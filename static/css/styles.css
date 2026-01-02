@@ -3993,7 +3993,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 30px !important;
     max-width: 40px !important;
     width: 35px !important;
-    font-size: 4px !important; /* Reduced from 5px for smaller font */
+    font-size: 3px !important; /* Reduced from 4px for smaller font */
     padding: 2px 6px 2px 3px !important;
     height: 14px !important;
     line-height: 1.0 !important;
@@ -4024,7 +4024,7 @@ body.modal-open #mainContent.store-selection-disabled,
     width: 70px !important;
     max-width: 70px !important;
     min-width: 70px !important;
-    font-size: 7px !important; /* Reduced from 9px for smaller font */
+    font-size: 5px !important; /* Reduced from 7px for smaller font */
     padding: 2px 12px 2px 6px !important;
     height: 14px !important;
     line-height: 1.0 !important;
@@ -5422,7 +5422,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--text-primary);
     border-radius: 8px;
     padding: 6px 12px;
-    font-size: 4px !important; /* Reduced from 0.5rem for smaller font */
+    font-size: 3px !important; /* Reduced from 0.5rem for smaller font */
     transition: all 0.3s ease;
   }
   .lineage-dropdown:hover,
@@ -6229,7 +6229,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Don't override with smaller size */
   }
   .lineage-dropdown-mini {
-    font-size: 4px !important; /* Reduced from 0.3em for smaller absolute font size */
+    font-size: 3px !important; /* Reduced from 0.3em for smaller absolute font size */
     padding: 2px 6px;
     min-width: 40px;
     max-width: 60px;
@@ -6358,7 +6358,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .lineage-dropdown,
   .lineage-dropdown-mini,
   .form-select.lineage-dropdown {
-    font-size: 4px !important; /* Reduced from 0.3em for smaller absolute font size */
+    font-size: 3px !important; /* Reduced from 0.3em for smaller absolute font size */
     min-width: 60px !important;
     max-width: 70px !important;
     width: 65px !important;
@@ -11802,7 +11802,7 @@ html, body {
 .tag-row .lineage-dropdown-mini,
 .tag-row .form-select.lineage-dropdown,
 .tag-row .form-select.lineage-dropdown-mini {
-    font-size: 4px !important;
+    font-size: 3px !important;
 }
 
 .tag-item .doh-dropdown,
@@ -11817,5 +11817,5 @@ html, body {
 .tag-row .doh-dropdown-mini,
 .tag-row .form-select.doh-dropdown,
 .tag-row .form-select.doh-dropdown-mini {
-    font-size: 7px !important;
+    font-size: 5px !important;
 }

@@ -11044,37 +11044,24 @@ const TagManager = {
             });
         });
         
-        // GUARANTEED FIX: Restore filters from localStorage on page load
-        const savedFilters = this.loadFiltersFromStorage();
-        this.state.filters = savedFilters || {
+        // CRITICAL FIX: Reset filters on page load (don't restore from localStorage)
+        // Filters should reset on page reload, but persist during session when tags are updated
+        this.state.filters = {
             vendor: 'All',
             brand: 'All',
             productType: 'All',
             lineage: 'All',
-            weight: 'All'
+            weight: 'All',
+            doh: 'All',
+            highCbd: 'All'
         };
         
-        // Set each filter dropdown to saved value or 'All' (or '')
+        // Set each filter dropdown to 'All' (empty string) on page load
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
-        const filterMap = {
-            'vendorFilter': 'vendor',
-            'brandFilter': 'brand',
-            'productTypeFilter': 'productType',
-            'lineageFilter': 'lineage',
-            'weightFilter': 'weight',
-            'dohFilter': 'doh',
-            'highCbdFilter': 'highCbd'
-        };
         filterIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
-                const filterKey = filterMap[id];
-                const savedValue = this.state.filters[filterKey];
-                if (savedValue && savedValue !== 'All') {
-                    el.value = savedValue;
-                } else {
-                    el.value = '';
-                }
+                el.value = '';
             }
         });
         // Don't apply filters immediately - let checkForExistingData handle it
