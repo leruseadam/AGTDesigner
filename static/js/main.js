@@ -10925,6 +10925,46 @@ const TagManager = {
             console.log('📝 Container ready for tags');
         }
 
+        // CRITICAL FIX: Check if file is uploaded FIRST - before any cache operations
+        const fileCheck = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+        const fileInfoTextCheck = document.getElementById('fileInfoText');
+        const hasFileInUICheck = fileInfoTextCheck && fileInfoTextCheck.textContent.trim() !== 'No file uploaded' && fileInfoTextCheck.textContent.trim() !== '';
+        const hasFileCheck = (fileCheck && fileCheck !== 'nofile' && fileCheck !== '' && fileCheck !== 'database') || hasFileInUICheck;
+        
+        // CRITICAL: If no file is uploaded, clear ALL cache immediately to prevent database tags from loading
+        if (!hasFileCheck) {
+            console.log('⚠️ No file uploaded - clearing all cache before initialization');
+            try {
+                if (window.localStorage) {
+                    for (let i = localStorage.length - 1; i >= 0; i--) {
+                        const key = localStorage.key(i);
+                        if (key && key.startsWith('agt_available_tags')) {
+                            localStorage.removeItem(key);
+                            console.log(`🧹 Cleared cache key: ${key}`);
+                        }
+                    }
+                }
+                if (window.sessionStorage) {
+                    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+                        const key = sessionStorage.key(i);
+                        if (key && key.startsWith('agt_available_tags')) {
+                            sessionStorage.removeItem(key);
+                            console.log(`🧹 Cleared cache key: ${key}`);
+                        }
+                    }
+                }
+                // Also clear tags state
+                this.state.tags = [];
+                this.state.originalTags = [];
+                if (availableTagsContainer) {
+                    availableTagsContainer.innerHTML = '';
+                }
+                console.log('✅ All cache cleared - no tags will be loaded');
+            } catch (e) {
+                console.warn('Failed to clear cache:', e);
+            }
+        }
+
         // CRITICAL FIX: Initialize lineage update tracking
         this._lineageUpdatePending = new Set();
         this._lineageUpdateCompletions = new Map();
@@ -10935,12 +10975,6 @@ const TagManager = {
 
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
-
-        // CRITICAL FIX: Check if file is uploaded before trying to hydrate from cache
-        const fileCheck = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-        const fileInfoTextCheck = document.getElementById('fileInfoText');
-        const hasFileInUICheck = fileInfoTextCheck && fileInfoTextCheck.textContent.trim() !== 'No file uploaded' && fileInfoTextCheck.textContent.trim() !== '';
-        const hasFileCheck = (fileCheck && fileCheck !== 'nofile' && fileCheck !== '' && fileCheck !== 'database') || hasFileInUICheck;
         
         // CRITICAL FIX: Try to hydrate from cache IMMEDIATELY before showing any splash
         // This ensures tags appear instantly on page load if cache exists
