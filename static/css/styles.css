@@ -11803,6 +11803,8 @@ html, body {
 .tag-row .form-select.lineage-dropdown,
 .tag-row .form-select.lineage-dropdown-mini {
     font-size: 3px !important;
+    transform: scale(0.4) !important; /* Scale down to make text appear smaller if browser enforces minimum font size */
+    transform-origin: left center !important;
 }
 
 .tag-item .doh-dropdown,
@@ -11818,4 +11820,6 @@ html, body {
 .tag-row .form-select.doh-dropdown,
 .tag-row .form-select.doh-dropdown-mini {
     font-size: 5px !important;
+    transform: scale(0.5) !important; /* Scale down to make text appear smaller if browser enforces minimum font size */
+    transform-origin: left center !important;
 }

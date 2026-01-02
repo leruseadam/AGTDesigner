@@ -2133,10 +2133,15 @@ const TagManager = {
             
             // Handle value restoration based on preserveExistingValues parameter
             if (preserveExistingValues) {
-                // CRITICAL FIX: Also check localStorage for saved filter values
-                // This ensures filters are preserved even if DOM values are temporarily lost
-                const savedFilters = this.loadFiltersFromStorage();
-                const savedValue = savedFilters && savedFilters[filterType] ? savedFilters[filterType] : null;
+                // CRITICAL FIX: Only check localStorage if we're not on initial page load
+                // On page load, filters should reset, but during session updates they should persist
+                const isInitialLoad = !this.state.initialized && this._initializing;
+                let savedValue = null;
+                if (!isInitialLoad) {
+                    // Only check localStorage during session (not on page load)
+                    const savedFilters = this.loadFiltersFromStorage();
+                    savedValue = savedFilters && savedFilters[filterType] ? savedFilters[filterType] : null;
+                }
                 const valueToPreserve = currentValue && currentValue.trim() !== '' ? currentValue : (savedValue || '');
                 
                 // Preserve existing value if it's still valid, or keep it even if not in current options
@@ -6572,8 +6577,8 @@ const TagManager = {
         lineageSelect.style.backdropFilter = 'blur(10px)';
         lineageSelect.style.transition = 'all 0.2s ease';
         lineageSelect.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.1)';
-        lineageSelect.style.fontSize = '8px'; /* Compact font */
-        lineageSelect.style.transform = 'none'; /* No transform - CSS handles size */
+        lineageSelect.style.fontSize = '3px'; /* Compact font */
+        /* Allow CSS transform to scale down text */
         lineageSelect.style.transformOrigin = 'left center';
         lineageSelect.style.lineHeight = '1.0';
         lineageSelect.style.fontWeight = 'bold';
@@ -6788,8 +6793,8 @@ const TagManager = {
         dohSelect.style.minWidth = '70px'; /* Even wider for full text visibility */
         dohSelect.style.maxWidth = '70px';
         dohSelect.style.width = '70px';
-        dohSelect.style.fontSize = '9px'; /* Slightly larger font */
-        dohSelect.style.transform = 'none'; /* No transform - CSS handles size */
+        dohSelect.style.fontSize = '5px'; /* Slightly larger font */
+        /* Allow CSS transform to scale down text */
         dohSelect.style.transformOrigin = 'left center';
         dohSelect.style.lineHeight = '1.0';
         dohSelect.style.fontWeight = '300';
@@ -10892,6 +10897,14 @@ const TagManager = {
             return;
         }
         this._initializing = true;
+        
+        // CRITICAL FIX: Clear filters from localStorage on page load so they reset
+        try {
+            localStorage.removeItem('agt_filters');
+            console.log('✅ Cleared filters from localStorage on page load');
+        } catch (e) {
+            console.warn('Could not clear filters from localStorage:', e);
+        }
 
         console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
         console.log('⚡ TagManager initializing...');
@@ -10959,32 +10972,9 @@ const TagManager = {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
 
-            // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
-            // This prevents unnecessary reloads on every page refresh
-            try {
-                const cacheKey = this.getAvailableTagsCacheKey();
-                const cachedData = sessionStorage.getItem(cacheKey);
-                if (cachedData) {
-                    const payload = JSON.parse(cachedData);
-                    const cacheAge = Date.now() - (payload.timestamp || 0);
-                    const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
-
-                    if (cacheAge > CACHE_MAX_AGE) {
-                        console.log(`🔄 Cache is ${Math.round(cacheAge / 1000)}s old, refreshing in background...`);
-                        setTimeout(() => {
-                            if (!this._checkingExistingData && !this.state.initialized) {
-                                this.checkForExistingData().catch(err => {
-                                    console.warn('Background refresh after cache load failed (non-critical):', err);
-                                });
-                            }
-                        }, 2000); // Increased delay to avoid interfering with cache load
-                    } else {
-                        console.log(`✅ Cache is fresh (${Math.round(cacheAge / 1000)}s old), skipping background refresh`);
-                    }
-                }
-            } catch (e) {
-                console.warn('Could not check cache age:', e);
-            }
+            // CRITICAL FIX: Skip background refresh if tags are already loaded from cache
+            // This prevents duplicate tag loading
+            console.log(`✅ Tags loaded from cache, skipping background refresh to prevent duplicate loads`);
 
             // Continue with rest of initialization (filters, etc.)
             this._continueInitWithoutSplash();
@@ -10995,6 +10985,14 @@ const TagManager = {
             AppLoadingSplash.updateProgress(40, 'Loading from server...');
         }
 
+        // CRITICAL FIX: Skip loading if tags are already loaded (e.g., from cache)
+        if (this.state.tags && this.state.tags.length > 0) {
+            console.log('✅ Tags already loaded, skipping checkForExistingData to prevent duplicate loads');
+            this.state.initialized = true;
+            this._initializing = false;
+            return;
+        }
+        
         // Initialize empty state first (but don't clear if we have tags)
         this.clearInitialDataRetry();
         // CRITICAL FIX: Only initialize empty state if we don't have tags already
@@ -11004,15 +11002,21 @@ const TagManager = {
         AppLoadingSplash.nextStep(); // Templates loaded
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
+        // CRITICAL FIX: Only call checkForExistingData once, and prevent duplicate calls
+        if (this._checkingExistingData) {
+            console.warn('⚠️ checkForExistingData already in progress, skipping duplicate call');
+            return;
+        }
+        
         this.checkForExistingData().then(() => {
             this.state.initialized = true;
             this._initializing = false;
             
-            // CRITICAL FIX: Verify tags actually loaded, retry if not
+            // CRITICAL FIX: Only retry if tags are actually missing (not just a timing issue)
             setTimeout(() => {
                 const hasTags = this.state.tags && this.state.tags.length > 0;
                 const hasRenderedTags = document.getElementById('availableTags')?.querySelectorAll('.tag-item').length > 0;
-                if (!hasTags && !hasRenderedTags) {
+                if (!hasTags && !hasRenderedTags && !this._checkingExistingData) {
                     console.warn('⚠️ Tags not loaded after checkForExistingData, attempting direct fetch...');
                     this.fetchAndUpdateAvailableTags().catch(e => {
                         console.error('Direct fetch after checkForExistingData failed:', e);
@@ -11021,16 +11025,21 @@ const TagManager = {
             }, 2000);
         }).catch(err => {
             console.error('Error during initialization:', err);
-            // CRITICAL FIX: Still try to fetch tags even if checkForExistingData fails
-            console.log('🔄 Initialization failed, attempting direct tag fetch as fallback...');
-            this.fetchAndUpdateAvailableTags().then(() => {
+            // CRITICAL FIX: Only retry if not already loading and tags are missing
+            if (!this._checkingExistingData && (!this.state.tags || this.state.tags.length === 0)) {
+                console.log('🔄 Initialization failed, attempting direct tag fetch as fallback...');
+                this.fetchAndUpdateAvailableTags().then(() => {
+                    this.state.initialized = true;
+                    this._initializing = false;
+                }).catch(fetchErr => {
+                    console.error('Fallback fetch also failed:', fetchErr);
+                    this.state.initialized = true;
+                    this._initializing = false;
+                });
+            } else {
                 this.state.initialized = true;
                 this._initializing = false;
-            }).catch(fetchErr => {
-                console.error('Fallback fetch also failed:', fetchErr);
-                this.state.initialized = true;
-                this._initializing = false;
-            });
+            }
         });
         
         // CRITICAL FIX: Reset filters on page load (don't restore from localStorage)
