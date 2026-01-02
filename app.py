@@ -9199,6 +9199,7 @@ def get_available_tags():
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
+        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         # Check memory before processing - but don't block if we have cached data
         memory_ok = check_memory_limit()
         if not memory_ok:
@@ -9425,9 +9426,11 @@ def get_available_tags():
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
                 # Enrich with database lineage ONLY (don't add database products)
-                try:
-                    product_db = get_product_database(store_name)
-                    if product_db and simple_tags:
+                # PERFORMANCE: Skip lineage enrichment if fast_load is enabled
+                if not fast_load:
+                    try:
+                        product_db = get_product_database(store_name)
+                        if product_db and simple_tags:
                         logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database lineage...")
                         product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
                         logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
@@ -9518,7 +9521,8 @@ def get_available_tags():
 
                         # CRITICAL FIX: Enrich tags with DOH data from database
                         # This ensures DOH badges show up in preroll menus and other tag lists
-                        if product_names:
+                        # PERFORMANCE: Skip DOH enrichment if fast_load is enabled
+                        if not fast_load and product_names:
                             try:
                                 logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database DOH data...")
 
@@ -9618,7 +9622,7 @@ def get_available_tags():
         skip_excel_loading = False  # Initialize flag to track if we should skip Excel loading
         
         # OPTIMIZATION: Allow fast loading by skipping lineage alignment on initial load
-        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        # fast_load is already defined above, reuse it here
         # PERFORMANCE: ALWAYS enable fast_load by default for maximum speed
         # User can explicitly request full lineage alignment by setting fast_load=0
         if request.args.get('fast_load') not in ('0', 'false', 'False'):
