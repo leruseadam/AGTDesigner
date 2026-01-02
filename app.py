@@ -6206,23 +6206,23 @@ def check_store_required():
         store_just_selected = session.get('store_just_selected', False)
         current_store = None
         
-        # CRITICAL FIX: Always require modal unless store was selected VERY recently (within last 2 minutes)
-        # This ensures modal shows on every page load unless user just selected store
+        # CRITICAL FIX: Accept store if it was selected with proper flags (persists for 24 hours)
+        # Once a user selects a store, it should persist until they explicitly change it
         # Only use session store if BOTH conditions are met:
         # 1. store_just_selected flag is True (explicit selection)
-        # 2. Has a valid VERY recent timestamp (within last 2 minutes, not 10)
+        # 2. Has a valid timestamp (within last 24 hours)
         if session_store and store_just_selected:
             store_timestamp = session.get('store_selected_timestamp')
             if store_timestamp:
                 try:
                     from datetime import datetime, timedelta
                     timestamp = datetime.fromisoformat(store_timestamp)
-                    # CRITICAL: Only accept stores selected within last 2 minutes
-                    if datetime.now() - timestamp < timedelta(minutes=2):
+                    # CRITICAL: Accept stores selected within last 24 hours (persists across sessions)
+                    if datetime.now() - timestamp < timedelta(hours=24):
                         current_store = session_store
                         logging.info(f"✅ Store found in session with valid flags (selected {datetime.now() - timestamp} ago): {current_store}")
                     else:
-                        logging.info(f"⚠️ Store timestamp expired (older than 2 minutes), requiring new selection")
+                        logging.info(f"⚠️ Store timestamp expired (older than 24 hours), requiring new selection")
                         # Clear all store-related session data
                         session.pop('selected_store', None)
                         session.pop('store_selected_timestamp', None)

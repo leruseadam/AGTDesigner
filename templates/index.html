@@ -5765,7 +5765,7 @@
                   <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0; min-height: 80px; justify-content: center;">
                     <!-- File Path Display (Above buttons) -->
                     <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px !important; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
                         {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
                       </span>
                     </div>
@@ -6159,20 +6159,13 @@
         modalElement.classList.remove('show');
       }
       
-      // CRITICAL: Clear stale sessionStorage on page load
-      // Only keep sessionStorage if it was set in the last 30 seconds (very recent)
+      // CRITICAL: Don't clear sessionStorage on page load - trust backend session
+      // Backend session is the source of truth, sessionStorage is just for frontend validation
       const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
       if (sessionTimestamp) {
         const timestamp = parseInt(sessionTimestamp, 10);
         const age = Date.now() - timestamp;
-        if (age > 30000) { // 30 seconds
-          console.log('🧹 Clearing stale sessionStorage (older than 30 seconds)');
-          sessionStorage.removeItem('selected_store');
-          sessionStorage.removeItem('store_just_selected');
-          sessionStorage.removeItem('store_selected_timestamp');
-        } else {
-          console.log('✅ sessionStorage is recent (age:', age, 'ms)');
-        }
+        console.log('✅ sessionStorage exists (age:', age, 'ms) - will validate with backend');
       }
       
       // CRITICAL: Hide main content initially until we know store status
@@ -6286,23 +6279,27 @@
         const sessionJustSelected = sessionStorage.getItem('store_just_selected') === 'true';
         const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
         
-        // Check if sessionStorage timestamp is recent (within 2 minutes)
-        let sessionStoreValid = false;
+        // CRITICAL FIX: Trust backend session - if backend says store is valid, use it
+        // Only check sessionStorage as a secondary validation, not a blocker
+        // Backend session is the source of truth
+        let sessionStoreValid = true; // Default to valid if backend says so
         if (sessionStore && sessionJustSelected && sessionTimestamp) {
           const timestamp = parseInt(sessionTimestamp, 10);
           const age = Date.now() - timestamp;
-          sessionStoreValid = (age < 120000); // 2 minutes
+          // Only invalidate if sessionStorage is very old (more than 24 hours) AND doesn't match backend
+          sessionStoreValid = (age < 86400000) || (sessionStore === storeName); // 24 hours or matches backend
           console.log('🔍 sessionStorage check:', {
             sessionStore,
             sessionJustSelected,
             sessionAge: age,
-            sessionStoreValid
+            sessionStoreValid,
+            backendStore: storeName
           });
         }
         
-        // CRITICAL FIX: Only show content if BOTH backend AND sessionStorage agree
-        // If requires_store is true OR store is missing OR sessionStorage doesn't match, show modal
-        if (requiresStore || !hasValidStore || !sessionStoreValid || sessionStore !== storeName) {
+        // CRITICAL FIX: Trust backend - if backend says store is valid, show content
+        // Only show modal if backend explicitly requires it
+        if (requiresStore || (!hasValidStore && !sessionStore)) {
           console.log('❗ No valid store match - showing modal');
           console.log('❗ Details:', {
             requiresStore,

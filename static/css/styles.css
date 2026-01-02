@@ -3806,7 +3806,7 @@ body.modal-open #mainContent.store-selection-disabled,
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     font-weight: 600 !important;
-    font-size: 5px !important;
+    font-size: 4px !important;
     padding: 2px 6px 2px 3px !important;
     transition: border-color 0.15s ease !important;
     text-align: center !important;
@@ -3873,7 +3873,7 @@ body.modal-open #mainContent.store-selection-disabled,
     max-width: 70px !important;
     min-width: 70px !important;
     height: 14px !important;
-    font-size: 9px !important;
+    font-size: 7px !important;
     padding: 2px 12px 2px 6px !important;
     border: 0.5px solid #ff6600 !important;
     background: #ffcc00 !important;
@@ -3993,7 +3993,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 30px !important;
     max-width: 40px !important;
     width: 35px !important;
-    font-size: 5px !important; /* Reduced from 6px for smaller font */
+    font-size: 4px !important; /* Reduced from 5px for smaller font */
     padding: 2px 6px 2px 3px !important;
     height: 14px !important;
     line-height: 1.0 !important;
@@ -4024,7 +4024,7 @@ body.modal-open #mainContent.store-selection-disabled,
     width: 70px !important;
     max-width: 70px !important;
     min-width: 70px !important;
-    font-size: 9px !important;
+    font-size: 7px !important; /* Reduced from 9px for smaller font */
     padding: 2px 12px 2px 6px !important;
     height: 14px !important;
     line-height: 1.0 !important;
