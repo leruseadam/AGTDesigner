@@ -9196,6 +9196,32 @@ def get_available_tags():
     store_name = None
     cache_store_name = 'global'
     try:
+        # CRITICAL: Check for Excel file FIRST - before any cache or processing
+        # This prevents any possibility of loading database tags
+        session_file_path = session.get('file_path', '')
+        file_exists = False
+        if session_file_path:
+            try:
+                file_exists = os.path.exists(session_file_path)
+            except Exception:
+                file_exists = False
+        
+        # CRITICAL: If no Excel file exists, return empty immediately - don't do ANY processing
+        if not file_exists or not session_file_path:
+            logging.info("⚡ EARLY RETURN: No Excel file - returning empty tags immediately (not loading from database)")
+            # Clear any stale session data
+            if 'file_path' in session:
+                session.pop('file_path', None)
+            if 'uploaded_filename' in session:
+                session.pop('uploaded_filename', None)
+            session.modified = True
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'empty-no-excel-early',
+                'message': 'No Excel file uploaded. Please upload an Excel file to see tags.'
+            }), 200
+        
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
@@ -9203,20 +9229,21 @@ def get_available_tags():
         # Check memory before processing - but don't block if we have cached data
         memory_ok = check_memory_limit()
         if not memory_ok:
-            # Try to return cached data instead of failing
-            cache_key = get_session_cache_key('available_tags')
-            cached_tags = cache.get(cache_key)
-            if cached_tags:
-                logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
-                # CRITICAL: Always align with DB lineage to ensure database values are used
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
-                safe_cached_tags = make_json_safe(aligned_cached_tags)
-                return jsonify({
-                    'tags': safe_cached_tags,
-                    'total_count': len(safe_cached_tags),
-                    'source': 'cache-memory-fallback',
-                    'warning': 'Memory usage high, serving cached data'
-                })
+            # CRITICAL: Only return cached data if Excel file exists
+            if file_exists and session_file_path:
+                cache_key = get_session_cache_key('available_tags')
+                cached_tags = cache.get(cache_key)
+                if cached_tags:
+                    logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
+                    # CRITICAL: Always align with DB lineage to ensure database values are used
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+                    safe_cached_tags = make_json_safe(aligned_cached_tags)
+                    return jsonify({
+                        'tags': safe_cached_tags,
+                        'total_count': len(safe_cached_tags),
+                        'source': 'cache-memory-fallback',
+                        'warning': 'Memory usage high, serving cached data'
+                    })
             # Only return 503 if we have no cached data
             logging.error("Memory usage too high and no cached data available")
             return jsonify({'error': 'Memory usage too high, please try again later'}), 503
@@ -9239,18 +9266,26 @@ def get_available_tags():
             recent_requests = [t for t in get_available_tags._rate_limit_data[client_ip] if t > current_time - 10]
             if len(recent_requests) >= 5:
                 logging.warning(f"Rate limit exceeded for {client_ip}, returning cached data")
-                # Return cached data instead of 429 error
-                cache_key = get_session_cache_key('available_tags')
-                cached_tags = cache.get(cache_key)
-            if cached_tags:
-                # CRITICAL: Always align with DB lineage to ensure database values are used
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
-                safe_cached_tags = make_json_safe(aligned_cached_tags)
+                # CRITICAL: Only return cached data if Excel file exists
+                if file_exists and session_file_path:
+                    cache_key = get_session_cache_key('available_tags')
+                    cached_tags = cache.get(cache_key)
+                    if cached_tags:
+                        # CRITICAL: Always align with DB lineage to ensure database values are used
+                        aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+                        safe_cached_tags = make_json_safe(aligned_cached_tags)
+                        return jsonify({
+                            'tags': safe_cached_tags,
+                            'total_count': len(safe_cached_tags),
+                            'source': 'rate-limited-cache'
+                        })
+                # If no file, return empty instead of cached database tags
                 return jsonify({
-                    'tags': safe_cached_tags,
-                    'total_count': len(safe_cached_tags),
-                    'source': 'rate-limited-cache'
-                })
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'empty-no-excel-rate-limited',
+                    'message': 'No Excel file uploaded. Please upload an Excel file to see tags.'
+                }), 200
         
         # Record this request
         if client_ip not in get_available_tags._rate_limit_data:
@@ -9278,17 +9313,7 @@ def get_available_tags():
         # Check for cached available tags first (JSON matched products)
         # Skip cache entirely if prefer_db is set (we want fresh DB data)
         # CRITICAL FIX: Include file path in cache key to prevent stale data from previous uploads
-        session_file_path = session.get('file_path', '')
-
-        # CRITICAL FIX: Cache key should use session file path even if the temp file was cleaned up.
-        # Rely on cache/_excel_processor instead of file existence to avoid losing tags after reload.
-        file_exists = False
-        if session_file_path:
-            try:
-                file_exists = os.path.exists(session_file_path)
-            except Exception as path_err:
-                logging.warning(f"Error checking file path: {path_err}")
-                file_exists = False
+        # Note: session_file_path and file_exists already checked at top of function
 
         # CRITICAL FIX: Don't rely on global _excel_processor - it's shared across all sessions/users
         # Only trust file existence and session state to prevent serving wrong user's data
@@ -9309,19 +9334,12 @@ def get_available_tags():
             session.modified = True
             has_excel_data = False
 
-        # FALLBACK: If no file but request-scoped processor already loaded, use it
-        if not has_excel_data and getattr(g, 'excel_processor', None):
-            try:
-                proc = g.excel_processor
-                if proc.df is not None and not proc.df.empty:
-                    has_excel_data = True
-                    session_file_path = getattr(proc, '_last_loaded_file', session_file_path)
-                    logging.info("ℹ️ Using in-memory Excel processor data as fallback for available-tags")
-            except Exception as mem_fallback_err:
-                logging.warning(f"In-memory processor fallback failed: {mem_fallback_err}")
+        # CRITICAL: Don't use fallback processor - only use actual uploaded Excel files
+        # Removed fallback to prevent loading tags without Excel file
         
         # CRITICAL FIX: If processor was cleared after lineage update, try to reload from session file path
         # This prevents tags from disappearing after lineage updates
+        # BUT only if the file actually exists
         if not has_excel_data and session_file_path:
             # Check if file exists
             file_actually_exists = os.path.exists(session_file_path) if session_file_path else False
