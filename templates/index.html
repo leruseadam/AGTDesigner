@@ -9391,7 +9391,25 @@
         matchCount.textContent = matchResult.matched_count || 0;
         
         // Populate matched products list with note about where they were added
-        if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+        // Use json_matched_tags to get properly formatted product names like Excel tags
+        const matchedTags = matchResult.json_matched_tags || [];
+        if (matchedTags.length > 0) {
+          matchedProductsList.innerHTML = `
+            <div class="alert alert-success mb-3">
+              <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
+              <br>Please review the available tags and select the items you need.
+            </div>
+            <div class="mb-2"><strong>Matched Products:</strong></div>
+            ${matchedTags
+              .map(tag => {
+                // Use the formatted Product Name* field which matches Excel tag format
+                const productName = tag['Product Name*'] || tag.ProductName || tag.displayName || 'Unknown Product';
+                return `<div class="mb-1">• ${productName}</div>`;
+              })
+              .join('')}
+          `;
+        } else if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+          // Fallback to matched_names if json_matched_tags not available
           matchedProductsList.innerHTML = `
             <div class="alert alert-success mb-3">
               <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.

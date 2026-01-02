@@ -2133,20 +2133,26 @@ const TagManager = {
             
             // Handle value restoration based on preserveExistingValues parameter
             if (preserveExistingValues) {
+                // CRITICAL FIX: Also check localStorage for saved filter values
+                // This ensures filters are preserved even if DOM values are temporarily lost
+                const savedFilters = this.loadFiltersFromStorage();
+                const savedValue = savedFilters && savedFilters[filterType] ? savedFilters[filterType] : null;
+                const valueToPreserve = currentValue && currentValue.trim() !== '' ? currentValue : (savedValue || '');
+                
                 // Preserve existing value if it's still valid, or keep it even if not in current options
-                if (currentValue && currentValue.trim() !== '') {
-                    if (sortedValues.includes(currentValue)) {
+                if (valueToPreserve && valueToPreserve.trim() !== '') {
+                    if (sortedValues.includes(valueToPreserve)) {
                         // Value is still valid, restore it
-                        filterElement.value = currentValue;
+                        filterElement.value = valueToPreserve;
                     } else {
                         // Value is no longer in current options, but preserve it by adding it back
-                        verboseLog(`Preserving filter value "${currentValue}" for ${filterId} even though it's not in current options`);
+                        verboseLog(`Preserving filter value "${valueToPreserve}" for ${filterId} even though it's not in current options`);
                         const option = document.createElement('option');
-                        option.value = currentValue;
-                        option.textContent = currentValue;
+                        option.value = valueToPreserve;
+                        option.textContent = valueToPreserve;
                         option.style.color = '#666'; // Gray out to indicate it's not currently available
                         filterElement.appendChild(option);
-                        filterElement.value = currentValue;
+                        filterElement.value = valueToPreserve;
                     }
                 } else {
                     // CRITICAL FIX: Only clear filter if it's not a valid current value that the user selected
@@ -10022,6 +10028,20 @@ const TagManager = {
             console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
             this._backgroundProcessingRetries = 0; // reset after successful load
             
+            // CRITICAL FIX: Restore filters from localStorage BEFORE rebuilding filter options
+            // This ensures user's filter selections are preserved when tags are updated
+            const savedFilters = this.loadFiltersFromStorage();
+            if (savedFilters && Object.keys(savedFilters).length > 0) {
+                console.log('⚡ Restoring filters from localStorage before rebuilding options:', savedFilters);
+                // Apply saved filters to dropdowns immediately (before buildFilterOptionsFromTags)
+                Object.entries(savedFilters).forEach(([key, value]) => {
+                    const filterElement = document.getElementById(`${key}Filter`);
+                    if (filterElement && value) {
+                        filterElement.value = value;
+                    }
+                });
+            }
+            
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
             if (tags && tags.length > 0) {
                 this.buildFilterOptionsFromTags(tags);
@@ -17077,7 +17097,25 @@ window.performJsonMatch = function() {
         matchCount.textContent = matchResult.matched_count || 0;
         
         // Populate matched products list with note about where they were added
-        if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+        // Use json_matched_tags to get properly formatted product names like Excel tags
+        const matchedTags = matchResult.json_matched_tags || [];
+        if (matchedTags.length > 0) {
+            matchedProductsList.innerHTML = `
+                <div class="alert alert-success mb-3">
+                    <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
+                    <br>Please review the available tags and select the items you need.
+                </div>
+                <div class="mb-2"><strong>Matched Products:</strong></div>
+                ${matchedTags
+                    .map(tag => {
+                        // Use the formatted Product Name* field which matches Excel tag format
+                        const productName = tag['Product Name*'] || tag.ProductName || tag.displayName || 'Unknown Product';
+                        return `<div class="mb-1">• ${productName}</div>`;
+                    })
+                    .join('')}
+            `;
+        } else if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+            // Fallback to matched_names if json_matched_tags not available
             matchedProductsList.innerHTML = `
                 <div class="alert alert-success mb-3">
                     <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
