@@ -755,7 +755,8 @@ def load_and_cleanup_on_startup():
 # Uncomment ONE of the following:
 
 # Force store selection on every server restart:
-clear_all_on_startup()
+# Moved to run() method to prevent blocking during import
+# clear_all_on_startup()
 
 # OR keep 12-hour persistence across restarts:
 # load_and_cleanup_on_startup()
@@ -2211,6 +2212,12 @@ class LabelMakerApp:
         # Show optimization status
         if DISABLE_STARTUP_FILE_LOADING:
             logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
+        
+        # Initialize store selections (moved here to prevent blocking during import)
+        try:
+            clear_all_on_startup()
+        except Exception as e:
+            logging.warning(f"Failed to clear store selections on startup: {e}")
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
         print(f"🌐 App will be available at: http://{host}:{port}")
