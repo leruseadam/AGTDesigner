@@ -1365,6 +1365,14 @@ const TagManager = {
         const hasFile = (file && file !== 'nofile' && file !== '' && file !== 'database') || hasFileInUI;
         if (!hasFile) {
             console.log('⚠️ No Excel file uploaded - skipping tag load');
+            // CRITICAL: Hide loading splash even when no file is uploaded
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
             return;
         }
         
@@ -10934,11 +10942,26 @@ const TagManager = {
             // Cache exists and hydrated - skip splash completely
             console.log('⚡ Cache hydrated - tags displayed instantly, skipping splash');
         } else {
-            // No cache - show splash
-            console.log('⚡ No cache - showing splash');
-            AppLoadingSplash.show();
-            AppLoadingSplash.startAutoAdvance();
-            AppLoadingSplash.updateProgress(10, 'Initializing...');
+            // No cache - check if file is uploaded before showing splash
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            const fileInfoText = document.getElementById('fileInfoText');
+            const hasFileInUI = fileInfoText && fileInfoText.textContent.trim() !== 'No file uploaded' && fileInfoText.textContent.trim() !== '';
+            const hasFile = (file && file !== 'nofile' && file !== '' && file !== 'database') || hasFileInUI;
+            
+            if (!hasFile) {
+                // No file uploaded - hide splash immediately
+                console.log('⚠️ No file uploaded - hiding splash');
+                if (AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+            } else {
+                // File exists - show splash
+                console.log('⚡ No cache - showing splash');
+                AppLoadingSplash.show();
+                AppLoadingSplash.startAutoAdvance();
+                AppLoadingSplash.updateProgress(10, 'Initializing...');
+            }
         }
 
         if (hydrated) {
@@ -11009,6 +11032,12 @@ const TagManager = {
         }
         
         this.checkForExistingData().then(() => {
+            // CRITICAL FIX: Hide splash if still visible after checkForExistingData completes
+            if (AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            
             this.state.initialized = true;
             this._initializing = false;
             
@@ -11025,6 +11054,11 @@ const TagManager = {
             }, 2000);
         }).catch(err => {
             console.error('Error during initialization:', err);
+            // CRITICAL FIX: Hide splash on error
+            if (AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
             // CRITICAL FIX: Only retry if not already loading and tags are missing
             if (!this._checkingExistingData && (!this.state.tags || this.state.tags.length === 0)) {
                 console.log('🔄 Initialization failed, attempting direct tag fetch as fallback...');
