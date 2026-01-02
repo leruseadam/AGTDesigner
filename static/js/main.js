@@ -1365,6 +1365,13 @@ const TagManager = {
         const hasFile = (file && file !== 'nofile' && file !== '' && file !== 'database') || hasFileInUI;
         if (!hasFile) {
             console.log('⚠️ No Excel file uploaded - skipping tag load');
+            // CRITICAL: Clear any existing tags and show upload prompt
+            this.state.tags = [];
+            this.state.originalTags = [];
+            const availableContainer = document.getElementById('availableTags');
+            if (availableContainer) {
+                availableContainer.innerHTML = '';
+            }
             // CRITICAL: Hide loading splash even when no file is uploaded
             if (this.hideActionSplash) {
                 this.hideActionSplash();
@@ -1376,73 +1383,13 @@ const TagManager = {
             return;
         }
         
-        const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
-        
-        // If no Excel file but we have database, try to load from cache first, then fetch from database
-        // BUT only if a file is actually uploaded (checked above)
-        if (shouldLoadFromDatabase && hasFileInUI) {
-            console.log('📊 No Excel file, checking cache for database tags...');
-            // Still try to load from cache (might have database tags cached)
-            const cachedTags = this.loadAvailableTagsFromCache();
-            if (cachedTags && cachedTags.length) {
-                console.log(`✅ Found ${cachedTags.length} cached tags from database`);
-                // Use the same rendering logic as below
-                verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
-                this.state.hydratedFromCache = true;
-                this.state.forceFullAvailableTagRender = true;
-                this.state.simplifiedAvailableTagsActive = false;
-                this.state.tags = [...cachedTags];
-                this.state.originalTags = [...cachedTags];
-
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-
-                const availableContainer = document.getElementById('availableTags');
-                if (availableContainer) {
-                    this._updateAvailableTags(cachedTags, null);
-                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
-                    this.buildFilterOptionsFromTags(cachedTags);
-                    setTimeout(() => {
-                        if (typeof this.setupFilterEventListeners === 'function') {
-                            this.setupFilterEventListeners();
-                            console.log('✅ Filter event listeners attached after cache hydration');
-                        }
-                    }, 50);
-                } else {
-                    const renderCachedTags = () => {
-                        this._updateAvailableTags(cachedTags, null);
-                        verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
-                        this.buildFilterOptionsFromTags(cachedTags);
-                        setTimeout(() => {
-                            if (typeof this.setupFilterEventListeners === 'function') {
-                                this.setupFilterEventListeners();
-                                console.log('✅ Filter event listeners attached after cache hydration');
-                            }
-                        }, 50);
-                    };
-                    if (document.readyState === 'loading') {
-                        document.addEventListener('DOMContentLoaded', renderCachedTags, { once: true });
-                    } else {
-                        renderCachedTags();
-                    }
-                }
-                return true;
-            } else {
-                // No cache - return false so init() or fetchAndUpdateAvailableTags() can fetch from database
-                console.log('📊 No cache found - will fetch from database');
-                return false;
-            }
-        }
+        // CRITICAL: Don't load from database - only load Excel tags
+        // Removed database loading path - user only wants Excel tags
 
         // PATCH: Always use cache, even after recent lineage updates, but keep lineage update logic elsewhere intact.
         // (No-op: do not skip cache after recent lineage update)
-
-        const cachedTags = this.loadAvailableTagsFromCache();
+        // CRITICAL: Only load from cache if Excel file is uploaded - don't load database tags from cache
+        const cachedTags = hasFile ? this.loadAvailableTagsFromCache() : null;
         if (cachedTags && cachedTags.length) {
             verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
             this.state.hydratedFromCache = true;
@@ -6585,7 +6532,7 @@ const TagManager = {
         lineageSelect.style.backdropFilter = 'blur(10px)';
         lineageSelect.style.transition = 'all 0.2s ease';
         lineageSelect.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.1)';
-        lineageSelect.style.fontSize = '6px';
+        lineageSelect.style.fontSize = '5px';
         lineageSelect.style.lineHeight = '1.0';
         lineageSelect.style.fontWeight = 'bold';
         lineageSelect.style.letterSpacing = '-0.1px';
