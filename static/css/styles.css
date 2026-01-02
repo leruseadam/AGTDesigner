@@ -3181,7 +3181,7 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Filter labels in center column */
   .control-panel .filter-label {
     margin-bottom: 0.6rem !important;
-    font-size: 0.85rem !important;
+    font-size: 0.95rem !important;
     font-weight: 600 !important;
     letter-spacing: 0.5px !important;
     text-transform: uppercase !important;
@@ -3745,14 +3745,14 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-left: 6px !important;
   }
   .vendor-header {
-      font-size: 1.5rem !important; /* Increased from 1.5rem (24px) to ~26px */
+      font-size: 1.25rem !important; /* Increased from 1.5rem (24px) to ~26px */
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+      font-size: 1.5rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -3786,7 +3786,7 @@ body.modal-open #mainContent.store-selection-disabled,
     max-width: 40px !important;
     width: 35px !important;
     height: 14px !important;
-    font-size: 5px !important;
+    font-size: 4px !important;
   }
   .lineage-dropdown {
     /* Cross-platform consistency - remove platform-specific styling */
@@ -3799,8 +3799,8 @@ body.modal-open #mainContent.store-selection-disabled,
     max-width: 40px !important;
     width: 35px !important;
     height: 14px !important;
-    font-size: 5px !important;
-    background: rgba(45, 34, 58, 0.95) !important;
+    font-size: 4px !important;
+    background-color: rgba(45, 34, 58, 0.95) !important;
     border: 0.5px solid rgba(160, 132, 232, 0.5) !important;
     color: white !important;
     border-radius: 2px !important;
@@ -3877,7 +3877,7 @@ body.modal-open #mainContent.store-selection-disabled,
     font-size: 4px !important;
     padding: 2px 12px 2px 6px !important;
     border: 0.5px solid #ff6600 !important;
-    background: #ffcc00 !important;
+    background-color: #ffcc00 !important;
     border-radius: 2px !important;
     transition: all 0.2s ease !important;
     line-height: 1.0 !important;
@@ -4935,7 +4935,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   .product-type-header {
     color: var(--accent-color);
-    font-weight: 500;
+    font-weight: 700;
     margin-bottom: 0.25rem;
     font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
     margin-left: 0 !important;
