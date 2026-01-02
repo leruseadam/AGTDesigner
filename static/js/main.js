@@ -6577,7 +6577,7 @@ const TagManager = {
         lineageSelect.style.backdropFilter = 'blur(10px)';
         lineageSelect.style.transition = 'all 0.2s ease';
         lineageSelect.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.1)';
-        lineageSelect.style.fontSize = '3px'; /* Compact font */
+        lineageSelect.style.fontSize = '6px'; /* Compact font */
         /* Allow CSS transform to scale down text */
         lineageSelect.style.transformOrigin = 'left center';
         lineageSelect.style.lineHeight = '1.0';

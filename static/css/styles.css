@@ -3993,7 +3993,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 30px !important;
     max-width: 40px !important;
     width: 35px !important;
-    font-size: 3px !important; /* Reduced from 4px for smaller font */
+    font-size: 6px !important; /* Reduced from larger sizes for smaller font */
     padding: 2px 6px 2px 3px !important;
     height: 14px !important;
     line-height: 1.0 !important;
@@ -11802,9 +11802,7 @@ html, body {
 .tag-row .lineage-dropdown-mini,
 .tag-row .form-select.lineage-dropdown,
 .tag-row .form-select.lineage-dropdown-mini {
-    font-size: 3px !important;
-    transform: scale(0.4) !important; /* Scale down to make text appear smaller if browser enforces minimum font size */
-    transform-origin: left center !important;
+    font-size: 6px !important;
 }
 
 .tag-item .doh-dropdown,
