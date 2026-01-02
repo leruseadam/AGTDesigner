@@ -1372,6 +1372,29 @@ const TagManager = {
             if (availableContainer) {
                 availableContainer.innerHTML = '';
             }
+            // CRITICAL: Clear any old cache that might contain database tags
+            try {
+                const cacheKey = this.getAvailableTagsCacheKey();
+                if (window.localStorage) {
+                    localStorage.removeItem(cacheKey);
+                }
+                if (window.sessionStorage) {
+                    sessionStorage.removeItem(cacheKey);
+                }
+                // Also clear normalized cache key
+                const normalizedKey = this.getNormalizedCacheKey();
+                if (normalizedKey) {
+                    if (window.localStorage) {
+                        localStorage.removeItem(normalizedKey);
+                    }
+                    if (window.sessionStorage) {
+                        sessionStorage.removeItem(normalizedKey);
+                    }
+                }
+                console.log('🧹 Cleared cache to prevent loading database tags');
+            } catch (e) {
+                console.warn('Failed to clear cache:', e);
+            }
             // CRITICAL: Hide loading splash even when no file is uploaded
             if (this.hideActionSplash) {
                 this.hideActionSplash();
@@ -10876,10 +10899,17 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
 
+        // CRITICAL FIX: Check if file is uploaded before trying to hydrate from cache
+        const fileCheck = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+        const fileInfoTextCheck = document.getElementById('fileInfoText');
+        const hasFileInUICheck = fileInfoTextCheck && fileInfoTextCheck.textContent.trim() !== 'No file uploaded' && fileInfoTextCheck.textContent.trim() !== '';
+        const hasFileCheck = (fileCheck && fileCheck !== 'nofile' && fileCheck !== '' && fileCheck !== 'database') || hasFileInUICheck;
+        
         // CRITICAL FIX: Try to hydrate from cache IMMEDIATELY before showing any splash
         // This ensures tags appear instantly on page load if cache exists
-        const alreadyHydrated = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
-        const hydrated = alreadyHydrated || this.hydrateAvailableTagsFromCache();
+        // BUT only if a file is uploaded
+        const alreadyHydrated = hasFileCheck && this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
+        const hydrated = hasFileCheck && (alreadyHydrated || this.hydrateAvailableTagsFromCache());
 
         if (hydrated) {
             // Cache exists and hydrated - skip splash completely
@@ -10966,6 +10996,24 @@ const TagManager = {
             this.initializeEmptyState();
         }
         AppLoadingSplash.nextStep(); // Templates loaded
+        
+        // CRITICAL: Check if file is uploaded before calling checkForExistingData
+        const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+        const fileInfoText = document.getElementById('fileInfoText');
+        const hasFileInUI = fileInfoText && fileInfoText.textContent.trim() !== 'No file uploaded' && fileInfoText.textContent.trim() !== '';
+        const hasFile = (file && file !== 'nofile' && file !== '' && file !== 'database') || hasFileInUI;
+        
+        if (!hasFile) {
+            // No file uploaded - don't call checkForExistingData, just initialize empty state
+            console.log('⚠️ No file uploaded - skipping checkForExistingData');
+            if (AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            this.state.initialized = true;
+            this._initializing = false;
+            return;
+        }
         
         // Check if there's already data loaded (e.g., from a previous session or default file)
         // CRITICAL FIX: Only call checkForExistingData once, and prevent duplicate calls
