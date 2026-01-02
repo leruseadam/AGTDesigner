@@ -11182,6 +11182,8 @@ class JSONMatcher:
         Create a new database entry for an unmatched JSON tag.
         This ensures that unmatched JSON products are added to the product database
         for future matching and reference.
+        Uses AI-based similarity matching to fill in missing fields from similar products
+        based on weight and description similarity.
         
         Args:
             tag: The tag dictionary created from JSON data
@@ -11198,6 +11200,41 @@ class JSONMatcher:
             strain = tag.get('Product Strain', '').strip()
             lineage = tag.get('Lineage', '').strip()
             description = tag.get('Description', '').strip()
+            
+            # AI-BASED SIMILARITY MATCHING: Find similar products by weight and description
+            # to fill in missing fields
+            if (weight or description) and product_db:
+                try:
+                    similar_products = self._find_similar_products_by_weight_and_description(
+                        product_name, weight, description, product_type, vendor, product_db
+                    )
+                    
+                    if similar_products:
+                        logging.info(f"🤖 Found {len(similar_products)} similar products for AI-based inference")
+                        
+                        # Use similar products to fill in missing fields
+                        inferred_data = self._infer_missing_fields_from_similar_products(
+                            similar_products, tag, weight, description
+                        )
+                        
+                        # Apply inferred data to fill missing fields
+                        if inferred_data.get('price') and not price:
+                            price = inferred_data['price']
+                            logging.info(f"💰 Inferred price '{price}' from similar products")
+                        if inferred_data.get('strain') and not strain:
+                            strain = inferred_data['strain']
+                            logging.info(f"🧬 Inferred strain '{strain}' from similar products")
+                        if inferred_data.get('lineage') and not lineage:
+                            lineage = inferred_data['lineage']
+                            logging.info(f"🎨 Inferred lineage '{lineage}' from similar products")
+                        if inferred_data.get('brand') and not brand:
+                            brand = inferred_data['brand']
+                            logging.info(f"🏷️ Inferred brand '{brand}' from similar products")
+                        if inferred_data.get('product_type') and not product_type:
+                            product_type = inferred_data['product_type']
+                            logging.info(f"📦 Inferred product type '{product_type}' from similar products")
+                except Exception as ai_error:
+                    logging.warning(f"AI similarity matching failed (non-critical): {ai_error}")
             
             # ENHANCED STRAIN EXTRACTION: If no strain in tag, try to find in database
             if not strain and product_name:
@@ -11265,6 +11302,240 @@ class JSONMatcher:
         except Exception as e:
             logging.error(f"Error creating database entry for unmatched JSON tag: {e}")
             # Don't re-raise the exception to avoid breaking the main flow
+    
+    def _find_similar_products_by_weight_and_description(self, product_name: str, weight: str, description: str, 
+                                                          product_type: str, vendor: str, product_db) -> List[Dict]:
+        """
+        Find similar products in the database based on weight and description similarity.
+        Uses AI-powered matching to find the most relevant products.
+        
+        Args:
+            product_name: The product name to match
+            weight: The weight value
+            description: The description text
+            product_type: The product type (if available)
+            vendor: The vendor name (if available)
+            product_db: The ProductDatabase instance
+            
+        Returns:
+            List of similar product dictionaries, sorted by similarity score
+        """
+        try:
+            import sqlite3
+            import re
+            from fuzzywuzzy import fuzz
+            
+            conn = sqlite3.connect(product_db.db_path)
+            
+            # Build query based on available information
+            query_parts = []
+            params = []
+            
+            # Filter by product type if available
+            if product_type:
+                query_parts.append('"Product Type*" = ?')
+                params.append(product_type)
+            
+            # Filter by vendor if available (helps narrow down results)
+            if vendor:
+                query_parts.append('"Vendor/Supplier*" LIKE ?')
+                params.append(f"%{vendor}%")
+            
+            # Build the query
+            where_clause = ' AND '.join(query_parts) if query_parts else '1=1'
+            query = f"""
+                SELECT * FROM products 
+                WHERE {where_clause}
+                AND "Weight*" IS NOT NULL AND "Weight*" != ''
+                LIMIT 100
+            """
+            
+            df = pd.read_sql_query(query, conn, params=params)
+            conn.close()
+            
+            if df.empty:
+                return []
+            
+            # Score products based on weight and description similarity
+            scored_products = []
+            
+            # Extract numeric weight value if available
+            weight_value = None
+            if weight:
+                weight_match = re.search(r'(\d+\.?\d*)', str(weight))
+                if weight_match:
+                    try:
+                        weight_value = float(weight_match.group(1))
+                    except (ValueError, TypeError):
+                        pass
+            
+            for _, row in df.iterrows():
+                score = 0.0
+                product_dict = row.to_dict()
+                
+                # Weight similarity scoring (40% weight)
+                if weight_value and weight:
+                    row_weight_str = str(product_dict.get('Weight*', ''))
+                    row_weight_match = re.search(r'(\d+\.?\d*)', row_weight_str)
+                    if row_weight_match:
+                        try:
+                            row_weight_value = float(row_weight_match.group(1))
+                            # Calculate weight similarity (closer weights = higher score)
+                            weight_diff = abs(weight_value - row_weight_value)
+                            weight_avg = (weight_value + row_weight_value) / 2
+                            if weight_avg > 0:
+                                weight_similarity = 1.0 - min(weight_diff / weight_avg, 1.0)
+                                score += weight_similarity * 0.4
+                        except (ValueError, TypeError):
+                            pass
+                
+                # Description similarity scoring (40% weight)
+                if description:
+                    row_description = str(product_dict.get('Description', '') or product_dict.get('Product Name*', ''))
+                    if row_description:
+                        # Use fuzzy matching for description similarity
+                        desc_similarity = fuzz.token_sort_ratio(description.lower(), row_description.lower()) / 100.0
+                        score += desc_similarity * 0.4
+                
+                # Product name similarity scoring (20% weight)
+                if product_name:
+                    row_name = str(product_dict.get('Product Name*', ''))
+                    if row_name:
+                        name_similarity = fuzz.token_sort_ratio(product_name.lower(), row_name.lower()) / 100.0
+                        score += name_similarity * 0.2
+                
+                if score > 0:
+                    scored_products.append((score, product_dict))
+            
+            # Sort by score (highest first) and return top 10
+            scored_products.sort(key=lambda x: x[0], reverse=True)
+            return [product for _, product in scored_products[:10]]
+            
+        except Exception as e:
+            logging.warning(f"Error finding similar products by weight and description: {e}")
+            return []
+    
+    def _infer_missing_fields_from_similar_products(self, similar_products: List[Dict], tag: Dict, 
+                                                     weight: str, description: str) -> Dict:
+        """
+        Infer missing fields from similar products using weighted averaging.
+        
+        Args:
+            similar_products: List of similar product dictionaries (already scored)
+            tag: The original tag dictionary
+            weight: The weight value
+            description: The description text
+            
+        Returns:
+            Dictionary with inferred fields (price, strain, lineage, brand, product_type)
+        """
+        try:
+            inferred = {}
+            
+            if not similar_products:
+                return inferred
+            
+            # Extract numeric weight for filtering
+            weight_value = None
+            if weight:
+                import re
+                weight_match = re.search(r'(\d+\.?\d*)', str(weight))
+                if weight_match:
+                    try:
+                        weight_value = float(weight_match.group(1))
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Filter products by weight similarity (within 50% difference)
+            filtered_products = []
+            for product in similar_products:
+                if weight_value:
+                    row_weight_str = str(product.get('Weight*', ''))
+                    weight_match = re.search(r'(\d+\.?\d*)', row_weight_str)
+                    if weight_match:
+                        try:
+                            row_weight_value = float(weight_match.group(1))
+                            weight_diff = abs(weight_value - row_weight_value) / max(weight_value, row_weight_value, 0.01)
+                            if weight_diff <= 0.5:  # Within 50% difference
+                                filtered_products.append(product)
+                        except (ValueError, TypeError):
+                            filtered_products.append(product)
+                else:
+                    filtered_products.append(product)
+            
+            if not filtered_products:
+                filtered_products = similar_products[:5]  # Use top 5 if no weight match
+            
+            # Infer price (use average from similar products with same weight range)
+            prices = []
+            for product in filtered_products:
+                price_str = str(product.get('Price', '')).strip()
+                if price_str and price_str not in ['', 'nan', 'None', '0']:
+                    # Extract numeric price
+                    price_match = re.search(r'(\d+\.?\d*)', price_str)
+                    if price_match:
+                        try:
+                            prices.append(float(price_match.group(1)))
+                        except (ValueError, TypeError):
+                            pass
+            
+            if prices:
+                avg_price = sum(prices) / len(prices)
+                # Format price appropriately
+                if avg_price.is_integer():
+                    inferred['price'] = f"${int(avg_price)}"
+                else:
+                    inferred['price'] = f"${avg_price:.2f}"
+            
+            # Infer strain (use most common strain from similar products)
+            strains = {}
+            for product in filtered_products:
+                strain = str(product.get('Product Strain', '')).strip()
+                if strain and strain not in ['', 'nan', 'None']:
+                    strains[strain] = strains.get(strain, 0) + 1
+            
+            if strains:
+                most_common_strain = max(strains.items(), key=lambda x: x[1])[0]
+                inferred['strain'] = most_common_strain
+            
+            # Infer lineage (use most common lineage from similar products)
+            lineages = {}
+            for product in filtered_products:
+                lineage = str(product.get('Lineage', '') or product.get('canonical_lineage', '')).strip()
+                if lineage and lineage not in ['', 'nan', 'None']:
+                    lineages[lineage] = lineages.get(lineage, 0) + 1
+            
+            if lineages:
+                most_common_lineage = max(lineages.items(), key=lambda x: x[1])[0]
+                inferred['lineage'] = most_common_lineage
+            
+            # Infer brand (use most common brand from similar products)
+            brands = {}
+            for product in filtered_products:
+                brand = str(product.get('Product Brand', '') or product.get('brand', '')).strip()
+                if brand and brand not in ['', 'nan', 'None']:
+                    brands[brand] = brands.get(brand, 0) + 1
+            
+            if brands:
+                most_common_brand = max(brands.items(), key=lambda x: x[1])[0]
+                inferred['brand'] = most_common_brand
+            
+            # Infer product type (use most common type from similar products)
+            types = {}
+            for product in filtered_products:
+                ptype = str(product.get('Product Type*', '') or product.get('product_type', '')).strip()
+                if ptype and ptype not in ['', 'nan', 'None', 'Unknown']:
+                    types[ptype] = types.get(ptype, 0) + 1
+            
+            if types:
+                most_common_type = max(types.items(), key=lambda x: x[1])[0]
+                inferred['product_type'] = most_common_type
+            
+            return inferred
+            
+        except Exception as e:
+            logging.warning(f"Error inferring missing fields from similar products: {e}")
+            return {}
     
     def _find_advanced_matches(self, json_item: dict) -> List[MatchResult]:
         """
