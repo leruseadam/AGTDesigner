@@ -2533,13 +2533,43 @@ class JSONMatcher:
                  
                 # Use sheet cache for matching (works with both Excel data and Database data)
                 if self._sheet_cache and len(self._sheet_cache) > 0:
-                    # Match against cached products (from database or Excel)
-                    for cache_item in self._sheet_cache:
+                    # PERFORMANCE OPTIMIZATION: Pre-filter candidates by vendor to reduce search space
+                    candidates_to_check = []
+                    
+                    # First pass: Filter by vendor if available (much faster than checking all items)
+                    if current_vendor_filter:
+                        for cache_item in self._sheet_cache:
+                            excel_vendor = cache_item.get('vendor', '').strip()
+                            if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
+                                candidates_to_check.append(cache_item)
+                    else:
+                        # No vendor filter - check all items but limit to first 500 for performance
+                        candidates_to_check = self._sheet_cache[:500]
+                    
+                    # If vendor filtering found too few candidates, expand search
+                    if len(candidates_to_check) < 10 and current_vendor_filter:
+                        # Add top 100 candidates regardless of vendor for fallback
+                        candidates_to_check.extend(self._sheet_cache[:100])
+                    
+                    # PERFORMANCE: Limit candidates to check (max 200 for speed)
+                    candidates_to_check = candidates_to_check[:200]
+                    
+                    # Match against filtered candidates
+                    for cache_item in candidates_to_check:
                         try:
                             excel_product_name = cache_item.get('original_name', '').strip().lower()
                             
                             if not excel_product_name:
                                 continue
+                            
+                            # PERFORMANCE: Early termination for exact matches
+                            if product_name.lower() == excel_product_name:
+                                best_score = 200.0
+                                if '_db_product' in cache_item:
+                                    best_match = cache_item['_db_product']
+                                else:
+                                    best_match = cache_item
+                                break  # Found perfect match, stop searching
                             
                             # ENHANCED SCORING: Multi-factor matching with PRECISION FOCUS
                             score = 0.0
@@ -2549,94 +2579,79 @@ class JSONMatcher:
                             vendor_match_bonus = 0.0
                             if current_vendor_filter and excel_vendor:
                                 # CRITICAL: Use the vendor matching function to check if vendors match
-                                json_vendor_normalized = self._normalize_vendor_name(current_vendor_filter.lower())
-                                excel_vendor_normalized = self._normalize_vendor_name(excel_vendor.lower())
-                                
-                                # Check if vendors match (exact, substring, or flexible match)
                                 vendor_matches = self._is_vendor_match(current_vendor_filter, excel_vendor)
                                 
                                 if vendor_matches:
                                     vendor_match_bonus = 50.0  # Strong bonus for vendor match
-                                    logging.debug(f"✓ Vendor match: '{current_vendor_filter}' matches '{excel_vendor}'")
                                 else:
                                     # REJECT non-matching vendors to prevent cross-brand contamination
-                                    logging.debug(f"🚫 REJECTED: Vendor mismatch - JSON vendor '{current_vendor_filter}' ≠ Excel vendor '{excel_vendor}'")
                                     continue  # Skip this candidate entirely
                             
-                            # 1. Exact name match (highest priority)
-                            if product_name.lower() == excel_product_name:
-                                score += 200.0  # Very high score for exact match
-                            
                             # 2. STRICT word-by-word matching to prevent incorrect matches
-                            else:
-                                # Check if key distinguishing words are present
-                                json_words = set(product_name.lower().split())
-                                excel_words = set(excel_product_name.split())
+                            # Check if key distinguishing words are present
+                            json_words = set(product_name.lower().split())
+                            excel_words = set(excel_product_name.split())
+                            
+                            # PROFESSIONAL-GRADE ACCURACY: Critical product identifiers that MUST NOT mismatch
+                            product_identifiers = {
+                                'bath', 'salt', 'salts', 'jar', 'balm', 'lotion', 'cream',
+                                'cherry', 'cherries', 'chew', 'chews', 'freeze', 'dried', 
+                                'ball', 'balls', 'chocolate', 'malt', 'dragon', 'assorted',
+                                'fruit', 'watermelon', 'sour', 'apple', 'mixed', 'berry',
+                                'cookies', 'capsule', 'capsules', 'squeeze', 'roll',
+                                'tincture', 'single', 'dark', 'milk', 'caramel', 'guava',
+                                'tropical', 'mango', 'lifted', 'chill', 'balance', 'relief'
+                            }
+                            
+                            # CRITICAL: Detect mutually exclusive products
+                            # "dragon jar" and "bath salt" are completely different products
+                            json_identifiers = json_words & product_identifiers
+                            excel_identifiers = excel_words & product_identifiers
+                            
+                            if json_identifiers and excel_identifiers:
+                                # Check for contradicting product types
+                                contradictions = [
+                                    ({'jar', 'dragon'}, {'bath', 'salt', 'salts'}),  # Jar vs Bath Salt
+                                    ({'ball', 'balls'}, {'chew', 'chews'}),  # Balls vs Chews
+                                    ({'bite', 'bites'}, {'ball', 'balls'}),  # Bites vs Balls
+                                    ({'capsule', 'capsules'}, {'tincture', 'tinctures'}),  # Capsule vs Tincture
+                                    ({'squeeze'}, {'roll', 'rollup'}),  # Squeeze Tube vs Roll-On
+                                ]
                                 
-                                # PROFESSIONAL-GRADE ACCURACY: Critical product identifiers that MUST NOT mismatch
-                                product_identifiers = {
-                                    'bath', 'salt', 'salts', 'jar', 'balm', 'lotion', 'cream',
-                                    'cherry', 'cherries', 'chew', 'chews', 'freeze', 'dried', 
-                                    'ball', 'balls', 'chocolate', 'malt', 'dragon', 'assorted',
-                                    'fruit', 'watermelon', 'sour', 'apple', 'mixed', 'berry',
-                                    'cookies', 'capsule', 'capsules', 'squeeze', 'roll',
-                                    'tincture', 'single', 'dark', 'milk', 'caramel', 'guava',
-                                    'tropical', 'mango', 'lifted', 'chill', 'balance', 'relief'
-                                }
-                                
-                                # CRITICAL: Detect mutually exclusive products
-                                # "dragon jar" and "bath salt" are completely different products
-                                json_identifiers = json_words & product_identifiers
-                                excel_identifiers = excel_words & product_identifiers
-                                
-                                if json_identifiers and excel_identifiers:
-                                    # Check for contradicting product types
-                                    contradictions = [
-                                        ({'jar', 'dragon'}, {'bath', 'salt', 'salts'}),  # Jar vs Bath Salt
-                                        ({'ball', 'balls'}, {'chew', 'chews'}),  # Balls vs Chews
-                                        ({'bite', 'bites'}, {'ball', 'balls'}),  # Bites vs Balls
-                                        ({'capsule', 'capsules'}, {'tincture', 'tinctures'}),  # Capsule vs Tincture
-                                        ({'squeeze'}, {'roll', 'rollup'}),  # Squeeze Tube vs Roll-On
-                                    ]
-                                    
-                                    for json_set, excel_set in contradictions:
-                                        if (json_identifiers & json_set) and (excel_identifiers & excel_set):
-                                            # Contradicting product types - reject match
-                                            logging.debug(f"🚫 REJECTED: Contradicting products - JSON has {json_identifiers & json_set}, DB has {excel_identifiers & excel_set}")
-                                            score = 0
-                                            continue
-                                    
-                                    # If both have identifiers, they MUST overlap significantly
-                                    identifier_overlap = len(json_identifiers & excel_identifiers) / max(len(json_identifiers), len(excel_identifiers))
-                                    if identifier_overlap < 0.5:  # Less than 50% overlap of product identifiers
-                                        score = 0  # Not a match - different products
-                                        logging.debug(f"🚫 REJECTED: Low identifier overlap ({identifier_overlap:.1%})")
+                                for json_set, excel_set in contradictions:
+                                    if (json_identifiers & json_set) and (excel_identifiers & excel_set):
+                                        # Contradicting product types - reject match
                                         continue
                                 
-                                # 3. Partial name match only if words align
-                                if product_name.lower() in excel_product_name or excel_product_name in product_name.lower():
-                                    # Check word overlap
-                                    word_overlap = len(json_words & excel_words) / max(len(json_words), len(excel_words))
-                                    if word_overlap >= 0.5:  # At least 50% word overlap
-                                        score += 80.0
-                                    else:
-                                        score += 30.0  # Reduced score for weak overlap
+                                # If both have identifiers, they MUST overlap significantly
+                                identifier_overlap = len(json_identifiers & excel_identifiers) / max(len(json_identifiers), len(excel_identifiers))
+                                if identifier_overlap < 0.5:  # Less than 50% overlap of product identifiers
+                                    continue  # Not a match - different products
+                            
+                            # 3. Partial name match only if words align
+                            if product_name.lower() in excel_product_name or excel_product_name in product_name.lower():
+                                # Check word overlap
+                                word_overlap = len(json_words & excel_words) / max(len(json_words), len(excel_words))
+                                if word_overlap >= 0.5:  # At least 50% word overlap
+                                    score += 80.0
+                                else:
+                                    score += 30.0  # Reduced score for weak overlap
+                            
+                            # 4. Enhanced fuzzy matching with more lenient threshold
+                            try:
+                                from fuzzywuzzy import fuzz
                                 
-                                # 4. Enhanced fuzzy matching with more lenient threshold
-                                try:
-                                    from fuzzywuzzy import fuzz
+                                # Use token_sort_ratio for better word-order-independent matching
+                                token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
+                                
+                                # More lenient thresholds for better product discovery
+                                if token_sort_score >= 60:  # Lowered from 70 for more matches
+                                    score += token_sort_score * 0.6  # Increased weight
+                                elif token_sort_score >= 50:
+                                    score += token_sort_score * 0.4  # Increased weight for marginal matches
                                     
-                                    # Use token_sort_ratio for better word-order-independent matching
-                                    token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
-                                    
-                                    # More lenient thresholds for better product discovery
-                                    if token_sort_score >= 60:  # Lowered from 70 for more matches
-                                        score += token_sort_score * 0.6  # Increased weight
-                                    elif token_sort_score >= 50:
-                                        score += token_sort_score * 0.4  # Increased weight for marginal matches
-                                        
-                                except ImportError:
-                                    pass
+                            except ImportError:
+                                pass
                             
                             # 5. Brand matching bonus
                             excel_brand = cache_item.get('brand', '').lower().strip()
@@ -2652,8 +2667,14 @@ class JSONMatcher:
                             if product_type and excel_type and any(word in excel_type for word in product_type.lower().split()):
                                 score += 15.0
                             
-                            # 8. Weight matching - not available in cache
-                            # (Skip weight bonus for now)
+                            # PERFORMANCE: Early termination if we found a very high confidence match
+                            if score >= 150.0:
+                                best_score = score
+                                if '_db_product' in cache_item:
+                                    best_match = cache_item['_db_product']
+                                else:
+                                    best_match = cache_item
+                                break  # High confidence match found, stop searching
                             
                             # Store best match
                             if score > best_score:
@@ -2661,12 +2682,8 @@ class JSONMatcher:
                                 # CRITICAL: Extract _db_product from cache_item
                                 if '_db_product' in cache_item:
                                     best_match = cache_item['_db_product']
-                                    db_name_check = best_match.get('Product Name*', 'MISSING')
-                                    logging.debug(f"🎯 Extracted _db_product: '{db_name_check[:50]}'")
                                 else:
                                     best_match = cache_item
-                                    logging.warning(f"⚠️  cache_item missing _db_product, using cache_item itself")
-                                logging.debug(f"🎯 New best match: JSON '{product_name}' → DB '{excel_product_name}' (score: {score:.1f})")
                                 
                         except Exception as e:
                             continue
@@ -3102,15 +3119,15 @@ class JSONMatcher:
             
             # ===== STEP 6: Normalize weight and units =====
             weight, weight_units = self._normalize_weight_for_json_product(raw_weight, raw_units, product_type, product_name)
-            weight_label = self._format_weight_label(weight, weight_units)
             
             # Ensure weight is valid
             if not weight or weight == "0":
                 weight = "1"
             if not weight_units:
                 weight_units = "g"
-            if not weight_label:
-                weight_label = f"{weight}{weight_units}"
+            
+            # Format weight label using the same method as Excel tags (no space between number and unit)
+            weight_label = self._format_weight_label(weight, weight_units) if hasattr(self, '_format_weight_label') else f"{weight}{weight_units}"
             
             # ===== STEP 7: Determine price with intelligent fallbacks =====
             price = raw_price
@@ -3135,14 +3152,21 @@ class JSONMatcher:
             # ===== STEP 9: Calculate ratio =====
             ratio = self._calculate_ratio_for_json_product(product_type, item)
             
-            # ===== STEP 9.5: Standardize description format for consistency =====
+            # ===== STEP 9.5: Standardize description format for consistency (match Excel tag format) =====
+            import re
             if use_excel_style_name:
                 description = product_name
             else:
-                description = product_name
-                import re
-                desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*[a-zA-Z]+\s*$', '', description, flags=re.IGNORECASE)
+                # Format to match Excel tags: "Product Name - WeightUnits" (no space before units)
+                # This matches the format used in _create_product_from_excel_match
+                desc_clean = product_name
+                # Remove existing weight patterns and re-add in standardized format
+                desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*[a-zA-Z]+\s*$', '', desc_clean, flags=re.IGNORECASE)
+                # Remove "by Brand" suffix if present
+                desc_clean = re.sub(r'\s+by\s+[^-]+$', '', desc_clean, flags=re.IGNORECASE)
                 desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+                
+                # Format weight same way as Excel tags: use weight_label which is already formatted correctly
                 if weight_label:
                     description = f"{desc_clean} - {weight_label}"
                 else:
@@ -3154,7 +3178,7 @@ class JSONMatcher:
             
             product = {
                 # Core identification
-                'Product Name*': description,  # Use standardized format
+                'Product Name*': description,  # Use standardized format (matches Excel tag format)
                 'Description': description,    # Same as Product Name*
                 
                 # Vendor and brand
@@ -11202,9 +11226,11 @@ class JSONMatcher:
             description = tag.get('Description', '').strip()
             
             # AI-BASED SIMILARITY MATCHING: Find similar products by weight and description
-            # to fill in missing fields
-            if (weight or description) and product_db:
+            # to fill in missing fields (only if we have missing critical fields to avoid unnecessary work)
+            missing_critical_fields = (not price) or (not strain) or (not lineage) or (not brand)
+            if missing_critical_fields and (weight or description) and product_db:
                 try:
+                    # PERFORMANCE: Only do AI matching if we're missing important fields
                     similar_products = self._find_similar_products_by_weight_and_description(
                         product_name, weight, description, product_type, vendor, product_db
                     )
@@ -11343,11 +11369,12 @@ class JSONMatcher:
             
             # Build the query
             where_clause = ' AND '.join(query_parts) if query_parts else '1=1'
+            # PERFORMANCE: Limit to 50 results instead of 100 for faster queries
             query = f"""
                 SELECT * FROM products 
                 WHERE {where_clause}
                 AND "Weight*" IS NOT NULL AND "Weight*" != ''
-                LIMIT 100
+                LIMIT 50
             """
             
             df = pd.read_sql_query(query, conn, params=params)
