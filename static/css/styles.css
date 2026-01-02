@@ -3745,14 +3745,14 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-left: 6px !important;
   }
   .vendor-header {
-      font-size: 1.6rem !important; /* Increased from 1.25rem to 1.6rem */
+      font-size: 1.25rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 1.8rem !important; /* Increased from 1.5rem to 1.8rem */
+      font-size: 1.3rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -3837,7 +3837,7 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: 500 !important;
     text-align: center !important;
     padding: 2px 4px !important; /* Reduced padding for compact list */
-    font-size: 0.4rem !important; /* Smaller font */
+    font-size: 0.35rem !important; /* Very small font for dropdown menu */
     line-height: 1.2 !important; /* Tighter line height */
     text-shadow: none !important;
   }
@@ -3856,6 +3856,7 @@ body.modal-open #mainContent.store-selection-disabled,
     background: white !important;
     color: black !important;
     font-weight: 600 !important;
+    font-size: 0.4rem !important; /* Small font for dropdown menu */
   }
   
   .lineage-dropdown:hover, .form-select.lineage-dropdown:hover {
@@ -4889,7 +4890,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--primary-color);
     font-weight: 600;
     margin-bottom: 0.75rem;
-    font-size: 2rem !important; /* Increased from 1.625rem to 2rem */
+    font-size: 1.625rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
     position: relative;
@@ -4918,7 +4919,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--secondary-color);
     font-weight: 500;
     margin-bottom: 0.5rem;
-    font-size: 1.75rem !important; /* Increased from 1.425rem to 1.75rem */
+    font-size: 1.425rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
     /* Ensure header stays above content */
@@ -4937,7 +4938,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--accent-color);
     font-weight: 700;
     margin-bottom: 0.25rem;
-    font-size: 1.75rem !important; /* Increased from 1.425rem to 1.75rem */
+    font-size: 1.425rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
@@ -4960,7 +4961,7 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .weight-header {
-    font-size: 1.75rem !important; /* Increased from 1.425rem to 1.75rem */
+    font-size: 1.425rem !important;
     color: var(--text-muted);
     margin-bottom: 0.25rem;
     margin-left: 0 !important;
@@ -6220,14 +6221,14 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 2rem !important; /* Increased from 1.625rem to 2rem */
+    font-size: 1.625rem !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.75rem !important; /* Increased from 1.425rem to 1.75rem */
+    font-size: 1.425rem !important;
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
@@ -6618,7 +6619,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Vendor (top-level) */
   .vendor-section > .vendor-header {
-    font-size: 2em !important; /* Increased from 1.65em to 2em */
+    font-size: 1.65em !important; /* Increased from 1.65em to 2em */
     font-weight: 700;
     margin-bottom: 0.4em;
     letter-spacing: 0.04em;
@@ -6631,7 +6632,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.d-flex,
   .vendor-section > .vendor-header.mb-2,
   .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 2em !important; /* Increased from 1.65em to 2em */
+    font-size: 1.65em !important; /* Increased from 1.65em to 2em */
     font-weight: 700 !important;
   }
 
@@ -6641,13 +6642,13 @@ body.modal-open #mainContent.store-selection-disabled,
   #selectedTags .vendor-section > .vendor-header.d-flex,
   #selectedTags .vendor-section > .vendor-header.mb-2,
   #selectedTags .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.5em !important; /* Increased from 1.225em to 1.5em */
+    font-size: 1.225em !important;
     font-weight: 700 !important;
   }
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.7em !important; /* Increased from 1.4em to 1.7em */
+    font-size: 1.4em !important;
     font-weight: 600;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
@@ -6657,7 +6658,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1.6em !important; /* Increased from 1.35em to 1.6em */
+    font-size: 1.35em !important;
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 2.2em;
@@ -6669,7 +6670,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 1.2em !important; /* Increased from 0.98em to 1.2em */
+    font-size: 0.98em !important;
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 3.2em;
@@ -10490,6 +10491,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #ffffff !important;
     border: none !important;
     cursor: pointer !important;
+    font-size: 0.4rem !important; /* Small font for dropdown menu options */
     
     /* Better hover states for PC */
     transition: background-color 0.2s ease !important;
