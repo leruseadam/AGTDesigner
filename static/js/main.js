@@ -6006,10 +6006,18 @@ const TagManager = {
                 if (!this.state.undoStack) {
                     this.state.undoStack = [];
                 }
-                this.state.undoStack.push(displayName);
-                console.log(`📝 Added to undo stack: ${displayName}, stack size: ${this.state.undoStack.length}`);
-                // Limit undo stack size to 10
-                if (this.state.undoStack.length > 10) {
+                // Store full action context for individual tag actions
+                const actionInfo = {
+                    type: isChecked ? 'add' : 'remove',
+                    tagName: displayName,
+                    element: checkbox,
+                    isForSelectedTags: isForSelectedTags,
+                    previousState: !isChecked
+                };
+                this.state.undoStack.push(actionInfo);
+                console.log(`📝 Added to undo stack: ${actionInfo.type} ${displayName}, stack size: ${this.state.undoStack.length}`);
+                // Limit undo stack size to 50 (increased for individual actions)
+                if (this.state.undoStack.length > 50) {
                     this.state.undoStack.shift();
                 }
                 // Clear redo stack on new action
@@ -12857,14 +12865,127 @@ const TagManager = {
             const lastAction = this.state.undoStack.pop();
 
             // Handle both old string format and new object format
-            let checkboxInfo;
+            let actionInfo;
             if (typeof lastAction === 'string') {
-                checkboxInfo = { id: lastAction, type: 'tag' };
+                // Legacy format - treat as checkbox toggle
+                actionInfo = { tagName: lastAction, type: 'tag' };
             } else {
-                checkboxInfo = lastAction;
+                actionInfo = lastAction;
             }
 
-            // Find the checkbox using the stored element reference or by searching
+            // Handle individual tag actions (add/remove)
+            if (actionInfo.type === 'add' || actionInfo.type === 'remove') {
+                const tagName = actionInfo.tagName || actionInfo.id;
+                const wasRemoved = actionInfo.type === 'remove';
+                
+                // Find the tag object
+                let tagObj = this._tagLookupMap?.get(tagName) ||
+                           this.state.tags.find(t => t && (t['Product Name*'] === tagName || t.ProductName === tagName)) ||
+                           this.state.originalTags.find(t => t && (t['Product Name*'] === tagName || t.ProductName === tagName));
+                
+                if (!tagObj) {
+                    console.warn(`⚠️ Tag object not found for: ${tagName}`);
+                    this.state.undoStack.push(actionInfo);
+                    if (window.Toast) {
+                        Toast.show('info', 'Tag not found');
+                    }
+                    return;
+                }
+                
+                // Create redo info (opposite action)
+                const redoInfo = {
+                    type: wasRemoved ? 'add' : 'remove',
+                    tagName: tagName,
+                    isForSelectedTags: actionInfo.isForSelectedTags || false,
+                    previousState: wasRemoved
+                };
+                
+                // Push to redo stack
+                this.state.redoStack.push(redoInfo);
+                console.log(`📚 Added to redo stack: ${redoInfo.type} ${tagName}`);
+                
+                // Prevent tracking this undo action
+                this.state.skipUndoTracking = true;
+                
+                // Undo the action: if it was removed, add it back; if it was added, remove it
+                if (wasRemoved) {
+                    // Re-add the tag
+                    if (!this.state._selectedTagsSet.has(tagName)) {
+                        this.state.persistentSelectedTags.push(tagName);
+                        this.state._selectedTagsSet.add(tagName);
+                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                        
+                        // Find checkbox in available tags and check it
+                        const availableContainer = document.getElementById('availableTags');
+                        if (availableContainer) {
+                            const availableCheckbox = availableContainer.querySelector(`input[data-tag-name="${tagName}"]`) ||
+                                                    availableContainer.querySelector(`input[value="${tagName}"]`);
+                            if (availableCheckbox) {
+                                availableCheckbox.checked = true;
+                            }
+                        }
+                        
+                        // Re-render selected tags to show the restored tag
+                        const selectedTagObjects = this.state.persistentSelectedTags
+                            .map(name => this._tagLookupMap?.get(name) ||
+                                       this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name)) ||
+                                       this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name)))
+                            .filter(Boolean);
+                        if (selectedTagObjects.length > 0) {
+                            this.updateSelectedTags(selectedTagObjects);
+                        }
+                    }
+                } else {
+                    // Remove the tag
+                    const index = this.state.persistentSelectedTags.indexOf(tagName);
+                    if (index > -1) {
+                        this.state.persistentSelectedTags.splice(index, 1);
+                        this.state._selectedTagsSet.delete(tagName);
+                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                        
+                        // Find and remove the tag element from selected tags
+                        const selectedContainer = document.getElementById('selectedTags');
+                        if (selectedContainer) {
+                            const tagItem = selectedContainer.querySelector(`.tag-item[data-product-name="${tagName}"]`) ||
+                                         selectedContainer.querySelector(`.tag-item input[value="${tagName}"]`)?.closest('.tag-item');
+                            if (tagItem) {
+                                tagItem.remove();
+                            }
+                        }
+                        
+                        // Uncheck checkbox in available tags
+                        const availableContainer = document.getElementById('availableTags');
+                        if (availableContainer) {
+                            const availableCheckbox = availableContainer.querySelector(`input[data-tag-name="${tagName}"]`) ||
+                                                    availableContainer.querySelector(`input[value="${tagName}"]`);
+                            if (availableCheckbox) {
+                                availableCheckbox.checked = false;
+                            }
+                        }
+                        
+                        this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+                    }
+                }
+                
+                setTimeout(() => {
+                    this.state.skipUndoTracking = false;
+                }, 100);
+                
+                // Save state
+                setTimeout(() => {
+                    this.saveSelectedTagsToBackend();
+                    this.saveSelectionState('undo_action');
+                }, 50);
+                
+                if (window.Toast) {
+                    Toast.show('success', `Undone: ${wasRemoved ? 'Restored' : 'Removed'} ${tagName}`);
+                }
+                console.log(`✅ Undone ${actionInfo.type} action for: ${tagName}`);
+                return;
+            }
+            
+            // Legacy checkbox toggle handling (for group checkboxes and old format)
+            let checkboxInfo = actionInfo;
             let checkbox = checkboxInfo.element;
 
             // If element reference is stale, search for it
@@ -12879,10 +13000,10 @@ const TagManager = {
                     const availableContainer = document.getElementById('availableTags');
                     const selectedContainer = document.getElementById('selectedTags');
 
-                    checkbox = availableContainer?.querySelector(`input[data-tag-name="${checkboxInfo.id}"]`) ||
-                              selectedContainer?.querySelector(`input[data-tag-name="${checkboxInfo.id}"]`) ||
-                              availableContainer?.querySelector(`input[value="${checkboxInfo.id}"]`) ||
-                              selectedContainer?.querySelector(`input[value="${checkboxInfo.id}"]`);
+                    checkbox = availableContainer?.querySelector(`input[data-tag-name="${checkboxInfo.tagName || checkboxInfo.id}"]`) ||
+                              selectedContainer?.querySelector(`input[data-tag-name="${checkboxInfo.tagName || checkboxInfo.id}"]`) ||
+                              availableContainer?.querySelector(`input[value="${checkboxInfo.tagName || checkboxInfo.id}"]`) ||
+                              selectedContainer?.querySelector(`input[value="${checkboxInfo.tagName || checkboxInfo.id}"]`);
                 }
             }
 
@@ -12899,7 +13020,7 @@ const TagManager = {
 
                 // Push to redo stack with updated state
                 this.state.redoStack.push(redoInfo);
-                console.log(`📚 Added to redo stack: ${redoInfo.id}, will restore to checked=${redoInfo.checked}`);
+                console.log(`📚 Added to redo stack: ${redoInfo.tagName || redoInfo.id}, will restore to checked=${redoInfo.checked}`);
 
                 // Prevent this click from being added to undo stack
                 this.state.skipUndoTracking = true;
@@ -12909,11 +13030,11 @@ const TagManager = {
                 }, 100);
 
                 if (window.Toast) {
-                    Toast.show('success', `Undone: ${checkboxInfo.id}`);
+                    Toast.show('success', `Undone: ${checkboxInfo.tagName || checkboxInfo.id}`);
                 }
-                console.log(`✅ Undone checkbox for: ${checkboxInfo.id}`);
+                console.log(`✅ Undone checkbox for: ${checkboxInfo.tagName || checkboxInfo.id}`);
             } else {
-                console.warn(`⚠️ Checkbox not found for: ${checkboxInfo.id}`);
+                console.warn(`⚠️ Checkbox not found for: ${checkboxInfo.tagName || checkboxInfo.id}`);
                 // Put it back on undo stack if checkbox not found
                 this.state.undoStack.push(checkboxInfo);
                 if (window.Toast) {
@@ -12957,16 +13078,129 @@ const TagManager = {
             console.log('Popped from redo stack:', lastAction);
 
             // Handle both old string format and new object format
-            let checkboxInfo;
+            let actionInfo;
             if (typeof lastAction === 'string') {
-                checkboxInfo = { id: lastAction, type: 'tag' };
+                // Legacy format - treat as checkbox toggle
+                actionInfo = { tagName: lastAction, type: 'tag' };
             } else {
-                checkboxInfo = lastAction;
+                actionInfo = lastAction;
             }
 
-            console.log('Redo checkbox info:', checkboxInfo);
+            console.log('Redo action info:', actionInfo);
 
-            // Find the checkbox using the stored element reference or by searching
+            // Handle individual tag actions (add/remove)
+            if (actionInfo.type === 'add' || actionInfo.type === 'remove') {
+                const tagName = actionInfo.tagName || actionInfo.id;
+                const shouldAdd = actionInfo.type === 'add';
+                
+                // Find the tag object
+                let tagObj = this._tagLookupMap?.get(tagName) ||
+                           this.state.tags.find(t => t && (t['Product Name*'] === tagName || t.ProductName === tagName)) ||
+                           this.state.originalTags.find(t => t && (t['Product Name*'] === tagName || t.ProductName === tagName));
+                
+                if (!tagObj) {
+                    console.warn(`⚠️ Tag object not found for: ${tagName}`);
+                    this.state.redoStack.push(actionInfo);
+                    if (window.Toast) {
+                        Toast.show('info', 'Tag not found');
+                    }
+                    return;
+                }
+                
+                // Create undo info (opposite action)
+                const undoInfo = {
+                    type: shouldAdd ? 'remove' : 'add',
+                    tagName: tagName,
+                    isForSelectedTags: actionInfo.isForSelectedTags || false,
+                    previousState: !shouldAdd
+                };
+                
+                // Push to undo stack
+                this.state.undoStack.push(undoInfo);
+                console.log(`📚 Added to undo stack: ${undoInfo.type} ${tagName}`);
+                
+                // Prevent tracking this redo action
+                this.state.skipUndoTracking = true;
+                
+                // Redo the action: if it should be added, add it; if it should be removed, remove it
+                if (shouldAdd) {
+                    // Add the tag
+                    if (!this.state._selectedTagsSet.has(tagName)) {
+                        this.state.persistentSelectedTags.push(tagName);
+                        this.state._selectedTagsSet.add(tagName);
+                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                        
+                        // Find checkbox in available tags and check it
+                        const availableContainer = document.getElementById('availableTags');
+                        if (availableContainer) {
+                            const availableCheckbox = availableContainer.querySelector(`input[data-tag-name="${tagName}"]`) ||
+                                                    availableContainer.querySelector(`input[value="${tagName}"]`);
+                            if (availableCheckbox) {
+                                availableCheckbox.checked = true;
+                            }
+                        }
+                        
+                        // Re-render selected tags to show the restored tag
+                        const selectedTagObjects = this.state.persistentSelectedTags
+                            .map(name => this._tagLookupMap?.get(name) ||
+                                       this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name)) ||
+                                       this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name)))
+                            .filter(Boolean);
+                        if (selectedTagObjects.length > 0) {
+                            this.updateSelectedTags(selectedTagObjects);
+                        }
+                    }
+                } else {
+                    // Remove the tag
+                    const index = this.state.persistentSelectedTags.indexOf(tagName);
+                    if (index > -1) {
+                        this.state.persistentSelectedTags.splice(index, 1);
+                        this.state._selectedTagsSet.delete(tagName);
+                        this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                        
+                        // Find and remove the tag element from selected tags
+                        const selectedContainer = document.getElementById('selectedTags');
+                        if (selectedContainer) {
+                            const tagItem = selectedContainer.querySelector(`.tag-item[data-product-name="${tagName}"]`) ||
+                                         selectedContainer.querySelector(`.tag-item input[value="${tagName}"]`)?.closest('.tag-item');
+                            if (tagItem) {
+                                tagItem.remove();
+                            }
+                        }
+                        
+                        // Uncheck checkbox in available tags
+                        const availableContainer = document.getElementById('availableTags');
+                        if (availableContainer) {
+                            const availableCheckbox = availableContainer.querySelector(`input[data-tag-name="${tagName}"]`) ||
+                                                    availableContainer.querySelector(`input[value="${tagName}"]`);
+                            if (availableCheckbox) {
+                                availableCheckbox.checked = false;
+                            }
+                        }
+                        
+                        this.updateTagCount('selected', this.state.persistentSelectedTags.length);
+                    }
+                }
+                
+                setTimeout(() => {
+                    this.state.skipUndoTracking = false;
+                }, 100);
+                
+                // Save state
+                setTimeout(() => {
+                    this.saveSelectedTagsToBackend();
+                    this.saveSelectionState('redo_action');
+                }, 50);
+                
+                if (window.Toast) {
+                    Toast.show('success', `Redone: ${shouldAdd ? 'Added' : 'Removed'} ${tagName}`);
+                }
+                console.log(`✅ Redone ${actionInfo.type} action for: ${tagName}`);
+                return;
+            }
+            
+            // Legacy checkbox toggle handling (for group checkboxes and old format)
+            let checkboxInfo = actionInfo;
             let checkbox = checkboxInfo.element;
 
             // If element reference is stale, search for it
@@ -12981,15 +13215,15 @@ const TagManager = {
                     const availableContainer = document.getElementById('availableTags');
                     const selectedContainer = document.getElementById('selectedTags');
 
-                    checkbox = availableContainer?.querySelector(`input[data-tag-name="${checkboxInfo.id}"]`) ||
-                              selectedContainer?.querySelector(`input[data-tag-name="${checkboxInfo.id}"]`) ||
-                              availableContainer?.querySelector(`input[value="${checkboxInfo.id}"]`) ||
-                              selectedContainer?.querySelector(`input[value="${checkboxInfo.id}"]`);
+                    checkbox = availableContainer?.querySelector(`input[data-tag-name="${checkboxInfo.tagName || checkboxInfo.id}"]`) ||
+                              selectedContainer?.querySelector(`input[data-tag-name="${checkboxInfo.tagName || checkboxInfo.id}"]`) ||
+                              availableContainer?.querySelector(`input[value="${checkboxInfo.tagName || checkboxInfo.id}"]`) ||
+                              selectedContainer?.querySelector(`input[value="${checkboxInfo.tagName || checkboxInfo.id}"]`);
                 }
             }
 
             if (checkbox) {
-                console.log(`Found checkbox: ${checkboxInfo.id}, current state: ${checkbox.checked}`);
+                console.log(`Found checkbox: ${checkboxInfo.tagName || checkboxInfo.id}, current state: ${checkbox.checked}`);
 
                 // Create undo info with current state before clicking
                 const undoInfo = {
@@ -13000,7 +13234,7 @@ const TagManager = {
 
                 // Push to undo stack
                 this.state.undoStack.push(undoInfo);
-                console.log(`📚 Added to undo stack: ${undoInfo.id}, current state: ${undoInfo.checked}`);
+                console.log(`📚 Added to undo stack: ${undoInfo.tagName || undoInfo.id}, current state: ${undoInfo.checked}`);
 
                 // Prevent this click from being added to undo stack again
                 this.state.skipUndoTracking = true;
@@ -13011,11 +13245,11 @@ const TagManager = {
                 }, 100);
 
                 if (window.Toast) {
-                    Toast.show('success', `Redone: ${checkboxInfo.id}`);
+                    Toast.show('success', `Redone: ${checkboxInfo.tagName || checkboxInfo.id}`);
                 }
-                console.log(`✅ Redone checkbox for: ${checkboxInfo.id}, new state: ${checkbox.checked}`);
+                console.log(`✅ Redone checkbox for: ${checkboxInfo.tagName || checkboxInfo.id}, new state: ${checkbox.checked}`);
             } else {
-                console.warn(`⚠️ Checkbox not found for: ${checkboxInfo.id}`);
+                console.warn(`⚠️ Checkbox not found for: ${checkboxInfo.tagName || checkboxInfo.id}`);
                 // Put it back on redo stack if checkbox not found
                 this.state.redoStack.push(checkboxInfo);
                 if (window.Toast) {
