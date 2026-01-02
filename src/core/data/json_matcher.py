@@ -3162,50 +3162,70 @@ class JSONMatcher:
                 desc_clean = product_name
                 
                 # Check if weight is already in the product name (to avoid duplication)
-                weight_already_in_name = False
+                # Extract numeric weight value for better matching
+                weight_value_only = None
                 if weight_label:
-                    # Check if the exact weight_label appears in the name (case insensitive)
-                    weight_label_lower = weight_label.lower()
+                    try:
+                        # Extract numeric part from weight_label (e.g., "1g" -> "1", "2.5g" -> "2.5")
+                        weight_match = re.search(r'(\d+\.?\d*)', weight_label)
+                        if weight_match:
+                            weight_value_only = weight_match.group(1)
+                    except:
+                        pass
+                
+                weight_already_in_name = False
+                if weight_label and weight_value_only:
                     product_name_lower = desc_clean.lower()
-                    # Check for exact match or with dash separator
-                    if weight_label_lower in product_name_lower:
-                        # Make sure it's not part of a larger number (e.g., "1g" in "10g")
-                        pattern = r'\b' + re.escape(weight_label_lower) + r'\b'
+                    weight_label_lower = weight_label.lower()
+                    
+                    # Check if the exact formatted weight appears at the end (with or without dash)
+                    end_patterns = [
+                        r'\s*-\s*' + re.escape(weight_label_lower) + r'\s*$',  # "- 1g" at end
+                        r'\s+' + re.escape(weight_label_lower) + r'\s*$',       # " 1g" at end
+                    ]
+                    for pattern in end_patterns:
                         if re.search(pattern, product_name_lower):
                             weight_already_in_name = True
+                            break
                     
-                    # Also check if weight pattern exists at the end (common pattern)
-                    weight_pattern = re.escape(weight_label_lower)
-                    end_pattern = r'\s*-\s*' + weight_pattern + r'\s*$'
-                    if re.search(end_pattern, product_name_lower):
-                        weight_already_in_name = True
+                    # Also check if the numeric weight value appears at the end (to catch variations)
+                    if not weight_already_in_name:
+                        numeric_end_patterns = [
+                            r'\s*-\s*' + re.escape(weight_value_only) + r'\s*[a-zA-Z]{1,4}\s*$',  # "- 1g" or "- 1gg" at end
+                        ]
+                        for pattern in numeric_end_patterns:
+                            if re.search(pattern, product_name_lower):
+                                weight_already_in_name = True
+                                break
                 
-                # Only remove and re-add weight if it's not already in the name correctly formatted
-                if not weight_already_in_name:
-                    # Remove existing weight patterns at the end (various formats)
-                    # Remove patterns like "- 1g", "- 1gg", "- 2.5g" etc.
-                    desc_clean = re.sub(r'\s*-\s*\d+\.?\d*\s*[a-zA-Z]{1,4}\s*$', '', desc_clean, flags=re.IGNORECASE)
-                    # Remove duplicate weight patterns (e.g., "- 1g - 1g" or "- 1g - 1gg")
-                    desc_clean = re.sub(r'\s*-\s*\d+\.?\d*\s*[a-zA-Z]{1,4}\s*-\s*\d+\.?\d*\s*[a-zA-Z]{1,4}\s*$', '', desc_clean, flags=re.IGNORECASE)
-                    # Remove "by Brand" suffix if present
-                    desc_clean = re.sub(r'\s+by\s+[^-]+$', '', desc_clean, flags=re.IGNORECASE)
-                    desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
-                    
-                    # Add weight if we have one
-                    if weight_label:
-                        description = f"{desc_clean} - {weight_label}"
-                    else:
-                        description = desc_clean
-                else:
-                    # Weight already in name - clean up duplicate weights and extra formatting
-                    # Remove duplicate weight patterns at the end (e.g., "- 1g - 1gg" -> "- 1g")
-                    desc_clean = re.sub(r'\s*-\s*(\d+\.?\d*\s*[a-zA-Z]{1,4})\s*-\s*\1\s*$', r' - \1', desc_clean, flags=re.IGNORECASE)
-                    # Remove duplicate units (e.g., "1gg" -> "1g")
+                # Always clean up duplicate weights first, regardless of whether we'll add weight
+                # Remove duplicate weight patterns at the end (multiple passes to catch all variations)
+                max_passes = 5
+                for _ in range(max_passes):
+                    prev_clean = desc_clean
+                    # Remove patterns like "- 1g - 1gg", "- 1g - 1g", "- 2.5g - 2.5gg" etc.
+                    desc_clean = re.sub(r'\s*-\s*(\d+\.?\d*)\s*([a-zA-Z]{1,4})\s*-\s*\1\s*\2+\s*$', r' - \1\2', desc_clean, flags=re.IGNORECASE)
+                    # Remove duplicate units (e.g., "1gg" -> "1g", "2.5ggg" -> "2.5g")
                     desc_clean = re.sub(r'(\d+\.?\d*)([a-zA-Z]{1,3})\2+', r'\1\2', desc_clean, flags=re.IGNORECASE)
-                    # Clean up extra spaces and duplicate dashes
-                    desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
-                    desc_clean = re.sub(r'-\s*-+', '-', desc_clean)  # Remove duplicate dashes
-                    description = desc_clean.strip()
+                    if prev_clean == desc_clean:
+                        break  # No more changes
+                
+                # Remove single weight pattern at the end if we're going to add it
+                if not weight_already_in_name and weight_label:
+                    # Remove any existing weight pattern at the end before adding our formatted one
+                    desc_clean = re.sub(r'\s*-\s*\d+\.?\d*\s*[a-zA-Z]{1,4}\s*$', '', desc_clean, flags=re.IGNORECASE)
+                
+                # Remove "by Brand" suffix if present (but preserve vendor info in the name)
+                # Only remove "by Brand" if it's at the very end, not if there's weight after it
+                desc_clean = re.sub(r'\s+by\s+[^-]+$', '', desc_clean, flags=re.IGNORECASE)
+                desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+                
+                # Add weight if we have one and it's not already in the name
+                if not weight_already_in_name and weight_label:
+                    description = f"{desc_clean} - {weight_label}"
+                else:
+                    # Clean up any remaining duplicate dashes
+                    description = re.sub(r'-\s*-+', '-', desc_clean).strip()
             
             # ===== STEP 10: Build COMPLETE product with ALL required fields =====
             # Vendor and brand - CRITICAL: Vendor should NEVER be empty
@@ -3431,42 +3451,69 @@ class JSONMatcher:
             # Format weight using the same method as fallback products
             formatted_weight = self._format_weight_label(excel_weight, excel_units) if excel_weight and excel_units else ''
             
+            # Extract numeric weight value for better matching
+            weight_value_only = None
+            if formatted_weight:
+                try:
+                    weight_match = re.search(r'(\d+\.?\d*)', formatted_weight)
+                    if weight_match:
+                        weight_value_only = weight_match.group(1)
+                except:
+                    pass
+            
             # Check if weight is already in the product name (to avoid duplication)
             weight_already_in_name = False
-            if formatted_weight:
-                formatted_weight_lower = formatted_weight.lower()
+            if formatted_weight and weight_value_only:
                 product_name_lower = description.lower()
-                # Check if the exact formatted weight appears in the name
-                pattern = r'\b' + re.escape(formatted_weight_lower) + r'\b'
-                if re.search(pattern, product_name_lower):
-                    weight_already_in_name = True
-                # Also check if weight pattern exists at the end
-                end_pattern = r'\s*-\s*' + re.escape(formatted_weight_lower) + r'\s*$'
-                if re.search(end_pattern, product_name_lower):
-                    weight_already_in_name = True
+                formatted_weight_lower = formatted_weight.lower()
+                
+                # Check if the exact formatted weight appears at the end (with or without dash)
+                end_patterns = [
+                    r'\s*-\s*' + re.escape(formatted_weight_lower) + r'\s*$',  # "- 1g" at end
+                    r'\s+' + re.escape(formatted_weight_lower) + r'\s*$',       # " 1g" at end
+                ]
+                for pattern in end_patterns:
+                    if re.search(pattern, product_name_lower):
+                        weight_already_in_name = True
+                        break
+                
+                # Also check if the numeric weight value appears at the end (to catch variations)
+                if not weight_already_in_name:
+                    numeric_end_patterns = [
+                        r'\s*-\s*' + re.escape(weight_value_only) + r'\s*[a-zA-Z]{1,4}\s*$',  # "- 1g" or "- 1gg" at end
+                    ]
+                    for pattern in numeric_end_patterns:
+                        if re.search(pattern, product_name_lower):
+                            weight_already_in_name = True
+                            break
             
-            # Only remove and re-add weight if it's not already in the name correctly formatted
-            if not weight_already_in_name:
-                # Remove existing weight patterns at the end (various formats)
-                # Remove patterns like "- 1g", "- 1gg", "- 2.5g" etc.
-                desc_clean = re.sub(r'\s*-\s*\d+\.?\d*\s*[a-zA-Z]{1,4}\s*$', '', description, flags=re.IGNORECASE)
-                # Remove duplicate weight patterns (e.g., "- 1g - 1g" or "- 1g - 1gg")
-                desc_clean = re.sub(r'\s*-\s*\d+\.?\d*\s*[a-zA-Z]{1,4}\s*-\s*\d+\.?\d*\s*[a-zA-Z]{1,4}\s*$', '', desc_clean, flags=re.IGNORECASE)
-                # Remove "by Brand" suffix if present
-                desc_clean = re.sub(r'\s+by\s+[^-]+$', '', desc_clean, flags=re.IGNORECASE)
-                desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
-                # Add standardized weight suffix
-                standardized_name = f"{desc_clean} - {formatted_weight}" if formatted_weight else desc_clean
-            else:
-                # Weight already in name - clean up duplicate weights and extra formatting
-                # Remove duplicate weight patterns at the end (e.g., "- 1g - 1gg" -> "- 1g")
-                desc_clean = re.sub(r'\s*-\s*(\d+\.?\d*\s*[a-zA-Z]{1,4})\s*-\s*\1\s*$', r' - \1', description, flags=re.IGNORECASE)
-                # Remove duplicate units (e.g., "1gg" -> "1g")
+            # Always clean up duplicate weights first, regardless of whether we'll add weight
+            desc_clean = description
+            max_passes = 5
+            for _ in range(max_passes):
+                prev_clean = desc_clean
+                # Remove patterns like "- 1g - 1gg", "- 1g - 1g", "- 2.5g - 2.5gg" etc.
+                desc_clean = re.sub(r'\s*-\s*(\d+\.?\d*)\s*([a-zA-Z]{1,4})\s*-\s*\1\s*\2+\s*$', r' - \1\2', desc_clean, flags=re.IGNORECASE)
+                # Remove duplicate units (e.g., "1gg" -> "1g", "2.5ggg" -> "2.5g")
                 desc_clean = re.sub(r'(\d+\.?\d*)([a-zA-Z]{1,3})\2+', r'\1\2', desc_clean, flags=re.IGNORECASE)
-                # Clean up extra spaces and duplicate dashes
-                desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
-                desc_clean = re.sub(r'-\s*-+', '-', desc_clean)  # Remove duplicate dashes
-                standardized_name = desc_clean.strip()
+                if prev_clean == desc_clean:
+                    break  # No more changes
+            
+            # Remove single weight pattern at the end if we're going to add it
+            if not weight_already_in_name and formatted_weight:
+                # Remove any existing weight pattern at the end before adding our formatted one
+                desc_clean = re.sub(r'\s*-\s*\d+\.?\d*\s*[a-zA-Z]{1,4}\s*$', '', desc_clean, flags=re.IGNORECASE)
+            
+            # Remove "by Brand" suffix if present (but preserve vendor info in the name)
+            desc_clean = re.sub(r'\s+by\s+[^-]+$', '', desc_clean, flags=re.IGNORECASE)
+            desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+            
+            # Add standardized weight suffix if needed
+            if not weight_already_in_name and formatted_weight:
+                standardized_name = f"{desc_clean} - {formatted_weight}"
+            else:
+                # Clean up any remaining duplicate dashes
+                standardized_name = re.sub(r'-\s*-+', '-', desc_clean).strip()
             
             # Build product with essential fields - MATCH BACKUP VERSION FORMAT
             # CRITICAL: Description = Product Name* (same value, standardized format)
