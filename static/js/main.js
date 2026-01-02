@@ -10947,19 +10947,8 @@ const TagManager = {
             // Load selected tags in background (non-blocking)
             this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
 
-            // CRITICAL FIX: Restore filters from localStorage IMMEDIATELY before API call
-            // This prevents filters from disappearing on page refresh
-            const savedFilters = this.loadFiltersFromStorage();
-            if (savedFilters && Object.keys(savedFilters).length > 0) {
-                console.log('⚡ Restoring filters from localStorage:', savedFilters);
-                // Apply saved filters to dropdowns immediately
-                Object.entries(savedFilters).forEach(([key, value]) => {
-                    const filterElement = document.getElementById(`${key}Filter`);
-                    if (filterElement && value) {
-                        filterElement.value = value;
-                    }
-                });
-            }
+            // CRITICAL FIX: Don't restore filters from localStorage on page load
+            // Filters should reset on page reload, but persist during session when tags are updated
 
             // CRITICAL FIX: Only fetch filter options from API if we didn't populate from cache
             // This prevents slow API calls from overwriting instant cache-based filters
@@ -11160,37 +11149,24 @@ const TagManager = {
 
     // Continue initialization without showing splash (for cache hits)
     _continueInitWithoutSplash() {
-        // GUARANTEED FIX: Restore filters from localStorage on page load
-        const savedFilters = this.loadFiltersFromStorage();
-        this.state.filters = savedFilters || {
+        // CRITICAL FIX: Reset filters on page load (don't restore from localStorage)
+        // Filters should reset on page reload, but persist during session when tags are updated
+        this.state.filters = {
             vendor: 'All',
             brand: 'All',
             productType: 'All',
             lineage: 'All',
-            weight: 'All'
+            weight: 'All',
+            doh: 'All',
+            highCbd: 'All'
         };
         
-        // Set each filter dropdown to saved value or 'All' (or '')
+        // Set each filter dropdown to 'All' (empty string) on page load
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
-        const filterMap = {
-            'vendorFilter': 'vendor',
-            'brandFilter': 'brand',
-            'productTypeFilter': 'productType',
-            'lineageFilter': 'lineage',
-            'weightFilter': 'weight',
-            'dohFilter': 'doh',
-            'highCbdFilter': 'highCbd'
-        };
         filterIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
-                const filterKey = filterMap[id];
-                const savedValue = this.state.filters[filterKey];
-                if (savedValue && savedValue !== 'All') {
-                    el.value = savedValue;
-                } else {
-                    el.value = '';
-                }
+                el.value = '';
             }
         });
         
