@@ -3745,14 +3745,14 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-left: 6px !important;
   }
   .vendor-header {
-      font-size: 1.25rem !important; /* Increased from 1.5rem (24px) to ~26px */
+      font-size: 1.6rem !important; /* Increased from 1.25rem to 1.6rem */
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 1.5rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+      font-size: 1.8rem !important; /* Increased from 1.5rem to 1.8rem */
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -3837,7 +3837,7 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: 500 !important;
     text-align: center !important;
     padding: 2px 4px !important; /* Reduced padding for compact list */
-    font-size: 0.65rem !important; /* Smaller font */
+    font-size: 0.4rem !important; /* Smaller font */
     line-height: 1.2 !important; /* Tighter line height */
     text-shadow: none !important;
   }
@@ -3944,7 +3944,7 @@ body.modal-open #mainContent.store-selection-disabled,
     background: rgba(45, 34, 58, 0.95) !important;
     color: white !important;
     border: none !important;
-    font-size: 0.7rem !important; /* Smaller font */
+    font-size: 0.4rem !important; /* Smaller font */
     padding: 2px 4px !important; /* Reduced padding for compact list */
     line-height: 1.2 !important; /* Tighter line height */
     font-weight: 500 !important;
@@ -4889,7 +4889,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--primary-color);
     font-weight: 600;
     margin-bottom: 0.75rem;
-    font-size: 1.625rem !important; /* Increased from 1.5rem (24px) to ~26px */
+    font-size: 2rem !important; /* Increased from 1.625rem to 2rem */
     margin-left: 0 !important;
     padding-left: 0 !important;
     position: relative;
@@ -4918,7 +4918,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--secondary-color);
     font-weight: 500;
     margin-bottom: 0.5rem;
-    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+    font-size: 1.75rem !important; /* Increased from 1.425rem to 1.75rem */
     margin-left: 0 !important;
     padding-left: 0 !important;
     /* Ensure header stays above content */
@@ -4937,7 +4937,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--accent-color);
     font-weight: 700;
     margin-bottom: 0.25rem;
-    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+    font-size: 1.75rem !important; /* Increased from 1.425rem to 1.75rem */
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
@@ -4960,7 +4960,7 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .weight-header {
-    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+    font-size: 1.75rem !important; /* Increased from 1.425rem to 1.75rem */
     color: var(--text-muted);
     margin-bottom: 0.25rem;
     margin-left: 0 !important;
@@ -5428,7 +5428,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--text-primary);
     border-radius: 8px;
     padding: 6px 12px;
-    font-size: 3px !important; /* Reduced from 0.5rem for smaller font */
+    font-size: 2.5px !important; /* Reduced from 3px for smaller font */
     transition: all 0.3s ease;
   }
   .lineage-dropdown:hover,
@@ -6220,14 +6220,14 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.625rem !important; /* Increased from 1.5rem (24px) to ~26px */
+    font-size: 2rem !important; /* Increased from 1.625rem to 2rem */
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+    font-size: 1.75rem !important; /* Increased from 1.425rem to 1.75rem */
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
@@ -6618,7 +6618,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Vendor (top-level) */
   .vendor-section > .vendor-header {
-    font-size: 1.65em !important; /* Increased substantially */
+    font-size: 2em !important; /* Increased from 1.65em to 2em */
     font-weight: 700;
     margin-bottom: 0.4em;
     letter-spacing: 0.04em;
@@ -6631,7 +6631,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.d-flex,
   .vendor-section > .vendor-header.mb-2,
   .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.65em !important; /* Increased substantially */
+    font-size: 2em !important; /* Increased from 1.65em to 2em */
     font-weight: 700 !important;
   }
 
@@ -6641,13 +6641,13 @@ body.modal-open #mainContent.store-selection-disabled,
   #selectedTags .vendor-section > .vendor-header.d-flex,
   #selectedTags .vendor-section > .vendor-header.mb-2,
   #selectedTags .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.225em !important; /* Increased by 0.125em (~2px) */
+    font-size: 1.5em !important; /* Increased from 1.225em to 1.5em */
     font-weight: 700 !important;
   }
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.4em; /* Increased substantially */
+    font-size: 1.7em !important; /* Increased from 1.4em to 1.7em */
     font-weight: 600;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
@@ -6657,7 +6657,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1.35em; /* Increased substantially */
+    font-size: 1.6em !important; /* Increased from 1.35em to 1.6em */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 2.2em;
@@ -6669,7 +6669,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 0.98em;
+    font-size: 1.2em !important; /* Increased from 0.98em to 1.2em */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 3.2em;
