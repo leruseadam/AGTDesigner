@@ -3806,7 +3806,6 @@ body.modal-open #mainContent.store-selection-disabled,
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     font-weight: 600 !important;
-    font-size: 4px !important;
     padding: 2px 6px 2px 3px !important;
     transition: border-color 0.15s ease !important;
     text-align: center !important;
@@ -3993,7 +3992,6 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 30px !important;
     max-width: 40px !important;
     width: 35px !important;
-    font-size: 5px !important; /* Reduced from larger sizes for smaller font */
     padding: 2px 6px 2px 3px !important;
     height: 14px !important;
     line-height: 1.0 !important;
@@ -4024,7 +4022,7 @@ body.modal-open #mainContent.store-selection-disabled,
     width: 70px !important;
     max-width: 70px !important;
     min-width: 70px !important;
-    font-size: 5px !important; /* Reduced from 7px for smaller font */
+    font-size: 7px !important;
     padding: 2px 12px 2px 6px !important;
     height: 14px !important;
     line-height: 1.0 !important;
@@ -6229,7 +6227,6 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Don't override with smaller size */
   }
   .lineage-dropdown-mini {
-    font-size: 3px !important; /* Reduced from 0.3em for smaller absolute font size */
     padding: 2px 6px;
     min-width: 40px;
     max-width: 60px;
@@ -6358,7 +6355,6 @@ body.modal-open #mainContent.store-selection-disabled,
   .lineage-dropdown,
   .lineage-dropdown-mini,
   .form-select.lineage-dropdown {
-    font-size: 3px !important; /* Reduced from 0.3em for smaller absolute font size */
     min-width: 60px !important;
     max-width: 70px !important;
     width: 65px !important;
@@ -11789,35 +11785,3 @@ html, body {
     }
 }
 
-/* CRITICAL: High-specificity rules to ensure small font sizes for lineage and DOH dropdowns */
-.tag-item .lineage-dropdown,
-.tag-item .lineage-dropdown-mini,
-.tag-item .form-select.lineage-dropdown,
-.tag-item .form-select.lineage-dropdown-mini,
-.tag-entry .lineage-dropdown,
-.tag-entry .lineage-dropdown-mini,
-.tag-entry .form-select.lineage-dropdown,
-.tag-entry .form-select.lineage-dropdown-mini,
-.tag-row .lineage-dropdown,
-.tag-row .lineage-dropdown-mini,
-.tag-row .form-select.lineage-dropdown,
-.tag-row .form-select.lineage-dropdown-mini {
-    font-size: 5px !important;
-}
-
-.tag-item .doh-dropdown,
-.tag-item .doh-dropdown-mini,
-.tag-item .form-select.doh-dropdown,
-.tag-item .form-select.doh-dropdown-mini,
-.tag-entry .doh-dropdown,
-.tag-entry .doh-dropdown-mini,
-.tag-entry .form-select.doh-dropdown,
-.tag-entry .form-select.doh-dropdown-mini,
-.tag-row .doh-dropdown,
-.tag-row .doh-dropdown-mini,
-.tag-row .form-select.doh-dropdown,
-.tag-row .form-select.doh-dropdown-mini {
-    font-size: 5px !important;
-    transform: scale(0.5) !important; /* Scale down to make text appear smaller if browser enforces minimum font size */
-    transform-origin: left center !important;
-}

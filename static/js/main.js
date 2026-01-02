@@ -6585,9 +6585,6 @@ const TagManager = {
         lineageSelect.style.backdropFilter = 'blur(10px)';
         lineageSelect.style.transition = 'all 0.2s ease';
         lineageSelect.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.1)';
-        lineageSelect.style.fontSize = '5px'; /* Compact font */
-        /* Allow CSS transform to scale down text */
-        lineageSelect.style.transformOrigin = 'left center';
         lineageSelect.style.lineHeight = '1.0';
         lineageSelect.style.fontWeight = 'bold';
         lineageSelect.style.letterSpacing = '-0.1px';
@@ -6801,9 +6798,6 @@ const TagManager = {
         dohSelect.style.minWidth = '70px'; /* Even wider for full text visibility */
         dohSelect.style.maxWidth = '70px';
         dohSelect.style.width = '70px';
-        dohSelect.style.fontSize = '5px'; /* Slightly larger font */
-        /* Allow CSS transform to scale down text */
-        dohSelect.style.transformOrigin = 'left center';
         dohSelect.style.lineHeight = '1.0';
         dohSelect.style.fontWeight = '300';
         dohSelect.style.letterSpacing = '-0.1px';
