@@ -1216,8 +1216,30 @@ const TagManager = {
             const hasFileInUI = fileInfoText && fileInfoText.textContent.trim() !== 'No file uploaded' && fileInfoText.textContent.trim() !== '';
             
             // Don't load tags if no file is uploaded
-            if (!uploadedFilename && !hasFileInUI) {
+            // Also reject if file is 'nofile', 'database', or empty string
+            if ((!uploadedFilename || uploadedFilename === 'nofile' || uploadedFilename === 'database' || uploadedFilename === '') && !hasFileInUI) {
                 verboseLog('⚠️ No file uploaded - skipping cache load');
+                // CRITICAL: Clear any old cache entries to prevent database tags from loading
+                try {
+                    if (window.localStorage) {
+                        for (let i = 0; i < localStorage.length; i++) {
+                            const key = localStorage.key(i);
+                            if (key && key.startsWith('agt_available_tags')) {
+                                localStorage.removeItem(key);
+                            }
+                        }
+                    }
+                    if (window.sessionStorage) {
+                        for (let i = 0; i < sessionStorage.length; i++) {
+                            const key = sessionStorage.key(i);
+                            if (key && key.startsWith('agt_available_tags')) {
+                                sessionStorage.removeItem(key);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Failed to clear cache:', e);
+                }
                 return null;
             }
             
@@ -1372,26 +1394,34 @@ const TagManager = {
             if (availableContainer) {
                 availableContainer.innerHTML = '';
             }
-            // CRITICAL: Clear any old cache that might contain database tags
+            // CRITICAL: Clear ALL cache that might contain database tags
             try {
                 const cacheKey = this.getAvailableTagsCacheKey();
+                const normalizedKey = this.getNormalizedCacheKey();
+                
+                // Clear all variations of cache keys
+                const keysToClear = [cacheKey, normalizedKey];
                 if (window.localStorage) {
-                    localStorage.removeItem(cacheKey);
+                    // Also clear any keys that start with 'agt_available_tags'
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (key && key.startsWith('agt_available_tags')) {
+                            localStorage.removeItem(key);
+                            console.log(`🧹 Cleared cache key: ${key}`);
+                        }
+                    }
                 }
                 if (window.sessionStorage) {
-                    sessionStorage.removeItem(cacheKey);
-                }
-                // Also clear normalized cache key
-                const normalizedKey = this.getNormalizedCacheKey();
-                if (normalizedKey) {
-                    if (window.localStorage) {
-                        localStorage.removeItem(normalizedKey);
-                    }
-                    if (window.sessionStorage) {
-                        sessionStorage.removeItem(normalizedKey);
+                    // Also clear any keys that start with 'agt_available_tags'
+                    for (let i = 0; i < sessionStorage.length; i++) {
+                        const key = sessionStorage.key(i);
+                        if (key && key.startsWith('agt_available_tags')) {
+                            sessionStorage.removeItem(key);
+                            console.log(`🧹 Cleared cache key: ${key}`);
+                        }
                     }
                 }
-                console.log('🧹 Cleared cache to prevent loading database tags');
+                console.log('🧹 Cleared all cache to prevent loading database tags');
             } catch (e) {
                 console.warn('Failed to clear cache:', e);
             }
@@ -1412,7 +1442,14 @@ const TagManager = {
         // PATCH: Always use cache, even after recent lineage updates, but keep lineage update logic elsewhere intact.
         // (No-op: do not skip cache after recent lineage update)
         // CRITICAL: Only load from cache if Excel file is uploaded - don't load database tags from cache
+        // CRITICAL: Only load from cache if Excel file is uploaded
         const cachedTags = hasFile ? this.loadAvailableTagsFromCache() : null;
+        // CRITICAL: If no file but we got cached tags, they're from database - reject them
+        if (!hasFile && cachedTags && cachedTags.length > 0) {
+            console.log('⚠️ No file uploaded but found cached tags - clearing database cache');
+            this.clearAvailableTagsCache();
+            return false;
+        }
         if (cachedTags && cachedTags.length) {
             verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
             this.state.hydratedFromCache = true;
