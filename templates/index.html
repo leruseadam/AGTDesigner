@@ -8967,7 +8967,7 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-view').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
-        fetch('/api/web/available-tags').then(r => r.json())
+        fetch('/api/web/available-tags?fast_load=1').then(r => r.json())
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
         const totalProducts = availableTags.length;
@@ -10971,7 +10971,7 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
         fetch('/api/database-analytics').then(r => r.json()).catch(() => ({})),
-        fetch('/api/web/available-tags').then(r => r.json())
+        fetch('/api/web/available-tags?fast_load=1').then(r => r.json())
       ])
       .then(([stats, vendorStats, analytics, availableTags]) => {
           const totalProducts = availableTags.length;

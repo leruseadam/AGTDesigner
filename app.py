@@ -9367,7 +9367,17 @@ def get_available_tags():
                     pass
 
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
+        # CRITICAL: Use cache even with fast_load to speed up repeated requests
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
+        if cached_tags and fast_load:
+            # Fast path: return cached tags immediately without any processing
+            logging.info(f"⚡ FAST LOAD: Returning {len(cached_tags)} cached tags (skipping all enrichment)")
+            safe_cached_tags = make_json_safe(cached_tags)
+            return jsonify({
+                'tags': safe_cached_tags,
+                'total_count': len(safe_cached_tags),
+                'source': 'cache-fast-load'
+            })
 
         # CRITICAL FIX: When no Excel file, return empty tags - DO NOT load from database
         # User only wants tags from Excel file, not entire database
