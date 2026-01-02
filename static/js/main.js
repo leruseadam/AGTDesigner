@@ -6608,10 +6608,10 @@ const TagManager = {
         lineageSelect.style.padding = '2px 6px 2px 3px'; /* Minimal padding for compact dropdown */
         lineageSelect.style.boxSizing = 'border-box';
         /* Style dropdown arrow - larger and more visible */
-        lineageSelect.style.backgroundImage = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' stroke='rgba(0,0,0,0.3)' stroke-width='0.5' d='M6 9L1 4h10z'/%3E%3C/svg%3E\")";
+        lineageSelect.style.backgroundImage = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' stroke='rgba(0,0,0,0.6)' stroke-width='1' d='M6 9L1 4h10z'/%3E%3C/svg%3E\")";
         lineageSelect.style.backgroundRepeat = 'no-repeat';
-        lineageSelect.style.backgroundPosition = 'right 3px center';
-        lineageSelect.style.backgroundSize = '8px 8px'; /* Clear, visible arrow */
+        lineageSelect.style.backgroundPosition = 'right 2px center';
+        lineageSelect.style.backgroundSize = '12px 12px'; /* Large, clear arrow */
         lineageSelect.style.webkitAppearance = 'none';
         lineageSelect.style.mozAppearance = 'none';
         lineageSelect.style.appearance = 'none';
@@ -6820,10 +6820,10 @@ const TagManager = {
         dohSelect.style.appearance = 'none';
         dohSelect.style.boxSizing = 'border-box';
         /* Add custom dropdown arrow - clear and visible */
-        dohSelect.style.backgroundImage = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='%23000000' stroke='rgba(255,255,255,0.5)' stroke-width='0.5' d='M6 9L1 4h10z'/%3E%3C/svg%3E\")";
+        dohSelect.style.backgroundImage = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23000000' stroke='rgba(255,255,255,0.8)' stroke-width='1' d='M6 9L1 4h10z'/%3E%3C/svg%3E\")";
         dohSelect.style.backgroundRepeat = 'no-repeat';
-        dohSelect.style.backgroundPosition = 'right 6px center';
-        dohSelect.style.backgroundSize = '10px 10px'; /* Clear, visible arrow */
+        dohSelect.style.backgroundPosition = 'right 5px center';
+        dohSelect.style.backgroundSize = '12px 12px'; /* Large, clear arrow */
 
         let currentDropdownStatus = 'NONE'; // Default to NONE
         
