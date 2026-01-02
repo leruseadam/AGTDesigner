@@ -2002,6 +2002,11 @@ const TagManager = {
     updateFilters(filters, preserveExistingValues = true) {
         if (!filters) return;
 
+        // CRITICAL FIX: Initialize flag if not already set
+        if (this._isUpdatingFilters === undefined) {
+            this._isUpdatingFilters = false;
+        }
+
         // CRITICAL FIX: Set flag to prevent filter change events from triggering during update
         // This prevents tags from being cleared when filters are programmatically updated on page load
         const wasUpdatingFilters = this._isUpdatingFilters;
@@ -2180,7 +2185,8 @@ const TagManager = {
 
         // CRITICAL FIX: Clear the flag IMMEDIATELY after updating dropdowns
         // Don't use requestAnimationFrame - clear synchronously so user can interact immediately
-        this._isUpdatingFilters = wasUpdatingFilters || false;
+        // Always reset to false to ensure filters work properly
+        this._isUpdatingFilters = false;
         console.log('✅ Filter update complete, _isUpdatingFilters reset to:', this._isUpdatingFilters);
 
         // GUARANTEED FIX: Save current filter values to localStorage
