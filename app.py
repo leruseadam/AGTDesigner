@@ -9431,58 +9431,58 @@ def get_available_tags():
                     try:
                         product_db = get_product_database(store_name)
                         if product_db and simple_tags:
-                        logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database lineage...")
-                        product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
-                        logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
+                            logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database lineage...")
+                            product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
+                            logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
 
-                        lineage_map = {}
-                        if product_names:
-                            try:
-                                # PERFORMANCE FIX: Query only lineage fields, not all 47 columns
-                                conn = product_db._get_connection()
-                                cursor = conn.cursor()
+                            lineage_map = {}
+                            if product_names:
+                                try:
+                                    # PERFORMANCE FIX: Query only lineage fields, not all 47 columns
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
 
-                                # PERFORMANCE: Build lowercase lookup for O(1) matching
-                                excel_lower_map = {name.lower().strip(): name for name in product_names}
+                                    # PERFORMANCE: Build lowercase lookup for O(1) matching
+                                    excel_lower_map = {name.lower().strip(): name for name in product_names}
 
-                                # SQLite has a parameter limit (typically 999) – chunk to avoid failures
-                                chunk_size = 400
-                                total_results = 0
-                                for chunk_start in range(0, len(product_names), chunk_size):
-                                    chunk = product_names[chunk_start:chunk_start + chunk_size]
-                                    chunk_lower = [name.lower() for name in chunk]
-                                    placeholders = ','.join(['?' for _ in chunk_lower])
-                                    # Use LOWER() with index for fast case-insensitive matching
-                                    cursor.execute(f'''
-                                        SELECT "Product Name*", "Lineage"
-                                        FROM products
-                                        WHERE LOWER("Product Name*") IN ({placeholders})
-                                    ''', chunk_lower)
-                                    results = cursor.fetchall()
-                                    total_results += len(results)
+                                    # SQLite has a parameter limit (typically 999) – chunk to avoid failures
+                                    chunk_size = 400
+                                    total_results = 0
+                                    for chunk_start in range(0, len(product_names), chunk_size):
+                                        chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                        chunk_lower = [name.lower() for name in chunk]
+                                        placeholders = ','.join(['?' for _ in chunk_lower])
+                                        # Use LOWER() with index for fast case-insensitive matching
+                                        cursor.execute(f'''
+                                            SELECT "Product Name*", "Lineage"
+                                            FROM products
+                                            WHERE LOWER("Product Name*") IN ({placeholders})
+                                        ''', chunk_lower)
+                                        results = cursor.fetchall()
+                                        total_results += len(results)
 
-                                    # Build lineage map with O(1) lookups
-                                    for row in results:
-                                        db_name = row[0]
-                                        db_lineage = row[1]
+                                        # Build lineage map with O(1) lookups
+                                        for row in results:
+                                            db_name = row[0]
+                                            db_lineage = row[1]
 
-                                        if db_lineage:
-                                            clean_lineage = str(db_lineage).strip().upper()
-                                            lineage_map[db_name] = clean_lineage
-                                            # O(1) lookup instead of O(n) loop
-                                            excel_key = db_name.lower().strip()
-                                            if excel_key in excel_lower_map:
-                                                lineage_map[excel_lower_map[excel_key]] = clean_lineage
+                                            if db_lineage:
+                                                clean_lineage = str(db_lineage).strip().upper()
+                                                lineage_map[db_name] = clean_lineage
+                                                # O(1) lookup instead of O(n) loop
+                                                excel_key = db_name.lower().strip()
+                                                if excel_key in excel_lower_map:
+                                                    lineage_map[excel_lower_map[excel_key]] = clean_lineage
 
-                                logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products from {len(product_names)} Excel products")
-                                logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
-                                if len(lineage_map) > 0:
-                                    sample = list(lineage_map.items())[:2]
-                                    logging.info(f"📋 Sample mappings: {sample}")
-                            except Exception as lineage_query_err:
-                                logging.warning(f"Lineage enrichment query failed: {lineage_query_err}")
-                                import traceback
-                                logging.warning(traceback.format_exc())
+                                    logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products from {len(product_names)} Excel products")
+                                    logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
+                                    if len(lineage_map) > 0:
+                                        sample = list(lineage_map.items())[:2]
+                                        logging.info(f"📋 Sample mappings: {sample}")
+                                except Exception as lineage_query_err:
+                                    logging.warning(f"Lineage enrichment query failed: {lineage_query_err}")
+                                    import traceback
+                                    logging.warning(traceback.format_exc())
 
                             enriched_count = 0
                             fallback_count = 0
@@ -9519,75 +9519,74 @@ def get_available_tags():
                                 sample = [(t.get('Product Name*'), t.get('currentLineage')) for t in simple_tags[:3]]
                                 logging.info(f"📋 SIMPLE PATH: Sample enriched tags: {sample}")
 
-                        # CRITICAL FIX: Enrich tags with DOH data from database
-                        # This ensures DOH badges show up in preroll menus and other tag lists
-                        # PERFORMANCE: Skip DOH enrichment if fast_load is enabled
-                        if not fast_load and product_names:
-                            try:
-                                logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database DOH data...")
+                            # CRITICAL FIX: Enrich tags with DOH data from database
+                            # This ensures DOH badges show up in preroll menus and other tag lists
+                            # PERFORMANCE: Skip DOH enrichment if fast_load is enabled
+                            if not fast_load and product_names:
+                                try:
+                                    logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database DOH data...")
 
-                                # Query DOH field from database for all products
-                                conn = product_db._get_connection()
-                                cursor = conn.cursor()
+                                    # Query DOH field from database for all products
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
 
-                                # Build lowercase lookup for O(1) matching (reuse from lineage enrichment)
-                                excel_lower_map = {name.lower().strip(): name for name in product_names}
+                                    # Build lowercase lookup for O(1) matching (reuse from lineage enrichment)
+                                    excel_lower_map = {name.lower().strip(): name for name in product_names}
 
-                                # SQLite has a parameter limit (typically 999) – chunk to avoid failures
-                                chunk_size = 400
-                                doh_map = {}
-                                total_doh_results = 0
-                                for chunk_start in range(0, len(product_names), chunk_size):
-                                    chunk = product_names[chunk_start:chunk_start + chunk_size]
-                                    chunk_lower = [name.lower() for name in chunk]
-                                    placeholders = ','.join(['?' for _ in chunk_lower])
-                                    # Query DOH field (can be 'DOH', 'THC', 'CBD', 'Yes', 'No', etc.)
-                                    cursor.execute(f'''
-                                        SELECT "Product Name*", "DOH Compliant (Yes/No)"
-                                        FROM products
-                                        WHERE LOWER("Product Name*") IN ({placeholders})
-                                    ''', chunk_lower)
-                                    results = cursor.fetchall()
-                                    total_doh_results += len(results)
+                                    # SQLite has a parameter limit (typically 999) – chunk to avoid failures
+                                    chunk_size = 400
+                                    doh_map = {}
+                                    total_doh_results = 0
+                                    for chunk_start in range(0, len(product_names), chunk_size):
+                                        chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                        chunk_lower = [name.lower() for name in chunk]
+                                        placeholders = ','.join(['?' for _ in chunk_lower])
+                                        # Query DOH field (can be 'DOH', 'THC', 'CBD', 'Yes', 'No', etc.)
+                                        cursor.execute(f'''
+                                            SELECT "Product Name*", "DOH Compliant (Yes/No)"
+                                            FROM products
+                                            WHERE LOWER("Product Name*") IN ({placeholders})
+                                        ''', chunk_lower)
+                                        results = cursor.fetchall()
+                                        total_doh_results += len(results)
 
-                                    # Build DOH map with O(1) lookups
-                                    for row in results:
-                                        db_name = row[0]
-                                        db_doh = row[1]
+                                        # Build DOH map with O(1) lookups
+                                        for row in results:
+                                            db_name = row[0]
+                                            db_doh = row[1]
 
-                                        if db_doh and str(db_doh).strip():
-                                            clean_doh = str(db_doh).strip().upper()
-                                            doh_map[db_name] = clean_doh
-                                            # O(1) lookup instead of O(n) loop
-                                            excel_key = db_name.lower().strip()
-                                            if excel_key in excel_lower_map:
-                                                doh_map[excel_lower_map[excel_key]] = clean_doh
+                                            if db_doh and str(db_doh).strip():
+                                                clean_doh = str(db_doh).strip().upper()
+                                                doh_map[db_name] = clean_doh
+                                                # O(1) lookup instead of O(n) loop
+                                                excel_key = db_name.lower().strip()
+                                                if excel_key in excel_lower_map:
+                                                    doh_map[excel_lower_map[excel_key]] = clean_doh
 
-                                logging.info(f"📦 SIMPLE PATH: Database returned DOH for {len(doh_map)} products")
-                                if len(doh_map) > 0:
-                                    sample_doh = list(doh_map.items())[:2]
-                                    logging.info(f"📋 Sample DOH mappings: {sample_doh}")
+                                    logging.info(f"📦 SIMPLE PATH: Database returned DOH for {len(doh_map)} products")
+                                    if len(doh_map) > 0:
+                                        sample_doh = list(doh_map.items())[:2]
+                                        logging.info(f"📋 Sample DOH mappings: {sample_doh}")
 
-                                # Apply DOH data to tags
-                                doh_enriched_count = 0
-                                for tag in simple_tags:
-                                    product_name = tag.get('Product Name*')
-                                    if product_name and product_name in doh_map:
-                                        db_doh_clean = doh_map[product_name]
-                                        tag['DOH'] = db_doh_clean
-                                        tag['DOH Compliant (Yes/No)'] = db_doh_clean
-                                        doh_enriched_count += 1
+                                    # Apply DOH data to tags
+                                    doh_enriched_count = 0
+                                    for tag in simple_tags:
+                                        product_name = tag.get('Product Name*')
+                                        if product_name and product_name in doh_map:
+                                            db_doh_clean = doh_map[product_name]
+                                            tag['DOH'] = db_doh_clean
+                                            tag['DOH Compliant (Yes/No)'] = db_doh_clean
+                                            doh_enriched_count += 1
 
-                                logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH data")
-                            except Exception as doh_enrich_err:
-                                logging.warning(f"Failed to enrich with database DOH data: {doh_enrich_err}")
-                                import traceback
-                                logging.warning(traceback.format_exc())
-
-                except Exception as enrich_err:
-                    logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
-                    import traceback
-                    logging.warning(traceback.format_exc())
+                                    logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH data")
+                                except Exception as doh_enrich_err:
+                                    logging.warning(f"Failed to enrich with database DOH data: {doh_enrich_err}")
+                                    import traceback
+                                    logging.warning(traceback.format_exc())
+                    except Exception as enrich_err:
+                        logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+                        import traceback
+                        logging.warning(traceback.format_exc())
 
                 safe_simple_tags = make_json_safe(simple_tags)
                 elapsed = (time.time() - start_time) * 1000
