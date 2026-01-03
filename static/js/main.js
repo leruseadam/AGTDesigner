@@ -10089,6 +10089,14 @@ const TagManager = {
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
             if (tags && tags.length > 0) {
                 this.buildFilterOptionsFromTags(tags);
+                
+                // CRITICAL FIX: Mark filters as initialized AFTER building filter options from tags
+                // This ensures that on the initial page load, filters are reset, but subsequent
+                // tag updates will preserve filters
+                if (!this.state.filtersInitialized) {
+                    this.state.filtersInitialized = true;
+                    console.log('✅ Filters initialized after initial tag load');
+                }
             }
             
             // CRITICAL: If lineage was aligned from database, ensure tags are fully re-rendered to show database lineage
@@ -11221,8 +11229,9 @@ const TagManager = {
             }
         });
         
-        // Mark filters as initialized (cleared) on page load
-        this.state.filtersInitialized = true;
+        // CRITICAL FIX: Don't mark filters as initialized here - wait until tags are loaded
+        // This ensures buildFilterOptionsFromTags knows it's a page reload and doesn't restore filters
+        // filtersInitialized will be set to true in _updateAvailableTags after tags are loaded
         
         // Don't apply filters immediately - let checkForExistingData handle it
         // this.applyFilters();
