@@ -798,6 +798,17 @@ body.modal-open #mainContent.store-selection-disabled,
   #selectedTags {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
+    /* Hide scrollbars while maintaining scroll functionality */
+    scrollbar-width: none !important; /* Firefox */
+    -ms-overflow-style: none !important; /* IE and Edge */
+  }
+  
+  .control-panel::-webkit-scrollbar,
+  .center-panel::-webkit-scrollbar,
+  #selectedTags::-webkit-scrollbar {
+    display: none !important; /* Chrome, Safari, Opera */
+    width: 0 !important;
+    height: 0 !important;
   }
   .header-buttons-container { margin-top: 0.25rem !important; }
 }
@@ -1157,6 +1168,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 0.25rem;
+    text-align: left !important;
   }
 
   .filter-item select,
@@ -2676,6 +2688,15 @@ body.modal-open #mainContent.store-selection-disabled,
     flex: 0 0 auto !important;
     width: auto !important;
     min-width: 260px !important;
+    /* Hide scrollbar on center column container */
+    scrollbar-width: none !important; /* Firefox */
+    -ms-overflow-style: none !important; /* IE and Edge */
+  }
+  
+  [data-container-type="center"]::-webkit-scrollbar {
+    display: none !important; /* Chrome, Safari, Opera */
+    width: 0 !important;
+    height: 0 !important;
   }
   
   /* Ensure tag list containers are responsive - ZOOM RESPONSIVE */
@@ -2777,23 +2798,28 @@ body.modal-open #mainContent.store-selection-disabled,
     padding-bottom: 0 !important;
   }
   
-  /* Ensure the tag list container has proper scrollbar styling */
+  /* CRITICAL FIX: Hide scrollbar completely for center column while maintaining scroll functionality */
+  #availableTags {
+    scrollbar-width: none !important; /* Firefox - hide scrollbar */
+    -ms-overflow-style: none !important; /* IE and Edge - hide scrollbar */
+  }
+  
   #availableTags::-webkit-scrollbar {
-    width: 8px;
+    display: none !important; /* Chrome, Safari, Opera - hide scrollbar */
+    width: 0 !important;
+    height: 0 !important;
   }
   
   #availableTags::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
+    display: none !important;
   }
   
   #availableTags::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 4px;
+    display: none !important;
   }
   
   #availableTags::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.5);
+    display: none !important;
   }
   .vendor-section {
     display: block !important;
@@ -3192,6 +3218,7 @@ body.modal-open #mainContent.store-selection-disabled,
     letter-spacing: 0.5px !important;
     text-transform: uppercase !important;
     color: rgba(160, 132, 232, 0.9) !important;
+    text-align: left !important;
     text-align: center !important;
   }
 
@@ -4847,6 +4874,7 @@ body.modal-open #mainContent.store-selection-disabled,
       margin-bottom: 0.2rem;
       font-weight: 600 !important;
       text-shadow: 0 1px 3px rgba(0,0,0,0.4) !important;
+      text-align: left !important;
     }
 
     .filter-bar select {
@@ -5534,6 +5562,7 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: 600 !important;
     text-shadow: 0 2px 4px rgba(0,0,0,0.4) !important;
     letter-spacing: 0.2px !important;
+    text-align: left !important;
   }
 
   .filter-bar option {
@@ -8190,6 +8219,7 @@ body.modal-open #mainContent.store-selection-disabled,
     line-height: 1.5 !important; /* Ensure proper line-height for text visibility */
     overflow: visible !important; /* Prevent text cutoff */
     min-height: 1.2rem !important; /* Ensure minimum height */
+    text-align: left !important;
   }
   .sticky-filter-bar .form-select,
   .sticky-filter-bar select,
@@ -8224,6 +8254,7 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0 0.15rem 0 !important; /* Increased bottom padding to prevent cutoff */
     line-height: 1.5 !important; /* Ensure proper line-height */
     overflow: visible !important; /* Prevent text cutoff */
+    text-align: left !important;
   }
   .sticky-filter-bar select,
   .sticky-filter-bar .form-select,
