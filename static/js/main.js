@@ -5904,15 +5904,20 @@ const TagManager = {
                 clearTimeout(forceHideTimeout);
                 console.log(`✅ Tags ready: ${currentTagCount} items (${visibleTags.length} visible) - hiding splash`);
                 
-                // CRITICAL FIX: Mark tags as ready and enable dropdowns after a short delay
-                // This prevents dropdowns from freezing if used immediately after page load
+                // CRITICAL FIX: Enable checkboxes IMMEDIATELY when tags are rendered
+                // Don't wait for initialization delay - users should be able to select tags right away
                 this._fetchingAvailableTags = false;
+                this._ensureCheckboxesEnabled(); // Enable checkboxes immediately
+                
+                // Mark as initialized immediately so checkboxes work right away
+                if (!this.state.initialized) {
+                    this.state.initialized = true;
+                }
+                console.log('✅ Tags ready - checkboxes enabled and TagManager initialized');
+                
+                // Small delay for dropdowns only (checkboxes work immediately)
                 setTimeout(() => {
-                    // Ensure TagManager is fully initialized before enabling dropdowns
-                    if (!this.state.initialized) {
-                        this.state.initialized = true;
-                    }
-                    console.log('✅ Dropdowns enabled - tags fully loaded and TagManager initialized');
+                    console.log('✅ Dropdowns enabled - tags fully loaded');
                 }, 100); // Small delay to ensure all event listeners are attached
                 
                 if (this.hideActionSplash) {
@@ -5928,6 +5933,11 @@ const TagManager = {
                 clearTimeout(forceHideTimeout);
                 if (currentTagCount > 0) {
                     console.log(`⚡ Fast timeout: ${currentTagCount} tags found - hiding splash`);
+                    // CRITICAL: Enable checkboxes even on timeout if tags exist
+                    this._ensureCheckboxesEnabled();
+                    if (!this.state.initialized) {
+                        this.state.initialized = true;
+                    }
                 } else {
                     console.log('⚡ Fast timeout: no tags yet - hiding splash anyway for UX');
                 }
