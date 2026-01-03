@@ -10338,19 +10338,27 @@ const TagManager = {
             this._cachedFilterOptionsHash = null;
             this._cachedFilterOptionsTagsLength = null;
             
+            // CRITICAL FIX: Preserve selected tags during upload without validation
             const currentSelectedTags = [...this.state.persistentSelectedTags];
-            this.state.persistentSelectedTags = [];
-            this.state._selectedTagsSet = new Set(); // PERFORMANCE: Reset Set when clearing tags
-            this.state.selectedTags = new Set();
-            
-            if (currentSelectedTags.length > 0) {
-                const tagNameSet = new Set(tags.map(t => t['Product Name*']));
-                for (const tagName of currentSelectedTags) {
-                    if (tagNameSet.has(tagName)) {
-                        this.state.persistentSelectedTags.push(tagName);
-                        this.state.selectedTags.add(tagName);
+
+            // Only clear and revalidate if NOT during upload
+            if (!this._isUploadInProgress) {
+                this.state.persistentSelectedTags = [];
+                this.state._selectedTagsSet = new Set(); // PERFORMANCE: Reset Set when clearing tags
+                this.state.selectedTags = new Set();
+
+                if (currentSelectedTags.length > 0) {
+                    const tagNameSet = new Set(tags.map(t => t['Product Name*']));
+                    for (const tagName of currentSelectedTags) {
+                        if (tagNameSet.has(tagName)) {
+                            this.state.persistentSelectedTags.push(tagName);
+                            this.state.selectedTags.add(tagName);
+                        }
                     }
                 }
+            } else {
+                // During upload, preserve ALL selected tags without validation
+                verboseLog('💾 Preserving selected tags during upload without validation');
             }
             
             this.validateSelectedTags();
@@ -10375,6 +10383,8 @@ const TagManager = {
 
     async fetchAndUpdateSelectedTags() {
         try {
+            console.log('🔄 fetchAndUpdateSelectedTags called');
+            console.log('📍 Current selected tags count:', this.state.persistentSelectedTags.length);
             verboseLog('Fetching selected tags...');
             
             // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 10 seconds)
@@ -12911,12 +12921,16 @@ const TagManager = {
     },
 
     async clearSelected() {
+        // CRITICAL DEBUG: Log who's calling clearSelected
+        console.log('🗑️ clearSelected() called - USER INTENTIONALLY CLEARING TAGS');
+        console.log('📍 Call stack:', new Error().stack);
+
         // Prevent multiple simultaneous calls
         if (this.state.isClearing) {
             verboseLog('⚠️ Clear operation already in progress, ignoring duplicate call');
             return;
         }
-        
+
         this.state.isClearing = true;
         this.clearAvailableTagsCache();
         
@@ -13919,10 +13933,13 @@ const TagManager = {
             // CRITICAL: Clear cache but PRESERVE selected tags during upload
             this._lastUploadTime = Date.now();
             this.state.hydratedFromCache = false; // Force fresh data load
-            
+
             // CRITICAL: Save selected tags before clearing cache
             const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
             verboseLog('💾 Preserving selected tags before upload:', savedSelectedTags);
+
+            // CRITICAL FIX: Set flag to prevent validation from clearing tags during upload
+            this._isUploadInProgress = true;
             
             this.state.tags = []; // Clear in-memory tags
             this.state.originalTags = []; // Clear original tags
@@ -14067,6 +14084,11 @@ const TagManager = {
                 try {
                     await this.fetchAndUpdateAvailableTags();
                     tagsLoaded = true;
+
+                    // CRITICAL FIX: Clear upload flag now that tags are loaded
+                    this._isUploadInProgress = false;
+                    verboseLog('✅ Upload complete - tag validation re-enabled');
+
                     verboseLog('✅ Tags loaded via standard fallback');
                 } catch (fallbackError) {
                     console.error('⚠️ Standard tag loading via fallback failed:', fallbackError);
@@ -14210,6 +14232,11 @@ const TagManager = {
                             }
 
                             tagsLoaded = true;
+
+                            // CRITICAL FIX: Clear upload flag now that tags are loaded
+                            this._isUploadInProgress = false;
+                            verboseLog('✅ Upload complete - tag validation re-enabled');
+
                             // Update upload UI to show completion
                             // Update file info text to show completion
                             const fileInfoElement = document.getElementById('fileInfoText');
@@ -14282,6 +14309,11 @@ const TagManager = {
                 try {
                     await this.fetchAndUpdateAvailableTags();
                     tagsLoaded = true;
+
+                    // CRITICAL FIX: Clear upload flag now that tags are loaded
+                    this._isUploadInProgress = false;
+                    verboseLog('✅ Upload complete - tag validation re-enabled');
+
                     verboseLog('✅ Tags loaded using standard method');
                 } catch (fallbackError) {
                     console.error('⚠️ Standard tag loading failed:', fallbackError);
@@ -14296,6 +14328,11 @@ const TagManager = {
             return; // Success!
         } catch (error) {
             console.error('⚡ Lightning upload error:', error);
+
+            // CRITICAL FIX: Clear upload flag on error
+            this._isUploadInProgress = false;
+            verboseLog('❌ Upload failed - tag validation re-enabled');
+
             // CRITICAL: Always hide splash on error
             this.hideExcelLoadingSplash();
             // Also hide action splash if it's showing
@@ -15219,11 +15256,17 @@ const TagManager = {
 
     // Clear all UI state when a new file is uploaded
     clearUIStateForNewFile(preserveFilters = false) {
+        // CRITICAL DEBUG: Log stack trace to track who's calling this
+        console.log('⚠️ clearUIStateForNewFile called, preserveFilters:', preserveFilters);
+        console.log('📍 Call stack:', new Error().stack);
+
         verboseLog('Clearing UI state for new file upload, preserveFilters:', preserveFilters);
-        
+
         // Clear persistent selected tags
+        console.log('🗑️ CLEARING SELECTED TAGS - count before clear:', this.state.persistentSelectedTags.length);
         this.state.persistentSelectedTags = [];
         this.state.selectedTags.clear();
+        console.log('🗑️ Selected tags cleared');
         
         // Clear tag displays
         const availableContainer = document.getElementById('availableTags');
@@ -15290,6 +15333,12 @@ const TagManager = {
             verboseLog('⏭️ Skipping validateSelectedTags - operation in progress');
             return;
         }
+
+        // CRITICAL FIX: Don't validate during file upload to prevent tag loss
+        if (this._isUploadInProgress) {
+            verboseLog('⏭️ Skipping validateSelectedTags - upload in progress, preserving selected tags');
+            return;
+        }
         
         // Add safeguard to prevent clearing tags that were just added via JSON matching
         const hasJsonMatchedTags = this.state.persistentSelectedTags.length > 0;
@@ -15350,8 +15399,11 @@ const TagManager = {
         // This prevents clearing when data is still loading
         if (invalidTags.length > 0 && invalidTags.length > this.state.persistentSelectedTags.length * 0.5) {
             // More than 50% invalid - likely a data mismatch, clean up
+            console.log('🗑️ validateSelectedTags - CLEARING TAGS due to >50% invalid');
+            console.log('📍 Invalid tags:', invalidTags);
+            console.log('📍 Call stack:', new Error().stack);
             verboseLog(`Cleaning up ${invalidTags.length} invalid tags (${(invalidTags.length / this.state.persistentSelectedTags.length * 100).toFixed(1)}% of selections)`);
-            
+
             // Remove invalid tags and update with corrected case
             this.state.persistentSelectedTags = [];
             correctedTags.forEach(tagName => {
@@ -15993,6 +16045,9 @@ async function handleJsonPasteInput(input) {
                     // Now call updateSelectedTags with tag objects
                     TagManager.updateSelectedTags(selectedTagObjects);
                 } else {
+                    console.log('🗑️ JSON MATCH - CLEARING TAGS: No valid tag objects found');
+                    console.log('📍 matchResult.selected_tags:', matchResult.selected_tags);
+                    console.log('📍 selectedTagObjects.length:', selectedTagObjects.length);
                     verboseLog('No valid tag objects found for selected tags');
                     TagManager.state.persistentSelectedTags = [];
                     TagManager.state.selectedTags = new Set();
@@ -16004,6 +16059,8 @@ async function handleJsonPasteInput(input) {
                     }
                 }
             } else {
+                console.log('🗑️ JSON MATCH - CLEARING TAGS: No selected tags in response');
+                console.log('📍 matchResult:', matchResult);
                 verboseLog('No selected tags in response, clearing selected tags');
                 TagManager.state.persistentSelectedTags = [];
                 TagManager.state.selectedTags = new Set();
