@@ -10943,11 +10943,11 @@ const TagManager = {
         }
         
         // CRITICAL FIX: Clear filters from localStorage on page load so they reset
+        // Set flag BEFORE clearing to ensure buildFilterOptionsFromTags knows it's a page reload
+        this.state.filtersInitialized = false;
         try {
             localStorage.removeItem('agt_filters');
             console.log('✅ Cleared filters from localStorage on page load');
-            // Mark that filters have been initialized (cleared) on this page load
-            this.state.filtersInitialized = false;
         } catch (e) {
             console.warn('Could not clear filters from localStorage:', e);
         }
