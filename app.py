@@ -13073,13 +13073,27 @@ def get_web_available_tags():
         # WEB OPTIMIZATION: Aggressive caching for web clients
         cached_tags = cache.get(cache_key)
         if cached_tags:
+            # CRITICAL: Even with cached tags, check if lineage was recently updated
+            from flask import session
+            lineage_was_updated = session.get('lineage_update_timestamp') is not None
+
+            if lineage_was_updated:
+                # Lineage was updated - re-align cached tags with database
+                logging.info(f"🔄 Lineage was updated - re-aligning {len(cached_tags)} cached web tags")
+                store_name = get_current_store_name()
+                cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+                # Update cache with aligned tags
+                cache.set(cache_key, cached_tags, timeout=300)
+                # Clear the update timestamp flag
+                session.pop('lineage_update_timestamp', None)
+
             elapsed = (time.time() - start_time) * 1000
             if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_success(f"Using cached web available tags ({elapsed:.1f}ms)", 
+                enhanced_logger.log_success(f"Using cached web available tags ({elapsed:.1f}ms)",
                                           {'cache_hit': True, 'tags_count': len(cached_tags)})
             else:
                 logging.info(f"✅ Using {len(cached_tags)} cached web available tags ({elapsed:.1f}ms)")
-            
+
             # Apply compression for web clients
             response = make_response(jsonify({
                 'tags': cached_tags,
@@ -13147,21 +13161,26 @@ def get_web_available_tags():
                 logging.error(f"WEB TAGS: Database fallback failed: {db_error}")
         
         if all_tags:
+            # CRITICAL: Align tags with database lineage to ensure manual edits persist
+            store_name = get_current_store_name()
+            aligned_tags = _align_tags_with_db_lineage(all_tags, store_name, skip_if_aligned=False)
+            logging.info(f"🔄 Aligned {len(aligned_tags)} web tags with database lineage")
+
             # WEB OPTIMIZATION: Cache the results for web clients
-            cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
-            
+            cache.set(cache_key, aligned_tags, timeout=300)  # Cache for 5 minutes
+
             elapsed = (time.time() - start_time) * 1000
             if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_success(f"Web available tags (Excel-only) completed ({elapsed:.1f}ms)", 
-                                          {'tags_count': len(all_tags), 'cached': True})
+                enhanced_logger.log_success(f"Web available tags completed ({elapsed:.1f}ms)",
+                                          {'tags_count': len(aligned_tags), 'cached': True})
             else:
-                logging.info(f"✅ Web available tags (Excel-only) completed ({elapsed:.1f}ms)")
-            
+                logging.info(f"✅ Web available tags completed ({elapsed:.1f}ms)")
+
             # Apply compression for web clients
             response = make_response(jsonify({
-                'tags': all_tags,
-                'total_count': len(all_tags),
-                'source': 'web-excel-only'
+                'tags': aligned_tags,
+                'total_count': len(aligned_tags),
+                'source': 'web-db-aligned'
             }))
             response = compress_response(response)
             return response
