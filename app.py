@@ -9820,9 +9820,9 @@ def get_available_tags():
                         import traceback
                         logging.warning(traceback.format_exc())
 
-                    # CRITICAL FIX: Always align tags with database lineage before returning
-                    # This ensures UI shows current database lineage, not stale Excel lineage
-                    aligned_excel_tags = _align_tags_with_db_lineage(excel_tags, store_name) if excel_tags else []
+                    # PERFORMANCE: Only align tags with database lineage if needed (skip if already aligned)
+                    # This avoids expensive database queries when tags already have lineage
+                    aligned_excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=True) if excel_tags else []
                     safe_excel_tags = make_json_safe(aligned_excel_tags)
                     # Log first few product names for debugging
                     if safe_excel_tags:
@@ -10026,9 +10026,9 @@ def get_available_tags():
             # Full lineage alignment will still be done later by non-fast-load or
             # prefer_db/refresh calls, but simple page refreshes stay instant.
             if fast_load and not prefer_db:
-                # CRITICAL FIX: Always align cached tags with database lineage before returning
-                # This ensures UI shows current database lineage, not stale cached lineage
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
+                    # PERFORMANCE: Only align tags with database lineage if needed (skip if already aligned)
+                    # This avoids expensive database queries when tags already have lineage
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
                 safe_all_tags = make_json_safe(aligned_cached_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(
@@ -18378,10 +18378,10 @@ def get_initial_data():
                             'doh': [],
                             'highCbd': []
                         }
-                    # CRITICAL FIX: Always align cached tags with database lineage before returning
-                    # This ensures UI shows current database lineage, not stale cached lineage
+                    # PERFORMANCE: Only align tags with database lineage if needed (skip if already aligned)
+                    # This avoids expensive database queries when tags already have lineage
                     store_name = get_current_store_name()
-                    aligned_cached_tags = _align_tags_with_db_lineage(cached_available_tags, store_name) if cached_available_tags else []
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_available_tags, store_name, skip_if_aligned=True) if cached_available_tags else []
                     
                     initial_data = {
                         'success': True,
@@ -18432,9 +18432,9 @@ def get_initial_data():
                                     'highCbd': []
                                 }
                                 
-                                # CRITICAL FIX: Always align tags with database lineage before returning
-                                # This ensures UI shows current database lineage, not stale Excel lineage
-                                aligned_default_tags = _align_tags_with_db_lineage(default_tags, store_name) if default_tags else []
+                                # PERFORMANCE: Only align tags with database lineage if needed (skip if already aligned)
+                                # This avoids expensive database queries when tags already have lineage
+                                aligned_default_tags = _align_tags_with_db_lineage(default_tags, store_name, skip_if_aligned=True) if default_tags else []
                                 
                                 initial_data = {
                                     'success': True,
@@ -18719,9 +18719,10 @@ def get_initial_data():
                 logging.info("⚡ Fast load - skipping lineage alignment for instant display")
                 aligned_available_tags = available_tags if available_tags else []
             else:
-                # Normal load - align tags with database lineage
+                # PERFORMANCE: Only align tags with database lineage if needed (skip if already aligned)
+                # This avoids expensive database queries when tags already have lineage
                 logging.info("Aligning tags with database lineage...")
-                aligned_available_tags = _align_tags_with_db_lineage(available_tags, store_name) if available_tags else []
+                aligned_available_tags = _align_tags_with_db_lineage(available_tags, store_name, skip_if_aligned=True) if available_tags else []
 
             initial_data = {
                 'success': True,

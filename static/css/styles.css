@@ -3038,7 +3038,10 @@ body.modal-open #mainContent.store-selection-disabled,
   .control-panel #templateSelectModal.form-select-modern {
     /* Match filter dropdown styling with centered text */
     display: block !important;
-    margin: 0.5rem auto 0.75rem auto !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    margin-top: 0.5rem !important;
+    margin-bottom: 0.75rem !important;
     width: auto !important;
     max-width: 100% !important;
     text-align: center !important;
@@ -3046,7 +3049,7 @@ body.modal-open #mainContent.store-selection-disabled,
     -moz-text-align-last: center !important;
     text-align-last: center !important;
     font-size: 1em !important;
-    padding: 10px 36px 10px 14px !important;
+    padding: 10px 36px 10px 36px !important;
     border: 3px solid #00d4aa !important;
     box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
     color: #f7f8ff !important;
@@ -6755,6 +6758,8 @@ body.modal-open #mainContent.store-selection-disabled,
     display: block !important;
     margin-left: auto !important;
     margin-right: auto !important;
+    margin-top: 0.5rem !important;
+    margin-bottom: 0.75rem !important;
 
     /* MATCH FILTER DROPDOWN STYLING - Same as vendor/brand/product type filters */
     background: rgba(42, 32, 64, 0.9) !important;
@@ -6773,25 +6778,25 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Dropdown arrow - purple to match filters */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
-    background-position: center right 14px !important;
+    background-position: right 14px center !important;
     background-size: 18px 18px !important;
 
     /* Layout and sizing */
-    display: block !important;
     box-sizing: border-box !important;
     width: auto !important;
     min-width: 250px !important;
     max-width: none !important;
-    margin: 0.5rem auto 0.75rem auto !important;
     line-height: 1.6 !important;
 
-    /* Text alignment - FORCE centered */
+    /* Text alignment - FORCE centered, accounting for arrow */
     text-align: center !important;
     text-align-last: center !important;
     -webkit-text-align-last: center !important;
     -moz-text-align-last: center !important;
     direction: ltr !important;
     text-indent: 0 !important;
+    padding-left: 36px !important;
+    padding-right: 36px !important;
 
     /* Allow text to be visible - prevent cutoff */
     white-space: normal !important;
