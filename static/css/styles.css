@@ -3037,7 +3037,10 @@ body.modal-open #mainContent.store-selection-disabled,
   .control-panel #templateSelect.form-select-modern,
   .control-panel #templateSelectModal.form-select-modern {
     /* Match filter dropdown styling with centered text */
+    display: block !important;
     margin: 0.5rem auto 0.75rem auto !important;
+    width: auto !important;
+    max-width: 100% !important;
     text-align: center !important;
     -webkit-text-align-last: center !important;
     -moz-text-align-last: center !important;
@@ -6747,6 +6750,11 @@ body.modal-open #mainContent.store-selection-disabled,
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
+
+    /* Center the dropdown */
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 
     /* MATCH FILTER DROPDOWN STYLING - Same as vendor/brand/product type filters */
     background: rgba(42, 32, 64, 0.9) !important;
