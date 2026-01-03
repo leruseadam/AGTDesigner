@@ -2163,39 +2163,12 @@ const TagManager = {
         this._isUpdatingFilters = wasUpdatingFilters || false;
         console.log('✅ Filter update complete, _isUpdatingFilters reset to:', this._isUpdatingFilters);
 
-        // CRITICAL FIX: Setup filter event listeners after filters are populated
-        // This ensures filters work on initial load
-        this.setupFilterEventListeners();
+        // CRITICAL FIX: Filter event listeners are set up by the comprehensive
+        // setupFilterEventListeners() method at line ~14817, called from init()
+        // No need to call it here - avoid duplicates
 
         // GUARANTEED FIX: Save current filter values to localStorage
         this.saveFiltersToStorage();
-    },
-
-    setupFilterEventListeners() {
-        // Only set up once to prevent duplicate listeners
-        if (this._filterListenersAttached) {
-            return;
-        }
-
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
-
-        filterIds.forEach(filterId => {
-            const filterElement = document.getElementById(filterId);
-            if (filterElement && !filterElement.dataset.listenerAttached) {
-                filterElement.addEventListener('change', () => {
-                    console.log(`📊 Filter changed: ${filterId} = ${filterElement.value}`);
-                    // Apply filters immediately when user changes a filter
-                    if (typeof this.applyFilters === 'function') {
-                        this.applyFilters(true);
-                    }
-                });
-                filterElement.dataset.listenerAttached = 'true';
-                console.log(`✅ Event listener attached to ${filterId}`);
-            }
-        });
-
-        this._filterListenersAttached = true;
-        console.log('✅ All filter event listeners attached');
     },
     
     saveFiltersToStorage() {
@@ -15722,17 +15695,27 @@ const TagManager = {
     async init() {
         try {
             console.log('🚀 TagManager.init() called');
-            
+
             // Mark as initialized
             this.state.initialized = true;
-            
+
+            // CRITICAL FIX: Setup filter event listeners IMMEDIATELY
+            // This ensures filters work on initial load regardless of cache state
+            console.log('🔧 Setting up filter event listeners in init()...');
+            if (typeof this.setupFilterEventListeners === 'function') {
+                this.setupFilterEventListeners();
+                console.log('✅ Filter event listeners setup complete in init()');
+            } else {
+                console.error('❌ setupFilterEventListeners method not found!');
+            }
+
             // Try to hydrate from cache first
             const hydrated = this.hydrateAvailableTagsFromCache();
             if (hydrated) {
                 console.log('✅ Tags loaded from cache in init()');
                 return true;
             }
-            
+
             // If no cache, fetch from database/API
             console.log('📊 No cache found in init(), fetching tags from database...');
             try {
