@@ -4566,6 +4566,8 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
+        console.log('🔄 _updateAvailableTags() called with', originalTags?.length || 0, 'tags');
+        console.log('📍 Call stack:', new Error().stack);
         // CRITICAL FIX: Render immediately instead of using requestAnimationFrame to prevent delays
         // Tags need to appear immediately after upload, not on next frame
         this._performUpdateAvailableTags(originalTags, filteredTags);
