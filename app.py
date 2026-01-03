@@ -7080,50 +7080,67 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
             return aligned_tags
         
         lineage_map = {}
+        doh_map = {}  # CRITICAL: Initialize DOH map outside loop
         conn = product_db._get_connection()
         cursor = conn.cursor()
-        
+
         chunk_size = 400
         for start in range(0, len(product_names), chunk_size):
             chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
             # CRITICAL FIX: Query sovereign_lineage (manual edits) with highest priority
             # Join with strains table to get strain lineage values
+            # ALSO query DOH values to ensure manual DOH edits persist
             cursor.execute(f'''
                 SELECT
                     p."Product Name*",
                     p."Lineage",
                     p.sovereign_lineage,
                     s.canonical_lineage,
-                    s.sovereign_lineage as strain_sovereign_lineage
+                    s.sovereign_lineage as strain_sovereign_lineage,
+                    p."DOH",
+                    p."DOH Compliant (Yes/No)"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE LOWER(p."Product Name*") IN ({placeholders})
             ''', [name.lower() for name in chunk])
+
             for row in cursor.fetchall():
                 db_name = row[0]
                 # CRITICAL FIX: Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
                 # sovereign_lineage stores permanent manual edits and should always be used first
                 db_lineage = row[2] or row[4] or row[3] or row[1]  # product.sovereign > strain.sovereign > canonical > Lineage
+                db_doh = row[5]  # DOH column
+                db_doh_compliant = row[6]  # DOH Compliant (Yes/No) column
+
                 if db_name and db_lineage:
                     lineage_map[db_name.lower().strip()] = str(db_lineage).strip().upper()
+
+                # Store DOH value (prefer DOH Compliant column if it exists)
+                if db_name and (db_doh or db_doh_compliant):
+                    doh_value = db_doh_compliant or db_doh
+                    if doh_value:
+                        doh_map[db_name.lower().strip()] = str(doh_value).strip()
         
         if not lineage_map:
             return aligned_tags
         
-        # CRITICAL FIX: Always apply database lineage (especially sovereign_lineage from manual edits)
+        # CRITICAL FIX: Always apply database lineage and DOH (especially manual edits)
         # This ensures manual edits persist and override any cached values
         aligned_count = 0
+        doh_aligned_count = 0
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
             name = tag.get('Product Name*')
             if not name:
                 continue
-            
+
+            name_key = str(name).lower().strip()
+
             # Always check database lineage, especially if lineage was recently updated
             # This ensures manual edits (sovereign_lineage) always override cached values
-            db_lineage = lineage_map.get(str(name).lower().strip())
+            db_lineage = lineage_map.get(name_key)
             if db_lineage:
                 # CRITICAL: Always update with database value if it exists (manual edits must persist)
                 # Only skip if lineage wasn't updated AND tag already has matching lineage
@@ -7134,9 +7151,20 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
                     tag['canonical_lineage'] = db_lineage
                     tag['currentLineage'] = db_lineage
                     aligned_count += 1
-        
+
+            # CRITICAL: Also apply database DOH values to ensure manual DOH edits persist
+            db_doh = doh_map.get(name_key)
+            if db_doh:
+                # Update both DOH fields
+                tag['DOH'] = db_doh
+                tag['DOH Compliant (Yes/No)'] = db_doh
+                tag['doh'] = db_doh
+                doh_aligned_count += 1
+
         if aligned_count > 0:
             logging.debug(f"✅ Aligned {aligned_count} tags with database lineage")
+        if doh_aligned_count > 0:
+            logging.debug(f"✅ Aligned {doh_aligned_count} tags with database DOH values")
         
         return aligned_tags
     except Exception as e:
