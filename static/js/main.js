@@ -1444,8 +1444,8 @@ const TagManager = {
                 this._updateAvailableTags(cachedTags, null);
                 verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
 
-                // Build filters INSTANTLY from cached tags
-                this.buildFilterOptionsFromTags(cachedTags);
+                // REMOVED: Duplicate buildFilterOptionsFromTags call - already called inside _updateAvailableTags
+                // this.buildFilterOptionsFromTags(cachedTags);
                 this._filtersBuiltThisSession = true; // Mark filters as built
 
                 // Setup filter event listeners so filters work
@@ -1462,8 +1462,8 @@ const TagManager = {
                     this._updateAvailableTags(cachedTags, null);
                     verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
 
-                    // Build filters from cached tags
-                    this.buildFilterOptionsFromTags(cachedTags);
+                    // REMOVED: Duplicate buildFilterOptionsFromTags call - already called inside _updateAvailableTags
+                    // this.buildFilterOptionsFromTags(cachedTags);
                     this._filtersBuiltThisSession = true; // Mark filters as built
 
                     // Setup filter event listeners
