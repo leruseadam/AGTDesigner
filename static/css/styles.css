@@ -3049,7 +3049,7 @@ body.modal-open #mainContent.store-selection-disabled,
     -moz-text-align-last: center !important;
     text-align-last: center !important;
     font-size: 1em !important;
-    padding: 10px 36px 10px 36px !important;
+    padding: 10px 54px 10px 42px !important;  /* Balanced padding to center text with arrow */
     border: 3px solid #00d4aa !important;
     box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
     color: #f7f8ff !important;
@@ -6767,7 +6767,7 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     box-shadow: none !important;
     border-radius: 10px !important;
-    padding: 14px 36px 16px 36px !important;
+    padding: 14px 54px 16px 42px !important;  /* Balanced padding to center text with arrow */
     font-size: 1em !important;
     min-height: auto !important;
     height: auto !important;
@@ -6795,8 +6795,9 @@ body.modal-open #mainContent.store-selection-disabled,
     -moz-text-align-last: center !important;
     direction: ltr !important;
     text-indent: 0 !important;
-    padding-left: 36px !important;
-    padding-right: 36px !important;
+    /* Balance padding to account for dropdown arrow on the right */
+    padding-left: 42px !important;  /* Increased to balance arrow */
+    padding-right: 54px !important; /* Extra padding for arrow (18px arrow + 14px offset = ~32px, so 54px total) */
 
     /* Allow text to be visible - prevent cutoff */
     white-space: normal !important;

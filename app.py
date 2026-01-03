@@ -2072,11 +2072,13 @@ def initialize_excel_processor():
         logging.error(f"Error initializing Excel processor: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
 
-# Initialize on startup
+# Initialize on startup - DISABLED for faster startup
 # Load Excel file on startup for immediate availability
 # Excel processor will be ready when user first visits the site
-if not os.environ.get('PYTHONANYWHERE_DOMAIN') and not os.environ.get('PYTHONANYWHERE_SITE'):
-    # Only initialize on local development
+# PERFORMANCE: Skip startup initialization to speed up app startup
+# Files will be loaded on-demand when needed
+if False and not os.environ.get('PYTHONANYWHERE_DOMAIN') and not os.environ.get('PYTHONANYWHERE_SITE'):
+    # Only initialize on local development (currently disabled for performance)
     try:
         initialize_excel_processor()
     except Exception as e:
@@ -2214,10 +2216,13 @@ class LabelMakerApp:
             logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
         
         # Initialize store selections (moved here to prevent blocking during import)
-        try:
-            clear_all_on_startup()
-        except Exception as e:
-            logging.warning(f"Failed to clear store selections on startup: {e}")
+        # PERFORMANCE: Skip store selection clearing on startup for faster initialization
+        # This can be done on-demand if needed
+        if False:  # Disabled for faster startup
+            try:
+                clear_all_on_startup()
+            except Exception as e:
+                logging.warning(f"Failed to clear store selections on startup: {e}")
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
         print(f"🌐 App will be available at: http://{host}:{port}")
@@ -7257,9 +7262,9 @@ def generate_labels():
         logging.info(f"Request URL: {request.url}")
         logging.info(f"Request headers: {dict(request.headers)}")
         
-        # TRACE: Check current store at start of generation
+        # TRACE: Check current store at start of generation (debug only)
         current_store_at_start = get_current_store_name()
-        logging.info(f"🔍 TRACE START: Current store = {current_store_at_start}")
+        logging.debug(f"🔍 TRACE START: Current store = {current_store_at_start}")
         
         # Rate limiting for label generation
         client_ip = request.remote_addr
@@ -7293,50 +7298,45 @@ def generate_labels():
         file_path = data.get('file_path')
         filters = data.get('filters', None)
 
-        logging.info(f"🎯 Generation request received:")
-        logging.info(f"   - template_type: {template_type}")
-        logging.info(f"   - scale_factor: {scale_factor}")
-        logging.info(f"   - selected_tags_from_request count: {len(selected_tags_from_request) if selected_tags_from_request else 0}")
-        if selected_tags_from_request:
-            logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
+        logging.info(f"🎯 Generation request: {template_type} template, {len(selected_tags_from_request) if selected_tags_from_request else 0} tags")
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
         
-        # TRACE: Check store before getting excel_processor
-        logging.info(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
+        # TRACE: Check store before getting excel_processor (debug only)
+        logging.debug(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
         
         # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
         
-        # TRACE: Check store after getting excel_processor
-        logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
+        # TRACE: Check store after getting excel_processor (debug only)
+        logging.debug(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
         excel_processor.enable_product_db_integration(True)
 
         # CRITICAL FIX: JSON tags work exactly like Excel tags - no special preservation needed
         # They're already in the DataFrame and will be handled the same way as Excel tags
         
-        # TRACE: Check store before file loading
-        logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
+        # TRACE: Check store before file loading (debug only)
+        logging.debug(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
         
         # Only load file if not already loaded
         if file_path:
-            logging.info(f"🔍 TRACE: Loading specific file_path = {file_path}")
+            logging.debug(f"🔍 TRACE: Loading specific file_path = {file_path}")
             if excel_processor._last_loaded_file != file_path or excel_processor.df is None or excel_processor.df.empty:
                 excel_processor.load_file(file_path)
-                logging.info(f"🔍 TRACE: Store after loading file_path = {get_current_store_name()}")
+                logging.debug(f"🔍 TRACE: Store after loading file_path = {get_current_store_name()}")
         else:
             # Ensure data is loaded - try to reload default file if needed
             if excel_processor.df is None:
                 from src.core.data.excel_processor import get_default_upload_file
                 selected_store = get_current_store_name() if has_store_selection() else None
-                logging.info(f"🔍 TRACE: Loading default file for store: {selected_store}")
+                logging.debug(f"🔍 TRACE: Loading default file for store: {selected_store}")
                 default_file = get_default_upload_file(selected_store)
-                logging.info(f"🔍 TRACE: get_default_upload_file returned: {default_file}")
-                logging.info(f"🔍 TRACE: Store after get_default_upload_file = {get_current_store_name()}")
+                logging.debug(f"🔍 TRACE: get_default_upload_file returned: {default_file}")
+                logging.debug(f"🔍 TRACE: Store after get_default_upload_file = {get_current_store_name()}")
                 if default_file:
-                    logging.info(f"📂 TRACE: About to load default file: {default_file}")
+                    logging.debug(f"📂 TRACE: About to load default file: {default_file}")
                     excel_processor.load_file(default_file)
-                    logging.info(f"🔍 TRACE: Store after loading default file = {get_current_store_name()}")
+                    logging.debug(f"🔍 TRACE: Store after loading default file = {get_current_store_name()}")
                 else:
                     logging.warning(f"⚠️ GENERATE: No default file found for store: {selected_store}")
         
@@ -7664,8 +7664,11 @@ def generate_labels():
             session['selected_tags'] = valid_selected_tags
             session.modified = True
             
-            logging.info(f"✅ Successfully validated and stored {len(valid_selected_tags)} tags")
-            logging.info(f"📊 Validation summary: {len(valid_selected_tags)} valid, {len(invalid_selected_tags)} invalid out of {len(normalized_tags)} total")
+            logging.debug(f"✅ Successfully validated and stored {len(valid_selected_tags)} tags")
+            if invalid_selected_tags:
+                logging.info(f"📊 Validation: {len(valid_selected_tags)} valid, {len(invalid_selected_tags)} invalid out of {len(normalized_tags)} total")
+            else:
+                logging.debug(f"📊 Validation: {len(valid_selected_tags)} valid, {len(invalid_selected_tags)} invalid out of {len(normalized_tags)} total")
             if invalid_selected_tags:
                 logging.warning(f"⚠️ These tags will NOT be generated: {invalid_selected_tags[:10]}")
         else:
@@ -8002,14 +8005,14 @@ def generate_labels():
                 except Exception as enrich_error:
                     logging.warning(f"⚠️ Error enriching Excel records with database data: {enrich_error}")
             
-            # CRITICAL: Log lineage values from recipient records to verify DataFrame updates took effect
+            # CRITICAL: Log lineage values from recipient records to verify DataFrame updates took effect (debug only)
             if records:
-                logging.info(f"🔍 LINEAGE VERIFICATION - First 5 records:")
+                logging.debug(f"🔍 LINEAGE VERIFICATION - First 5 records:")
                 for i, record in enumerate(records[:5]):
                     product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
                     lineage = record.get('Lineage', 'NOT_FOUND')
                     price = record.get('Price', 'NOT_FOUND')
-                    logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}', Price: '{price}'")
+                    logging.debug(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}', Price: '{price}'")
             
             # CRITICAL FIX: Apply UI lineage values first (what user sees in UI), then database override
             # This ensures DOCX matches what's displayed in the UI
@@ -8039,16 +8042,16 @@ def generate_labels():
                             record['currentLineage'] = ui_lineage
                             record['canonical_lineage'] = ui_lineage
                             record['lineage'] = ui_lineage.lower()
-                            logging.info(f"✅ UI LINEAGE APPLIED: '{product_name}' - Record: '{original_lineage}' -> UI: '{ui_lineage}'")
+                            logging.debug(f"✅ UI LINEAGE APPLIED: '{product_name}' - Record: '{original_lineage}' -> UI: '{ui_lineage}'")
                             ui_lineage_applied += 1
                         else:
                             logging.debug(f"✅ UI LINEAGE CONFIRMED: '{product_name}' - Already matches UI: '{ui_lineage}'")
                 
                 if ui_lineage_applied > 0:
-                    logging.info(f"✅ UI LINEAGE: Applied {ui_lineage_applied} UI lineage values to records (matches UI display)")
+                    logging.debug(f"✅ UI LINEAGE: Applied {ui_lineage_applied} UI lineage values to records (matches UI display)")
                 
                 # PERFORMANCE FIX: Batch query for database lineage override
-                logging.info("LINEAGE OVERRIDE: Checking database for updated lineage values for records without UI lineage...")
+                logging.debug("LINEAGE OVERRIDE: Checking database for updated lineage values for records without UI lineage...")
                 try:
                     store_name = get_current_store_name()
                     product_db = get_product_database(store_name)
@@ -8092,7 +8095,7 @@ def generate_labels():
                                     record['lineage'] = db_lineage_clean.lower()
                                     lineage_overrides_applied += 1
 
-                            logging.info(f"✅ Database lineage applied to {lineage_overrides_applied} records in batch")
+                            logging.debug(f"✅ Database lineage applied to {lineage_overrides_applied} records in batch")
                 except Exception as e:
                     logging.warning(f"Error during lineage override check: {e}")
             
@@ -8168,24 +8171,24 @@ def generate_labels():
 
                                 logging.info(f"✅ Applied lineage to JSON records in single batch query")
             
-            # CRITICAL FIX: Log lineage values for debugging
+            # CRITICAL FIX: Log lineage values for debugging (debug only)
             if records:
                 for i, record in enumerate(records[:3]):  # Log first 3 records
                     product_name = record.get('ProductName', 'Unknown')
                     lineage = record.get('Lineage', 'NOT_FOUND')
-                    logging.info(f"LINEAGE DEBUG: Record {i+1} - Product: '{product_name}', Lineage: '{lineage}'")
+                    logging.debug(f"LINEAGE DEBUG: Record {i+1} - Product: '{product_name}', Lineage: '{lineage}'")
             logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
 
-        # CRITICAL DEBUG: Log final record count and price data
-        logging.info(f"🔍 DEBUG: Final records count: {len(records) if records else 0}")
+            # CRITICAL DEBUG: Log final record count and price data (debug only)
+        logging.debug(f"🔍 DEBUG: Final records count: {len(records) if records else 0}")
         if records:
-            logging.info(f"🔍 DEBUG: Sample record names: {[r.get('ProductName', r.get('Product Name*', 'NO_NAME')) for r in records[:5]]}")
-            # Log price information for each record to diagnose missing prices
-            for i, record in enumerate(records):
+            logging.debug(f"🔍 DEBUG: Sample record names: {[r.get('ProductName', r.get('Product Name*', 'NO_NAME')) for r in records[:5]]}")
+            # Log price information for each record to diagnose missing prices (debug only)
+            for i, record in enumerate(records[:3]):  # Only log first 3
                 product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
                 price = record.get('Price', 'NOT_FOUND')
                 price_star = record.get('Price*', 'NOT_FOUND')
-                logging.info(f"🔍 PRICE DEBUG Record {i+1}: '{product_name}' - Price={price}, Price*={price_star}")
+                logging.debug(f"🔍 PRICE DEBUG Record {i+1}: '{product_name}' - Price={price}, Price*={price_star}")
         
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
@@ -8331,7 +8334,7 @@ def generate_labels():
             }
         
         # Log the number of records passed to the template processor
-        logging.info(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
+        logging.debug(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
 
         # For horizontal/vertical/double templates, ensure all records are processed (no chunking)
         if template_type in ['horizontal', 'vertical', 'double']:
@@ -8339,7 +8342,7 @@ def generate_labels():
                 processor.CHUNK_SIZE_LIMIT = max(len(records), 1000)  # Remove chunking limit
             if hasattr(processor, 'chunk_size'):
                 processor.chunk_size = max(len(records), 1000)
-            logging.info(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
+            logging.debug(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
 
         # Apply DOH session overrides just before generation to guarantee latest UI choice wins
         try:
@@ -8359,7 +8362,7 @@ def generate_labels():
                     return base
                 
                 applied = 0
-                logging.info(f"🔍 DOH OVERRIDE CHECK: Checking {len(records)} records against {len(overrides)} override(s)")
+                logging.debug(f"🔍 DOH OVERRIDE CHECK: Checking {len(records)} records against {len(overrides)} override(s)")
                 for rec in records:
                     name = rec.get('ProductName') or rec.get('Product Name*') or rec.get('product_name') or ''
                     if not name:
@@ -8377,19 +8380,19 @@ def generate_labels():
                     if full_norm in overrides:
                         matched_key = full_norm
                         matched_val = overrides[full_norm]
-                        logging.info(f"✅ DOH OVERRIDE MATCH (full): '{name}' → override key '{matched_key}' = '{matched_val}'")
+                        logging.debug(f"✅ DOH OVERRIDE MATCH (full): '{name}' → override key '{matched_key}' = '{matched_val}'")
                     # Strategy 2: Base name only (without vendor/weight suffix)
                     elif base_norm in overrides:
                         matched_key = base_norm
                         matched_val = overrides[base_norm]
-                        logging.info(f"✅ DOH OVERRIDE MATCH (base): '{name}' → base '{base_name_only}' → override key '{matched_key}' = '{matched_val}'")
+                        logging.debug(f"✅ DOH OVERRIDE MATCH (base): '{name}' → base '{base_name_only}' → override key '{matched_key}' = '{matched_val}'")
                     # Strategy 3: Any override key that's a substring of the normalized name
                     else:
                         for ov_key, ov_val in overrides.items():
                             if ov_key in full_norm or full_norm in ov_key:
                                 matched_key = ov_key
                                 matched_val = ov_val
-                                logging.info(f"✅ DOH OVERRIDE MATCH (substring): '{name}' → override key '{matched_key}' = '{matched_val}'")
+                                logging.debug(f"✅ DOH OVERRIDE MATCH (substring): '{name}' → override key '{matched_key}' = '{matched_val}'")
                                 break
                     
                     if matched_key and matched_val is not None:
@@ -8399,11 +8402,12 @@ def generate_labels():
                         rec['DOH Compliant (Yes/No)'] = matched_val
                         rec['doh'] = matched_val
                         applied += 1
-                        logging.info(f"✅ DOH OVERRIDE APPLIED: '{name}' DOH changed from '{old_doh}' → '{matched_val}'")
+                        logging.debug(f"✅ DOH OVERRIDE APPLIED: '{name}' DOH changed from '{old_doh}' → '{matched_val}'")
                     else:
                         logging.debug(f"🔍 DOH OVERRIDE: No match for '{name}' (tried: full='{full_norm}', base='{base_norm}')")
                 
-                logging.info(f"✅ DOH OVERRIDE SUMMARY: Applied {applied} override(s) to {len(records)} record(s)")
+                if applied > 0:
+                    logging.debug(f"✅ DOH OVERRIDE SUMMARY: Applied {applied} override(s) to {len(records)} record(s)")
         except Exception as ov_err:
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
             logging.error(f"DOH override error details: {traceback.format_exc()}")
@@ -8519,12 +8523,15 @@ def generate_labels():
                                     logging.debug(f"🔄 ENRICHMENT: Lineage update for '{product_name}': '{old_lineage}' → '{db_lineage}'")
                         
                         if enriched_count > 0:
-                            logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
+                            logging.debug(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
         except Exception as enrich_err:
             logging.error(f"Lineage enrichment failed: {enrich_err}")
 
         _enrichment_time = time.time() - _enrichment_start
-        logging.info(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
+        if _enrichment_time > 1.0:  # Only log if it took more than 1 second
+            logging.info(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
+        else:
+            logging.debug(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
 
         # Bail out early if no records made it this far (prevents NoneType errors downstream)
         if not records:
@@ -8541,12 +8548,19 @@ def generate_labels():
         cache_hit = fast_engine.cache_hits > cache_hits_before
         update_generation_stats(len(records), generation_time, cache_hit)
         
-        logging.info(
-            f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s "
-            f"({generation_time/len(records):.3f}s per label, cache_hit={cache_hit})"
-        )
+        # Only log detailed timing if generation took more than 5 seconds
+        if generation_time > 5.0:
+            logging.info(
+                f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s "
+                f"({generation_time/len(records):.3f}s per label, cache_hit={cache_hit})"
+            )
+        else:
+            logging.debug(
+                f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s "
+                f"({generation_time/len(records):.3f}s per label, cache_hit={cache_hit})"
+            )
         if hasattr(final_doc, 'labels_rendered'):
-            logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
+            logging.debug(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
         if final_doc is None:
             logging.error("❌ Generation returned None document")
             return jsonify({'error': 'Failed to generate document.'}), 500
@@ -8680,9 +8694,9 @@ def generate_labels():
         
         # Log final filename for debugging
         logging.debug(f"Generated filename: {filename} for {tag_count} tags")
-
-        # TRACE: Check store before returning file
-        logging.info(f"🔍 TRACE END: Current store before return = {get_current_store_name()}")
+        
+        # TRACE: Check store before returning file (debug only)
+        logging.debug(f"🔍 TRACE END: Current store before return = {get_current_store_name()}")
         
         # Create response with explicit headers
         response = send_file(
@@ -8698,7 +8712,7 @@ def generate_labels():
 
         _total_time = time.time() - _start_time
         logging.info(f"⏱️ PERFORMANCE: Total generation time {_total_time:.2f}s for {len(records)} records ({_total_time/len(records):.3f}s per record)")
-        logging.info(f"🔍 TRACE: Returning file, final store = {get_current_store_name()}")
+        logging.debug(f"🔍 TRACE: Returning file, final store = {get_current_store_name()}")
         return response
 
     except Exception as e:
@@ -9521,14 +9535,22 @@ def get_available_tags():
                                     import traceback
                                     logging.warning(traceback.format_exc())
 
+                            # CRITICAL FIX: Check if lineage was recently updated - if so, force refresh from database
+                            # This ensures lineage changes persist after page reload
+                            lineage_was_updated = session.get('lineage_update_timestamp') is not None
+                            
                             enriched_count = 0
                             fallback_count = 0
                             for tag in simple_tags:
                                 product_name = tag.get('Product Name*')
-                                # CRITICAL FIX: Only set lineage if it's missing to prevent overwriting user changes
+                                # CRITICAL FIX: Always use database lineage if available, especially after lineage updates
+                                # If lineage_update_timestamp is set, force refresh even if tag already has lineage
                                 if product_name and product_name in lineage_map:
-                                    # Only use database lineage if tag doesn't already have canonical_lineage/currentLineage
-                                    if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                                    # Use database lineage if:
+                                    # 1. Tag doesn't have lineage yet, OR
+                                    # 2. Lineage was recently updated (force refresh)
+                                    should_update = not (tag.get('canonical_lineage') or tag.get('currentLineage')) or lineage_was_updated
+                                    if should_update:
                                         # Use database lineage (product exists in database)
                                         db_lineage_clean = lineage_map[product_name]
                                         tag['currentLineage'] = db_lineage_clean
@@ -9550,6 +9572,8 @@ def get_available_tags():
                                             fallback_count += 1
 
                             logging.info(f"✅ SIMPLE PATH: Enriched {enriched_count}/{len(simple_tags)} tags with database lineage, {fallback_count} with Excel fallback")
+                            if lineage_was_updated:
+                                logging.info(f"🔄 Lineage was recently updated - forced refresh from database for all tags")
 
                             # Log sample of enriched tags for debugging
                             if enriched_count > 0:

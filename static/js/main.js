@@ -10027,8 +10027,15 @@ const TagManager = {
                 verboseLog('Tags loaded successfully, refreshing filters...');
                 // Use a small delay to ensure Excel processor is ready
                 setTimeout(() => {
+                    // CRITICAL FIX: Always populate filters after tags are loaded
                     this.fetchAndPopulateFilters(0).catch(error => {
                         console.warn('Auto-refresh filters after tag load failed (non-critical):', error);
+                        // Retry once after a short delay if initial attempt failed
+                        setTimeout(() => {
+                            this.fetchAndPopulateFilters(0).catch(err => {
+                                console.warn('Filter retry also failed:', err);
+                            });
+                        }, 1000);
                     });
                 }, 500);
             }
@@ -10635,6 +10642,10 @@ const TagManager = {
                 return; // Return immediately after building from cache
             }
             
+            // CRITICAL FIX: If no tags available, still try to fetch filters from API
+            // The API endpoint can load the file itself if needed
+            verboseLog('⚠️ No tags available, fetching filters from API (API will load file if needed)...');
+            
             // Use the filter options API with cache refresh and timestamp to ensure updated weight formatting
             const timestamp = Date.now();
             const response = await fetch(`/api/filter-options?refresh=true&t=${timestamp}`, {
@@ -11067,11 +11078,19 @@ const TagManager = {
             // CRITICAL FIX: Don't restore filters from localStorage on page load
             // Filters should reset on page reload, but persist during session when tags are updated
 
-            // CRITICAL FIX: Only fetch filter options from API if we didn't populate from cache
-            // This prevents slow API calls from overwriting instant cache-based filters
+            // CRITICAL FIX: Always ensure filters are populated, even if not from cache
+            // This ensures filters work immediately after page load
             if (!filtersPopulated && this.fetchAndPopulateFilters) {
                 console.log('⚠️ No cached filters, fetching from API...');
-                this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
+                this.fetchAndPopulateFilters().catch(err => {
+                    console.warn('Error loading filters:', err);
+                    // Retry once after tags are loaded if initial attempt failed
+                    setTimeout(() => {
+                        this.fetchAndPopulateFilters().catch(retryErr => {
+                            console.warn('Filter retry also failed:', retryErr);
+                        });
+                    }, 2000);
+                });
             } else if (filtersPopulated) {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
@@ -11569,7 +11588,16 @@ const TagManager = {
             // Still load selected tags and filters in background (non-blocking)
             this.fetchAndUpdateSelectedTags().catch(err => console.warn('Error loading selected tags:', err));
             if (this.fetchAndPopulateFilters) {
-                this.fetchAndPopulateFilters().catch(err => console.warn('Error loading filters:', err));
+                // CRITICAL FIX: Ensure filters are populated even when using cached tags
+                this.fetchAndPopulateFilters().catch(err => {
+                    console.warn('Error loading filters:', err);
+                    // Retry once if initial attempt failed
+                    setTimeout(() => {
+                        this.fetchAndPopulateFilters().catch(retryErr => {
+                            console.warn('Filter retry also failed:', retryErr);
+                        });
+                    }, 1000);
+                });
             }
             return;
         }
