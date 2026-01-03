@@ -2153,12 +2153,13 @@ const TagManager = {
             
             // Handle value restoration based on preserveExistingValues parameter
             if (preserveExistingValues) {
-                // CRITICAL FIX: Only check localStorage if we're not on initial page load
-                // On page load, filters should reset, but during session updates they should persist
-                const isInitialLoad = !this.state.initialized && this._initializing;
+                // CRITICAL FIX: Only check localStorage if filters have been initialized (not on page reload)
+                // On page reload, filtersInitialized is false, so don't restore
+                // During session updates, filtersInitialized is true, so restore from localStorage
+                const isPageReload = !this.state.filtersInitialized;
                 let savedValue = null;
-                if (!isInitialLoad) {
-                    // Only check localStorage during session (not on page load)
+                if (!isPageReload) {
+                    // Only check localStorage during session (not on page reload)
                     const savedFilters = this.loadFiltersFromStorage();
                     savedValue = savedFilters && savedFilters[filterType] ? savedFilters[filterType] : null;
                 }
@@ -16569,12 +16570,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
             const isInitialized = window.TagManager.state.initialized;
             const isChecking = window.TagManager._checkingExistingData;
+            const isFetching = window.TagManager._fetchingAvailableTags;
 
             // Check if tags are actually rendered in the DOM (more reliable than just checking cache)
             const availableContainer = document.getElementById('availableTags');
             const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
-            if (!hasTags && !hasRenderedTags && isInitialized && !isChecking) {
+            // CRITICAL FIX: Don't trigger duplicate load if tags are already being fetched or checked
+            if (!hasTags && !hasRenderedTags && isInitialized && !isChecking && !isFetching) {
                 console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no rendered tags found, attempting retry...');
                 // Reset flags to allow retry
                 window.TagManager._checkingExistingData = false;
@@ -16593,6 +16596,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else if (hasTags || hasRenderedTags) {
                 console.log('✅ SAFEGUARD: Tags already loaded or rendered, skipping retry');
+            } else if (isChecking || isFetching) {
+                console.log('✅ SAFEGUARD: Tags are already being loaded (checking or fetching), skipping duplicate retry');
             }
         }
     }, 5000);
@@ -16603,8 +16608,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
             const availableContainer = document.getElementById('availableTags');
             const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
+            const isChecking = window.TagManager._checkingExistingData;
+            const isFetching = window.TagManager._fetchingAvailableTags;
 
-            if (!hasTags && !hasRenderedTags) {
+            // CRITICAL FIX: Only force fetch if tags aren't loaded AND not currently being fetched/checked
+            if (!hasTags && !hasRenderedTags && !isChecking && !isFetching) {
                 console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no rendered tags found - forcing direct fetch');
                 // Force reset all flags
                 window.TagManager._checkingExistingData = false;
@@ -16618,6 +16626,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else if (hasTags || hasRenderedTags) {
                 console.log('✅ 10s SAFEGUARD: Tags already loaded or rendered - skipping force fetch');
+            } else if (isChecking || isFetching) {
+                console.log('✅ 10s SAFEGUARD: Tags are already being loaded (checking or fetching), skipping duplicate force fetch');
             }
         }
     }, 10000);
@@ -16649,8 +16659,11 @@ document.addEventListener('DOMContentLoaded', function() {
             const hasTags = window.TagManager.state?.tags && window.TagManager.state.tags.length > 0;
             const availableContainer = document.getElementById('availableTags');
             const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
+            const isCurrentlyChecking = window.TagManager._checkingExistingData;
+            const isCurrentlyFetching = window.TagManager._fetchingAvailableTags;
 
-            if (!hasTags && !hasRenderedTags && !checkingStuck && !fetchingStuck) {
+            // CRITICAL FIX: Don't trigger duplicate load if tags are already being fetched or checked
+            if (!hasTags && !hasRenderedTags && !checkingStuck && !fetchingStuck && !isCurrentlyChecking && !isCurrentlyFetching) {
                 console.log('🔄 Page visible and no tags loaded or rendered, attempting to load tags...');
                 if (typeof window.TagManager.checkForExistingData === 'function') {
                     window.TagManager.checkForExistingData().catch(e => {
@@ -16659,6 +16672,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else if (hasTags || hasRenderedTags) {
                 console.log('✅ VISIBILITY: Tags already loaded or rendered, skipping reload');
+            } else if (isCurrentlyChecking || isCurrentlyFetching) {
+                console.log('✅ VISIBILITY: Tags are already being loaded (checking or fetching), skipping duplicate reload');
             }
         }
     });
