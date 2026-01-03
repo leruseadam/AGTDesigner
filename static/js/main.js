@@ -2163,8 +2163,39 @@ const TagManager = {
         this._isUpdatingFilters = wasUpdatingFilters || false;
         console.log('✅ Filter update complete, _isUpdatingFilters reset to:', this._isUpdatingFilters);
 
+        // CRITICAL FIX: Setup filter event listeners after filters are populated
+        // This ensures filters work on initial load
+        this.setupFilterEventListeners();
+
         // GUARANTEED FIX: Save current filter values to localStorage
         this.saveFiltersToStorage();
+    },
+
+    setupFilterEventListeners() {
+        // Only set up once to prevent duplicate listeners
+        if (this._filterListenersAttached) {
+            return;
+        }
+
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+
+        filterIds.forEach(filterId => {
+            const filterElement = document.getElementById(filterId);
+            if (filterElement && !filterElement.dataset.listenerAttached) {
+                filterElement.addEventListener('change', () => {
+                    console.log(`📊 Filter changed: ${filterId} = ${filterElement.value}`);
+                    // Apply filters immediately when user changes a filter
+                    if (typeof this.applyFilters === 'function') {
+                        this.applyFilters(true);
+                    }
+                });
+                filterElement.dataset.listenerAttached = 'true';
+                console.log(`✅ Event listener attached to ${filterId}`);
+            }
+        });
+
+        this._filterListenersAttached = true;
+        console.log('✅ All filter event listeners attached');
     },
     
     saveFiltersToStorage() {
@@ -2215,8 +2246,16 @@ const TagManager = {
     
     buildFilterOptionsFromTags(tags) {
         try {
+            // CRITICAL FIX: Prevent duplicate simultaneous calls
+            if (this._isBuildingFilters) {
+                console.log('⏭️ Skipping buildFilterOptionsFromTags - already building');
+                return;
+            }
+            this._isBuildingFilters = true;
+
             if (!tags || tags.length === 0) {
                 console.log('❌ buildFilterOptionsFromTags: No tags provided!');
+                this._isBuildingFilters = false;
                 return;
             }
 
@@ -9987,6 +10026,7 @@ const TagManager = {
             // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
             // This is especially important when lineage alignment happened on the backend
             console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
+            console.log('📍 Call stack for tag update:', new Error().stack);
             this._backgroundProcessingRetries = 0; // reset after successful load
             
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
