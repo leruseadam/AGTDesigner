@@ -1343,8 +1343,10 @@ const TagManager = {
 
     hydrateAvailableTagsFromCache() {
         if (this.state.hydratedFromCache) {
+            console.log('⏭️ Skipping cache hydration - already hydrated this session');
             return false;
         }
+        console.log('🔄 hydrateAvailableTagsFromCache() called - attempting to hydrate...');
 
         // CRITICAL FIX: Load from cache OR database
         // Check if there's an Excel file OR if we should load from database
