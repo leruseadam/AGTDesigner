@@ -411,6 +411,7 @@ h6 { font-size: 1rem !important; font-weight: 600 !important; }
   height: auto !important;
   line-height: 1.6 !important;
   overflow: visible !important;
+  text-align: left !important; /* Left-align dropdown text */
 }
 
 /* Larger list items */
@@ -1151,6 +1152,7 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Filter Bar Improvements */
   .sticky-filter-bar {
     min-height: 60px;
+    text-align: left !important;
   }
 
   .filter-item {
@@ -1160,6 +1162,8 @@ body.modal-open #mainContent.store-selection-disabled,
     flex: 1 1 0;
     width: 100%;
     max-width: 100%;
+    align-items: flex-start !important;
+    text-align: left !important;
   }
 
   .filter-item label {
@@ -1176,6 +1180,7 @@ body.modal-open #mainContent.store-selection-disabled,
     font-size: 1.05rem;
     width: 100%;
     min-width: 0;
+    text-align: left !important; /* Left-align dropdown text */
   }
 
   .modern-upload-bar {
@@ -3219,22 +3224,21 @@ body.modal-open #mainContent.store-selection-disabled,
     text-transform: uppercase !important;
     color: rgba(160, 132, 232, 0.9) !important;
     text-align: left !important;
-    text-align: center !important;
   }
 
-  /* Center filter dropdown text */
+  /* Left-align filter dropdown text */
   .control-panel .filter-select,
   .control-panel #templateSelect {
-    text-align: center !important;
-    -webkit-text-align-last: center !important;
-    -moz-text-align-last: center !important;
-    text-align-last: center !important;
+    text-align: left !important;
+    -webkit-text-align-last: left !important;
+    -moz-text-align-last: left !important;
+    text-align-last: left !important;
   }
 
-  /* Center dropdown options */
+  /* Left-align dropdown options */
   .control-panel .filter-select option,
   .control-panel #templateSelect option {
-    text-align: center !important;
+    text-align: left !important;
   }
 
   /* Enhanced Control Button Styling - Matching Generate Button */
@@ -4671,6 +4675,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .filter-bar {
     opacity: 1 !important;
     visibility: visible !important;
+    text-align: left !important;
   }
   
 
@@ -4885,6 +4890,7 @@ body.modal-open #mainContent.store-selection-disabled,
       min-height: 2.5rem !important;
       line-height: 1.6 !important;
       overflow: visible !important;
+      text-align: left !important; /* Left-align dropdown text */
     }
   }
   
@@ -5544,6 +5550,7 @@ body.modal-open #mainContent.store-selection-disabled,
     min-height: 2.5rem !important;
     padding: 0.5rem 12px 0.6rem 12px !important;
     line-height: 1.6 !important;
+    text-align: left !important; /* Left-align dropdown text */
     overflow: visible !important;
     background: rgba(45, 34, 58, 0.8) !important;
     color: var(--text-primary) !important;
@@ -7809,6 +7816,7 @@ body.modal-open #mainContent.store-selection-disabled,
     box-sizing: border-box !important;
     font-size: 1.1rem !important; /* Increased moderately */
     line-height: 1.6 !important; /* Increased line-height to prevent cutoff */
+    text-align: left !important; /* Left-align dropdown text */
   }
 
   .sticky-filter-bar .form-select:focus,
@@ -8054,6 +8062,7 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1px solid #dee2e6;
     transition: all 0.2s ease;
     padding: 0.5rem 0.75rem;
+    text-align: left !important; /* Left-align dropdown text */
   }
 
   .sticky-filter-bar .form-select:focus {
@@ -8150,6 +8159,7 @@ body.modal-open #mainContent.store-selection-disabled,
     font-size: 0.95rem;
     line-height: 1.6 !important;
     overflow: visible !important;
+    text-align: left !important; /* Left-align dropdown text */
     /* Bright blue arrow */
     background-image: url('data:image/svg+xml;utf8,<svg fill="%2300BFFF" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
     background-repeat: no-repeat !important;
@@ -10486,6 +10496,7 @@ body.modal-open #mainContent.store-selection-disabled,
     height: auto !important;
     line-height: 1.6 !important;
     overflow: visible !important;
+    text-align: left !important; /* Left-align dropdown text */
   }
 
   /* Ensure consistent arrow positioning and styling */

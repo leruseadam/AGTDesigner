@@ -4993,8 +4993,14 @@ const TagManager = {
             const LARGE_DATASET_THRESHOLD = 500;
             if (tags.length > LARGE_DATASET_THRESHOLD) {
                 verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
-                // Show loading indicator while organizing
-                availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
+                // CRITICAL FIX: Don't clear existing tags - preserve them while organizing
+                // Only show loading indicator if container is truly empty
+                const currentTagCount = availableTagsContainer.querySelectorAll('.tag-item').length;
+                if (currentTagCount === 0) {
+                    // Only show loading if there are no tags currently displayed
+                    availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
+                }
+                // Otherwise keep existing tags visible while organizing in background
                 
                 // Organize in next event loop tick to prevent blocking
                 setTimeout(() => {
@@ -5014,21 +5020,19 @@ const TagManager = {
                             return aName.localeCompare(bName);
                         });
                         this._renderTagsInBatches(sortedSimple, tagList);
-                        availableTagsContainer.innerHTML = '';
-                        availableTagsContainer.appendChild(tagList);
-                        this._restoreCheckboxStates();
-                        this._restoreAvailableScrollPosition(savedScroll);
-                        
-                        // CRITICAL FIX: Re-enable scaling after rendering completes
-                        if (window.setTagRenderingState) {
-                            setTimeout(() => {
-                                window.setTagRenderingState(false);
-                                // Trigger scale after rendering completes
-                                if (window.scaleAppToFitDebounced) {
-                                    window.scaleAppToFitDebounced(300);
-                                }
-                            }, 200);
-                        }
+                        // CRITICAL FIX: Only clear container when content is ready
+                        requestAnimationFrame(() => {
+                            if (tagList && tagList.children.length > 0) {
+                                availableTagsContainer.innerHTML = '';
+                                availableTagsContainer.appendChild(tagList);
+                                this._restoreCheckboxStates();
+                                this._restoreAvailableScrollPosition(savedScroll);
+                                reenableScaling();
+                            } else {
+                                console.warn('⚠️ Error fallback: No tags to render, preserving existing content');
+                                reenableScaling();
+                            }
+                        });
                     }
                 }, 0);
                 return; // Exit early, rendering will continue in callback
@@ -5057,9 +5061,17 @@ const TagManager = {
             });
             // PERFORMANCE FIX: Render tags progressively to prevent UI freeze
             this._renderTagsInBatches(sortedSimple, tagList);
-                    // CRITICAL FIX: Replace container content immediately - don't wait for next frame
-                    availableTagsContainer.innerHTML = '';
-                    availableTagsContainer.appendChild(tagList);
+                    // CRITICAL FIX: Only replace container when content is ready
+                    // Use requestAnimationFrame to ensure smooth transition
+                    requestAnimationFrame(() => {
+                        if (tagList && tagList.children.length > 0) {
+                            availableTagsContainer.innerHTML = '';
+                            availableTagsContainer.appendChild(tagList);
+                        } else {
+                            // If no content, don't clear existing tags
+                            console.warn('⚠️ No tags to render in simple list, preserving existing content');
+                        }
+                    });
                         
                         // CRITICAL FIX: Restore checkbox states after re-render to preserve selections
                         // Also restore persistentSelectedTags if it was accidentally cleared
@@ -5140,50 +5152,39 @@ const TagManager = {
                 }
             } else {
                 // All vendors rendered - finalize
-                // CRITICAL FIX: Append immediately instead of waiting for next frame
-                availableTagsContainer.innerHTML = '';
-                availableTagsContainer.appendChild(tagList);
-                    
-                    // CRITICAL FIX: Restore checkbox states after re-render
-                    if (savedPersistentTags.length > 0 && (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0)) {
-                        console.log(`🔄 Restoring ${savedPersistentTags.length} persistent selected tags`);
-                        this.state.persistentSelectedTags = [...savedPersistentTags];
-                        this.state.selectedTags = new Set(savedPersistentTags);
+                // CRITICAL FIX: Only clear container when we're ready to show new content
+                // Use requestAnimationFrame to ensure smooth transition without flicker
+                requestAnimationFrame(() => {
+                    // Only clear if we have content to show
+                    if (tagList && tagList.children.length > 0) {
+                        availableTagsContainer.innerHTML = '';
+                        availableTagsContainer.appendChild(tagList);
+                        
+                        // CRITICAL FIX: Restore checkbox states after re-render
+                        if (savedPersistentTags.length > 0 && (!this.state.persistentSelectedTags || this.state.persistentSelectedTags.length === 0)) {
+                            console.log(`🔄 Restoring ${savedPersistentTags.length} persistent selected tags`);
+                            this.state.persistentSelectedTags = [...savedPersistentTags];
+                            this.state.selectedTags = new Set(savedPersistentTags);
+                        }
+                        this._restoreCheckboxStates();
+                        
+                        // Restore scroll and initialize
+                        this._restoreAvailableScrollPosition(savedScroll);
+                        this.updateSelectAllCheckboxes();
+                        this.initializeSelectAllCheckbox();
+                        
+                        // Update available tags count badge
+                        const availableTagItems = availableTagsContainer.querySelectorAll('.tag-item');
+                        this.updateTagCount('available', availableTagItems.length);
+                        
+                        // CRITICAL FIX: Re-enable scaling after rendering completes
+                        reenableScaling();
+                    } else {
+                        // If no content, don't clear existing tags
+                        console.warn('⚠️ No tags to render, preserving existing content');
+                        reenableScaling();
                     }
-                    this._restoreCheckboxStates();
-                    
-                    // Update selected tags display
-                    if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
-                        setTimeout(() => {
-                            const selectedTagObjects = this.getSelectedTagObjects();
-                            if (selectedTagObjects.length > 0) {
-                                this.updateSelectedTags(selectedTagObjects);
-                            }
-                        }, 100);
-                    }
-                    
-                    // Restore scroll and initialize
-                    this._restoreAvailableScrollPosition(savedScroll);
-                    this.updateSelectAllCheckboxes();
-                    this.initializeSelectAllCheckbox();
-                    
-                    // Hide loading splash
-                    this._waitForTagsToAppear();
-                    
-                    // Update available tags count badge
-                    const availableTagItems = availableTagsContainer.querySelectorAll('.tag-item');
-                    this.updateTagCount('available', availableTagItems.length);
-                    
-                    // CRITICAL FIX: Re-enable scaling after rendering completes
-                    if (window.setTagRenderingState) {
-                        setTimeout(() => {
-                            window.setTagRenderingState(false);
-                            // Trigger scale after rendering completes
-                            if (window.scaleAppToFitDebounced) {
-                                window.scaleAppToFitDebounced(300);
-                            }
-                        }, 200);
-                    }
+                });
             }
         };
         
