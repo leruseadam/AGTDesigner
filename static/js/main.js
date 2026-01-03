@@ -10057,18 +10057,25 @@ const TagManager = {
             console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
             this._backgroundProcessingRetries = 0; // reset after successful load
             
-            // CRITICAL FIX: Restore filters from localStorage BEFORE rebuilding filter options
-            // This ensures user's filter selections are preserved when tags are updated
-            const savedFilters = this.loadFiltersFromStorage();
-            if (savedFilters && Object.keys(savedFilters).length > 0) {
-                console.log('⚡ Restoring filters from localStorage before rebuilding options:', savedFilters);
-                // Apply saved filters to dropdowns immediately (before buildFilterOptionsFromTags)
-                Object.entries(savedFilters).forEach(([key, value]) => {
-                    const filterElement = document.getElementById(`${key}Filter`);
-                    if (filterElement && value) {
-                        filterElement.value = value;
-                    }
-                });
+            // CRITICAL FIX: Don't restore filters from localStorage on page reload
+            // Filters should reset on page reload, but can be preserved during session updates
+            // Only restore if this is NOT the initial page load (check if filters were already cleared)
+            const wasPageReload = !this.state.filtersInitialized;
+            if (!wasPageReload) {
+                // This is a session update (tags refreshed), preserve filters
+                const savedFilters = this.loadFiltersFromStorage();
+                if (savedFilters && Object.keys(savedFilters).length > 0) {
+                    console.log('⚡ Restoring filters from localStorage during session update:', savedFilters);
+                    // Apply saved filters to dropdowns immediately (before buildFilterOptionsFromTags)
+                    Object.entries(savedFilters).forEach(([key, value]) => {
+                        const filterElement = document.getElementById(`${key}Filter`);
+                        if (filterElement && value) {
+                            filterElement.value = value;
+                        }
+                    });
+                }
+            } else {
+                console.log('⚡ Page reload detected - filters will reset to "All"');
             }
             
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
@@ -10938,6 +10945,8 @@ const TagManager = {
         try {
             localStorage.removeItem('agt_filters');
             console.log('✅ Cleared filters from localStorage on page load');
+            // Mark that filters have been initialized (cleared) on this page load
+            this.state.filtersInitialized = false;
         } catch (e) {
             console.warn('Could not clear filters from localStorage:', e);
         }
@@ -11182,9 +11191,13 @@ const TagManager = {
         filterIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
-                    el.value = '';
+                el.value = '';
             }
         });
+        
+        // Mark filters as initialized (cleared) on page load
+        this.state.filtersInitialized = true;
+        
         // Don't apply filters immediately - let checkForExistingData handle it
         // this.applyFilters();
         
