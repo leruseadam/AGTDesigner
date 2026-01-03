@@ -1994,15 +1994,21 @@ const TagManager = {
         this._isUpdatingFilters = true;
 
         // Debug log for filters
-        console.log('🔧🔧🔧 updateFilters called with:', {
+        const filterCounts = {
             vendor: filters.vendor?.length || 0,
             brand: filters.brand?.length || 0,
             productType: filters.productType?.length || 0,
             lineage: filters.lineage?.length || 0,
             weight: filters.weight?.length || 0,
             preserveExistingValues
-        });
-        console.log('📍 updateFilters call stack:', new Error().stack);
+        };
+        console.log('🔧🔧🔧 updateFilters called with:', filterCounts);
+        try {
+            const stack = new Error().stack;
+            console.log('📍 updateFilters call stack:', stack);
+        } catch (e) {
+            console.error('Failed to get stack trace:', e);
+        }
         verboseLog('Updating filters with:', filters, 'preserveExistingValues:', preserveExistingValues);
 
         // CRITICAL FIX: Check if all filters are empty and we're trying to preserve values
