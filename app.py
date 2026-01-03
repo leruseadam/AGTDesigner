@@ -10026,9 +10026,9 @@ def get_available_tags():
             # Full lineage alignment will still be done later by non-fast-load or
             # prefer_db/refresh calls, but simple page refreshes stay instant.
             if fast_load and not prefer_db:
-                    # PERFORMANCE: Only align tags with database lineage if needed (skip if already aligned)
-                    # This avoids expensive database queries when tags already have lineage
-                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
+                # PERFORMANCE: Only align tags with database lineage if needed (skip if already aligned)
+                # This avoids expensive database queries when tags already have lineage
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
                 safe_all_tags = make_json_safe(aligned_cached_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(
