@@ -7088,16 +7088,23 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
             chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
             # CRITICAL FIX: Query sovereign_lineage (manual edits) with highest priority
+            # Join with strains table to get strain lineage values
             cursor.execute(f'''
-                SELECT "Product Name*", "Lineage", "canonical_lineage", "sovereign_lineage"
-                FROM products
-                WHERE LOWER("Product Name*") IN ({placeholders})
+                SELECT
+                    p."Product Name*",
+                    p."Lineage",
+                    p.sovereign_lineage,
+                    s.canonical_lineage,
+                    s.sovereign_lineage as strain_sovereign_lineage
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE LOWER(p."Product Name*") IN ({placeholders})
             ''', [name.lower() for name in chunk])
             for row in cursor.fetchall():
                 db_name = row[0]
-                # CRITICAL FIX: Prioritize sovereign_lineage (manual edits) > canonical_lineage > Lineage
+                # CRITICAL FIX: Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
                 # sovereign_lineage stores permanent manual edits and should always be used first
-                db_lineage = row[3] or row[2] or row[1]  # sovereign_lineage first, then canonical_lineage, then Lineage
+                db_lineage = row[2] or row[4] or row[3] or row[1]  # product.sovereign > strain.sovereign > canonical > Lineage
                 if db_name and db_lineage:
                     lineage_map[db_name.lower().strip()] = str(db_lineage).strip().upper()
         
@@ -9442,18 +9449,31 @@ def get_available_tags():
 
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         # CRITICAL: Only use cache if Excel file exists - never return database-only cache
+        # PERFORMANCE FIX: Use cached data more aggressively on reload to prevent loading entire database
         cached_tags = None
         if has_excel_data and not prefer_db and not nocache:
             cached_tags = cache.get(cache_key)
-            if cached_tags and fast_load:
-                # Fast path: return cached tags immediately without any processing
-                logging.info(f"⚡ FAST LOAD: Returning {len(cached_tags)} cached tags (skipping all enrichment)")
-                safe_cached_tags = make_json_safe(cached_tags)
-                return jsonify({
-                    'tags': safe_cached_tags,
-                    'total_count': len(safe_cached_tags),
-                    'source': 'cache-fast-load'
-                })
+            if cached_tags:
+                # CRITICAL: Always align cached tags with database lineage to ensure manual edits persist
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+                safe_cached_tags = make_json_safe(aligned_cached_tags)
+                if fast_load:
+                    # Fast path: return immediately without additional processing
+                    logging.info(f"⚡ FAST LOAD: Returning {len(safe_cached_tags)} cached tags (aligned with DB lineage)")
+                    return jsonify({
+                        'tags': safe_cached_tags,
+                        'total_count': len(safe_cached_tags),
+                        'source': 'cache-fast-load'
+                    })
+                else:
+                    # Normal path: return cached tags with alignment
+                    logging.info(f"✅ Returning {len(safe_cached_tags)} cached tags (aligned with DB lineage)")
+                    return jsonify({
+                        'tags': safe_cached_tags,
+                        'total_count': len(safe_cached_tags),
+                        'source': 'cache-reload',
+                        'message': f'Loaded {len(safe_cached_tags)} tags from cache'
+                    })
 
         # CRITICAL FIX: When no Excel file, return empty tags - DO NOT load from database
         # User only wants tags from Excel file, not entire database
@@ -10906,13 +10926,15 @@ def get_available_tags():
                                     
                                         # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
                                         # This ensures UI matches database method which uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                                        # PERFORMANCE FIX: Increase limit but still cap it to prevent loading entire database
+                                        MAX_PRODUCTS_LIMIT = 10000
                                         quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                                         query = f'''
                                             SELECT {quoted_columns}, COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                             FROM products p
                                             LEFT JOIN strains s ON p.strain_id = s.id
-                                    ORDER BY p.id DESC
-                                    LIMIT 2000
+                                            ORDER BY p.id DESC
+                                            LIMIT {MAX_PRODUCTS_LIMIT}
                                         '''
                                         try:
                                             main_cursor.execute(query)
@@ -10972,22 +10994,25 @@ def get_available_tags():
                             
                                 # PERFORMANCE: Use simpler query without strain join for faster loading
                                 # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
-                                # REMOVED LIMIT: Allow all products to be fetched (was limiting to 2000, causing missing products)
+                                # PERFORMANCE FIX: Add LIMIT to prevent loading entire database on reload (max 10000 products)
+                                MAX_PRODUCTS_LIMIT = 10000
                                 lineage_query_join_by_name = f'''
                                     SELECT {quoted_columns}, 
                                            COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                     FROM products p
                                     LEFT JOIN strains s ON p.strain_id = s.id
                                     ORDER BY p.id DESC
+                                    LIMIT {MAX_PRODUCTS_LIMIT}
                                 '''
                             
                                 # Fallback query if strains table/join fails - use this first for speed
-                                # REMOVED LIMIT: Allow all products to be fetched
+                                # PERFORMANCE FIX: Add LIMIT to prevent loading entire database
                                 lineage_query_fallback = f'''
                                     SELECT {quoted_columns}, 
                                            p."Lineage" AS preferred_lineage
                                     FROM products p
                                     ORDER BY p.id DESC
+                                    LIMIT {MAX_PRODUCTS_LIMIT}
                                 '''
                             
                                 # PERFORMANCE: Use simpler fallback query first (no join) for faster loading
