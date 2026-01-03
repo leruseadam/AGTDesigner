@@ -12129,7 +12129,7 @@ def update_lineage():
         cursor.execute("""
             UPDATE products
             SET sovereign_lineage = ?
-            WHERE \"Product Name*\" = ? OR ProductName = ?
+            WHERE "Product Name*" = ? OR ProductName = ?
         """, (new_lineage, tag_name, tag_name))
         products_sovereign_updated = cursor.rowcount
         if products_sovereign_updated > 0:
