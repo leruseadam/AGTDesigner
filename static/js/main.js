@@ -3224,9 +3224,12 @@ const TagManager = {
     },
 
     organizeBrandCategories(tags) {
+        console.log('🔧 organizeBrandCategories() called with', tags.length, 'tags');
+        console.log('📍 Call stack:', new Error().stack);
+
         const vendorGroups = new Map();
         let skippedTags = 0;
-        
+
         // CRITICAL FIX: Deduplicate by Product Name + Vendor + Price
         // This prevents true duplicates from showing in the list while keeping
         // products with different attributes (DOH, etc.) that share name/vendor
@@ -12107,6 +12110,34 @@ const TagManager = {
         const checkedFromUI = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"].tag-checkbox:checked')).map(cb => cb.value);
         if (checkedFromUI.length > 0) {
             this.state.persistentSelectedTags = checkedFromUI;
+        }
+
+        // CRITICAL FIX: Wait for any pending lineage updates to complete before generating
+        // This ensures lineage changes made right before clicking generate are saved
+        if (this._lineageUpdateTimeout || this._lineageUpdateProcessing) {
+            console.log('⏳ Waiting for pending lineage updates to complete before generating...');
+            const generateBtn = document.getElementById('generateBtn');
+            if (generateBtn) {
+                generateBtn.disabled = true;
+                generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving lineage...';
+            }
+
+            // Wait for debounce timeout to trigger processing
+            if (this._lineageUpdateTimeout) {
+                await new Promise(resolve => setTimeout(resolve, 600)); // Wait for 500ms debounce + 100ms buffer
+            }
+
+            // Wait for processing to complete (max 10 seconds)
+            const maxWait = 10000;
+            const startWait = Date.now();
+            while (this._lineageUpdateProcessing && (Date.now() - startWait) < maxWait) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            console.log('✅ Lineage updates complete, proceeding with generation');
+            if (generateBtn) {
+                generateBtn.innerHTML = 'Generate Tags';
+            }
         }
 
         console.time('debouncedGenerate');
