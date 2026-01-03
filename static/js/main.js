@@ -2356,9 +2356,14 @@ const TagManager = {
             verboseLog('⚡⚡⚡ Calling updateFilters with built options...');
             this.updateFilters(filterOptionsArrays, true);
             verboseLog('⚡⚡⚡ updateFilters completed');
-            
+
+            // CRITICAL FIX: Reset flag after completion
+            this._isBuildingFilters = false;
+
         } catch (error) {
             console.warn('Failed to build filter options from tags:', error);
+            // CRITICAL FIX: Reset flag on error too
+            this._isBuildingFilters = false;
         }
     },
     
