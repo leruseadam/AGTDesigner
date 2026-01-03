@@ -2002,6 +2002,7 @@ const TagManager = {
             weight: filters.weight?.length || 0,
             preserveExistingValues
         });
+        console.log('📍 updateFilters call stack:', new Error().stack);
         verboseLog('Updating filters with:', filters, 'preserveExistingValues:', preserveExistingValues);
 
         // CRITICAL FIX: Check if all filters are empty and we're trying to preserve values
