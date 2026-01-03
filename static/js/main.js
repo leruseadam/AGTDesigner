@@ -827,6 +827,11 @@ const AppLoadingSplash = {
     autoAdvanceInterval: null,
 
     show() {
+        // CRITICAL FIX: Prevent showing if already visible to avoid cycling
+        if (this.isVisible) {
+            console.log('⚠️ Splash already visible, skipping duplicate show()');
+            return;
+        }
         this.isVisible = true;
         this.currentStep = 0;
         // Emergency kill-switch: never let the splash sit indefinitely
@@ -4969,67 +4974,67 @@ const TagManager = {
             verboseLog('Select All Available checkbox not found');
         }
 
-        // Organize tags by vendor, brand, product type, weight (SAME HIERARCHY AS SELECTED TAGS)
+            // Organize tags by vendor, brand, product type, weight (SAME HIERARCHY AS SELECTED TAGS)
         // JSON matched tags now use the same rendering path as Excel tags for consistency
-        verboseLog('About to organize tags, tags length:', tags.length);
+            verboseLog('About to organize tags, tags length:', tags.length);
         
         let organizedTags;
-        
-        // CRITICAL FIX: For large datasets, organize asynchronously to prevent UI freeze
-        const LARGE_DATASET_THRESHOLD = 500;
-        if (tags.length > LARGE_DATASET_THRESHOLD) {
-            verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
-            // Show loading indicator while organizing
-            availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
             
-            // Organize in next event loop tick to prevent blocking
-            setTimeout(() => {
-                try {
-                    organizedTags = this.organizeBrandCategories(tags);
-                    verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
-                    verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
-                    // Continue with normal rendering flow
-                    this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
-                } catch (error) {
-                    console.error('Error organizing tags:', error);
-                    // CRITICAL FIX: Fallback to simple list rendering if organization fails
-                    console.log('🔄 Falling back to simple list rendering due to organization error');
-                    const sortedSimple = [...tags].sort((a, b) => {
-                        const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                        const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                        return aName.localeCompare(bName);
-                    });
-                    this._renderTagsInBatches(sortedSimple, tagList);
-                    availableTagsContainer.innerHTML = '';
-                    availableTagsContainer.appendChild(tagList);
-                    this._restoreCheckboxStates();
-                    this._restoreAvailableScrollPosition(savedScroll);
-                    
-                    // CRITICAL FIX: Re-enable scaling after rendering completes
-                    if (window.setTagRenderingState) {
-                        setTimeout(() => {
-                            window.setTagRenderingState(false);
-                            // Trigger scale after rendering completes
-                            if (window.scaleAppToFitDebounced) {
-                                window.scaleAppToFitDebounced(300);
-                            }
-                        }, 200);
+            // CRITICAL FIX: For large datasets, organize asynchronously to prevent UI freeze
+            const LARGE_DATASET_THRESHOLD = 500;
+            if (tags.length > LARGE_DATASET_THRESHOLD) {
+                verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
+                // Show loading indicator while organizing
+                availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
+                
+                // Organize in next event loop tick to prevent blocking
+                setTimeout(() => {
+                    try {
+                        organizedTags = this.organizeBrandCategories(tags);
+                        verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
+                        verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
+                        // Continue with normal rendering flow
+                        this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
+                    } catch (error) {
+                        console.error('Error organizing tags:', error);
+                        // CRITICAL FIX: Fallback to simple list rendering if organization fails
+                        console.log('🔄 Falling back to simple list rendering due to organization error');
+                        const sortedSimple = [...tags].sort((a, b) => {
+                            const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                            const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                            return aName.localeCompare(bName);
+                        });
+                        this._renderTagsInBatches(sortedSimple, tagList);
+                        availableTagsContainer.innerHTML = '';
+                        availableTagsContainer.appendChild(tagList);
+                        this._restoreCheckboxStates();
+                        this._restoreAvailableScrollPosition(savedScroll);
+                        
+                        // CRITICAL FIX: Re-enable scaling after rendering completes
+                        if (window.setTagRenderingState) {
+                            setTimeout(() => {
+                                window.setTagRenderingState(false);
+                                // Trigger scale after rendering completes
+                                if (window.scaleAppToFitDebounced) {
+                                    window.scaleAppToFitDebounced(300);
+                                }
+                            }, 200);
+                        }
                     }
-                }
-            }, 0);
-            return; // Exit early, rendering will continue in callback
-        }
-        
-        // Small dataset - organize synchronously (fast enough)
-        try {
-            organizedTags = this.organizeBrandCategories(tags);
-            verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
-            verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
-        } catch (error) {
-            console.error('Error organizing tags:', error);
-            // Fallback to simple list if organization fails
-            availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
-            return;
+                }, 0);
+                return; // Exit early, rendering will continue in callback
+            }
+            
+            // Small dataset - organize synchronously (fast enough)
+            try {
+                organizedTags = this.organizeBrandCategories(tags);
+                verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
+                verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
+            } catch (error) {
+                console.error('Error organizing tags:', error);
+                // Fallback to simple list if organization fails
+                availableTagsContainer.innerHTML = '<div class="tag-entry">Error organizing tags: ' + error.message + '</div>';
+                return;
         }
         
         // Create vendor sections
@@ -10913,9 +10918,21 @@ const TagManager = {
         // CRITICAL FIX: Prevent multiple initialization calls
         if (this.state.initialized || this._initializing) {
             console.log('⚠️ TagManager already initialized or initializing, skipping duplicate init call');
+            // CRITICAL FIX: Ensure splash is hidden if already initialized
+            if (AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
             return;
         }
         this._initializing = true;
+        
+        // CRITICAL FIX: Only show splash if not already visible to prevent cycling
+        if (!AppLoadingSplash.isVisible) {
+            AppLoadingSplash.show();
+            AppLoadingSplash.startAutoAdvance();
+            AppLoadingSplash.updateProgress(10, 'Initializing application...');
+        }
         
         // CRITICAL FIX: Clear filters from localStorage on page load so they reset
         try {
@@ -10983,7 +11000,7 @@ const TagManager = {
 
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
-        
+
         // CRITICAL FIX: Try to hydrate from cache IMMEDIATELY before showing any splash
         // This ensures tags appear instantly on page load if cache exists
         // BUT only if a file is uploaded
@@ -11008,11 +11025,13 @@ const TagManager = {
                     AppLoadingSplash.complete();
                 }
             } else {
-                // File exists - show splash
+                // File exists - show splash only if not already visible
                 console.log('⚡ No cache - showing splash');
-                AppLoadingSplash.show();
-                AppLoadingSplash.startAutoAdvance();
-                AppLoadingSplash.updateProgress(10, 'Initializing...');
+                if (!AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.show();
+                    AppLoadingSplash.startAutoAdvance();
+                    AppLoadingSplash.updateProgress(10, 'Initializing...');
+                }
             }
         }
 
@@ -11067,7 +11086,7 @@ const TagManager = {
             this._initializing = false;
             return;
         }
-        
+
         // Initialize empty state first (but don't clear if we have tags)
         this.clearInitialDataRetry();
         // CRITICAL FIX: Only initialize empty state if we don't have tags already
@@ -11131,15 +11150,15 @@ const TagManager = {
             }
             // CRITICAL FIX: Only retry if not already loading and tags are missing
             if (!this._checkingExistingData && (!this.state.tags || this.state.tags.length === 0)) {
-                console.log('🔄 Initialization failed, attempting direct tag fetch as fallback...');
-                this.fetchAndUpdateAvailableTags().then(() => {
-                    this.state.initialized = true;
-                    this._initializing = false;
-                }).catch(fetchErr => {
-                    console.error('Fallback fetch also failed:', fetchErr);
-                    this.state.initialized = true;
-                    this._initializing = false;
-                });
+            console.log('🔄 Initialization failed, attempting direct tag fetch as fallback...');
+            this.fetchAndUpdateAvailableTags().then(() => {
+                this.state.initialized = true;
+                this._initializing = false;
+            }).catch(fetchErr => {
+                console.error('Fallback fetch also failed:', fetchErr);
+                this.state.initialized = true;
+                this._initializing = false;
+            });
             } else {
                 this.state.initialized = true;
                 this._initializing = false;
@@ -11163,7 +11182,7 @@ const TagManager = {
         filterIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
-                el.value = '';
+                    el.value = '';
             }
         });
         // Don't apply filters immediately - let checkForExistingData handle it
@@ -11279,7 +11298,7 @@ const TagManager = {
         filterIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
-                el.value = '';
+                    el.value = '';
             }
         });
         
