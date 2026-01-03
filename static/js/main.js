@@ -4957,18 +4957,28 @@ const TagManager = {
             const LARGE_DATASET_THRESHOLD = 500;
             if (tags.length > LARGE_DATASET_THRESHOLD) {
                 verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
+
+                // CRITICAL FIX: Prevent duplicate organization if already in progress
+                if (this._isOrganizingTags) {
+                    console.log('⏭️ Skipping tag organization - already in progress');
+                    return;
+                }
+                this._isOrganizingTags = true;
+
                 // Show loading indicator while organizing
                 availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
-                
+
                 // Organize in next event loop tick to prevent blocking
                 setTimeout(() => {
                     try {
                         organizedTags = this.organizeBrandCategories(tags);
+                        this._isOrganizingTags = false; // Clear flag after completion
                         verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
                         verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
                         // Continue with normal rendering flow
                         this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
                     } catch (error) {
+                        this._isOrganizingTags = false; // Clear flag on error
                         console.error('Error organizing tags:', error);
                         // CRITICAL FIX: Fallback to simple list rendering if organization fails
                         console.log('🔄 Falling back to simple list rendering due to organization error');
