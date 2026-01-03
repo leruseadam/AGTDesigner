@@ -723,6 +723,13 @@ def clear_all_on_startup():
     except Exception as e:
         logging.warning(f"Failed to delete store selections file: {e}")
 
+    # CRITICAL: Also clear all caches to prevent wrong tags from previous session
+    try:
+        cache.clear()
+        logging.warning(f"🔥 STARTUP: Cleared all Flask caches - fresh start for all users")
+    except Exception as e:
+        logging.warning(f"Failed to clear cache on startup: {e}")
+
     logging.warning(f"🔥 STARTUP: Cleared all {count} store selections - STORE MODAL WILL SHOW FOR ALL USERS")
 
 # OPTION 2: Load persisted selections and only clear expired ones (12-hour persistence)
