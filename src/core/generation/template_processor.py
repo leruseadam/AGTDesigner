@@ -3287,19 +3287,19 @@ class TemplateProcessor:
                     if product_vendor is None or pd.isna(product_vendor) or str(product_vendor).lower() in ['nan', 'none', 'null', '']:
                         product_vendor = ''
                     enriched_vendor = product_vendor
-                
-                # Set vendor if we found one
-                if enriched_vendor and str(enriched_vendor).strip():
-                    # For vertical template, don't wrap with markers since it uses simple placeholders
-                    if self.template_type == 'vertical':
-                        label_context['ProductVendor'] = str(enriched_vendor).strip()
+
+                    # Set vendor if we found one
+                    if enriched_vendor and str(enriched_vendor).strip():
+                        # For vertical template, don't wrap with markers since it uses simple placeholders
+                        if self.template_type == 'vertical':
+                            label_context['ProductVendor'] = str(enriched_vendor).strip()
+                        else:
+                            label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
+                        self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}' (product_type: '{product_type}')")
                     else:
-                        label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
-                    self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}' (product_type: '{product_type}')")
-                else:
-                    # No vendor found anywhere, set to empty
-                    label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
-                    self.logger.warning(f"⚠️ VENDOR MISSING: No vendor data found for '{product_name}'")
+                        # No vendor found anywhere, set to empty
+                        label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
+                        self.logger.warning(f"⚠️ VENDOR MISSING: No vendor data found for '{product_name}'")
         # End of classic type vendor handling - non-classic types already have ProductVendor set to empty above
 
         # Generate QR code - special handling for preroll template
