@@ -111,7 +111,7 @@ CLASSIC_TYPES = {
     "flower", "bud",
     
     # Pre-roll types  
-    "pre-roll", "infused pre-roll", "preroll", "blunt", "flavored blunt",
+    "pre-roll", "infused pre-roll", "preroll",
     
     # Concentrate types (all variations)
     "concentrate", "solventless concentrate",

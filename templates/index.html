@@ -418,14 +418,11 @@
           return;
         }
         
-        // CRITICAL: Ensure modal is visible (remove any hidden states)
-        modalElement.style.visibility = 'visible';
-        modalElement.style.display = 'block';
-        
         // Check if Bootstrap is available
         if (typeof bootstrap === 'undefined') {
           console.error('❌ Bootstrap not available, using fallback method');
           // Fallback: Show modal manually if Bootstrap isn't loaded
+          modalElement.style.display = 'block';
           modalElement.classList.add('show');
           modalElement.setAttribute('aria-hidden', 'false');
           modalElement.setAttribute('aria-modal', 'true');
@@ -436,7 +433,7 @@
           if (!document.querySelector('.modal-backdrop')) {
             const backdrop = document.createElement('div');
             backdrop.className = 'modal-backdrop fade show';
-            backdrop.style.zIndex = '10000';
+            backdrop.style.zIndex = '1040';
             document.body.appendChild(backdrop);
           }
           
@@ -468,12 +465,10 @@
         try {
           const modalElement = document.getElementById('storeSelectionModal');
           if (modalElement) {
-            modalElement.style.visibility = 'visible';
             modalElement.style.display = 'block';
             modalElement.classList.add('show');
             modalElement.setAttribute('aria-hidden', 'false');
             document.body.classList.add('modal-open');
-            document.body.style.overflow = 'hidden';
             console.log('✅ Modal shown using error fallback');
           }
         } catch (fallbackError) {
@@ -1064,23 +1059,8 @@
           }),
           // Defer analytics - load after page is interactive
           Promise.resolve({ error: 'Deferred' }),
-          // Only load available tags immediately (critical for UI) - but only if a file is uploaded
-          (() => {
-            // Check if a file is uploaded before fetching tags
-            const fileInfoText = document.getElementById('fileInfoText');
-            const hasFile = fileInfoText && fileInfoText.textContent.trim() !== 'No file uploaded' && fileInfoText.textContent.trim() !== '';
-            const uploadedFilename = sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path');
-            
-            if (!hasFile && !uploadedFilename) {
-              console.log('⚠️ No file uploaded - skipping tag load');
-              return Promise.resolve([]);
-            }
-            
-            return fetchWithTimeout('/api/web/available-tags?fast_load=1', 5000).catch(e => { 
-              console.error('Available tags failed:', e); 
-              return []; 
-            });
-          })()
+          // Only load available tags immediately (critical for UI)
+          fetchWithTimeout('/api/web/available-tags', 10000).catch(e => { console.error('Available tags failed:', e); return []; })
         ])
         .then((results) => {
           console.log('All promises settled:', results);
@@ -5765,7 +5745,7 @@
                   <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0; min-height: 80px; justify-content: center;">
                     <!-- File Path Display (Above buttons) -->
                     <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px !important; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
                         {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
                       </span>
                     </div>
@@ -5805,25 +5785,25 @@
                   <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="margin-left: 0.5rem;">
                     <div class="filter-group">
                       <label for="vendorFilter" class="filter-label">VENDOR</label>
-                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 48px !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: center !important; text-align-last: center !important;">
+                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="brandFilter" class="filter-label">BRAND</label>
-                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 48px !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: center !important; text-align-last: center !important;">
+                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
-                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 48px !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: center !important; text-align-last: center !important;">
+                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
-                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 12px !important; line-height: 1.4 !important; width: 100% !important; min-width: 280px !important;">
+                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 18px !important; line-height: 1.4 !important; width: 100% !important; min-width: 280px !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
@@ -5835,7 +5815,7 @@
                     </div>
                     <div class="filter-group">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
-                      <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 12px !important; line-height: 1.4 !important; min-width: 280px !important;">
+                      <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 18px !important; line-height: 1.4 !important; min-width: 280px !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
@@ -5858,7 +5838,6 @@
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">CURRENT INVENTORY</h5>
-                  <span class="badge badge-modern" id="availableTagsCount">(0)</span>
                 </div>
                 <div class="search-input-container">
                   <input type="text" id="availableTagsSearch" class="form-control form-control-modern" placeholder="Search available tags...">
@@ -5900,7 +5879,7 @@
               <!-- Template Section -->
               <div class="control-section mb-2">
                 <label for="templateSelect" class="filter-label">TEMPLATE</label>
-                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 54px 1rem 42px !important; font-size: 18px !important; line-height: 1.5 !important; width: auto !important; min-width: 250px !important; max-width: none !important; margin: 0 auto !important; display: block !important; overflow: visible !important; text-align: center !important; text-align-last: center !important;">
+                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 48px !important; font-size: 18px !important; line-height: 1.5 !important; width: auto !important; min-width: 250px !important; max-width: none !important; margin: 0 auto !important; display: block !important; overflow: visible !important; text-align: center !important; text-align-last: center !important;">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
@@ -5909,7 +5888,7 @@
                   <option value="inventory">Inventory</option>
                 </select>
 
-                <button id="generateBtn" class="btn-generate-themed" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 70% !important; max-width: 70% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important; margin: 1.5rem auto 0 auto !important; display: block !important;">
+                <button id="generateBtn" class="btn-generate-themed mt-2" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 85% !important; max-width: 85% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important; margin: 0 auto !important; display: block !important;">
                   Generate Tags
                 </button>
 
@@ -6067,7 +6046,7 @@
   <!-- Modals -->
   
   <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
-  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 10001 !important;">
+  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
       <div class="modal-content glass-card">
         <div class="modal-header border-0" style="padding: 1.6rem 1.8rem 1rem;">
@@ -6151,23 +6130,6 @@
     (function() {
       console.log('🚀 FIRST SCRIPT - Modal control starting (checking backend)');
       
-      // CRITICAL: Ensure store modal is hidden initially to prevent flash over loading splash
-      const modalElement = document.getElementById('storeSelectionModal');
-      if (modalElement) {
-        modalElement.style.display = 'none';
-        modalElement.style.visibility = 'hidden';
-        modalElement.classList.remove('show');
-      }
-      
-      // CRITICAL: Don't clear sessionStorage on page load - trust backend session
-      // Backend session is the source of truth, sessionStorage is just for frontend validation
-      const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
-      if (sessionTimestamp) {
-        const timestamp = parseInt(sessionTimestamp, 10);
-        const age = Date.now() - timestamp;
-        console.log('✅ sessionStorage exists (age:', age, 'ms) - will validate with backend');
-      }
-      
       // CRITICAL: Hide main content initially until we know store status
       const mainContent = document.getElementById('mainContent');
       if (mainContent) {
@@ -6176,34 +6138,19 @@
       }
       
       // Always check backend for store selection (don't rely on sessionStorage)
-      // CRITICAL: Add force_store_modal parameter to ensure fresh check
-      const cacheBust = `ts=${Date.now()}&force_store_modal=false`;
+      const cacheBust = `ts=${Date.now()}`;
       fetch(`/api/check-store-required?${cacheBust}`, {
         method: 'GET',
         credentials: 'same-origin',
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        }
+        cache: 'no-store'
       })
       .then(response => response.json())
       .then(data => {
         console.log('Backend store check response:', data);
-        console.log('🔍 Early check - requires_store:', data.requires_store, 'store:', data.store);
         
-        // CRITICAL: Backend returns 'requires_store' - if true, we MUST show modal
-        // Only trust store if requires_store is explicitly false AND store exists
-        const requiresStore = data.requires_store === true;
-        const hasValidStore = data.requires_store === false && data.store && data.store.trim() !== '';
-        const storeName = hasValidStore ? data.store : null;
-        
-        console.log('🔍 Early check decision:', {
-          requiresStore: requiresStore,
-          hasValidStore: hasValidStore,
-          storeName: storeName
-        });
+        // Backend returns 'requires_store', not 'required'
+        const requiresStore = data.requires_store === true || data.required === true;
+        const storeName = data?.store || null;
         
         const forceShowModal = () => {
           console.log('🔄 Forcing store modal to display...');
@@ -6211,15 +6158,6 @@
           window.STORE_MODAL_BLOCKING = true;
 
           const attemptShow = () => {
-            // CRITICAL: Wait for loading splash to be hidden before showing modal
-            const loadingSplash = document.getElementById('appLoadingSplash');
-            if (loadingSplash && loadingSplash.style.display !== 'none' && !loadingSplash.classList.contains('fade-out')) {
-              // Loading splash is still visible, wait a bit longer
-              console.log('⏳ Waiting for loading splash to hide before showing store modal...');
-              setTimeout(attemptShow, 200);
-              return;
-            }
-            
             if (typeof window.showStoreSelectionModal === 'function') {
               window.showStoreSelectionModal();
             } else {
@@ -6229,7 +6167,6 @@
                   const modalInstance = (typeof bootstrap !== 'undefined')
                     ? bootstrap.Modal.getOrCreateInstance(modalElement, { backdrop: 'static', keyboard: false })
                     : null;
-                  modalElement.style.visibility = 'visible';
                   modalElement.style.display = 'block';
                   modalElement.classList.add('show');
                   modalElement.setAttribute('aria-hidden', 'false');
@@ -6239,7 +6176,7 @@
                     const backdrop = document.createElement('div');
                     backdrop.id = 'storeModalBackdrop';
                     backdrop.className = 'modal-backdrop fade show';
-                    backdrop.style.zIndex = '10000';
+                    backdrop.style.zIndex = '9998';
                     document.body.appendChild(backdrop);
                   }
                   if (modalInstance) {
@@ -6273,51 +6210,16 @@
           }
         };
         
-        // CRITICAL: Check BOTH backend AND sessionStorage
-        // Even if backend has a store, if sessionStorage doesn't match, show modal
-        const sessionStore = sessionStorage.getItem('selected_store');
-        const sessionJustSelected = sessionStorage.getItem('store_just_selected') === 'true';
-        const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
-        
-        // CRITICAL FIX: Trust backend session - if backend says store is valid, use it
-        // Only check sessionStorage as a secondary validation, not a blocker
-        // Backend session is the source of truth
-        let sessionStoreValid = true; // Default to valid if backend says so
-        if (sessionStore && sessionJustSelected && sessionTimestamp) {
-          const timestamp = parseInt(sessionTimestamp, 10);
-          const age = Date.now() - timestamp;
-          // Only invalidate if sessionStorage is very old (more than 24 hours) AND doesn't match backend
-          sessionStoreValid = (age < 86400000) || (sessionStore === storeName); // 24 hours or matches backend
-          console.log('🔍 sessionStorage check:', {
-            sessionStore,
-            sessionJustSelected,
-            sessionAge: age,
-            sessionStoreValid,
-            backendStore: storeName
-          });
-        }
-        
-        // CRITICAL FIX: Trust backend - if backend says store is valid, show content
-        // Only show modal if backend explicitly requires it
-        if (requiresStore || (!hasValidStore && !sessionStore)) {
-          console.log('❗ No valid store match - showing modal');
-          console.log('❗ Details:', {
-            requiresStore,
-            hasValidStore,
-            backendStore: data.store,
-            sessionStore,
-            sessionStoreValid,
-            storesMatch: sessionStore === storeName
-          });
+        if (requiresStore || !storeName) {
+          console.log('❗ No store selected in backend - showing modal');
           forceShowModal();
           return;
         }
 
-        console.log('✅ Valid store match (backend + sessionStorage):', storeName, '- showing content');
-        // Ensure sessionStorage is set (should already be, but ensure it)
+        console.log('✅ Store available from backend:', storeName, '- showing content');
         sessionStorage.setItem('selected_store', storeName);
-        sessionStorage.setItem('store_just_selected', 'true');
-        sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
+        sessionStorage.removeItem('store_just_selected');
+        sessionStorage.removeItem('store_selected_timestamp');
 
         window.STORE_MODAL_BLOCKING = false;
 
@@ -8058,72 +7960,52 @@
         }
       });
       
-      // CRITICAL FIX: Setup ALL filter event listeners to trigger search when changed
+      // DOH FILTER FUNCTIONALITY - Make the DOH dropdown in filter bar work
       setTimeout(() => {
-        console.log('🔧 Setting up filter event listeners...');
-
-        // Debounce timer to prevent rapid-fire searches
-        let filterDebounceTimer = null;
-
-        // List of all filter IDs that should trigger search on change
-        const filterIds = [
-          'brandFilter',
-          'productTypeFilter',
-          'lineageFilter',
-          'weightFilter',
-          'dohFilter',
-          'highCbdFilter'
-          // Note: vendorFilter is handled separately because it's in a different context
-        ];
-
-        // Attach event listeners to each filter
-        filterIds.forEach(filterId => {
-          const filterElement = document.getElementById(filterId);
-          if (filterElement) {
-            // Remove any existing listeners to prevent duplicates
-            const newFilter = filterElement.cloneNode(true);
-            filterElement.parentNode.replaceChild(newFilter, filterElement);
-
-            // Add the event listener to trigger search
-            newFilter.addEventListener('change', function() {
-              const selectedValue = this.value;
-              console.log(`📊 ${filterId} changed to:`, selectedValue);
-
-              // Visual feedback for DOH filter
-              if (filterId === 'dohFilter') {
-                const filterLabel = document.querySelector('label[for="dohFilter"]');
-                if (filterLabel && selectedValue !== 'All') {
-                  filterLabel.style.color = '#ff6600';
-                  filterLabel.style.fontWeight = 'bold';
-                  filterLabel.innerHTML = `DOH COMPLIANCE (${selectedValue})`;
-                } else if (filterLabel) {
-                  filterLabel.style.color = '';
-                  filterLabel.style.fontWeight = '';
-                  filterLabel.innerHTML = 'DOH COMPLIANCE';
+        console.log('Setting up DOH filter functionality...');
+        const dohFilter = document.getElementById('dohFilter');
+        if (dohFilter) {
+          console.log('DOH filter found, adding event listener...');
+          
+          // Add change event listener
+          dohFilter.addEventListener('change', function() {
+            const selectedValue = this.value;
+            console.log('DOH filter changed to:', selectedValue);
+            
+            // Add visual feedback
+            const filterLabel = document.querySelector('label[for="dohFilter"]');
+            if (filterLabel && selectedValue !== 'All') {
+              filterLabel.style.color = '#ff6600';
+              filterLabel.style.fontWeight = 'bold';
+              filterLabel.innerHTML = `DOH COMPLIANCE (${selectedValue})`;
+            } else if (filterLabel) {
+              filterLabel.style.color = '';
+              filterLabel.style.fontWeight = '';
+              filterLabel.innerHTML = 'DOH COMPLIANCE';
+            }
+            
+            // You can add actual filtering logic here
+            console.log('DOH filter is now set to:', selectedValue);
+            
+            // Show confirmation message
+            if (selectedValue !== 'All') {
+              const confirmDiv = document.createElement('div');
+              confirmDiv.style.cssText = 'position: fixed; top: 10px; right: 10px; background: #28a745; color: white; padding: 15px; border-radius: 5px; z-index: 10000; font-weight: bold;';
+              confirmDiv.innerHTML = `✅ DOH Filter Applied: ${selectedValue}`;
+              document.body.appendChild(confirmDiv);
+              
+              setTimeout(() => {
+                if (confirmDiv.parentNode) {
+                  confirmDiv.remove();
                 }
-              }
-
-              // CRITICAL: Debounced search to prevent rapid-fire when changing multiple filters
-              clearTimeout(filterDebounceTimer);
-              filterDebounceTimer = setTimeout(() => {
-                const productSearchInput = document.getElementById('productSearch');
-                if (productSearchInput && window.searchProducts && window.selectedVendor) {
-                  // Re-run search with current search term and new filters
-                  console.log(`🔍 Triggering search after ${filterId} change`);
-                  window.searchProducts(productSearchInput.value || '');
-                } else {
-                  console.log(`⚠️ Search not triggered - vendor: ${window.selectedVendor}, searchProducts: ${typeof window.searchProducts}`);
-                }
-              }, 300); // Wait 300ms after last filter change before searching
-            });
-
-            console.log(`✅ ${filterId} event listener attached`);
-          } else {
-            console.warn(`⚠️ ${filterId} element not found`);
-          }
-        });
-
-        console.log('✅ All filter event listeners setup complete!');
+              }, 3000);
+            }
+          });
+          
+          console.log('DOH filter is now functional!');
+        } else {
+          console.error('DOH filter element not found');
+        }
       }, 1000);
 
       // Store check handled by backend template rendering
@@ -8987,7 +8869,7 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-view').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
-        fetch('/api/web/available-tags?fast_load=1').then(r => r.json())
+        fetch('/api/web/available-tags').then(r => r.json())
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
         const totalProducts = availableTags.length;
@@ -9411,25 +9293,7 @@
         matchCount.textContent = matchResult.matched_count || 0;
         
         // Populate matched products list with note about where they were added
-        // Use json_matched_tags to get properly formatted product names like Excel tags
-        const matchedTags = matchResult.json_matched_tags || [];
-        if (matchedTags.length > 0) {
-          matchedProductsList.innerHTML = `
-            <div class="alert alert-success mb-3">
-              <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
-              <br>Please review the available tags and select the items you need.
-            </div>
-            <div class="mb-2"><strong>Matched Products:</strong></div>
-            ${matchedTags
-              .map(tag => {
-                // Use the formatted Product Name* field which matches Excel tag format
-                const productName = tag['Product Name*'] || tag.ProductName || tag.displayName || 'Unknown Product';
-                return `<div class="mb-1">• ${productName}</div>`;
-              })
-              .join('')}
-          `;
-        } else if (matchResult.matched_names && matchResult.matched_names.length > 0) {
-          // Fallback to matched_names if json_matched_tags not available
+        if (matchResult.matched_names && matchResult.matched_names.length > 0) {
           matchedProductsList.innerHTML = `
             <div class="alert alert-success mb-3">
               <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
@@ -10991,7 +10855,7 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
         fetch('/api/database-analytics').then(r => r.json()).catch(() => ({})),
-        fetch('/api/web/available-tags?fast_load=1').then(r => r.json())
+        fetch('/api/web/available-tags').then(r => r.json())
       ])
       .then(([stats, vendorStats, analytics, availableTags]) => {
           const totalProducts = availableTags.length;

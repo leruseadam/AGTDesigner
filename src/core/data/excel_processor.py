@@ -3405,14 +3405,26 @@ class ExcelProcessor:
                 is_duplicate = True
                 duplicate_reason = "same product with different weight"
             elif tertiary_key in seen_product_keys:
-                # PERFORMANCE: Use a dictionary to track weights by product+vendor for O(1) lookup
                 # Only flag as duplicate if the weight difference is small (likely same product)
-                # Check if we've seen this product+vendor combination before
                 existing_weight = None
-                # Use tertiary_key to lookup weight from a separate tracking dict (if we had one)
-                # For now, skip this expensive check - it's rarely needed and slows down tag loading
-                # Most duplicates are caught by primary_key and secondary_key checks above
-                pass  # Skip tertiary key weight comparison for performance
+                for key in seen_product_keys:
+                    if key.startswith(f"{product_name}|{vendor_value}|"):
+                        try:
+                            existing_weight = float(key.split('|')[-1])
+                            break
+                        except:
+                            continue
+                
+                if existing_weight and weight_value:
+                    try:
+                        current_weight = float(weight_value)
+                        weight_diff = abs(existing_weight - current_weight)
+                        # If weight difference is less than 10%, consider it a duplicate
+                        if weight_diff < max(existing_weight, current_weight) * 0.1:
+                            is_duplicate = True
+                            duplicate_reason = f"same product with similar weight ({existing_weight} vs {current_weight})"
+                    except:
+                        pass
             
             if is_duplicate:
                 logger.info(f"🔄 ENHANCED DEDUPLICATION: Skipping duplicate product '{product_name}' - {duplicate_reason}")
@@ -3579,14 +3591,8 @@ class ExcelProcessor:
         logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
         logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
         
-        # PERFORMANCE: Skip enrichment by default for fast tag loading
-        # Enrichment is expensive and lineage alignment in app.py handles database sync
-        # Set _skip_enrichment=False to enable enrichment when needed
-        if not getattr(self, '_skip_enrichment', True):  # Default to True (skip enrichment)
-            sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
-        else:
-            # Skip enrichment for performance - lineage alignment in app.py will handle database sync
-            logger.debug("⚡ Skipping enrichment for fast tag loading")
+        # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
+        sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
         
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)

@@ -38,12 +38,12 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(5, 14), (10, 12), (15, 10), (float('inf'), 8)],
                     'doh': [(5, 12), (10, 11), (float('inf'), 10)],
-                    'vendor': [(10, 6), (float('inf'), 5)],
+                    'vendor': [(10, 5), (float('inf'), 5)],
                     'qr': [(float('inf'), 24)],  # QR codes: Small size for mini template
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
                 'double': {
-                    'description': [(10, 28), (20, 26), (30, 23), (40, 22), (50, 20), (60, 18), (70, 16), (80, 15), (90, 14), (100, 13), (110, 12), (120, 11), (130, 10), (float('inf'), 9)],
+                    'description': [(10, 28), (20, 26), (30, 23), (40, 22), (50, 20), (60, 19), (70, 18), (80, 17), (90, 16), (100, 15), (110, 14), (120, 13), (130, 12), (float('inf'), 10)],
                     'brand': [(5, 12), (15, 10), (20, 8), (30, 7.5), (40, 7), (float('inf'), 6.5)],
                     'price': [(10, 26), (15, 21), (float('inf'), 14)],
                     'lineage': [(15, 14), (25, 13), (35, 10), (45, 9), (float('inf'), 9)],
@@ -52,7 +52,7 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 20), (25, 16), (float('inf'), 13)],
-                    'vendor': [(10, 6), (float('inf'), 5)],
+                    'vendor': [(10, 5), (float('inf'), 5)],
                     'qr': [(float('inf'), 36)],  # QR codes: Medium size for double template
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
@@ -66,27 +66,27 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 20), (25, 18), (35, 16), (float('inf'), 14)],
                     'doh': [(15, 24), (25, 20), (float('inf'), 18)],
-                    'vendor': [(10, 6), (float('inf'), 5)],
+                    'vendor': [(10, 5), (20, 4), (float('inf'), 4)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
                 'horizontal': {
-                    'description': [(10, 36), (20, 34), (25, 32), (30, 28), (35, 27), (40, 26), (45, 24), (50, 22), (70, 21), (100, 19), (120, 18), (float('inf'), 16)],
-                    'brand': [(20, 18), (40, 16), (120, 14), (140, 12), (160, 10), (float('inf'), 10)],
-                    'price': [(5, 40), (10, 38), (20, 36), (80, 20), (float('inf'), 18)],
-                    'lineage': [(10, 20), (80, 18), (60, 10), (float('inf'), 10)],
-                    'ratio': [(10, 14), (20, 12), (30, 10), (40, 9), (50, 8), (60, 7), (70, 6), (float('inf'), 5)],
-                    'thc_cbd': [(10, 14), (float('inf'), 14)],
+                    'description': [(10, 44), (20, 42), (25, 40), (30, 36), (35, 35), (40, 34), (45, 32), (50, 30), (70, 29), (100, 28), (120, 26), (float('inf'), 24)],
+                    'brand': [(20, 24), (40, 22), (120, 20), (140, 18), (160, 16), (float('inf'), 16)],
+                    'price': [(5, 48), (10, 46), (20, 44), (80, 28), (float('inf'), 26)],
+                    'lineage': [(10, 26), (60, 24), (80, 20), (float('inf'), 16)],
+                    'ratio': [(10, 18), (20, 16), (30, 14), (40, 13), (50, 12), (60, 11), (70, 10), (float('inf'), 9)],
+                    'thc_cbd': [(10, 18), (float('inf'), 18)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'weight': [(15, 18), (25, 16), (35, 14), (float('inf'), 12)],
-                    'doh': [(15, 22), (25, 18), (float('inf'), 16)],
-                    'vendor': [(10, 6), (float('inf'), 6)],
+                    'weight': [(15, 24), (25, 22), (35, 20), (float('inf'), 18)],
+                    'doh': [(15, 28), (25, 24), (float('inf'), 22)],
+                    'vendor': [(10, 5), (float('inf'), 5)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for horizontal template
-                    'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
+                    'default': [(20, 24), (40, 22), (60, 20), (float('inf'), 18)]
                 },
                 'preroll': {
                     # Preroll template: Copy all settings from mini template (identical font sizing)
-                    'description': [(5, 18), (15, 17), (20, 16), (30, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
+                    'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
                     'brand': [(5, 9), (20, 8), (30, 6.5), (float('inf'), 6)],
                     'price': [(5, 20), (float('inf'), 17)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],

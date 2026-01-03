@@ -152,7 +152,6 @@ class TemplateProcessor:
         self._expanded_template_buffer = self._expand_template_if_needed()
         self._dynamic_template_created = False  # Track if dynamic template was created
         self._last_dynamic_count = None  # Track last product count used to build dynamic buffer
-        self._vendor_fallback = None  # Vendor to use as fallback when records are vendor-filtered but individual records have missing vendor
         
         # Set chunk size based on template type with performance limits
         if not IS_PYTHONANYWHERE:
@@ -1070,30 +1069,6 @@ class TemplateProcessor:
         documents = []
         # FULLY DISABLE CHUNKING for horizontal, vertical, and double templates
         try:
-            # VENDOR FALLBACK: Detect if records were filtered by vendor (all have same vendor)
-            # If so, use that vendor as fallback for records with missing vendor
-            # PERFORMANCE: Sample first 50 records instead of checking all to speed up detection
-            self._vendor_fallback = None
-            if records:
-                vendor_counts = {}
-                sample_size = min(50, len(records))  # Sample first 50 records for speed
-                sample_records = records[:sample_size]
-                
-                for record in sample_records:
-                    vendor = (record.get('Vendor') or record.get('Vendor/Supplier*') or 
-                             record.get('Vendor/Supplier') or record.get('ProductVendor', ''))
-                    if vendor and not pd.isna(vendor) and str(vendor).strip() and str(vendor).lower() not in ['nan', 'none', 'null', '']:
-                        vendor_str = str(vendor).strip()
-                        vendor_counts[vendor_str] = vendor_counts.get(vendor_str, 0) + 1
-                
-                # If one vendor dominates (appears in >50% of sampled records), use it as fallback
-                if vendor_counts:
-                    total_with_vendor = sum(vendor_counts.values())
-                    most_common_vendor = max(vendor_counts.items(), key=lambda x: x[1])
-                    if most_common_vendor[1] >= total_with_vendor * 0.5 and most_common_vendor[1] >= 2:
-                        self._vendor_fallback = most_common_vendor[0]
-                        # Only log if we actually use it (reduces logging overhead)
-            
             if self.template_type in ['horizontal', 'vertical', 'double']:
                 self.chunk_size = len(records)
                 self.logger.info(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
@@ -1451,18 +1426,7 @@ class TemplateProcessor:
                 # Debug logging to check field values and order (only for first few labels to reduce overhead)
                 if i < 3:
                     product_name = record.get('ProductName', 'Unknown')
-                    product_type = record.get('ProductType', '') or record.get('Product Type*', '')
-                    product_vendor = label_context.get('ProductVendor', 'NOT_FOUND')
-                    # Unwrap vendor to see actual value
-                    if product_vendor != 'NOT_FOUND' and 'PRODUCTVENDOR_START' in str(product_vendor):
-                        try:
-                            vendor_value = unwrap_marker(product_vendor, 'PRODUCTVENDOR')
-                            product_vendor = f"'{vendor_value}' (wrapped)"
-                        except:
-                            pass
-                    # Also check vendor from record directly
-                    vendor_from_record_debug = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor') or 'NOT_IN_RECORD'
-                    self.logger.info(f"🔍 CONTEXT DEBUG Label{i+1} -> {product_name} (type: {product_type}) - ProductVendor in context: {product_vendor}, Vendor in record: '{vendor_from_record_debug}', _vendor_from_record: '{label_context.get('_vendor_from_record', 'NOT_SET')}'")
+                    self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
             
             # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
             # to prevent Jinja template errors when template references missing labels
@@ -1761,24 +1725,10 @@ class TemplateProcessor:
                 # Fallback to record if not in label_context
                 val = record.get(field_name)
             
-            # CRITICAL: More thorough check - handle empty strings, None, NaN, and whitespace-only values
-            if val is not None:
-                # Check if it's NaN using pandas
-                if not pd.isna(val):
-                    val_str = str(val).strip()
-                    val_lower = val_str.lower()
-                    # Check if it's a valid non-empty value
-                    if val_str and val_lower not in ['nan', 'none', 'null', '']:
-                        vendor_from_record = val_str
-                        self.logger.info(f"✅ EARLY VENDOR EXTRACTION: Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
-                        break
-                    else:
-                        # Log why it was rejected
-                        self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' has value '{repr(val)}' (stripped: '{val_str}') which is empty/invalid for '{product_name}'")
-                else:
-                    self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' is NaN for '{product_name}'")
-            else:
-                self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' is None for '{product_name}'")
+            if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
+                vendor_from_record = str(val).strip()
+                self.logger.info(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
+                break
         
         # If not found in standard fields, check ALL vendor-related keys from BOTH label_context and record
         if not vendor_from_record and vendor_related_keys:
@@ -1793,16 +1743,6 @@ class TemplateProcessor:
                     self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
                     break
         
-        # VENDOR FALLBACK: If vendor not found in record but we detected vendor filtering, use the fallback vendor
-        if not vendor_from_record and hasattr(self, '_vendor_fallback') and self._vendor_fallback:
-            vendor_from_record = self._vendor_fallback
-            # Reduced logging for performance - only log first few instances
-            if not hasattr(self, '_vendor_fallback_logged_count'):
-                self._vendor_fallback_logged_count = 0
-            if self._vendor_fallback_logged_count < 3:
-                self.logger.info(f"✅ VENDOR FALLBACK: Using detected vendor '{vendor_from_record}' for '{product_name}' (vendor was missing from record)")
-                self._vendor_fallback_logged_count += 1
-        
         # Store vendor early so it's available throughout processing
         if vendor_from_record:
             label_context['_vendor_from_record'] = vendor_from_record
@@ -1813,24 +1753,9 @@ class TemplateProcessor:
             else:
                 label_context['ProductVendor'] = f"PRODUCTVENDOR_START{vendor_from_record}PRODUCTVENDOR_END"
         else:
-            # CRITICAL FIX: Always initialize ProductVendor, even if empty, so fallback logic can detect and populate it
-            # Initialize as empty with markers so the fallback logic can properly detect it needs to be populated
-            if self.template_type == 'vertical':
-                label_context['ProductVendor'] = ''
-            else:
-                label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
             # Log warning with all available keys for debugging
             all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
-            # Also log actual values from vendor fields to see if they're empty or have different names
-            vendor_field_values = {}
-            for field in vendor_field_names:
-                val = record.get(field)
-                vendor_field_values[field] = f"value={repr(val)}, type={type(val).__name__}, is_na={pd.isna(val) if hasattr(pd, 'isna') else 'N/A'}"
-            # Also check vendor-related keys
-            for key in vendor_related_keys:
-                val = record.get(key)
-                vendor_field_values[key] = f"value={repr(val)}, type={type(val).__name__}, is_na={pd.isna(val) if hasattr(pd, 'isna') else 'N/A'}"
-            self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Vendor field values: {vendor_field_values}, Sample record keys: {all_keys_sample}")
+            self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Sample record keys: {all_keys_sample}")
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
@@ -2490,13 +2415,7 @@ class TemplateProcessor:
                 self.logger.info(f"✅ BRAND UPDATED: Product '{product_name}' brand set to '{enriched_brand}' in context")
         
         # Check if it's a classic type
-        # CRITICAL: Ensure case-insensitive comparison
-        product_type_lower = product_type.lower() if product_type else ''
-        classic_types_lower = {t.lower() for t in classic_types}
-        is_classic_type = product_type_lower in classic_types_lower
-        # Debug logging for blunts and pre-rolls to diagnose vendor issues
-        if product_name and ('blunt' in product_name.lower() or 'pre-roll' in product_name.lower()):
-            self.logger.info(f"🔍 CLASSIC TYPE CHECK: '{product_name}' - product_type: '{product_type}', product_type_lower: '{product_type_lower}', is_classic: {is_classic_type}, classic_types includes blunt: {'blunt' in classic_types_lower}")
+        is_classic_type = product_type in classic_types
         
         if is_classic_type:
             # For classic types, Lineage should show strain lineage and ProductVendor should show brand
@@ -2649,26 +2568,8 @@ class TemplateProcessor:
             # CRITICAL: Check if ProductVendor was already set at the start (from _vendor_from_record)
             # If so, preserve it - don't overwrite with empty
             existing_vendor = label_context.get('ProductVendor', '')
-            # Check if existing_vendor has actual content (unwrap markers to check)
-            existing_vendor_has_content = False
-            if existing_vendor and str(existing_vendor).strip():
-                try:
-                    # unwrap_marker is already imported at the top of the file
-                    unwrapped = unwrap_marker(str(existing_vendor), 'PRODUCTVENDOR')
-                    if unwrapped and str(unwrapped).strip():
-                        existing_vendor_has_content = True
-                except:
-                    # If unwrapping fails, check if it's just the plain value (no markers)
-                    if 'PRODUCTVENDOR_START' not in str(existing_vendor):
-                        existing_vendor_has_content = True
-                    else:
-                        # Has markers, check if content between markers is non-empty
-                        match = re.search(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', str(existing_vendor))
-                        if match and match.group(1).strip():
-                            existing_vendor_has_content = True
-            
-            if existing_vendor_has_content:
-                # ProductVendor was set at the start with content, keep it
+            if existing_vendor and str(existing_vendor).strip() and 'PRODUCTVENDOR_START' not in str(existing_vendor):
+                # ProductVendor was set at the start, keep it
                 self.logger.info(f"✅ Preserving ProductVendor set at start: '{existing_vendor}' for '{product_name}'")
             elif vendor_val and str(vendor_val).strip():
                 # For vertical template, don't wrap with markers since it uses simple placeholders
@@ -2689,13 +2590,8 @@ class TemplateProcessor:
                     self.logger.info(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
                 else:
                     # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
-                    # CRITICAL FIX: Set with markers when empty so fallback logic can detect and populate it
-                    # Use the same check as above to see if existing_vendor has content
-                    if not existing_vendor_has_content:
-                        if self.template_type == 'vertical':
-                            label_context['ProductVendor'] = ""
-                        else:
-                            label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
+                    if not existing_vendor or not str(existing_vendor).strip():
+                        label_context['ProductVendor'] = ""
                         self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
@@ -3064,7 +2960,7 @@ class TemplateProcessor:
                 label_context['ProductStrain'] = ""
                 self.logger.debug(f"DEBUG: ProductStrain set to empty (no product_strain value) for template {self.template_type}")
             
-            # ProductVendor is not used for non-classic types - set to empty (intentional design)
+            # ProductVendor is not used for non-classic types - set to empty
             label_context['ProductVendor'] = ""
             self.logger.debug(f"ProductVendor set to empty for non-classic type '{product_type}' (not used for non-classic types)")
         
@@ -3316,11 +3212,7 @@ class TemplateProcessor:
         product_type_check = (label_context.get('ProductType', '').lower() or 
                              label_context.get('Product Type*', '').lower())
         from src.core.constants import CLASSIC_TYPES
-        classic_types_lower = [t.lower() for t in CLASSIC_TYPES]
-        is_classic_type_for_vendor = product_type_check in classic_types_lower
-        # Debug logging for product types that should be classic but aren't matching
-        if product_name and ('blunt' in product_name.lower() or 'pre-roll' in product_name.lower()):
-            self.logger.info(f"🔍 VENDOR TYPE CHECK: '{product_name}' - product_type_check: '{product_type_check}', is_classic: {is_classic_type_for_vendor}, classic_types: {classic_types_lower}")
+        is_classic_type_for_vendor = product_type_check in [t.lower() for t in CLASSIC_TYPES]
         
         # Only process vendor for classic types
         if is_classic_type_for_vendor:
@@ -3345,27 +3237,27 @@ class TemplateProcessor:
                     elif str(current_vendor).strip() == '':
                         vendor_is_empty = True
             
-            if vendor_is_empty:
-                # PRIORITY 1: Use vendor we already read from record at the start
-                enriched_vendor = label_context.get('_vendor_from_record', '')
-                if enriched_vendor:
-                    self.logger.debug(f"✅ Using vendor from record: '{enriched_vendor}' for '{product_name}'")
-                
-                # PRIORITY 2: Try to enrich vendor from pre-loaded cache if not in record
-                if not enriched_vendor:
-                    try:
-                        # Use cached vendor data (loaded in batch before loop)
-                        enriched_vendor = product_vendor_cache.get(product_name, "")
-                        if enriched_vendor:
-                            self.logger.info(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
-                    except Exception as e:
-                        self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-                
-                # PRIORITY 3: Fallback to record fields directly if still not found
-                if not enriched_vendor:
-                    product_type = (label_context.get('ProductType', '').lower() or
+        if vendor_is_empty:
+            # PRIORITY 1: Use vendor we already read from record at the start
+            enriched_vendor = label_context.get('_vendor_from_record', '')
+            if enriched_vendor:
+                self.logger.debug(f"✅ Using vendor from record: '{enriched_vendor}' for '{product_name}'")
+            
+            # PRIORITY 2: Try to enrich vendor from pre-loaded cache if not in record
+            if not enriched_vendor:
+                try:
+                    # Use cached vendor data (loaded in batch before loop)
+                    enriched_vendor = product_vendor_cache.get(product_name, "")
+                    if enriched_vendor:
+                        self.logger.info(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
+                except Exception as e:
+                    self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
+            
+            # PRIORITY 3: Fallback to record fields directly if still not found
+            if not enriched_vendor:
+                    product_type = (label_context.get('ProductType', '').lower() or 
                                    label_context.get('Product Type*', '').lower())
-
+                    
                     # CRITICAL: Check all possible vendor field names with comprehensive fallback
                     product_vendor = None
                     vendor_fields = [
@@ -3377,7 +3269,7 @@ class TemplateProcessor:
                         'Vendor/Supplier *',  # Handle space variations
                         'Vendor/Supplier* ',  # Handle trailing space
                     ]
-
+                    
                     # Try each field name
                     for field in vendor_fields:
                         val = record.get(field)
@@ -3385,17 +3277,17 @@ class TemplateProcessor:
                             product_vendor = val
                             self.logger.debug(f"✅ FALLBACK: Found vendor in field '{field}': '{product_vendor}' for '{product_name}'")
                             break
-
+                    
                     # If still no vendor, log all available fields for debugging
                     if not product_vendor or not str(product_vendor).strip():
                         available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
                         self.logger.warning(f"⚠️ FALLBACK: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-
+                    
                     # Handle NaN values in vendor data
                     if product_vendor is None or pd.isna(product_vendor) or str(product_vendor).lower() in ['nan', 'none', 'null', '']:
                         product_vendor = ''
                     enriched_vendor = product_vendor
-
+                
                 # Set vendor if we found one
                 if enriched_vendor and str(enriched_vendor).strip():
                     # For vertical template, don't wrap with markers since it uses simple placeholders
@@ -3403,7 +3295,7 @@ class TemplateProcessor:
                         label_context['ProductVendor'] = str(enriched_vendor).strip()
                     else:
                         label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
-                    self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}'")
+                    self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}' (product_type: '{product_type}')")
                 else:
                     # No vendor found anywhere, set to empty
                     label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
@@ -3518,48 +3410,6 @@ class TemplateProcessor:
                 self.logger.debug(f"FINAL: Set JointRatio for {product_type}: '{joint_ratio}'")
             else:
                 self.logger.debug(f"FINAL: No JointRatio found for {product_type}")
-
-        # FINAL SAFETY CHECK: Ensure ProductVendor is ALWAYS set for classic types (even if empty)
-        # This ensures the template placeholder {{Label1.ProductVendor}} is always replaced
-        product_type_final = (label_context.get('ProductType', '').lower() or
-                             label_context.get('Product Type*', '').lower())
-        from src.core.constants import CLASSIC_TYPES
-        if product_type_final in [t.lower() for t in CLASSIC_TYPES]:
-            # Check if ProductVendor is missing or empty
-            current_vendor = label_context.get('ProductVendor', '')
-            vendor_is_empty = not current_vendor or not str(current_vendor).strip()
-
-            # If empty, try one more time to get vendor from _vendor_from_record or record
-            if vendor_is_empty:
-                fallback_vendor = label_context.get('_vendor_from_record') or record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor')
-                if fallback_vendor and str(fallback_vendor).strip() and str(fallback_vendor).lower() not in ['nan', 'none', 'null', '']:
-                    if self.template_type == 'vertical':
-                        label_context['ProductVendor'] = str(fallback_vendor).strip()
-                    else:
-                        label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(fallback_vendor).strip()}PRODUCTVENDOR_END"
-                    self.logger.info(f"✅ FINAL CHECK: Set ProductVendor to '{fallback_vendor}' for classic type (was empty)")
-                else:
-                    # CRITICAL: Always set ProductVendor to empty string if no vendor found
-                    # This ensures the template placeholder is replaced (not left as-is)
-                    label_context['ProductVendor'] = ""
-                    self.logger.warning(f"⚠️ FINAL CHECK: ProductVendor set to empty for classic type '{product_type_final}' (no vendor data found anywhere)")
-            # Ensure ProductVendor exists in context even if it wasn't empty
-            if 'ProductVendor' not in label_context:
-                label_context['ProductVendor'] = ""
-                self.logger.warning(f"⚠️ FINAL CHECK: ProductVendor was missing from context, set to empty")
-        
-        # FINAL DEBUG: Log ProductVendor value for blunts and pre-rolls before returning context
-        final_product_vendor = label_context.get('ProductVendor', 'NOT_SET')
-        product_name_final = label_context.get('ProductName', '') or label_context.get('Product Name*', '')
-        if product_name_final and ('blunt' in product_name_final.lower() or 'pre-roll' in product_name_final.lower()):
-            try:
-                if 'PRODUCTVENDOR_START' in str(final_product_vendor):
-                    final_vendor_unwrapped = unwrap_marker(str(final_product_vendor), 'PRODUCTVENDOR')
-                    self.logger.info(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_vendor_unwrapped}' (was wrapped)")
-                else:
-                    self.logger.info(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_product_vendor}'")
-            except Exception as e:
-                self.logger.warning(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_product_vendor}' (error unwrapping: {e})")
 
         return label_context
 
@@ -4430,23 +4280,12 @@ class TemplateProcessor:
                     strain_content = strain_match.group(1)
                     # Replace the full product strain marker pattern with just the content
                     cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
-
-                # CRITICAL FIX: Handle product vendor markers specially to preserve content
-                # Extract product vendor content before removing markers
-                vendor_content_extracted = None
-                vendor_match = re.search(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', cleaned, re.IGNORECASE)
-                if vendor_match:
-                    vendor_content_extracted = vendor_match.group(1).strip()
-                    # Replace the full product vendor marker pattern with a placeholder temporarily
-                    # to protect it from being removed by cleanup patterns
-                    cleaned = re.sub(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', '<<<VENDOR_PLACEHOLDER>>>', cleaned, flags=re.IGNORECASE)
-
+                
                 # Remove other marker patterns
                 for pattern in marker_patterns:
                     cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-
+                
                 # CRITICAL FIX: Remove partial marker remnants like "bis" from "PRODUCTBRAND_END"
-                # NOTE: Do this BEFORE restoring vendor content to avoid removing words like "VENDOR" from vendor names
                 partial_remnants = [
                     r'\bbis\b',                    # "bis" from PRODUCTBRAND_END
                     r'PRODUCTBRAND_END',           # PRODUCTBRAND_END remnants (specific first)
@@ -4461,14 +4300,14 @@ class TemplateProcessor:
                     r'\bVENDOR\b',                 # Any remaining VENDOR
                     # REMOVED: r'\bLINEAGE\b' - Don't remove LINEAGE as it might be part of content
                     # REMOVED: r'\bCBD\b' - Don't remove CBD as it's part of lineage content like "CBD Blend"
-
+                    
                     # CRITICAL FIX: Handle corrupted marker text patterns
                     r'PRODUCTSTRR_STARTCONSTELL',  # Corrupted PRODUCTBRAND_CENTER_START + CONSTELLATION
                     r'PRODUCTSTRR_',               # Corrupted PRODUCTBRAND_ patterns
                     r'STARTCONSTELL',              # Corrupted START + CONSTELLATION
                     r'CONSTELLATION\$\s*',         # CONSTELLATION$ remnants
                     r'\$.*',                       # Any $ symbol remnants (like VICE$Star)
-
+                    
                     r'\bTHC\b',                    # Any remaining THC
                     # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
                     r'\bWEIGHT\b',                 # Any remaining WEIGHT
@@ -4483,14 +4322,9 @@ class TemplateProcessor:
                     # r'\bC\b',                      # REMOVED: This could break legitimate words
                     # r'\bD\b',                      # REMOVED: This could break legitimate words
                 ]
-
+                
                 for remnant in partial_remnants:
                     cleaned = re.sub(remnant, '', cleaned, flags=re.IGNORECASE)
-
-                # CRITICAL: Restore vendor content after ALL cleanup to prevent removal
-                # This ensures vendor names containing words like "VENDOR" are preserved
-                if vendor_content_extracted:
-                    cleaned = cleaned.replace('<<<VENDOR_PLACEHOLDER>>>', vendor_content_extracted)
 
                 # Remove stray CENTER tokens left behind by split PRODUCTBRAND_CENTER markers.
                 # This specifically catches runs that only contain the marker fragment.
@@ -7701,7 +7535,7 @@ class TemplateProcessor:
                         break
                 
                 if is_classic_lineage:
-                    # This is a classic type with lineage content - show lineage AND vendor
+                    # This is a classic type with lineage content - don't combine with vendor
                     # Extract just the lineage part if it contains additional brand info
                     lineage_only = lineage_content
                     for classic_lineage in classic_lineages:
@@ -7709,15 +7543,31 @@ class TemplateProcessor:
                             # Extract just the lineage part
                             lineage_only = lineage_content[:len(classic_lineage)]
                             break
-
+                    
                     # Update the lineage content to only show the lineage part
                     lineage_content = lineage_only
                     self.logger.debug(f"Extracted classic lineage only: '{lineage_content}' from '{full_text[lineage_start_idx:lineage_end_idx]}'")
-
-                    # CRITICAL FIX: Process lineage AND vendor using the combined function
-                    # This ensures vendor is displayed on classic types
-                    self._process_combined_lineage_vendor(paragraph, lineage_content, vendor_content)
-
+                    
+                    # Process only the lineage part, not combined with vendor
+                    paragraph.clear()
+                    run = paragraph.add_run()
+                    run.font.name = "Arial"
+                    run.font.bold = True
+                    
+                    # Get proper lineage font size using unified font sizing system
+                    product_type = None
+                    if hasattr(self, 'current_product_type'):
+                        product_type = self.current_product_type
+                    elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
+                        product_type = self.label_context['ProductType']
+                    
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    lineage_font_size = get_font_size(lineage_content, 'lineage', self.template_type, self.scale_factor)
+                    set_run_font_size(run, lineage_font_size)
+                    
+                    run.text = lineage_content  # Use assignment instead of add_text to avoid duplication
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT  # Left-align classic lineage
+                    
                     # Mark as processed to prevent re-processing
                     paragraph._combined_lineage_vendor_processed = True
                     return True
