@@ -1379,6 +1379,7 @@ const TagManager = {
                     this._updateAvailableTags(cachedTags, null);
                     verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
                     this.buildFilterOptionsFromTags(cachedTags);
+                    this._filtersBuiltThisSession = true; // Mark filters as built
                     setTimeout(() => {
                         if (typeof this.setupFilterEventListeners === 'function') {
                             this.setupFilterEventListeners();
@@ -1390,6 +1391,7 @@ const TagManager = {
                         this._updateAvailableTags(cachedTags, null);
                         verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
                         this.buildFilterOptionsFromTags(cachedTags);
+                        this._filtersBuiltThisSession = true; // Mark filters as built
                         setTimeout(() => {
                             if (typeof this.setupFilterEventListeners === 'function') {
                                 this.setupFilterEventListeners();
@@ -1442,6 +1444,7 @@ const TagManager = {
 
                 // Build filters INSTANTLY from cached tags
                 this.buildFilterOptionsFromTags(cachedTags);
+                this._filtersBuiltThisSession = true; // Mark filters as built
 
                 // Setup filter event listeners so filters work
                 setTimeout(() => {
@@ -1459,6 +1462,7 @@ const TagManager = {
 
                     // Build filters from cached tags
                     this.buildFilterOptionsFromTags(cachedTags);
+                    this._filtersBuiltThisSession = true; // Mark filters as built
 
                     // Setup filter event listeners
                     setTimeout(() => {
@@ -10006,10 +10010,15 @@ const TagManager = {
             console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
             console.log('📍 Call stack for tag update:', new Error().stack);
             this._backgroundProcessingRetries = 0; // reset after successful load
-            
+
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
-            if (tags && tags.length > 0) {
+            // CRITICAL FIX: Only build if filters haven't been built yet to prevent duplicate rebuilds
+            if (tags && tags.length > 0 && !this._filtersBuiltThisSession) {
+                console.log('🔧 Building filters from fetched tags (first time this session)');
                 this.buildFilterOptionsFromTags(tags);
+                this._filtersBuiltThisSession = true;
+            } else if (this._filtersBuiltThisSession) {
+                console.log('⏭️ Skipping filter rebuild - already built this session');
             }
             
             // CRITICAL: If lineage was aligned from database, ensure tags are fully re-rendered to show database lineage
