@@ -1482,6 +1482,14 @@ const TagManager = {
 
                 // Build filters INSTANTLY from cached tags
                 this.buildFilterOptionsFromTags(cachedTags);
+                
+                // CRITICAL FIX: Mark filters as initialized AFTER building filter options from cached tags
+                // This ensures that on the initial page load, filters are reset, but subsequent
+                // tag updates will preserve filters
+                if (!this.state.filtersInitialized) {
+                    this.state.filtersInitialized = true;
+                    console.log('✅ Filters initialized after loading from cache');
+                }
 
                 // Setup filter event listeners so filters work
                 setTimeout(() => {
