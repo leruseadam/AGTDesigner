@@ -8058,52 +8058,72 @@
         }
       });
       
-      // DOH FILTER FUNCTIONALITY - Make the DOH dropdown in filter bar work
+      // CRITICAL FIX: Setup ALL filter event listeners to trigger search when changed
       setTimeout(() => {
-        console.log('Setting up DOH filter functionality...');
-        const dohFilter = document.getElementById('dohFilter');
-        if (dohFilter) {
-          console.log('DOH filter found, adding event listener...');
-          
-          // Add change event listener
-          dohFilter.addEventListener('change', function() {
-            const selectedValue = this.value;
-            console.log('DOH filter changed to:', selectedValue);
-            
-            // Add visual feedback
-            const filterLabel = document.querySelector('label[for="dohFilter"]');
-            if (filterLabel && selectedValue !== 'All') {
-              filterLabel.style.color = '#ff6600';
-              filterLabel.style.fontWeight = 'bold';
-              filterLabel.innerHTML = `DOH COMPLIANCE (${selectedValue})`;
-            } else if (filterLabel) {
-              filterLabel.style.color = '';
-              filterLabel.style.fontWeight = '';
-              filterLabel.innerHTML = 'DOH COMPLIANCE';
-            }
-            
-            // You can add actual filtering logic here
-            console.log('DOH filter is now set to:', selectedValue);
-            
-            // Show confirmation message
-            if (selectedValue !== 'All') {
-              const confirmDiv = document.createElement('div');
-              confirmDiv.style.cssText = 'position: fixed; top: 10px; right: 10px; background: #28a745; color: white; padding: 15px; border-radius: 5px; z-index: 10000; font-weight: bold;';
-              confirmDiv.innerHTML = `✅ DOH Filter Applied: ${selectedValue}`;
-              document.body.appendChild(confirmDiv);
-              
-              setTimeout(() => {
-                if (confirmDiv.parentNode) {
-                  confirmDiv.remove();
+        console.log('🔧 Setting up filter event listeners...');
+
+        // Debounce timer to prevent rapid-fire searches
+        let filterDebounceTimer = null;
+
+        // List of all filter IDs that should trigger search on change
+        const filterIds = [
+          'brandFilter',
+          'productTypeFilter',
+          'lineageFilter',
+          'weightFilter',
+          'dohFilter',
+          'highCbdFilter'
+          // Note: vendorFilter is handled separately because it's in a different context
+        ];
+
+        // Attach event listeners to each filter
+        filterIds.forEach(filterId => {
+          const filterElement = document.getElementById(filterId);
+          if (filterElement) {
+            // Remove any existing listeners to prevent duplicates
+            const newFilter = filterElement.cloneNode(true);
+            filterElement.parentNode.replaceChild(newFilter, filterElement);
+
+            // Add the event listener to trigger search
+            newFilter.addEventListener('change', function() {
+              const selectedValue = this.value;
+              console.log(`📊 ${filterId} changed to:`, selectedValue);
+
+              // Visual feedback for DOH filter
+              if (filterId === 'dohFilter') {
+                const filterLabel = document.querySelector('label[for="dohFilter"]');
+                if (filterLabel && selectedValue !== 'All') {
+                  filterLabel.style.color = '#ff6600';
+                  filterLabel.style.fontWeight = 'bold';
+                  filterLabel.innerHTML = `DOH COMPLIANCE (${selectedValue})`;
+                } else if (filterLabel) {
+                  filterLabel.style.color = '';
+                  filterLabel.style.fontWeight = '';
+                  filterLabel.innerHTML = 'DOH COMPLIANCE';
                 }
-              }, 3000);
-            }
-          });
-          
-          console.log('DOH filter is now functional!');
-        } else {
-          console.error('DOH filter element not found');
-        }
+              }
+
+              // CRITICAL: Debounced search to prevent rapid-fire when changing multiple filters
+              clearTimeout(filterDebounceTimer);
+              filterDebounceTimer = setTimeout(() => {
+                const productSearchInput = document.getElementById('productSearch');
+                if (productSearchInput && window.searchProducts && window.selectedVendor) {
+                  // Re-run search with current search term and new filters
+                  console.log(`🔍 Triggering search after ${filterId} change`);
+                  window.searchProducts(productSearchInput.value || '');
+                } else {
+                  console.log(`⚠️ Search not triggered - vendor: ${window.selectedVendor}, searchProducts: ${typeof window.searchProducts}`);
+                }
+              }, 300); // Wait 300ms after last filter change before searching
+            });
+
+            console.log(`✅ ${filterId} event listener attached`);
+          } else {
+            console.warn(`⚠️ ${filterId} element not found`);
+          }
+        });
+
+        console.log('✅ All filter event listeners setup complete!');
       }, 1000);
 
       // Store check handled by backend template rendering

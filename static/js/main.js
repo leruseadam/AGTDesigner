@@ -5069,6 +5069,8 @@ const TagManager = {
                             this.state.selectedTags = new Set(savedPersistentTags);
                         }
                         this._restoreCheckboxStates();
+                        // CRITICAL: Enable checkboxes immediately after restoring states
+                        this._ensureCheckboxesEnabled();
                         
                         // CRITICAL FIX: Also update selected tags display to ensure they're shown
                         if (this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0) {
@@ -6209,11 +6211,15 @@ const TagManager = {
             }, 10);
         });
         
-        // Ensure the checkbox is not disabled by drag-and-drop manager
+        // CRITICAL FIX: Ensure the checkbox is not disabled by drag-and-drop manager
+        // Enable immediately - don't wait for initialization
         checkbox.style.pointerEvents = 'auto';
         checkbox.removeAttribute('data-drag-disabled');
         checkbox.removeAttribute('data-reordering');
         checkbox.disabled = false;
+        
+        // CRITICAL: Mark checkbox as ready for interaction immediately
+        checkbox.setAttribute('data-checkbox-ready', 'true');
         
         // Store the checkbox state in a data attribute for debugging
         checkbox.setAttribute('data-tag-name', displayName);
@@ -7054,6 +7060,15 @@ const TagManager = {
                 // CRITICAL FIX: Use requestAnimationFrame for smoother rendering without flickering
                 // This ensures rendering happens at the optimal time for the browser
                 requestAnimationFrame(renderBatch);
+            } else {
+                // All tags rendered - CRITICAL: Enable checkboxes immediately
+                verboseLog(`✅ Rendered ${tags.length} tags in batches - enabling checkboxes`);
+                // Enable checkboxes immediately after rendering completes
+                this._ensureCheckboxesEnabled();
+                // Mark as initialized if not already
+                if (!this.state.initialized) {
+                    this.state.initialized = true;
+                }
             }
         };
         
