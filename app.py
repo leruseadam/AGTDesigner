@@ -7772,7 +7772,13 @@ def generate_labels():
 
                                     # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                     processed_record = process_database_product_for_api(db_record)
-                                    
+
+                                    # DEBUG: Log vendor field before and after processing (first 3 records only)
+                                    if idx < 3:
+                                        db_vendor = db_record.get('Vendor/Supplier*') or db_record.get('Vendor')
+                                        processed_vendor = processed_record.get('Vendor/Supplier*') or processed_record.get('Vendor')
+                                        logging.info(f"🏢 VENDOR DEBUG: Product '{product_name_for_record}' - db_record vendor: '{db_vendor}', processed_record vendor: '{processed_vendor}'")
+
                                     # CRITICAL FIX: ALWAYS use database lineage as source of truth for tag generation
                                     # UI lineage may contain sativa hybrid overrides that shouldn't affect tag output
                                     # Database lineage is the ONLY source of truth - ignore UI lineage completely
