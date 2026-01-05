@@ -18321,12 +18321,12 @@ def get_initial_data():
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
         # PERFORMANCE: Check fast_load flag FIRST before any expensive operations
-        # CRITICAL FIX: Default to FALSE so that lineage alignment happens by default
-        # Fast load skips database lineage enrichment, which causes missing lineage in generated output
-        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
-        if request.args.get('fast_load') in ('0', 'false', 'False'):
-            fast_load = False  # Explicitly disabled
-        # Note: If fast_load parameter is not provided, fast_load remains False (default behavior with full lineage enrichment)
+        # BALANCED APPROACH: Default to fast_load=True for instant UI, but with smart caching
+        # - fast_load=True: Skip lineage alignment on initial load (instant display)
+        # - Cached tags are enriched and cached WITH lineage for subsequent loads
+        # - Generation endpoint re-enriches selected tags before generating labels
+        fast_load = request.args.get('fast_load') not in ('0', 'false', 'False')
+        # Explicit override: fast_load=0 forces full enrichment (slow but complete)
         
         # PERFORMANCE: For fast_load, check cache and session BEFORE loading any files
         if fast_load:
@@ -18350,10 +18350,10 @@ def get_initial_data():
                             'doh': [],
                             'highCbd': []
                         }
-                    # CRITICAL FIX: Always align cached tags with database lineage before returning
-                    # This ensures UI shows current database lineage, not stale cached lineage
+                    # PERFORMANCE FIX: Skip re-alignment if cached tags already have lineage
+                    # The _align_tags_with_db_lineage function will skip if 90%+ already have lineage fields
                     store_name = get_current_store_name()
-                    aligned_cached_tags = _align_tags_with_db_lineage(cached_available_tags, store_name) if cached_available_tags else []
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_available_tags, store_name, skip_if_aligned=True) if cached_available_tags else []
                     
                     initial_data = {
                         'success': True,
@@ -18422,9 +18422,10 @@ def get_initial_data():
                                 }
                                 elapsed = (time.time() - start_time) * 1000
                                 logging.info(f"⚡ Fast load default file data returned in {elapsed:.0f}ms")
-                                # Cache tags for future fast_load hits
+                                # PERFORMANCE FIX: Cache ALIGNED tags (with lineage) for future fast_load hits
+                                # This avoids re-enrichment on every request
                                 try:
-                                    cache.set(get_session_cache_key(f'available_tags_{default_file}'), make_json_safe(default_tags), timeout=3600)
+                                    cache.set(get_session_cache_key(f'available_tags_{default_file}'), make_json_safe(aligned_default_tags), timeout=3600)
                                 except Exception:
                                     pass
                                 response = make_response(jsonify(initial_data))
