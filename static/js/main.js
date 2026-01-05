@@ -11690,11 +11690,11 @@ const TagManager = {
         }, 60000); // 60 second safety net - increased for large files
 
         try {
-            // PERFORMANCE FIX: Use fast_load=1 for initial loads to skip expensive lineage alignment
-            // This dramatically speeds up initial tag loading
-            // CRITICAL FIX: Add timeout to prevent hanging - if API takes too long, complete initialization anyway
+            // CRITICAL FIX: Load WITH lineage enrichment to ensure dropdowns show correct values
+            // Previously used fast_load=1 which skipped lineage, causing empty dropdowns when filtering by product type
+            // Removing fast_load ensures all tags have database lineage from the start
             const response = await Promise.race([
-                fetch('/api/initial-data?fast_load=1'),
+                fetch('/api/initial-data'),
                 timeoutPromise
             ]).catch(err => {
                 // If fetch fails or times out, complete initialization anyway
