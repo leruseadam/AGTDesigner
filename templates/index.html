@@ -7575,45 +7575,10 @@
     window.mainJsLoaded = true;
     console.log('✅ main.js script tag executed');
 
-    // CRITICAL: Hydrate tags from cache IMMEDIATELY for instant page load
-    // This must happen right after main.js loads, before any other initialization
-    if (window.TagManager && typeof window.TagManager.hydrateAvailableTagsFromCache === 'function') {
-      try {
-        console.log('⚡ Attempting to hydrate tags from cache...');
-
-        // Debug: Check what's available in localStorage and sessionStorage
-        const cacheKey = window.TagManager.getAvailableTagsCacheKey ? window.TagManager.getAvailableTagsCacheKey() : 'unknown';
-        console.log('📦 Expected cache key:', cacheKey);
-
-        const localStorageKeys = [];
-        const sessionStorageKeys = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.includes('agt_available_tags')) {
-            localStorageKeys.push(key);
-          }
-        }
-        for (let i = 0; i < sessionStorage.length; i++) {
-          const key = sessionStorage.key(i);
-          if (key && key.includes('agt_available_tags')) {
-            sessionStorageKeys.push(key);
-          }
-        }
-        console.log('📦 LocalStorage tag cache keys:', localStorageKeys);
-        console.log('📦 SessionStorage tag cache keys:', sessionStorageKeys);
-
-        const hydrated = window.TagManager.hydrateAvailableTagsFromCache();
-        if (hydrated) {
-          console.log('✅ INSTANT: Tags hydrated from cache immediately after main.js load');
-        } else {
-          console.warn('⚠️ Cache hydration returned false - no cache available or cache check failed');
-        }
-      } catch (err) {
-        console.error('❌ Cache hydration failed:', err);
-      }
-    } else {
-      console.error('❌ TagManager or hydrateAvailableTagsFromCache not available');
-    }
+    // DISABLED: Early cache hydration can show stale/old tags before fresh data loads
+    // Let init() handle loading fresh data from the server instead
+    // This ensures the tag list always shows current Excel data, not cached stale data
+    console.log('⚡ Skipping early cache hydration - will load fresh data from server in init()');
 
     // Check TagManager immediately after script loads (synchronous execution)
     (function checkTagManager() {

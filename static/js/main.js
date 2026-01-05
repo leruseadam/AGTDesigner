@@ -5188,12 +5188,13 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
+                console.log(`🔍 Select-all checkbox changed: isChecked=${isChecked}, found ${checkboxes.length} checkboxes in vendor section`);
                 checkboxes.forEach(checkbox => {
                     if (!checkbox.classList.contains('tag-checkbox')) {
                     checkbox.checked = isChecked;
                         return;
                     }
-                    
+
                     const tagName = checkbox.value;
                     // PERFORMANCE: Use Map lookup instead of array.find() - O(1) vs O(n)
                     const tag = this._tagLookupMap?.get(tagName);
@@ -5221,10 +5222,12 @@ const TagManager = {
                         }
                     }
                 });
+                console.log(`📊 After select-all change: persistentSelectedTags has ${this.state.persistentSelectedTags.length} items`);
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources (Map, originalTags, tags)
                 // This prevents tags from disappearing when filters are active
                 const selectedTagObjects = this.getSelectedTagObjects();
+                console.log(`📊 getSelectedTagObjects() returned ${selectedTagObjects.length} objects`);
                 this.updateSelectedTags(selectedTagObjects);
                 this.efficientlyUpdateAvailableTagsDisplay();
                 // Use double requestAnimationFrame to ensure it happens after all updates, including updateSelectAllCheckboxes
@@ -6695,7 +6698,7 @@ const TagManager = {
             lineageSelect.value = 'CBD';
         } else if (shouldMapToMixed(normalizedLineage)) {
             // CRITICAL FIX: Classic types should never get MIXED - use HYBRID instead
-            if (isClassicTypeForDropdown) {
+            if (isClassicType) {
                 lineageSelect.value = 'HYBRID';
                 console.log(`🔄 DROPDOWN FIX: Mapped invalid lineage "${normalizedLineage}" to HYBRID for classic type "${displayName}"`);
             } else {
@@ -6705,14 +6708,14 @@ const TagManager = {
             lineageSelect.value = normalizedLineage;
         } else {
             // CRITICAL FIX: Smart fallback based on product type and lineage
-            if (isClassicTypeForDropdown) {
+            if (isClassicType) {
                 // Classic types default to HYBRID
                 lineageSelect.value = 'HYBRID';
                 console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for classic type "${displayName}", defaulting to HYBRID`);
             } else if (isParaphernaliaType || normalizedLineage === 'PARA' || normalizedLineage === 'PARAPHERNALIA') {
                 // Paraphernalia items should always use PARA
                 lineageSelect.value = 'PARA';
-            } else if (normalizedLineage === 'HYBRID' && !isClassicTypeForDropdown) {
+            } else if (normalizedLineage === 'HYBRID' && !isClassicType) {
                 // Non-classic items with HYBRID lineage (likely accessories/paraphernalia misclassified)
                 // Silently default to MIXED (THC) without warning since HYBRID isn't valid for non-classic
                 lineageSelect.value = 'MIXED';
@@ -15771,15 +15774,9 @@ const TagManager = {
                 console.error('❌ setupFilterEventListeners method not found!');
             }
 
-            // Try to hydrate from cache first
-            const hydrated = this.hydrateAvailableTagsFromCache();
-            if (hydrated) {
-                console.log('✅ Tags loaded from cache in init()');
-                return true;
-            }
-
-            // If no cache, fetch from database/API
-            console.log('📊 No cache found in init(), fetching tags from database...');
+            // CRITICAL FIX: Always fetch fresh data from server, skip cache
+            // Cache can contain stale/old tags that don't match current Excel file
+            console.log('📊 Fetching fresh tags from server (cache skipped to ensure current Excel data)...');
             try {
                 const loaded = await this.fetchAndUpdateAvailableTags();
                 if (loaded) {
