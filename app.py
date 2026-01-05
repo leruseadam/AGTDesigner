@@ -7967,9 +7967,13 @@ def generate_labels():
                                     processed_db.get('canonical_lineage') or
                                     processed_db.get('currentLineage')
                                 )
+                                logging.info(f"🔍 LINEAGE DEBUG for '{product_name}': db_lineage='{db_lineage}', existing='{record.get('Lineage', 'NONE')}'")
                                 if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
                                     record['Lineage'] = str(db_lineage).strip().upper()
+                                    logging.info(f"✅ Set lineage for '{product_name}' to '{record['Lineage']}'")
                                     enriched_count += 1
+                                else:
+                                    logging.warning(f"⚠️ No valid database lineage found for '{product_name}'!")
 
                                 # Price
                                 db_price = _extract_price_from_database_product(processed_db)
