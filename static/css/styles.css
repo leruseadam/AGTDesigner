@@ -4333,7 +4333,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .brand-header label {
     margin: 0;
     font-weight: 600;
-    font-size: 1rem;
+    font-size: 1.3rem; /* Increased from 1rem for better visibility */
     color: white;
     cursor: pointer;
   }
@@ -6162,7 +6162,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Brand header - larger and bolder */
   .brand-header {
-      font-size: 1.05rem !important; /* 0.2rem bigger than default 0.85rem */
+      font-size: 1.3rem !important; /* Significantly bigger than default 0.85rem for better visibility */
       font-weight: 700 !important;
   }
 
