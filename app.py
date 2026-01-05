@@ -8275,6 +8275,17 @@ def generate_labels():
         saved_font_size_mode = template_settings.get('fontSizeMode', 'auto')
         saved_field_font_sizes = template_settings.get('fieldFontSizes', {})
         
+        # CRITICAL DEBUG: Log exact record count before template processing
+        logging.info(f"🔍 GENERATION DEBUG: Processing {len(records)} records for template '{template_type}'")
+        if records:
+            # Log lineage status for all records to detect missing lineage
+            missing_lineage_count = sum(1 for r in records if not r.get('Lineage') or r.get('Lineage') in ['', 'MISSING', 'NOT_FOUND', 'None', 'nan'])
+            missing_vendor_count = sum(1 for r in records if not r.get('Vendor/Supplier*') or r.get('Vendor/Supplier*') in ['', 'MISSING', 'None'])
+            logging.info(f"🔍 GENERATION DEBUG: {missing_lineage_count}/{len(records)} records missing lineage, {missing_vendor_count}/{len(records)} missing vendor")
+            # Log first and last 3 records to verify full batch is processed
+            logging.info(f"🔍 GENERATION DEBUG: First 3 records: {[r.get('Product Name*', 'NO_NAME')[:30] for r in records[:3]]}")
+            logging.info(f"🔍 GENERATION DEBUG: Last 3 records: {[r.get('Product Name*', 'NO_NAME')[:30] for r in records[-3:]]}")
+
         # Use the already imported TemplateProcessor and get_font_scheme
         font_scheme = get_font_scheme(template_type)
         processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor)
