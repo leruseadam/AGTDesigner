@@ -5205,8 +5205,8 @@ const TagManager = {
                     const tag = this._tagLookupMap?.get(tagName);
                     if (!tag) {
                         tagsNotInMap++;
-                        checkbox.checked = isChecked;
-                        console.warn(`⚠️ Tag "${tagName}" not found in _tagLookupMap, skipping`);
+                        // CRITICAL FIX: Don't skip - continue processing even if not in map
+                        console.warn(`⚠️ Tag "${tagName}" not in _tagLookupMap, but continuing`);
                     }
 
                     checkbox.checked = isChecked;
