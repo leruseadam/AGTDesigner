@@ -9761,10 +9761,11 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // PERFORMANCE FIX: Always use fast_load=1 for instant tag loading
-            // This skips expensive lineage alignment on cached tags for faster response
-            // Lineage will still be aligned when needed, but cached tags return instantly
-            const fastLoadParam = '&fast_load=1';
+            // CRITICAL FIX: Use fast_load=0 to ensure lineage is included in tags
+            // We disabled the background lineage refresh (was causing 18s page loads)
+            // So we MUST get lineage on initial load, otherwise large batches missing lineage
+            // Small performance trade-off, but lineage is essential for labels
+            const fastLoadParam = '&fast_load=0';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
