@@ -9964,10 +9964,24 @@ const TagManager = {
                     }
                 } else {
                     console.warn('Backend returned empty tags array - no Excel file loaded');
+                    // Show message to user when no Excel file is uploaded
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    if (availableTagsContainer) {
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-4">
+                                <div class="alert alert-info mx-3">
+                                    <i class="fas fa-info-circle"></i>
+                                    <p class="mb-0 mt-2">No Excel file uploaded. Please upload an Excel file to see available tags.</p>
+                                </div>
+                            </div>
+                        `;
+                    }
                 }
                 this.state.tags = [];
                 this.state.originalTags = [];
-                this._updateAvailableTags([]);
+                // CRITICAL FIX: Skip _updateAvailableTags when no Excel file
+                // _updateAvailableTags([]) would clear our "no Excel file" message
+                // this._updateAvailableTags([]);
                 this._restoreAvailableScrollPosition(savedScroll);
                 // Hide splash when no tags
                 if (this.hideActionSplash) {
