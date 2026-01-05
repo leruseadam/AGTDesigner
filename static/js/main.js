@@ -1488,7 +1488,8 @@ const TagManager = {
             this._refreshLineageFromDatabase(cachedTags).then(() => {
                 verboseLog('✅ Background lineage check complete (fast mode)');
             }).catch(err => {
-                console.warn('⚠️ Background lineage check failed (non-critical):', err);
+                // Silently ignore timeout errors - this is non-critical background refresh
+                verboseLog('ℹ️ Background lineage check timed out (non-critical, will retry on next page load)');
             });
 
             return true;
@@ -1507,7 +1508,7 @@ const TagManager = {
             verboseLog('🔄 Background refresh: forcing database lineage enrichment (fast_load=0)');
             
             const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=${fastLoad}`, {
-                signal: AbortSignal.timeout(5000) // 5 second timeout (reduced from 30s)
+                signal: AbortSignal.timeout(15000) // 15 second timeout (increased from 5s to reduce timeout errors)
             });
             if (lineageResponse.ok) {
                 const lineageData = await lineageResponse.json();
@@ -1620,7 +1621,8 @@ const TagManager = {
                 }
             }
         } catch (error) {
-            console.warn('⚠️ Failed to refresh lineage from database:', error);
+            // Silently fail - this is non-critical background operation
+            verboseLog('ℹ️ Background lineage refresh timed out (will retry on next page load)');
             throw error;
         }
     },
@@ -5189,18 +5191,22 @@ const TagManager = {
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
                 console.log(`🔍 Select-all checkbox changed: isChecked=${isChecked}, found ${checkboxes.length} checkboxes in vendor section`);
+                let tagCheckboxCount = 0;
+                let tagsNotInMap = 0;
                 checkboxes.forEach(checkbox => {
                     if (!checkbox.classList.contains('tag-checkbox')) {
                     checkbox.checked = isChecked;
                         return;
                     }
 
+                    tagCheckboxCount++;
                     const tagName = checkbox.value;
                     // PERFORMANCE: Use Map lookup instead of array.find() - O(1) vs O(n)
                     const tag = this._tagLookupMap?.get(tagName);
                     if (!tag) {
+                        tagsNotInMap++;
                         checkbox.checked = isChecked;
-                        return;
+                        console.warn(`⚠️ Tag "${tagName}" not found in _tagLookupMap, skipping`);
                     }
 
                     checkbox.checked = isChecked;
@@ -5222,7 +5228,7 @@ const TagManager = {
                         }
                     }
                 });
-                console.log(`📊 After select-all change: persistentSelectedTags has ${this.state.persistentSelectedTags.length} items`);
+                console.log(`📊 Select-all summary: ${tagCheckboxCount} tag checkboxes, ${tagsNotInMap} not in map, ${this.state.persistentSelectedTags.length} in persistentSelectedTags`);
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources (Map, originalTags, tags)
                 // This prevents tags from disappearing when filters are active
