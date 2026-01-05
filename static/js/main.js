@@ -1483,14 +1483,16 @@ const TagManager = {
                 }
             }
 
-            // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
-            // This makes page reloads instant while still updating in background
-            this._refreshLineageFromDatabase(cachedTags).then(() => {
-                verboseLog('✅ Background lineage check complete (fast mode)');
-            }).catch(err => {
-                // Silently ignore timeout errors - this is non-critical background refresh
-                verboseLog('ℹ️ Background lineage check timed out (non-critical, will retry on next page load)');
-            });
+            // DISABLED: Background lineage refresh was causing slow page loads (18+ seconds)
+            // The database query is too slow and blocks the page, even with timeout
+            // Users reported: "too slow" with tags not loading for 18+ seconds
+            // Lineage updates will happen on next file upload instead
+            // this._refreshLineageFromDatabase(cachedTags).then(() => {
+            //     verboseLog('✅ Background lineage check complete (fast mode)');
+            // }).catch(err => {
+            //     // Silently ignore timeout errors - this is non-critical background refresh
+            //     verboseLog('ℹ️ Background lineage check timed out (non-critical, will retry on next page load)');
+            // });
 
             return true;
         }
