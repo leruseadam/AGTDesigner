@@ -35,7 +35,7 @@
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin: 0.5rem 0 1rem 0 !important;
+  margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
   padding: 0 !important;
   display: flex !important;
   justify-content: center !important;
@@ -45,7 +45,7 @@
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin: 0.5rem 0 1rem 0 !important;
+    margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
     padding: 0 !important;
   }
 }
@@ -908,7 +908,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: 0.5rem 0 1rem 0 !important;
+  margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -2998,7 +2998,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.5rem 0 1rem 0 !important;
+    margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -6160,6 +6160,12 @@ body.modal-open #mainContent.store-selection-disabled,
       justify-content: flex-start !important;
   }
 
+  /* Brand header - larger and bolder */
+  .brand-header {
+      font-size: 1.05rem !important; /* 0.2rem bigger than default 0.85rem */
+      font-weight: 700 !important;
+  }
+
   /* Container for header + checkbox/value */
   .tag-row {
       display: flex;
@@ -6619,14 +6625,14 @@ body.modal-open #mainContent.store-selection-disabled,
   #selectedTags .vendor-section > .vendor-header.d-flex,
   #selectedTags .vendor-section > .vendor-header.mb-2,
   #selectedTags .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.225em !important; /* Increased by 0.125em (~2px) */
+    font-size: 1em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
   }
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.4em; /* Increased substantially */
-    font-weight: 600;
+    font-size: 1.25em; /* Increased substantially */
+    font-weight: 700;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
     letter-spacing: 0.03em;
@@ -7878,7 +7884,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.5rem 0 1rem 0 !important;
+    margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
