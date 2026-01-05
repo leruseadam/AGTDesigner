@@ -8184,7 +8184,7 @@ class JSONMatcher:
             
             # Extract clean product name for UI display
             clean_display_name = extract_clean_product_name(primary_product_name)
-            
+
             # Create Description and DescAndWeight with proper weight formatting
             # Format: "Product Name - Weight" (e.g., "Georgia Pie Cured Resin Ceramic Cartridge - 1g")
             # ALWAYS use the transformed primary_product_name as the base (not the raw description field)
@@ -8205,7 +8205,12 @@ class JSONMatcher:
                 desc_and_weight = base_description
             
             logging.info(f"📝 Final formatted description: '{formatted_description}'")
-            
+
+            # CRITICAL FIX: Use actual database value for displayName (don't construct from strain+weight)
+            # Use desc_and_weight which already has the proper database product name format
+            excel_style_display_name = desc_and_weight
+            logging.info(f"📝 Using database value for displayName: '{excel_style_display_name}'")
+
             tag = {
                 # Core product information - follow existing tag format
                 'Product Name*': primary_product_name,
@@ -8229,7 +8234,7 @@ class JSONMatcher:
                 'Price': price,  # Always include Price from database
                 'Price* (Tier Name for Bulk)': price,  # Always include Price from database
                 'price': price,  # Include lowercase variant for compatibility
-                'displayName': clean_display_name,  # Use clean product name for UI display
+                'displayName': excel_style_display_name,  # Use Excel-style product name for UI display matching Excel format
                 
                 # Enhanced fields using database information
                 'State': 'active',
