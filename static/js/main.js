@@ -9612,20 +9612,13 @@ const TagManager = {
             }
         }
         
-        // PERFORMANCE: Check cache FIRST before setting flags or showing splash
-        const cachedTags = this.loadAvailableTagsFromCache();
-        const hasCache = cachedTags && cachedTags.length > 0;
+        // CRITICAL FIX: Skip cache hydration to always fetch fresh data from server
+        // Cache can contain stale/filtered tags that don't match current Excel file
+        // This ensures the tag list always shows current Excel data on refresh
         const availableTagsContainer = document.getElementById('availableTags');
         const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
-        
-        // PERFORMANCE: If cache exists, hydrate immediately and return (instant load)
-        if (hasCache && !hasExistingTags) {
-            const hydrated = this.hydrateAvailableTagsFromCache();
-            if (hydrated) {
-                console.log('✅ INSTANT LOAD: Tags rendered from cache before any API calls');
-                return true;
-            }
-        }
+
+        console.log('📊 Skipping cache - will fetch fresh tags from server to ensure accurate data');
         
         // Set flag to prevent concurrent calls
         this._fetchingAvailableTags = true;
@@ -9684,7 +9677,7 @@ const TagManager = {
             
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
-            if (!hasExistingTags && !hasCache) {
+            if (!hasExistingTags) {
                 safetyTimeout = setTimeout(() => {
                     console.warn('⚠️ Safety timeout: Hiding loading spinner');
                     // Just hide the splash, don't show error message
@@ -9694,22 +9687,10 @@ const TagManager = {
                     // Don't show error message - let the app continue working
                 }, 60000); // 60 seconds - very generous timeout
             }
-            
-            // PERFORMANCE: Double-check cache (in case it was just saved)
-            const hydratedFromCache = this.hydrateAvailableTagsFromCache();
-            if (hydratedFromCache) {
-                console.log('✅ Tags rendered instantly from cache');
-                // PERFORMANCE FIX: Background refresh uses fast_load now (set in _refreshLineageFromDatabase)
-                console.log('⚡ PERFORMANCE: Cache loaded, background refresh will use fast mode');
-                // Hide splash since we have cached tags
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
-                }
-                return true;
-            }
-            
-            // Only show loading if we don't have cached tags
-            console.log('⏳ No cache available - preparing loader');
+
+            // CRITICAL FIX: Skip cache hydration - always fetch fresh from server
+            // Cache can contain filtered/stale tags that don't match current Excel file
+            console.log('⏳ Skipping cache - fetching fresh tags from server');
             
             // Preserve current scroll/anchor so refreshes don't jump the list
             const savedScroll = this._saveAvailableScrollPosition();
