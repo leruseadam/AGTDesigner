@@ -3213,11 +3213,13 @@ class TemplateProcessor:
                              label_context.get('Product Type*', '').lower())
         from src.core.constants import CLASSIC_TYPES
         is_classic_type_for_vendor = product_type_check in [t.lower() for t in CLASSIC_TYPES]
-        
+
+        # Initialize vendor_is_empty before conditional (CRITICAL: prevents UnboundLocalError)
+        vendor_is_empty = False
+
         # Only process vendor for classic types
         if is_classic_type_for_vendor:
             current_vendor = label_context.get('ProductVendor', '')
-            vendor_is_empty = False
             
             # Check if ProductVendor is missing or empty
             if not current_vendor or not str(current_vendor).strip():
