@@ -8043,15 +8043,30 @@
           fileInput.parentNode.replaceChild(newFileInput, fileInput);
           
           newFileInput.addEventListener('change', function(e) {
+            console.log('🔵 File input change event triggered');
             const file = e.target.files[0];
             if (file) {
-              console.log('File selected:', file.name);
+              console.log('✅ File selected:', file.name, 'Size:', file.size, 'bytes');
+              console.log('📤 Attempting to upload file...');
               try {
-                window.TagManager.uploadFile(file);
+                if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+                  console.log('✅ TagManager.uploadFile is available, calling it now');
+                  window.TagManager.uploadFile(file);
+                } else {
+                  console.error('❌ TagManager.uploadFile is not available!');
+                  console.error('  - window.TagManager exists:', !!window.TagManager);
+                  if (window.TagManager) {
+                    console.error('  - uploadFile type:', typeof window.TagManager.uploadFile);
+                  }
+                  alert('Error: Upload functionality not initialized. Please refresh the page.');
+                }
               } catch (error) {
-                console.error('Error uploading file:', error);
-                alert('Error uploading file. Please try again or refresh the page.');
+                console.error('❌ Error uploading file:', error);
+                console.error('Error stack:', error.stack);
+                alert('Error uploading file: ' + error.message + '\n\nPlease try again or refresh the page.');
               }
+            } else {
+              console.warn('⚠️ No file selected (files array is empty)');
             }
           });
         } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
@@ -8092,6 +8107,8 @@
       // On Windows, use File System Access API to open Downloads folder
       // On Mac, regular file input already opens to Downloads
       async function handleFileUploadClick() {
+        console.log('🔵 handleFileUploadClick() called');
+
         // CRITICAL FIX: Prevent multiple uploads
         const uploadBtn = document.getElementById('uploadTriggerBtn');
         if (uploadBtn && uploadBtn.disabled) {
@@ -8099,8 +8116,10 @@
           return;
         }
 
+        console.log('✅ Upload button check passed, proceeding with upload');
         const isWindows = navigator.platform.toLowerCase().includes('win') ||
                          navigator.userAgent.toLowerCase().includes('windows');
+        console.log('🖥️ Platform detected:', isWindows ? 'Windows' : 'Mac/Other');
 
         // Try to use File System Access API on Windows (if supported)
         // This API allows specifying a suggested start directory
@@ -8168,9 +8187,14 @@
         }
         
         // Fallback to regular file input (works on Mac and Windows without API support)
+        console.log('📂 Using fallback: Regular file input dialog');
         const fileInput = document.getElementById('fileInput');
         if (fileInput) {
+          console.log('✅ fileInput element found, triggering click');
           fileInput.click();
+        } else {
+          console.error('❌ fileInput element not found!');
+          alert('Error: File input element not found. Please refresh the page.');
         }
       }
       
