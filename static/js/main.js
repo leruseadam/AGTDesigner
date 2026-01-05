@@ -3915,7 +3915,7 @@ const TagManager = {
 
         // CRITICAL FIX: Don't restore if we just generated (within last 5 seconds)
         // This prevents clearing checkboxes immediately after generation
-        const now = Date.now();
+        // Reuse 'now' variable from above (line 3891)
         const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 5000;
         
         // Restore checkbox states based on persistentSelectedTags
