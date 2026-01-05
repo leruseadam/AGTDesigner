@@ -1375,7 +1375,9 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                logger.warning(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
+                # Only log the first rejection, then a summary will be logged at the end
+                if self._rejected_blank_names == 1:
+                    logger.warning(f"⚠️ Rejecting products with blank/empty product names (logging suppressed, will show total at end)")
                 return None
             
             # Check for invalid values
