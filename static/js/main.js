@@ -3815,7 +3815,7 @@ const TagManager = {
 
                         // Mark as recently unchecked to prevent race conditions
                         checkbox.setAttribute('data-recently-unchecked', 'true');
-                        setTimeout(() => checkbox.removeAttribute('data-recently-unchecked'), 3000);
+                        setTimeout(() => checkbox.removeAttribute('data-recently-unchecked'), 500);
                     } else {
                         console.log(`⚠️ Tag "${tagName}" not found in persistentSelectedTags (length: ${this.state.persistentSelectedTags.length})`);
                     }
@@ -3885,6 +3885,15 @@ const TagManager = {
             verboseLog('⏭️ Skipping checkbox restore - filters are being updated');
             return;
         }
+
+        // CRITICAL FIX: Prevent restore from running too frequently
+        // This prevents checkbox states from being reverted immediately after user clicks
+        const now = Date.now();
+        if (this._lastCheckboxRestoreTime && (now - this._lastCheckboxRestoreTime) < 300) {
+            verboseLog('⏭️ Skipping checkbox restore - too soon after last restore (prevents flickering)');
+            return;
+        }
+        this._lastCheckboxRestoreTime = now;
 
         // CRITICAL FIX: Ensure _selectedTagsSet is synced before restoring checkboxes
         if (!this.state._selectedTagsSet) {
@@ -6026,9 +6035,9 @@ const TagManager = {
                     this.state.persistentSelectedTags.push(displayName);
                     this.state._selectedTagsSet.add(displayName);
                     // CRITICAL FIX: Mark checkbox as recently checked to prevent race conditions
-                    // Extended timeout to 3 seconds to prevent premature unchecking during re-renders
+                    // Short timeout to prevent immediate restore, but not so long it blocks user deselection
                     checkbox.setAttribute('data-recently-checked', 'true');
-                    setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 3000);
+                    setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 500);
                 }
             } else {
                 const index = this.state.persistentSelectedTags.indexOf(displayName);
@@ -13222,15 +13231,45 @@ const TagManager = {
                     await new Promise(resolve => setTimeout(resolve, 100));
                     waitCount++;
                 }
-                
+
+                // CRITICAL FIX: If still fetching after timeout, force reset the flag
+                if (this._fetchingAvailableTags) {
+                    console.warn('⚠️ Force resetting _fetchingAvailableTags flag after clear/reset timeout');
+                    this._fetchingAvailableTags = false;
+                    this._fetchingAvailableTagsStartTime = null;
+                }
+
+                // CRITICAL FIX: Clear rate limiting to allow immediate fetch after clear/reset
+                this._lastFetchTime = 0;
+
                 // Now refresh tags
                 verboseLog('Refreshing available tags with full Excel data...');
                 if (this.fetchAndUpdateAvailableTags) {
                     try {
-                        await this.fetchAndUpdateAvailableTags();
+                        // CRITICAL FIX: Add timeout to prevent infinite hang
+                        const fetchPromise = this.fetchAndUpdateAvailableTags();
+                        const timeoutPromise = new Promise((_, reject) =>
+                            setTimeout(() => {
+                                // Force reset the flag on timeout
+                                this._fetchingAvailableTags = false;
+                                this._fetchingAvailableTagsStartTime = null;
+                                reject(new Error('Tag refresh timeout after clear/reset'));
+                            }, 15000)
+                        );
+
+                        await Promise.race([fetchPromise, timeoutPromise]);
+                        console.log('✅ Tags refreshed successfully after clear/reset');
                     } catch (fetchError) {
                         console.error('Error refreshing available tags:', fetchError);
-                        this.state.isClearing = false; // Ensure flag is reset
+                        // CRITICAL FIX: Force reset ALL flags to ensure app doesn't stay stuck
+                        this._fetchingAvailableTags = false;
+                        this._fetchingAvailableTagsStartTime = null;
+                        this.state.isClearing = false;
+
+                        // CRITICAL FIX: Show error message to user if refresh fails
+                        if (window.Toast && window.Toast.show) {
+                            window.Toast.show('warning', 'Tags may not have refreshed. Try reloading the page.', { duration: 3000 });
+                        }
                     }
                 }
             };
