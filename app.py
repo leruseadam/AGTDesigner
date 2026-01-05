@@ -18321,9 +18321,12 @@ def get_initial_data():
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
         
         # PERFORMANCE: Check fast_load flag FIRST before any expensive operations
+        # CRITICAL FIX: Default to FALSE so that lineage alignment happens by default
+        # Fast load skips database lineage enrichment, which causes missing lineage in generated output
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
-        if request.args.get('fast_load') not in ('0', 'false', 'False'):
-            fast_load = True  # Default to fast loading
+        if request.args.get('fast_load') in ('0', 'false', 'False'):
+            fast_load = False  # Explicitly disabled
+        # Note: If fast_load parameter is not provided, fast_load remains False (default behavior with full lineage enrichment)
         
         # PERFORMANCE: For fast_load, check cache and session BEFORE loading any files
         if fast_load:
