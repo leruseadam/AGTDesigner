@@ -638,110 +638,6 @@ class JSONMatcher:
         # If none of the known keys are present, return empty string
         return ""
     
-    @staticmethod
-    def _extract_field_from_json_item(item: Dict[str, Any], canonical_field: str) -> Optional[Any]:
-        """Extract a field value from JSON item using comprehensive field mapping."""
-        # Field mapping from JSON keys to canonical field names
-        field_map = {
-            "Product Name*": ["product_name", "ProductName", "name", "displayName", "description", "Description"],
-            "Vendor/Supplier*": ["vendor", "Vendor", "vendor_name", "supplier", "supplier_name", "from_license_name", "license_name"],
-            "Product Brand": ["brand", "Brand", "brand_name"],
-            "Price": ["price", "Price", "line_price", "unit_price", "retail_price"],
-            "Weight*": ["weight", "Weight", "unit_weight", "net_weight", "package_weight"],
-            "Units": ["units", "Units", "unit_weight_uom", "uom", "weight_unit"],
-            "Product Strain": ["strain", "Strain", "strain_name", "strain_type"],
-            "Product Type*": ["product_type", "ProductType", "inventory_type", "type"],
-            "Lineage": ["lineage", "Lineage", "strain_lineage"],
-            "Quantity*": ["quantity", "Quantity", "qty", "Qty"],
-            "THC test result": ["thc_percentage", "thc", "THC", "thc_pct"],
-            "CBD test result": ["cbd_percentage", "cbd", "CBD", "cbd_pct"],
-        }
-        
-        # Get list of JSON keys to check for this canonical field
-        json_keys = field_map.get(canonical_field, [])
-        
-        # Try each JSON key
-        for json_key in json_keys:
-            value = item.get(json_key)
-            if value is not None and value != "":
-                return value
-        
-        return None
-    
-    @staticmethod
-    def _enrich_matched_product(matched: Dict[str, Any], json_item: Dict[str, Any]) -> Dict[str, Any]:
-        """Enrich matched product with missing fields from JSON item."""
-        # Fields to enrich if missing from matched product
-        fields_to_enrich = [
-            "Price",
-            "Weight*",
-            "Units",
-            "Product Brand",
-            "Product Strain",
-            "Lineage",
-            "Quantity*",
-            "THC test result",
-            "CBD test result",
-        ]
-        
-        enriched = dict(matched)  # Copy matched product
-        
-        for field in fields_to_enrich:
-            # Only enrich if field is missing or empty in matched product
-            current_value = enriched.get(field)
-            if not current_value or (isinstance(current_value, str) and current_value.strip() == ""):
-                json_value = JSONMatcher._extract_field_from_json_item(json_item, field)
-                if json_value is not None:
-                    # Format weight properly (combine weight and units)
-                    if field == "Weight*":
-                        units = JSONMatcher._extract_field_from_json_item(json_item, "Units")
-                        if units:
-                            # Format as "weightunits" (no space per user preference)
-                            weight_str = str(json_value).strip()
-                            # Remove .0 from whole numbers (e.g., 1.0 -> 1)
-                            if weight_str.endswith('.0'):
-                                weight_str = weight_str[:-2]
-                            enriched[field] = f"{weight_str}{units}"
-                            if "Units" not in enriched or not enriched.get("Units"):
-                                enriched["Units"] = str(units).strip()
-                        else:
-                            weight_str = str(json_value).strip()
-                            if weight_str.endswith('.0'):
-                                weight_str = weight_str[:-2]
-                            enriched[field] = weight_str
-                    elif field in ["THC test result", "CBD test result"]:
-                        # Handle percentage values - round to 1 decimal place
-                        try:
-                            pct_value = float(json_value)
-                            enriched[field] = round(pct_value, 1)
-                        except (ValueError, TypeError):
-                            enriched[field] = str(json_value)
-                    elif field == "Price":
-                        # Format price - remove .00 for whole numbers
-                        try:
-                            price_value = float(json_value)
-                            if price_value == int(price_value):
-                                enriched[field] = str(int(price_value))
-                            else:
-                                enriched[field] = f"{price_value:.2f}"
-                        except (ValueError, TypeError):
-                            enriched[field] = str(json_value)
-                    else:
-                        enriched[field] = str(json_value)
-                    logging.debug(f"Enriched {field} from JSON: {enriched[field]}")
-        
-        # Also check for lab result data in JSON item
-        lab_result_data = json_item.get("lab_result_data") or json_item.get("lab_results") or json_item.get("potency")
-        if lab_result_data:
-            cannabinoids = extract_cannabinoids(lab_result_data)
-            for key, value in cannabinoids.items():
-                # Only add if not already present or empty
-                if key not in enriched or not enriched.get(key):
-                    enriched[key] = value
-                    logging.debug(f"Enriched {key} from JSON lab results: {value}")
-        
-        return enriched
-    
     # ---- Public API used by Flask app ------------------------------------
 
     def _fetch_items_from_url(self, url: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -809,20 +705,43 @@ class JSONMatcher:
             if not matched:
                 continue
             
-            # Enrich matched product with missing fields from JSON item
-            matched = self._enrich_matched_product(matched, item)
-            
-            # Attach raw JSON context for debugging only; do not overwrite database/Excel
-            # description fields so the final tags use canonical names/descriptions.
-            matched.setdefault("json_raw", item)
-
-            name = str(
+            # CRITICAL: Fetch complete database record to ensure we have all database values
+            # If the match came from database, refresh it; if from Excel, try to find in database
+            product_name = (
                 matched.get("Product Name*")
                 or matched.get("ProductName")
                 or matched.get("Description")
                 or matched.get("product_name")
                 or ""
-            ).strip()
+            )
+            
+            if product_name:
+                # Try to get complete database record
+                product_db = self._get_product_database()
+                if product_db:
+                    try:
+                        db_products = product_db.get_products_by_names([str(product_name)])
+                        if db_products and len(db_products) > 0:
+                            db_product = db_products[0]
+                            # Only use database record if it has an id (not a placeholder)
+                            if db_product.get("id") is not None:
+                                # Use complete database record instead of candidate index match
+                                # Preserve json_match_score and json_raw from the match
+                                db_product["json_match_score"] = matched.get("json_match_score", 0)
+                                matched = db_product
+                                logging.debug(f"Using complete database record for '{product_name}'")
+                            else:
+                                logging.debug(f"Database returned placeholder for '{product_name}', using candidate match")
+                    except Exception as e:
+                        logging.warning(f"Could not fetch database record for '{product_name}': {e}")
+                        # Fall back to matched product from candidate index
+            
+            # CRITICAL: Use database/Excel values only - do NOT enrich from JSON
+            # Attach raw JSON context for debugging only; do not overwrite database/Excel
+            # description fields so the final tags use canonical names/descriptions.
+            matched.setdefault("json_raw", item)
+
+            name = str(product_name).strip()
 
             matched_products.append(matched)
             if name:
