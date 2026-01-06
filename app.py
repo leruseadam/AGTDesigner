@@ -7814,12 +7814,21 @@ def generate_labels():
                                 
                                 # Convert database records to the format expected by TemplateProcessor
                                 records = []
-                                # PERFORMANCE: Process records with NO logging for speed
-                                for db_record in valid_db_records:
+                                # PERFORMANCE: Process records with minimal logging (only first 3)
+                                for idx, db_record in enumerate(valid_db_records):
                                     product_name_for_record = db_record.get('Product Name*', '')
+                                    if idx < 3:  # Only log first 3 records for performance
+                                        logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
+                                        logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
 
                                     # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                     processed_record = process_database_product_for_api(db_record)
+
+                                    # DEBUG: Log vendor field before and after processing (first 3 records only)
+                                    if idx < 3:
+                                        db_vendor = db_record.get('Vendor/Supplier*') or db_record.get('Vendor')
+                                        processed_vendor = processed_record.get('Vendor/Supplier*') or processed_record.get('Vendor')
+                                        logging.info(f"🏢 VENDOR DEBUG: Product '{product_name_for_record}' - db_record vendor: '{db_vendor}', processed_record vendor: '{processed_vendor}'")
 
                                     # CRITICAL FIX: ALWAYS use database lineage as source of truth for tag generation
                                     # UI lineage may contain sativa hybrid overrides that shouldn't affect tag output
@@ -7833,6 +7842,12 @@ def generate_labels():
                                         db_record.get('lineage') or 
                                         db_record.get('currentLineage')
                                     )
+                                    
+                                    # Debug logging for Lemon Cherry Gelato
+                                    if 'lemon' in product_name_for_record.lower() or 'cherry' in product_name_for_record.lower():
+                                        db_lineage = db_record.get('Lineage')
+                                        db_canonical_lineage = db_record.get('canonical_lineage')
+                                        logging.info(f"🔍 DEBUG LINEAGE: Product '{product_name_for_record}' - db_record Lineage='{db_lineage}', canonical_lineage='{db_canonical_lineage}', db_lineage_raw='{db_lineage_raw}'")
                                     
                                     # CRITICAL FIX: Check UI lineage FIRST, then fall back to database lineage
                                     # This ensures user's lineage changes are respected in the output
@@ -7850,8 +7865,12 @@ def generate_labels():
                                     
                                     if ui_lineage_for_this:
                                         docx_lineage = ui_lineage_for_this
+                                        if idx < 3:
+                                            logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (user change)")
                                     elif db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
                                         docx_lineage = str(db_lineage_raw).strip().upper()
+                                        if idx < 3:
+                                            logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
                                     else:
                                         # No database lineage found - use defaults based on product type
                                         product_type = processed_record.get('Product Type*', '').lower()
@@ -7862,10 +7881,15 @@ def generate_labels():
                                             docx_lineage = 'HYBRID'
                                         else:
                                             docx_lineage = 'MIXED'
+                                        
+                                        if idx < 3:
+                                            logging.info(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type")
                                     
-                                    # Extract price (no logging for performance)
+                                    # Extract price with logging (only first 3 for performance)
                                     extracted_price = _extract_price_from_database_product(processed_record)
                                     formatted_price = _format_price_value(extracted_price)
+                                    if idx < 3:
+                                        logging.info(f"💰 PRICE EXTRACTION: Product '{product_name_for_record}' - Raw: '{extracted_price}', Formatted: '{formatted_price}'")
                                     
                                     # Map database fields to template fields (using correct field names from database)
                                     record = {
@@ -7934,6 +7958,9 @@ def generate_labels():
                                         'Quantity': processed_record.get('Quantity*', '1')
                                     }
                                     record = _normalize_weight_fields(record)
+                                    print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
+                                    print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
+                                    print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
                                     records.append(record)
                                 logging.info(f"✅ Generated {len(records)} records from database")
                                 
@@ -7992,9 +8019,15 @@ def generate_labels():
                 excel_processor.selected_tags = valid_selected_tags
                 logging.info(f"🔍 Set selected_tags on Excel processor: {len(valid_selected_tags)} tags")
             
-            # PERFORMANCE: Skip DataFrame update - enrichment below will handle database lineage
-            # This dramatically speeds up generation by avoiding expensive DataFrame update
-            # Database enrichment happens after records are built, which is faster
+            # GUARANTEED FIX: Update DataFrame from database BEFORE getting records
+            # This ensures records are built with database lineage, not Excel file lineage
+            if excel_processor and hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
+                try:
+                    logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database before get_selected_records...")
+                    excel_processor._update_dataframe_lineage_from_database()
+                    logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database")
+                except Exception as df_update_err:
+                    logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
             
             records = excel_processor.get_selected_records(template_type)
             logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
@@ -8038,9 +8071,15 @@ def generate_labels():
                                         processed_db.get('canonical_lineage') or
                                         processed_db.get('currentLineage')
                                     )
+                                    logging.info(f"🔍 LINEAGE DEBUG for '{product_name}': db_lineage='{db_lineage}', existing='{record.get('Lineage', 'NONE')}'")
                                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
                                         record['Lineage'] = str(db_lineage).strip().upper()
+                                        logging.info(f"✅ Set lineage for '{product_name}' to '{record['Lineage']}'")
                                         enriched_count += 1
+                                    else:
+                                        logging.warning(f"⚠️ No valid database lineage found for '{product_name}'!")
+                                else:
+                                    logging.debug(f"✅ Preserved existing lineage '{record.get('Lineage')}' for '{product_name}' (UI lineage takes precedence)")
 
                                 # Price
                                 db_price = _extract_price_from_database_product(processed_db)
