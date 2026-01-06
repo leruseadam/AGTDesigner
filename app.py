@@ -12146,6 +12146,16 @@ def update_lineage():
         
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
+
+        # CRITICAL FIX: Force WAL checkpoint to ensure lineage changes persist immediately
+        # This is essential for PC/Windows where WAL commits might not sync to disk immediately
+        # Without this, the next read query (during generation) might see stale data from WAL cache
+        try:
+            cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            logging.info(f"✅ WAL checkpoint completed for lineage update")
+        except Exception as checkpoint_error:
+            logging.warning(f"⚠️ WAL checkpoint failed (non-critical): {checkpoint_error}")
+
         total_updated = products_updated + strains_updated
 
         # Step 5: Verify the update actually worked - CRITICAL for persistence
