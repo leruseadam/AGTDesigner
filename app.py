@@ -9694,9 +9694,9 @@ def get_available_tags():
                                 sample = [(t.get('Product Name*'), t.get('currentLineage')) for t in simple_tags[:3]]
                                 logging.info(f"📋 SIMPLE PATH: Sample enriched tags: {sample}")
 
-                        # CRITICAL FIX: Enrich tags with DOH data from database
+                        # CRITICAL FIX: Enrich tags with DOH data from database (skip during fast_load)
                         # This ensures DOH badges show up in preroll menus and other tag lists
-                        if product_names:
+                        if not fast_load and product_names:
                             try:
                                 logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database DOH data...")
 
