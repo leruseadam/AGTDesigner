@@ -1062,6 +1062,33 @@ class ExcelProcessor:
         self.logger.debug("File cache cleared")
         self._on_dataset_updated()
     
+    def refresh_from_file_if_modified(self):
+        """Refresh DataFrame from file if the file has been modified since last load."""
+        try:
+            if not self._last_loaded_file:
+                return False
+            
+            import os
+            if not os.path.exists(self._last_loaded_file):
+                return False
+            
+            current_mtime = os.path.getmtime(self._last_loaded_file)
+            cache_key = f"{self._last_loaded_file}_{current_mtime}"
+            
+            # If file was modified, clear cache and reload
+            if cache_key not in self._file_cache:
+                self.logger.info(f"File modified, refreshing DataFrame from {self._last_loaded_file}")
+                file_path = self._last_loaded_file  # Save before clearing
+                self._file_cache.clear()  # Clear old cache entries
+                # Force reload by clearing the last loaded file reference
+                self._last_loaded_file = None
+                return self.load_file(file_path)
+            
+            return False
+        except Exception as e:
+            self.logger.warning(f"Error refreshing from file: {e}")
+            return False
+    
     def check_memory_usage(self):
         """Check current memory usage and cleanup if needed."""
         try:
@@ -3929,6 +3956,33 @@ class ExcelProcessor:
                     else:
                         logger.warning(f"CRITICAL FIX: No direct matches found for any of the {len(selected_tag_names)} selected tags")
             
+            # CRITICAL FIX: If still no matches, try to refresh Excel DataFrame first (in case file was updated)
+            if not canonical_selected and self._last_loaded_file:
+                logger.info("CRITICAL FIX: No matches found, refreshing Excel DataFrame from file...")
+                try:
+                    # Force refresh DataFrame from file (clear cache and reload)
+                    file_path = self._last_loaded_file
+                    self._file_cache.clear()  # Clear cache to force reload
+                    old_last_loaded = self._last_loaded_file
+                    self._last_loaded_file = None  # Force reload
+                    if self.load_file(file_path):
+                        logger.info("CRITICAL FIX: Successfully refreshed Excel DataFrame")
+                        # Try matching again after refresh
+                        if self.df is not None and not self.df.empty and product_name_col in self.df.columns:
+                            canonical_map = {normalize_name(name): name for name in self.df[product_name_col]}
+                            for tag in selected_tag_names:
+                                normalized_tag = normalize_name(tag)
+                                if normalized_tag in canonical_map:
+                                    canonical_selected.append(canonical_map[normalized_tag])
+                                    logger.info(f"CRITICAL FIX: Found match after refresh: '{tag}' -> '{canonical_map[normalized_tag]}'")
+                    else:
+                        # Restore if reload failed
+                        self._last_loaded_file = old_last_loaded
+                except Exception as e:
+                    logger.warning(f"CRITICAL FIX: Error refreshing Excel DataFrame: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
             # CRITICAL FIX: If still no matches, try to get products from database directly
             if not canonical_selected:
                 logger.warning("CRITICAL FIX: No matches found in DataFrame, trying to get products from database...")
@@ -3947,6 +4001,7 @@ class ExcelProcessor:
                                 if isinstance(product, dict):
                                     product_name = product.get('Product Name*', product.get('ProductName', ''))
                                     if product_name in selected_tag_names:
+                                        # Start with database data
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
@@ -3968,11 +4023,92 @@ class ExcelProcessor:
                                             'DOH': product.get('DOH', ''),
                                             'Source': 'Database'
                                         }
+                                        
+                                        # CRITICAL FIX: Try to enrich with Excel data if available
+                                        # Search Excel DataFrame for similar products to get Excel data
+                                        if self.df is not None and not self.df.empty:
+                                            excel_match = None
+                                            # Try exact match first
+                                            if product_name_col in self.df.columns:
+                                                exact_match = self.df[self.df[product_name_col] == product_name]
+                                                if not exact_match.empty:
+                                                    excel_match = exact_match.iloc[0]
+                                                    logger.info(f"CRITICAL FIX: Found exact Excel match for '{product_name}'")
+                                                else:
+                                                    # Try case-insensitive match
+                                                    case_match = self.df[
+                                                        self.df[product_name_col].str.lower() == product_name.lower()
+                                                    ]
+                                                    if not case_match.empty:
+                                                        excel_match = case_match.iloc[0]
+                                                        logger.info(f"CRITICAL FIX: Found case-insensitive Excel match for '{product_name}'")
+                                                    else:
+                                                        # Try fuzzy matching with normalized names
+                                                        normalized_product_name = normalize_name(product_name)
+                                                        for idx, row in self.df.iterrows():
+                                                            excel_name = str(row.get(product_name_col, '')).strip()
+                                                            normalized_excel_name = normalize_name(excel_name)
+                                                            if normalized_excel_name == normalized_product_name:
+                                                                excel_match = row
+                                                                logger.info(f"CRITICAL FIX: Found normalized Excel match for '{product_name}' -> '{excel_name}'")
+                                                                break
+                                            
+                                            # If Excel match found, enrich record with Excel data (Excel takes precedence for price, weight, etc.)
+                                            if excel_match is not None:
+                                                logger.info(f"CRITICAL FIX: Enriching database record for '{product_name}' with Excel data")
+                                                # Excel data takes precedence for price, weight, and other Excel-specific fields
+                                                if excel_match.get('Price') or excel_match.get('Price*'):
+                                                    excel_price = excel_match.get('Price') or excel_match.get('Price*', '')
+                                                    if excel_price:
+                                                        record['Price'] = excel_price
+                                                        record['Price*'] = excel_price
+                                                        logger.debug(f"CRITICAL FIX: Updated price from Excel: {excel_price}")
+                                                
+                                                if excel_match.get('Weight*'):
+                                                    excel_weight = excel_match.get('Weight*', '')
+                                                    if excel_weight:
+                                                        record['Weight*'] = excel_weight
+                                                        logger.debug(f"CRITICAL FIX: Updated weight from Excel: {excel_weight}")
+                                                
+                                                if excel_match.get('Units'):
+                                                    excel_units = excel_match.get('Units', '')
+                                                    if excel_units:
+                                                        record['Units'] = excel_units
+                                                        logger.debug(f"CRITICAL FIX: Updated units from Excel: {excel_units}")
+                                                
+                                                if excel_match.get('Vendor') or excel_match.get('Vendor/Supplier*'):
+                                                    excel_vendor = excel_match.get('Vendor') or excel_match.get('Vendor/Supplier*', '')
+                                                    if excel_vendor:
+                                                        record['Vendor'] = excel_vendor
+                                                        logger.debug(f"CRITICAL FIX: Updated vendor from Excel: {excel_vendor}")
+                                                
+                                                if excel_match.get('Product Brand'):
+                                                    excel_brand = excel_match.get('Product Brand', '')
+                                                    if excel_brand:
+                                                        record['Product Brand'] = excel_brand
+                                                        logger.debug(f"CRITICAL FIX: Updated brand from Excel: {excel_brand}")
+                                                
+                                                if excel_match.get('Product Type*'):
+                                                    excel_type = excel_match.get('Product Type*', '')
+                                                    if excel_type:
+                                                        record['Product Type*'] = excel_type
+                                                        logger.debug(f"CRITICAL FIX: Updated product type from Excel: {excel_type}")
+                                                
+                                                # Update other Excel fields if available
+                                                for col in self.df.columns:
+                                                    if col not in record and excel_match.get(col):
+                                                        record[col] = excel_match.get(col)
+                                                
+                                                record['Source'] = 'Database+Excel'  # Indicate it's enriched
+                                                logger.info(f"CRITICAL FIX: Successfully enriched '{product_name}' with Excel data")
+                                            else:
+                                                logger.warning(f"CRITICAL FIX: No Excel match found for '{product_name}', using database data only")
+                                        
                                         records.append(record)
                                         logger.info(f"CRITICAL FIX: Created database record for '{product_name}'")
                             
                             if records:
-                                logger.info(f"CRITICAL FIX: Created {len(records)} records from database")
+                                logger.info(f"CRITICAL FIX: Created {len(records)} records from database (enriched with Excel where available)")
                                 return records
                             else:
                                 logger.warning("CRITICAL FIX: No valid records created from database products")

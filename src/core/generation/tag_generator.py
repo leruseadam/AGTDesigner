@@ -1290,6 +1290,31 @@ def process_chunk(args):
             
             label_data["DescAndWeight"] = wrap_with_marker(combined, "DESC")
             
+            # CRITICAL FIX: Set ProductVendor in label_data so {{Label1.ProductVendor}} placeholder gets replaced
+            # Get vendor from row data (check multiple field names)
+            vendor_val = (row.get("Vendor/Supplier*") or 
+                         row.get("Vendor/Supplier") or 
+                         row.get("Vendor") or 
+                         row.get("ProductVendor") or 
+                         "")
+            # Clean up vendor value
+            if vendor_val:
+                vendor_val = str(vendor_val).strip()
+                if vendor_val.lower() in ['nan', 'none', 'null', '']:
+                    vendor_val = ""
+            else:
+                vendor_val = ""
+            
+            # Set ProductVendor in label_data - template processor will handle proper formatting
+            # For classic types, ProductVendor should show vendor; for non-classic types, it should be empty
+            if is_classic_type and vendor_val:
+                label_data["ProductVendor"] = vendor_val
+                logger.debug(f"Set ProductVendor to '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
+            else:
+                # Non-classic types don't use ProductVendor, or no vendor available
+                label_data["ProductVendor"] = ""
+                logger.debug(f"Set ProductVendor to empty for product '{product_name}' (is_classic: {is_classic_type}, vendor: '{vendor_val}')")
+            
             context[f"Label{i+1}"] = label_data
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
