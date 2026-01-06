@@ -902,8 +902,10 @@ def process_chunk(args):
                     conn = product_db._get_connection()
                     cur = conn.cursor()
                     placeholders = ','.join(['?'] * len(product_names))
+                    # CRITICAL FIX: Use sovereign_lineage first (user changes), then fall back to Lineage column
+                    # This ensures lineage updates from /api/update-lineage are used in generation
                     batch_lineage_query = f'''
-                        SELECT "Product Name*", "Lineage"
+                        SELECT "Product Name*", COALESCE(sovereign_lineage, "Lineage") as lineage
                         FROM products
                         WHERE "Product Name*" IN ({placeholders})
                         ORDER BY id DESC
