@@ -9580,7 +9580,9 @@ def get_available_tags():
                 }), 400
 
         # CRITICAL: SIMPLE PATH - When Excel exists, load ONLY from Excel, skip ALL other logic
-        logging.info(f"✅ Excel file exists: {session_file_path} - using SIMPLE Excel-only path")
+        # PERFORMANCE: Check fast_load parameter to skip expensive database queries
+        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        logging.info(f"✅ Excel file exists: {session_file_path} - using SIMPLE Excel-only path (fast_load={fast_load})")
         try:
             from src.core.data.excel_processor import ExcelProcessor
 
@@ -9603,13 +9605,15 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
-                # Enrich with database lineage ONLY (don't add database products)
-                try:
-                    product_db = get_product_database(store_name)
-                    if product_db and simple_tags:
-                        logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database lineage...")
-                        product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
-                        logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
+                # PERFORMANCE: Skip database enrichment during fast_load - tags already have lineage from Excel
+                if not fast_load:
+                    # Enrich with database lineage ONLY (don't add database products)
+                    try:
+                        product_db = get_product_database(store_name)
+                        if product_db and simple_tags:
+                            logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database lineage...")
+                            product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
+                            logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
 
                         lineage_map = {}
                         if product_names:
