@@ -11351,19 +11351,49 @@ const TagManager = {
                 return;
             }
             
-            // No data loaded, show upload prompt
-            availableTagsContainer.innerHTML = `
-                <div class="text-center py-5">
-                    <div class="upload-prompt">
-                        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                        <h5 class="text-muted">No product data loaded</h5>
-                        <p class="text-muted">Upload an Excel file to get started</p>
-                        <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                            <i class="fas fa-upload me-2"></i>Upload Excel File
-                        </button>
+            // CRITICAL FIX: Check if tags are being fetched before showing upload prompt
+            // This prevents showing the prompt when tags are loading asynchronously
+            if (this._fetchingAvailableTags) {
+                verboseLog('Tags are being fetched, waiting before showing upload prompt...');
+                // Wait briefly to allow fetch to complete
+                setTimeout(() => {
+                    // Check again if tags loaded
+                    if (this.state.tags && this.state.tags.length > 0) {
+                        verboseLog('Tags loaded during wait, skipping upload prompt');
+                        return;
+                    }
+                    // Show upload prompt only if still no tags
+                    const container = document.getElementById('availableTags');
+                    if (container && (!this.state.tags || this.state.tags.length === 0)) {
+                        container.innerHTML = `
+                            <div class="text-center py-5">
+                                <div class="upload-prompt">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <h5 class="text-muted">No product data loaded</h5>
+                                    <p class="text-muted">Upload an Excel file to get started</p>
+                                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                        <i class="fas fa-upload me-2"></i>Upload Excel File
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }, 2000); // Wait 2 seconds
+            } else {
+                // No fetch in progress, show upload prompt immediately
+                availableTagsContainer.innerHTML = `
+                    <div class="text-center py-5">
+                        <div class="upload-prompt">
+                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No product data loaded</h5>
+                            <p class="text-muted">Upload an Excel file to get started</p>
+                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                <i class="fas fa-upload me-2"></i>Upload Excel File
+                            </button>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            }
         }
     },
 
@@ -11722,9 +11752,40 @@ const TagManager = {
             if (response.ok) {
                 const data = await response.json();
                 verboseLog('Initial data response:', data);
-                // CRITICAL: Check data_loaded flag first - if false, show upload prompt even if success
+                // CRITICAL: Check data_loaded flag first - if false, wait briefly before showing upload prompt
+                // This prevents showing the prompt when tags are loading asynchronously
                 if (data.success && data.data_loaded === false) {
-                    verboseLog('No data loaded (data_loaded=false), showing upload prompt');
+                    verboseLog('No data loaded (data_loaded=false), checking if tags are loading...');
+                    
+                    // CRITICAL FIX: Wait briefly to allow async tag loading to complete
+                    // This prevents showing upload prompt when tags are loading in background
+                    await new Promise(resolve => setTimeout(resolve, 1500)); // Wait 1.5 seconds
+                    
+                    // Check again if tags have loaded in the meantime
+                    if (this.state.tags && this.state.tags.length > 0) {
+                        verboseLog('Tags loaded during wait, skipping upload prompt');
+                        this._checkingExistingData = false;
+                        return;
+                    }
+                    
+                    // Also check if fetchAndUpdateAvailableTags is in progress
+                    if (this._fetchingAvailableTags) {
+                        verboseLog('Tag fetch in progress, waiting for completion...');
+                        // Wait up to 3 seconds for fetch to complete
+                        let waitCount = 0;
+                        while (this._fetchingAvailableTags && waitCount < 30) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            waitCount++;
+                        }
+                        // Check again after waiting
+                        if (this.state.tags && this.state.tags.length > 0) {
+                            verboseLog('Tags loaded after waiting for fetch, skipping upload prompt');
+                            this._checkingExistingData = false;
+                            return;
+                        }
+                    }
+                    
+                    verboseLog('No data loaded after wait period, showing upload prompt');
                     // Complete splash loading when no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
