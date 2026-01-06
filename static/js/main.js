@@ -3062,6 +3062,46 @@ const TagManager = {
         // This prevents tags from disappearing when filters are active
         const selectedTagObjects = this.getSelectedTagObjects();
         this.updateSelectedTags(selectedTagObjects);
+        
+        // CRITICAL FIX: Ensure checkbox handlers are properly attached to selected tags after filter change
+        // This fixes the issue where checkboxes in selected tags become unresponsive after filter changes
+        setTimeout(() => {
+            const selectedContainer = document.getElementById('selectedTags');
+            if (selectedContainer) {
+                const selectedCheckboxes = selectedContainer.querySelectorAll('.tag-checkbox');
+                selectedCheckboxes.forEach(checkbox => {
+                    // Ensure checkbox is enabled and has proper handlers
+                    checkbox.style.pointerEvents = 'auto';
+                    checkbox.disabled = false;
+                    checkbox.removeAttribute('data-drag-disabled');
+                    checkbox.removeAttribute('data-reordering');
+                    
+                    // CRITICAL FIX: Reattach handlers if they're missing (can happen after filter changes)
+                    // This ensures checkboxes remain functional after filter updates
+                    if (!checkbox._changeHandler && !checkbox.onchange) {
+                        const tagName = checkbox.value;
+                        const tag = this._tagLookupMap?.get(tagName) ||
+                                   this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                                   this.state.originalTags.find(t => t['Product Name*'] === tagName);
+                        if (tag) {
+                            // Recreate the tag element to get proper handlers
+                            const tagElement = this.createTagElement(tag, true);
+                            const newCheckbox = tagElement.querySelector('.tag-checkbox');
+                            if (newCheckbox && newCheckbox._changeHandler) {
+                                // Replace the old checkbox with the new one that has handlers
+                                const tagRow = checkbox.closest('.tag-item') || checkbox.closest('.tag-row');
+                                if (tagRow) {
+                                    // Replace just the checkbox, not the entire row
+                                    checkbox.replaceWith(newCheckbox);
+                                    console.log(`✅ Reattached handler for checkbox "${tagName}" in selected tags after filter change`);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }, 100); // Small delay to ensure DOM is updated
+        
         this.renderActiveFilters();
         // USER PREFERENCE: Scroll to top after filter update
         requestAnimationFrame(() => {
@@ -9124,6 +9164,12 @@ const TagManager = {
                                 checkbox.checked = shouldBeChecked;
                                 verboseLog(`Setting checkbox for "${tag['Product Name*']}" to checked: ${shouldBeChecked}`);
                                 
+                                // CRITICAL FIX: Ensure checkbox is enabled and handlers are attached after filter changes
+                                checkbox.style.pointerEvents = 'auto';
+                                checkbox.disabled = false;
+                                checkbox.removeAttribute('data-drag-disabled');
+                                checkbox.removeAttribute('data-reordering');
+                                
                                 // Ensure the checkbox is properly initialized
                                 if (shouldBeChecked) {
                                     checkbox.setAttribute('data-checked', 'true');
@@ -9133,7 +9179,9 @@ const TagManager = {
                                 
                                 // Add a small delay to ensure the checkbox is properly rendered
                                 setTimeout(() => {
-                                    // Double-check the checkbox state
+                                    // Double-check the checkbox state and ensure it's enabled
+                                    checkbox.style.pointerEvents = 'auto';
+                                    checkbox.disabled = false;
                                     if (shouldBeChecked && !checkbox.checked) {
                                         verboseLog(`Fixing checkbox state for "${tag['Product Name*']}" - should be checked but isn't`);
                                         checkbox.checked = true;
@@ -15329,41 +15377,47 @@ const TagManager = {
             };
         }
         
-        // Debounced search handler for available tags
-        const debouncedAvailableSearch = (event) => {
-            if (this._searchDebounceTimers.available) {
-                clearTimeout(this._searchDebounceTimers.available);
-            }
-            this._searchDebounceTimers.available = setTimeout(() => {
-                this.handleAvailableTagsSearch(event);
-            }, 300); // 300ms debounce delay
-        };
+        // CRITICAL FIX: Create debounced functions as instance properties so we can properly remove them
+        // Only create them once, reuse if they already exist
+        if (!this._debouncedAvailableSearch) {
+            this._debouncedAvailableSearch = (event) => {
+                if (this._searchDebounceTimers.available) {
+                    clearTimeout(this._searchDebounceTimers.available);
+                }
+                this._searchDebounceTimers.available = setTimeout(() => {
+                    this.handleAvailableTagsSearch(event);
+                }, 300); // 300ms debounce delay
+            };
+        }
         
-        // Debounced search handler for selected tags
-        const debouncedSelectedSearch = (event) => {
-            if (this._searchDebounceTimers.selected) {
-                clearTimeout(this._searchDebounceTimers.selected);
-            }
-            this._searchDebounceTimers.selected = setTimeout(() => {
-                this.handleSelectedTagsSearch(event);
-            }, 300); // 300ms debounce delay
-        };
+        if (!this._debouncedSelectedSearch) {
+            this._debouncedSelectedSearch = (event) => {
+                if (this._searchDebounceTimers.selected) {
+                    clearTimeout(this._searchDebounceTimers.selected);
+                }
+                this._searchDebounceTimers.selected = setTimeout(() => {
+                    this.handleSelectedTagsSearch(event);
+                }, 300); // 300ms debounce delay
+            };
+        }
         
         let foundCount = 0;
         
         // Add search event listeners for available tags
         const availableTagsSearch = document.getElementById('availableTagsSearch');
         if (availableTagsSearch) {
-            // Remove old listeners if they exist
+            // Remove old listeners if they exist (using stored function reference)
             if (this._boundAvailableSearch) {
                 availableTagsSearch.removeEventListener('input', this._boundAvailableSearch);
             }
             // Remove the debounced function if it was previously added
-            availableTagsSearch.removeEventListener('input', debouncedAvailableSearch);
+            if (this._debouncedAvailableSearch) {
+                availableTagsSearch.removeEventListener('input', this._debouncedAvailableSearch);
+            }
             
             // Store bound function and add new listener
-            this._boundAvailableSearch = debouncedAvailableSearch;
-            availableTagsSearch.addEventListener('input', debouncedAvailableSearch);
+            this._boundAvailableSearch = this._debouncedAvailableSearch;
+            availableTagsSearch.addEventListener('input', this._debouncedAvailableSearch);
             foundCount++;
             verboseLog('✅ Added debounced event listener to availableTagsSearch');
         } else {
@@ -15373,16 +15427,18 @@ const TagManager = {
         // Add search event listeners for selected tags
         const selectedTagsSearch = document.getElementById('selectedTagsSearch');
         if (selectedTagsSearch) {
-            // Remove old listeners if they exist
+            // Remove old listeners if they exist (using stored function reference)
             if (this._boundSelectedSearch) {
                 selectedTagsSearch.removeEventListener('input', this._boundSelectedSearch);
             }
             // Remove the debounced function if it was previously added
-            selectedTagsSearch.removeEventListener('input', debouncedSelectedSearch);
+            if (this._debouncedSelectedSearch) {
+                selectedTagsSearch.removeEventListener('input', this._debouncedSelectedSearch);
+            }
             
             // Store bound function and add new listener
-            this._boundSelectedSearch = debouncedSelectedSearch;
-            selectedTagsSearch.addEventListener('input', debouncedSelectedSearch);
+            this._boundSelectedSearch = this._debouncedSelectedSearch;
+            selectedTagsSearch.addEventListener('input', this._debouncedSelectedSearch);
             foundCount++;
             verboseLog('✅ Added debounced event listener to selectedTagsSearch');
         } else {
