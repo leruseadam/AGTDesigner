@@ -1496,13 +1496,6 @@ class TemplateProcessor:
                     self.logger.warning(f"Skipping post-processing due to error: {processing_error}")
             else:
                 self.logger.warning(f"PERFORMANCE: Skipping post-processing for large chunk with {num_tables} tables")
-                
-                # PERFORMANCE: Skip redundant marker cleanup - _post_process already does this
-                # self._final_marker_cleanup(rendered_doc)  # REMOVED - redundant with _post_process
-                
-            except Exception as processing_error:
-                self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
-                # Continue processing without post-processing features
             
             # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
             # Cell widths already standardized
