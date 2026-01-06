@@ -2641,16 +2641,44 @@ class JSONMatcher:
                         if term in db_lower:
                             core_terms_db.append(term)
                     
-                    # CRITICAL: If both have core terms, at least ONE must match
+                    # Check for clear contradictions between product types
+                    # Only reject if there's a known contradiction (jar+dragon vs bath+salt, ball vs chew, etc.)
                     if core_terms_json and core_terms_db:
-                        has_common_term = any(jterm in core_terms_db for jterm in core_terms_json)
-                        if not has_common_term:
-                            logging.warning(f"🚫 VALIDATION FAILED: No common product type - JSON:{core_terms_json} vs DB:{core_terms_db}")
-                            logging.warning(f"   '{json_name_str}' ≠ '{db_name_str}'")
+                        # Contradiction groups - products that should never match
+                        contradictions = [
+                            ({'jar', 'dragon'}, {'bath', 'salt', 'salts'}),
+                            ({'ball', 'balls'}, {'chew', 'chews'}),
+                            ({'capsule', 'capsules'}, {'tincture'}),
+                            ({'squeeze'}, {'roll'}),
+                        ]
+                        
+                        json_terms_set = set(core_terms_json)
+                        db_terms_set = set(core_terms_db)
+                        
+                        # Check for contradictions
+                        has_contradiction = False
+                        for group1, group2 in contradictions:
+                            if (json_terms_set & group1 and db_terms_set & group2) or \
+                               (json_terms_set & group2 and db_terms_set & group1):
+                                has_contradiction = True
+                                logging.warning(f"🚫 VALIDATION FAILED: Product type contradiction - JSON:{core_terms_json} vs DB:{core_terms_db}")
+                                logging.warning(f"   '{json_name_str}' ≠ '{db_name_str}'")
+                                break
+                        
+                        if has_contradiction:
                             best_match = None  # Reject this match
                         else:
-                            validated = True
-                            logging.info(f"✅ VALIDATED: Common terms {set(core_terms_json) & set(core_terms_db)}")
+                            # No contradiction - validate if there's a common term OR if score is high enough
+                            has_common_term = any(jterm in core_terms_db for jterm in core_terms_json)
+                            if has_common_term:
+                                validated = True
+                                logging.info(f"✅ VALIDATED: Common terms {set(core_terms_json) & set(core_terms_db)}")
+                            elif best_score >= 70.0:  # Allow matches with high enough score even without common terms
+                                validated = True
+                                logging.info(f"✅ VALIDATED: High score ({best_score:.1f}) despite no common product type terms")
+                            else:
+                                logging.warning(f"🚫 VALIDATION FAILED: No common product type and score too low - JSON:{core_terms_json} vs DB:{core_terms_db}, score:{best_score:.1f}")
+                                best_match = None
                     else:
                         # No clear product type terms - use score threshold (reduced from 85 to 70 to find more matches)
                         validated = (best_score >= 70.0)
