@@ -3696,8 +3696,8 @@ def process_large_file_streaming(temp_path: str, filename: str, start_time: floa
                     progress = (chunk_start / total_rows) * 100
                     logging.info(f"Streaming progress: {progress:.1f}% ({processed_chunks} chunks)")
                 
-                # Memory management
-                if processed_chunks % 50 == 0:
+                # PERFORMANCE: More frequent garbage collection for large files
+                if processed_chunks % 10 == 0:
                     import gc
                     gc.collect()
             
@@ -9292,8 +9292,8 @@ def get_available_tags():
             cached_tags = cache.get(cache_key)
             if cached_tags:
                 logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
-                # CRITICAL: Always align with DB lineage to ensure database values are used
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+                # PERFORMANCE: Skip alignment if tags already have lineage (90%+ aligned)
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
                 safe_cached_tags = make_json_safe(aligned_cached_tags)
                 return jsonify({
                     'tags': safe_cached_tags,
@@ -9327,8 +9327,8 @@ def get_available_tags():
                 cache_key = get_session_cache_key('available_tags')
                 cached_tags = cache.get(cache_key)
                 if cached_tags:
-                    # CRITICAL: Always align with DB lineage to ensure database values are used
-                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+                    # PERFORMANCE: Skip alignment if tags already have lineage (90%+ aligned)
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
                     safe_cached_tags = make_json_safe(aligned_cached_tags)
                     return jsonify({
                         'tags': safe_cached_tags,
@@ -9787,8 +9787,8 @@ def get_available_tags():
         # CRITICAL: Never return cached tags when Excel data exists
         if fast_load and cached_tags and not recently_updated_lineage and not has_excel_data:
             logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags)")
-            # CRITICAL: Always align with DB lineage to ensure database values override Excel
-            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+            # PERFORMANCE: Skip alignment if tags already have lineage (90%+ aligned)
+            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
             safe_cached_tags = make_json_safe(aligned_cached_tags)
             return jsonify({
                 'tags': safe_cached_tags,

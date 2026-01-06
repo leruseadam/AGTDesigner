@@ -653,18 +653,25 @@ class ProductDatabase:
                 
                 # Create indexes for better performance
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
-                
+
                 # Only create normalized_name index if the column exists
                 cursor.execute("PRAGMA table_info(products)")
                 product_columns = [col[1] for col in cursor.fetchall()]
                 if 'normalized_name' in product_columns:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_name)')
-                
+
                 # Only create strain_id index if the column exists
                 if 'strain_id' in product_columns:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_strain ON products(strain_id)')
-                    
+
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
+
+                # Performance optimization: Add indexes for frequently queried columns
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_product_type ON products("Product Type*")')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_lineage ON products("Lineage")')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor ON products("Vendor/Supplier*")')
+                if 'canonical_lineage' in product_columns:
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_canonical_lineage ON products(canonical_lineage)')
                 
                 conn.commit()
                 
