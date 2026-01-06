@@ -2856,6 +2856,17 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
+            
+            // If search bar is active, re-apply the search with the cleared filter results
+            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
+            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
+                const searchTerm = availableTagsSearchInput.value.trim();
+                verboseLog(`🔍 Re-applying search "${searchTerm}" after clearing filters`);
+                // Use setTimeout to ensure filter update completes before re-applying search
+                setTimeout(() => {
+                    this.handleSearch('availableTags', 'availableTagsSearch');
+                }, 50);
+            }
             return;
         }
         
@@ -2885,6 +2896,17 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
+            
+            // If search bar is active, re-apply the search with the cached filter results
+            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
+            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
+                const searchTerm = availableTagsSearchInput.value.trim();
+                verboseLog(`🔍 Re-applying search "${searchTerm}" after applying cached filter`);
+                // Use setTimeout to ensure filter update completes before re-applying search
+                setTimeout(() => {
+                    this.handleSearch('availableTags', 'availableTagsSearch');
+                }, 50);
+            }
             return;
         }
         
@@ -3109,6 +3131,17 @@ const TagManager = {
         requestAnimationFrame(() => {
             this._scrollAvailableTagsToTop();
         });
+        
+        // If search bar is active, re-apply the search with the new filter results
+        const availableTagsSearchInput = document.getElementById('availableTagsSearch');
+        if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
+            const searchTerm = availableTagsSearchInput.value.trim();
+            verboseLog(`🔍 Re-applying search "${searchTerm}" after filter change`);
+            // Use setTimeout to ensure filter update completes before re-applying search
+            setTimeout(() => {
+                this.handleSearch('availableTags', 'availableTagsSearch');
+            }, 50);
+        }
     },
 
     handleSearch(listId, searchInputId) {
@@ -3194,6 +3227,33 @@ const TagManager = {
         } catch (error) {
             console.error(`❌ Error in handleSearch for ${listId}:`, error);
             return false;
+        }
+    },
+
+    expandAllTagGroups() {
+        try {
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (!availableTagsContainer) {
+                return;
+            }
+
+            // Find all collapsed content elements (vendor-content, brand-content, product-type-content, weight-content, price-content)
+            const collapsedElements = availableTagsContainer.querySelectorAll('.vendor-content.collapsed, .brand-content.collapsed, .product-type-content.collapsed, .weight-content.collapsed, .price-content.collapsed');
+            
+            // Expand all collapsed groups
+            collapsedElements.forEach(element => {
+                element.classList.remove('collapsed');
+            });
+
+            // Update all collapse icons to show expanded state (▼)
+            const collapseIcons = availableTagsContainer.querySelectorAll('.collapse-icon');
+            collapseIcons.forEach(icon => {
+                icon.textContent = '▼';
+            });
+
+            verboseLog(`✅ Expanded all tag groups (${collapsedElements.length} groups expanded)`);
+        } catch (error) {
+            console.error('❌ Error expanding tag groups:', error);
         }
     },
 
