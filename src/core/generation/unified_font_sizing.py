@@ -219,6 +219,15 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             return Pt(first_size * scale_factor)
         return Pt(12 * scale_factor)
     
+    # Check for 9+ consecutive letters in vertical template descriptions (for 28pt cap)
+    has_long_consecutive_letters = False
+    if field_type.lower() == 'description' and orientation.lower() == 'vertical':
+        import re
+        # Find sequences of consecutive letters (9 or more)
+        consecutive_letter_pattern = r'[a-zA-Z]{9,}'
+        if re.search(consecutive_letter_pattern, str(text)):
+            has_long_consecutive_letters = True
+    
     # Special rule: If Description has any word longer than 9 characters in Vertical Template, reduce font size
     if field_type.lower() == 'description' and orientation.lower() == 'vertical':
         words = str(text).split()
@@ -236,7 +245,12 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                     font_size = 11
                 
                 final_size = font_size * scale_factor
-                logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font")
+                # Apply 28pt cap if 9+ consecutive letters found
+                if has_long_consecutive_letters and final_size > 28 * scale_factor:
+                    final_size = 28 * scale_factor
+                    logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, capped at 28pt due to consecutive letters")
+                else:
+                    logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font")
                 return Pt(final_size)
     
     
@@ -297,6 +311,10 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.info(f"PRICE DEBUG: threshold {threshold} -> size {size}, comp {comp} <= threshold? {comp <= threshold}")
         if comp <= threshold:  # Fixed: Use <= instead of < for proper threshold matching
             final_size = size * scale_factor
+            # Apply 28pt cap for vertical template descriptions with 9+ consecutive letters
+            if has_long_consecutive_letters and final_size > 28 * scale_factor:
+                final_size = 28 * scale_factor
+                logger.debug(f"Applied 28pt cap for vertical description with 9+ consecutive letters: '{text}'")
             logger.debug(f"Selected size {size}pt (final: {final_size}pt)")
             if field_type.lower() == 'price':
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")

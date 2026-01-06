@@ -1988,7 +1988,11 @@ def initialize_excel_processor():
             logging.info("Excel processor initialization skipped - using per-request processors")
             return
 
-        excel_processor.logger.setLevel(logging.WARNING)
+        # Safety check: ensure excel_processor has a logger attribute
+        if not hasattr(excel_processor, 'logger') or excel_processor.logger is None:
+            logging.warning("Excel processor does not have a logger - skipping logger configuration")
+        else:
+            excel_processor.logger.setLevel(logging.WARNING)
         
         # Enable product database integration by default
         if hasattr(excel_processor, 'enable_product_db_integration'):
