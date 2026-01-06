@@ -7891,6 +7891,24 @@ def generate_labels():
                                     if idx < 3:
                                         logging.info(f"💰 PRICE EXTRACTION: Product '{product_name_for_record}' - Raw: '{extracted_price}', Formatted: '{formatted_price}'")
                                     
+                                    # CRITICAL FIX: Ensure Price is always set - use fallback if empty
+                                    if not formatted_price or str(formatted_price).strip() in ['', 'None', 'nan', 'N/A', '$0', '$0.00']:
+                                        # Try to get price from other fields
+                                        price_fallback = (
+                                            processed_record.get('Price', '') or
+                                            processed_record.get('Price*', '') or
+                                            processed_record.get('Med Price', '') or
+                                            ''
+                                        )
+                                        formatted_price = price_fallback if price_fallback else '$0.00'
+                                    
+                                    # CRITICAL FIX: Ensure DescAndWeight is always set - use fallback if empty
+                                    desc_and_weight = processed_record.get('DescAndWeight', '')
+                                    if not desc_and_weight or str(desc_and_weight).strip() in ['', 'None', 'nan', 'N/A']:
+                                        product_name_fallback = processed_record.get('Product Name*', '')
+                                        combined_weight_fallback = processed_record.get('CombinedWeight', '1g')
+                                        desc_and_weight = f"{product_name_fallback} - {combined_weight_fallback}" if product_name_fallback else combined_weight_fallback
+                                    
                                     # Map database fields to template fields (using correct field names from database)
                                     record = {
                                         'Product Name*': processed_record.get('Product Name*', ''),
@@ -7912,9 +7930,9 @@ def generate_labels():
                                         'Units': processed_record.get('Units', 'g'),  # Default units if missing
                                         'WeightUnits': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
                                         'CombinedWeight': processed_record.get('CombinedWeight', f"{processed_record.get('Weight*', '1')}{processed_record.get('Units', 'g')}"),  # Use processed CombinedWeight
-                                        # CRITICAL FIX: Use processed DescAndWeight from process_database_product_for_api
-                                        'Description': processed_record.get('DescAndWeight', processed_record.get('Product Name*', '')),  # Use processed DescAndWeight
-                                        'DescAndWeight': processed_record.get('DescAndWeight', f"{processed_record.get('Product Name*', '')} - {processed_record.get('CombinedWeight', '1g')}"),  # Use processed DescAndWeight
+                                        # CRITICAL FIX: Use processed DescAndWeight from process_database_product_for_api with fallback
+                                        'Description': desc_and_weight,  # Use calculated DescAndWeight with fallback
+                                        'DescAndWeight': desc_and_weight,  # Use calculated DescAndWeight with fallback
                                         'THC test result': processed_record.get('THC test result', ''),
                                         'CBD test result': processed_record.get('CBD test result', ''),
                                         'Test result unit (% or mg)': processed_record.get('Test result unit (% or mg)', '%'),  # Default to % if missing
