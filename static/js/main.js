@@ -4664,20 +4664,17 @@ const TagManager = {
         // This prevents tags from disappearing when background operations return empty results
         if (!tags || tags.length === 0) {
             const currentTagCount = availableTagsContainer.querySelectorAll('.tag-item').length;
-            if (currentTagCount > 0) {
-                verboseLog(`⏭️ Skipping empty tag update - ${currentTagCount} tags already displayed`);
+            // CRITICAL FIX: Check if tags exist in state FIRST before showing upload prompt
+            const hasTagsInState = this.state.tags && this.state.tags.length > 0;
+            
+            if (currentTagCount > 0 || hasTagsInState) {
+                verboseLog(`⏭️ Skipping empty tag update - ${currentTagCount} tags displayed or ${this.state.tags?.length || 0} tags in state`);
                 reenableScaling();
                 return;
             }
             verboseLog('No tags provided, showing empty state');
             
-            // CRITICAL FIX: Check if no Excel file is uploaded and show proper empty state
-            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-            // CRITICAL FIX: Also treat as "no file" if total tag count is 0 (not just filtered)
-            const hasNoTags = !this.state.tags || this.state.tags.length === 0;
-            const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database' || hasNoTags;
-            
-            // CRITICAL FIX: Check if tags are being fetched - show loading instead of upload prompt
+            // CRITICAL FIX: Check if tags are being fetched FIRST - show loading instead of upload prompt
             const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData;
             
             if (isFetchingTags) {
@@ -4700,6 +4697,12 @@ const TagManager = {
                 `;
                 return;
             }
+            
+            // CRITICAL FIX: Check if no Excel file is uploaded and show proper empty state
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            // CRITICAL FIX: Also treat as "no file" if total tag count is 0 (not just filtered)
+            const hasNoTags = !this.state.tags || this.state.tags.length === 0;
+            const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database' || hasNoTags;
             
             if (noFileUploaded) {
                 // Show prominent upload prompt when Excel is needed
@@ -9641,12 +9644,42 @@ const TagManager = {
         // This ensures the tag list always shows current Excel data on refresh
         const availableTagsContainer = document.getElementById('availableTags');
         const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
+        
+        // CRITICAL FIX: Check if cache exists to determine if we should show loading
+        const cachedTags = this.loadAvailableTagsFromCache();
+        const hasCache = cachedTags && cachedTags.length > 0;
 
         console.log('📊 Skipping cache - will fetch fresh tags from server to ensure accurate data');
         
-        // Set flag to prevent concurrent calls
+        // CRITICAL FIX: Set flag EARLY to prevent upload prompt from showing while fetching
+        // This must be set before any UI updates to ensure loading state is shown
         this._fetchingAvailableTags = true;
         this._fetchingAvailableTagsStartTime = Date.now();
+        
+        // CRITICAL FIX: Immediately show loading state if container is empty
+        // This prevents upload prompt from flashing while tags are being fetched
+        if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0)) {
+            const currentContent = availableTagsContainer.innerHTML.trim();
+            // Only show loading if container is empty or showing upload prompt
+            if (!currentContent || currentContent.includes('upload-prompt') || currentContent.includes('Upload Excel')) {
+                availableTagsContainer.innerHTML = `
+                    <div style="
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: 400px;
+                        padding: 3rem 2rem;
+                    ">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading tags...</h5>
+                        <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
+                    </div>
+                `;
+            }
+        }
         // Track background-processing retries (reset on success)
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
@@ -11365,6 +11398,57 @@ const TagManager = {
         }
     },
 
+    // Helper function to show loading state or upload prompt based on fetch status
+    _showLoadingOrUploadPrompt(container) {
+        if (!container) return;
+        
+        // CRITICAL FIX: Never show upload prompt if tags exist in state
+        const hasTagsInState = this.state.tags && this.state.tags.length > 0;
+        if (hasTagsInState) {
+            verboseLog('Tags exist in state, skipping upload prompt');
+            return false; // Don't show anything, tags should be displayed
+        }
+        
+        // Check if tags are being fetched - show loading instead of upload prompt
+        const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData;
+        
+        if (isFetchingTags) {
+            // Show loading indicator while tags are being fetched
+            container.innerHTML = `
+                <div style="
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: 400px;
+                    padding: 3rem 2rem;
+                ">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading tags...</h5>
+                    <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
+                </div>
+            `;
+            return true; // Indicates loading state was shown
+        }
+        
+        // No fetch in progress, show upload prompt
+        container.innerHTML = `
+            <div class="text-center py-5">
+                <div class="upload-prompt">
+                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No product data loaded</h5>
+                    <p class="text-muted">Upload an Excel file to get started</p>
+                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-upload me-2"></i>Upload Excel File
+                    </button>
+                </div>
+            </div>
+        `;
+        return false; // Indicates upload prompt was shown
+    },
+
     // Hide loading indicator
     hideLoadingIndicator() {
         const availableTagsContainer = document.getElementById('availableTags');
@@ -11375,49 +11459,8 @@ const TagManager = {
                 return;
             }
             
-            // CRITICAL FIX: Check if tags are being fetched before showing upload prompt
-            // This prevents showing the prompt when tags are loading asynchronously
-            if (this._fetchingAvailableTags) {
-                verboseLog('Tags are being fetched, waiting before showing upload prompt...');
-                // Wait briefly to allow fetch to complete
-                setTimeout(() => {
-                    // Check again if tags loaded
-                    if (this.state.tags && this.state.tags.length > 0) {
-                        verboseLog('Tags loaded during wait, skipping upload prompt');
-                        return;
-                    }
-                    // Show upload prompt only if still no tags
-                    const container = document.getElementById('availableTags');
-                    if (container && (!this.state.tags || this.state.tags.length === 0)) {
-                        container.innerHTML = `
-                            <div class="text-center py-5">
-                                <div class="upload-prompt">
-                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                    <h5 class="text-muted">No product data loaded</h5>
-                                    <p class="text-muted">Upload an Excel file to get started</p>
-                                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                        <i class="fas fa-upload me-2"></i>Upload Excel File
-                                    </button>
-                                </div>
-                            </div>
-                        `;
-                    }
-                }, 2000); // Wait 2 seconds
-            } else {
-                // No fetch in progress, show upload prompt immediately
-                availableTagsContainer.innerHTML = `
-                    <div class="text-center py-5">
-                        <div class="upload-prompt">
-                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                            <h5 class="text-muted">No product data loaded</h5>
-                            <p class="text-muted">Upload an Excel file to get started</p>
-                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                <i class="fas fa-upload me-2"></i>Upload Excel File
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }
+            // Use helper function to show appropriate state
+            this._showLoadingOrUploadPrompt(availableTagsContainer);
         }
     },
 
@@ -11751,21 +11794,10 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                // Show upload prompt
+                // Show loading or upload prompt based on fetch status
                 const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
-                    availableTagsContainer.innerHTML = `
-                        <div class="text-center py-5">
-                            <div class="upload-prompt">
-                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                <h5 class="text-muted">No product data loaded</h5>
-                                <p class="text-muted">Upload an Excel file to get started</p>
-                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                    <i class="fas fa-upload me-2"></i>Upload Excel File
-                                </button>
-                            </div>
-                        </div>
-                    `;
+                    this._showLoadingOrUploadPrompt(availableTagsContainer);
                 }
                 this.initializeEmptyState();
                 this._checkingExistingData = false;
@@ -11855,20 +11887,14 @@ const TagManager = {
                         this.hideActionSplash();
                     }
                     
-                    // Show upload prompt in Current Inventory when no file/data
+                    // Show loading or upload prompt based on fetch status
                     if (availableTagsContainer) {
-                        availableTagsContainer.innerHTML = `
-                            <div class="text-center py-5">
-                                <div class="upload-prompt">
-                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                    <h5 class="text-muted">No product data loaded</h5>
-                                    <p class="text-muted">Upload an Excel file to get started</p>
-                                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                        <i class="fas fa-upload me-2"></i>Upload Excel File
-                                    </button>
-                                </div>
-                            </div>
-                        `;
+                        const showingLoading = this._showLoadingOrUploadPrompt(availableTagsContainer);
+                        // If showing loading, don't initialize empty state yet - wait for tags
+                        if (showingLoading) {
+                            // Continue waiting for tags to load
+                            return;
+                        }
                     }
                     
                     this.initializeEmptyState();
@@ -11986,21 +12012,15 @@ const TagManager = {
                         this.hideActionSplash();
                     }
                     
-                    // Show upload prompt in Current Inventory when no file/data
+                    // Show loading or upload prompt based on fetch status
                     const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
-                        availableTagsContainer.innerHTML = `
-                            <div class="text-center py-5">
-                                <div class="upload-prompt">
-                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                    <h5 class="text-muted">No product data loaded</h5>
-                                    <p class="text-muted">Upload an Excel file to get started</p>
-                                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                        <i class="fas fa-upload me-2"></i>Upload Excel File
-                                    </button>
-                                </div>
-                            </div>
-                        `;
+                        const showingLoading = this._showLoadingOrUploadPrompt(availableTagsContainer);
+                        // If showing loading, don't initialize empty state yet - wait for tags
+                        if (showingLoading) {
+                            // Continue waiting for tags to load
+                            return;
+                        }
                     }
                     
                     // FIXED: Initialize empty state instead of loading test data
@@ -12021,21 +12041,10 @@ const TagManager = {
                     this.hideActionSplash();
                 }
                 
-                // Show upload prompt in Current Inventory on error (likely no file)
+                // Show loading or upload prompt based on fetch status
                 const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
-                    availableTagsContainer.innerHTML = `
-                        <div class="text-center py-5">
-                            <div class="upload-prompt">
-                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                <h5 class="text-muted">No product data loaded</h5>
-                                <p class="text-muted">Upload an Excel file to get started</p>
-                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                    <i class="fas fa-upload me-2"></i>Upload Excel File
-                                </button>
-                            </div>
-                        </div>
-                    `;
+                    this._showLoadingOrUploadPrompt(availableTagsContainer);
                 }
                 
                 // FIXED: Initialize empty state instead of loading test data
