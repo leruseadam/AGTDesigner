@@ -1387,6 +1387,10 @@ const TagManager = {
                             this.setupFilterEventListeners();
                             console.log('✅ Filter event listeners attached after cache hydration');
                         }
+                        if (typeof this.setupSearchEventListeners === 'function') {
+                            this.setupSearchEventListeners();
+                            console.log('✅ Search event listeners attached after cache hydration');
+                        }
                     }, 50);
                 } else {
                     const renderCachedTags = () => {
@@ -1398,6 +1402,10 @@ const TagManager = {
                             if (typeof this.setupFilterEventListeners === 'function') {
                                 this.setupFilterEventListeners();
                                 console.log('✅ Filter event listeners attached after cache hydration');
+                            }
+                            if (typeof this.setupSearchEventListeners === 'function') {
+                                this.setupSearchEventListeners();
+                                console.log('✅ Search event listeners attached after cache hydration');
                             }
                         }, 50);
                     };
@@ -1448,13 +1456,17 @@ const TagManager = {
                 // this.buildFilterOptionsFromTags(cachedTags);
                 this._filtersBuiltThisSession = true; // Mark filters as built
 
-                // Setup filter event listeners so filters work
-                setTimeout(() => {
-                    if (typeof this.setupFilterEventListeners === 'function') {
-                        this.setupFilterEventListeners();
-                        console.log('✅ Filter event listeners attached after cache hydration');
-                    }
-                }, 50);
+                    // Setup filter event listeners so filters work
+                    setTimeout(() => {
+                        if (typeof this.setupFilterEventListeners === 'function') {
+                            this.setupFilterEventListeners();
+                            console.log('✅ Filter event listeners attached after cache hydration');
+                        }
+                        if (typeof this.setupSearchEventListeners === 'function') {
+                            this.setupSearchEventListeners();
+                            console.log('✅ Search event listeners attached after cache hydration');
+                        }
+                    }, 50);
             } else {
                 // DOM not ready yet - defer rendering until DOM loads
                 console.log('⏳ DOM not ready, deferring render until DOMContentLoaded');
@@ -1471,6 +1483,10 @@ const TagManager = {
                         if (typeof this.setupFilterEventListeners === 'function') {
                             this.setupFilterEventListeners();
                             console.log('✅ Filter event listeners attached after cache hydration');
+                        }
+                        if (typeof this.setupSearchEventListeners === 'function') {
+                            this.setupSearchEventListeners();
+                            console.log('✅ Search event listeners attached after cache hydration');
                         }
                     }, 50);
                 };
@@ -9639,17 +9655,20 @@ const TagManager = {
             }
         }
         
-        // CRITICAL FIX: Skip cache hydration to always fetch fresh data from server
-        // Cache can contain stale/filtered tags that don't match current Excel file
-        // This ensures the tag list always shows current Excel data on refresh
+        // PERFORMANCE FIX: Use cache first for fast reloads, then refresh in background
+        // This provides instant display on reload while keeping data fresh
         const availableTagsContainer = document.getElementById('availableTags');
         const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
         
-        // CRITICAL FIX: Check if cache exists to determine if we should show loading
+        // Check if cache exists to determine if we should show loading or use cache
         const cachedTags = this.loadAvailableTagsFromCache();
         const hasCache = cachedTags && cachedTags.length > 0;
 
-        console.log('📊 Skipping cache - will fetch fresh tags from server to ensure accurate data');
+        if (hasCache && !hasExistingTags) {
+            console.log(`⚡ CACHE AVAILABLE: ${cachedTags.length} tags in cache - will use for instant display`);
+        } else {
+            console.log('📊 No cache or tags already exist - fetching from server');
+        }
         
         // CRITICAL FIX: Set flag EARLY to prevent upload prompt from showing while fetching
         // This must be set before any UI updates to ensure loading state is shown
@@ -9721,6 +9740,8 @@ const TagManager = {
         }, 30000); // 30 second warning, but don't hide splash
         
         // CRITICAL FIX: Use try-finally to ensure flag is always reset
+        // Declare cacheUsedForDisplay at function scope so it's accessible throughout
+        let cacheUsedForDisplay = false;
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
             // Ensure flag is initialized
@@ -9745,13 +9766,41 @@ const TagManager = {
                 }, 60000); // 60 seconds - very generous timeout
             }
 
-            // CRITICAL FIX: Skip cache hydration - always fetch fresh from server
-            // Cache can contain filtered/stale tags that don't match current Excel file
-            console.log('⏳ Skipping cache - fetching fresh tags from server');
-            
-            // Preserve current scroll/anchor so refreshes don't jump the list
+            // PERFORMANCE FIX: Use cache first for instant load, then refresh in background
+            // This provides fast reloads while still keeping data fresh
             const savedScroll = this._saveAvailableScrollPosition();
-
+            
+            // Check if we have cache and no existing tags - use cache for instant display
+            if (hasCache && !hasExistingTags) {
+                console.log(`⚡ INSTANT CACHE: Using ${cachedTags.length} cached tags for immediate display`);
+                // Render cached tags immediately
+                this.state.tags = [...cachedTags];
+                this.state.originalTags = [...cachedTags];
+                this.state.hydratedFromCache = true;
+                cacheUsedForDisplay = true;
+                
+                // Render immediately for instant UI update (synchronous for fastest display)
+                this._updateAvailableTags(cachedTags, null);
+                console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
+                
+                // Build filters from cached tags immediately
+                this.buildFilterOptionsFromTags(cachedTags);
+                
+                // Hide splash since we have cached tags
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                
+                // Continue to fetch fresh data in background to update cache (non-blocking)
+                console.log('🔄 Fetching fresh tags in background to update cache...');
+            } else {
+                console.log('⏳ No cache available or tags already exist - fetching from server');
+            }
+            
             // Fire off a non-blocking lite prefetch to get instant tags while the
             // full /api/available-tags endpoint is still loading.
             // This should never throw or block the main flow.
@@ -10126,9 +10175,20 @@ const TagManager = {
                 console.log(`✅ Lineage alignment detected (source: ${responseData.source}), re-rendering UI with database lineage`);
             }
             
-            // Always update available tags - _updateAvailableTags clears container and re-renders everything
-            // This ensures lineage dropdowns reflect the database values from the normalized tags
-            this._updateAvailableTags(tags);
+            // PERFORMANCE FIX: Only update UI if we didn't already show cached tags
+            // If cache was used, we already displayed tags - only update if tags changed significantly
+            // This prevents flickering and maintains instant display from cache
+            if (!cacheUsedForDisplay || tags.length !== (cachedTags?.length || 0)) {
+                // Always update available tags - _updateAvailableTags clears container and re-renders everything
+                // This ensures lineage dropdowns reflect the database values from the normalized tags
+                this._updateAvailableTags(tags);
+            } else {
+                // Cache was used and tag count matches - just update state silently
+                // This prevents UI flicker while keeping data fresh
+                this.state.tags = [...tags];
+                this.state.originalTags = [...tags];
+                console.log(`✅ Background refresh complete: ${tags.length} tags (UI already showing from cache)`);
+            }
             
             // CRITICAL: ALWAYS update selected tags after loading tags to ensure they have database lineage
             // This is essential because selected tags dropdowns need to show database lineage, not Excel lineage
@@ -11175,6 +11235,12 @@ const TagManager = {
         
         // Add search event listeners
         this.setupSearchEventListeners();
+        
+        // Also set up search listeners after a short delay as backup (in case search inputs aren't ready yet)
+        setTimeout(() => {
+            verboseLog('=== BACKUP: RE-CHECKING SEARCH EVENT LISTENERS ===');
+            this.setupSearchEventListeners();
+        }, 100);
         
         // Skip PC compatibility for Mac-like speed
         // this.initializePCCompatibility();
@@ -15250,28 +15316,56 @@ const TagManager = {
             }, 300); // 300ms debounce delay
         };
         
+        let foundCount = 0;
+        
         // Add search event listeners for available tags
         const availableTagsSearch = document.getElementById('availableTagsSearch');
         if (availableTagsSearch) {
-            availableTagsSearch.removeEventListener('input', this._boundAvailableSearch);
+            // Remove old listeners if they exist
+            if (this._boundAvailableSearch) {
+                availableTagsSearch.removeEventListener('input', this._boundAvailableSearch);
+            }
+            // Remove the debounced function if it was previously added
             availableTagsSearch.removeEventListener('input', debouncedAvailableSearch);
+            
+            // Store bound function and add new listener
             this._boundAvailableSearch = debouncedAvailableSearch;
             availableTagsSearch.addEventListener('input', debouncedAvailableSearch);
-            verboseLog('Added debounced event listener to availableTagsSearch');
+            foundCount++;
+            verboseLog('✅ Added debounced event listener to availableTagsSearch');
         } else {
-            console.warn('Available tags search element not found');
+            console.warn('⚠️ Available tags search element not found');
         }
         
         // Add search event listeners for selected tags
         const selectedTagsSearch = document.getElementById('selectedTagsSearch');
         if (selectedTagsSearch) {
-            selectedTagsSearch.removeEventListener('input', this._boundSelectedSearch);
+            // Remove old listeners if they exist
+            if (this._boundSelectedSearch) {
+                selectedTagsSearch.removeEventListener('input', this._boundSelectedSearch);
+            }
+            // Remove the debounced function if it was previously added
             selectedTagsSearch.removeEventListener('input', debouncedSelectedSearch);
+            
+            // Store bound function and add new listener
             this._boundSelectedSearch = debouncedSelectedSearch;
             selectedTagsSearch.addEventListener('input', debouncedSelectedSearch);
-            verboseLog('Added debounced event listener to selectedTagsSearch');
+            foundCount++;
+            verboseLog('✅ Added debounced event listener to selectedTagsSearch');
         } else {
-            console.warn('Selected tags search element not found');
+            console.warn('⚠️ Selected tags search element not found');
+        }
+        
+        if (foundCount === 0) {
+            console.error('❌ No search input elements found! Search will not work. Retrying in 500ms...');
+            setTimeout(() => {
+                console.log('🔄 Retrying search event listener setup...');
+                this.setupSearchEventListeners();
+            }, 500);
+        } else if (foundCount < 2) {
+            console.warn(`⚠️ Only ${foundCount}/2 search inputs found. Some search functionality may not work.`);
+        } else {
+            verboseLog(`✅ All ${foundCount} search event listeners attached successfully`);
         }
     },
 

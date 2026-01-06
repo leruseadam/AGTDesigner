@@ -697,7 +697,7 @@ def safe_product_name(name):
     
     return name_str
 
-def safe_product_type(product_type):
+def safe_product_type(product_type, product_name=None):
     """Safely process product types."""
     if not product_type or pd.isna(product_type):
         return "Vape Cartridge"  # Default to Vape Cartridge for concentrates
@@ -706,6 +706,12 @@ def safe_product_type(product_type):
     
     if not type_str or type_str.lower() in ['nan', 'none', 'null', '']:
         return "Vape Cartridge"  # Default to Vape Cartridge for concentrates
+    
+    # CRITICAL FIX: If product type is Concentrate and product name contains "Tanker", change to RSO/CO2 Tanker
+    if product_name and isinstance(product_name, str):
+        product_name_lower = product_name.lower()
+        if type_str.lower() == 'concentrate' and 'tanker' in product_name_lower:
+            return "rso/co2 tankers"
     
     return type_str
 
@@ -2132,6 +2138,21 @@ class ExcelProcessor:
                 self.df["Product Type*"] = self.df["Product Type*"].str.strip()
                 # Apply TYPE_OVERRIDES to normalize product types
                 self.df["Product Type*"] = self.df["Product Type*"].replace(TYPE_OVERRIDES)
+                
+                # CRITICAL FIX: If a Concentrate contains "Tanker" in the product name, change it to RSO/CO2 Tanker
+                if product_name_col in self.df.columns:
+                    concentrate_mask = self.df["Product Type*"].str.strip().str.lower() == "concentrate"
+                    tanker_name_mask = self.df[product_name_col].astype(str).str.lower().str.contains("tanker", na=False, case=False)
+                    tanker_concentrate_mask = concentrate_mask & tanker_name_mask
+                    
+                    if tanker_concentrate_mask.any():
+                        self.df.loc[tanker_concentrate_mask, "Product Type*"] = "rso/co2 tankers"
+                        count = tanker_concentrate_mask.sum()
+                        self.logger.info(f"✅ Changed {count} Concentrate product(s) containing 'Tanker' to 'rso/co2 tankers'")
+                        # Log the product names that were changed
+                        changed_products = self.df.loc[tanker_concentrate_mask, product_name_col].tolist()
+                        self.logger.debug(f"Changed products: {changed_products[:10]}")  # Log first 10
+                
                 self.logger.info(f"Product type normalization complete. Sample types: {self.df['Product Type*'].unique()[:10].tolist()}")
 
             # Update product_name_col after renaming
@@ -5800,6 +5821,17 @@ class ExcelProcessor:
             for col in required_columns:
                 if col in df.columns:
                     df[col] = df[col].astype(str).str.strip()
+            
+            # CRITICAL FIX: If a Concentrate contains "Tanker" in the product name, change it to RSO/CO2 Tanker
+            if 'Product Type*' in df.columns and 'Product Name*' in df.columns:
+                concentrate_mask = df["Product Type*"].str.strip().str.lower() == "concentrate"
+                tanker_name_mask = df["Product Name*"].astype(str).str.lower().str.contains("tanker", na=False, case=False)
+                tanker_concentrate_mask = concentrate_mask & tanker_name_mask
+                
+                if tanker_concentrate_mask.any():
+                    df.loc[tanker_concentrate_mask, "Product Type*"] = "rso/co2 tankers"
+                    count = tanker_concentrate_mask.sum()
+                    self.logger.info(f"✅ [MINIMAL] Changed {count} Concentrate product(s) containing 'Tanker' to 'rso/co2 tankers'")
             
             # Remove excluded product types (minimal check)
             if 'Product Type*' in df.columns:
