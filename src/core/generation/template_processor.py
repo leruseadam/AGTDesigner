@@ -1074,12 +1074,12 @@ class TemplateProcessor:
         try:
             if self.template_type in ['horizontal', 'vertical', 'double']:
                 self.chunk_size = len(records)
-                self.logger.info(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
-                self.logger.info(f"🔍 LABEL RENDER: Chunking is fully disabled. All {len(records)} records will be processed in one pass.")
+                self.logger.debug(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
+                self.logger.debug(f"🔍 LABEL RENDER: Chunking is fully disabled. All {len(records)} records will be processed in one pass.")
                 self.start_time = time.time()
                 self.chunk_count = 1
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
-                self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
+                self.logger.debug(f"Processing {len(records)} records in overall order: {overall_order[:5] if len(overall_order) > 5 else overall_order}...")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
                 
                 # DEDUPLICATION FIX: Remove exact duplicates even for JSON matched products
@@ -1102,10 +1102,10 @@ class TemplateProcessor:
                         unique_records.append(record)
                     else:
                         duplicate_count += 1
-                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+                        self.logger.debug(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
                 
                 if duplicate_count > 0:
-                    self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
+                    self.logger.debug(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
                     records = unique_records
                 
                 # Process all records in a single chunk
@@ -1116,11 +1116,11 @@ class TemplateProcessor:
             else:
                 # Ensure chunk size respects fixed page capacity for templates like mini/inventory
                 self.chunk_size = self.chunk_size or len(records)
-                self.logger.info(f"🔍 LABEL RENDER: Processing {len(records)} records for template '{self.template_type}' with chunk_size {self.chunk_size}.")
+                self.logger.debug(f"🔍 LABEL RENDER: Processing {len(records)} records for template '{self.template_type}' with chunk_size {self.chunk_size}.")
                 self.start_time = time.time()
                 self.chunk_count = 0
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
-                self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
+                self.logger.debug(f"Processing {len(records)} records in overall order: {overall_order[:5] if len(overall_order) > 5 else overall_order}...")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
 
                 # Apply the same deduplication logic for consistency across templates
@@ -1141,10 +1141,10 @@ class TemplateProcessor:
                         unique_records.append(record)
                     else:
                         duplicate_count += 1
-                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+                        self.logger.debug(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
 
                 if duplicate_count > 0:
-                    self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
+                    self.logger.debug(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
                     records = unique_records
 
                 if not records:
@@ -1161,7 +1161,7 @@ class TemplateProcessor:
                 if len(chunks) > 1:
                     from concurrent.futures import ThreadPoolExecutor, as_completed
                     
-                    self.logger.info(f"⚡ PARALLEL PROCESSING: Processing {len(chunks)} chunks concurrently")
+                    self.logger.debug(f"⚡ PARALLEL PROCESSING: Processing {len(chunks)} chunks concurrently")
                     chunk_docs = [None] * len(chunks)  # Preserve order
                     
                     with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
@@ -1178,7 +1178,7 @@ class TemplateProcessor:
                                 chunk_doc = future.result()
                                 chunk_docs[idx] = chunk_doc
                                 self.chunk_count += 1
-                                self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
+                                self.logger.debug(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
                             except Exception as e:
                                 self.logger.error(f"Error processing chunk {idx + 1}: {e}")
                                 chunk_docs[idx] = None
@@ -1188,7 +1188,7 @@ class TemplateProcessor:
                 else:
                     # Single chunk - process normally
                     self.chunk_count = 1
-                    self.logger.info(f"🔍 LABEL RENDER: Processing single chunk containing {len(records)} record(s)")
+                    self.logger.debug(f"🔍 LABEL RENDER: Processing single chunk containing {len(records)} record(s)")
                     try:
                         chunk_doc = self._process_chunk(records)
                         if chunk_doc is not None:
@@ -1206,7 +1206,7 @@ class TemplateProcessor:
                 return documents[0]
             
             # Combine documents
-            self.logger.info(f"Combining {len(documents)} documents")
+            self.logger.debug(f"Combining {len(documents)} documents")
             composer = Composer(documents[0])
             for doc in documents[1:]:
                 composer.append(doc)
@@ -1679,7 +1679,7 @@ class TemplateProcessor:
         # CRITICAL FIX: Log lineage value received in template processor
         lineage_value = record.get('Lineage', 'NOT_FOUND')
         product_name = record.get('ProductName', 'Unknown')
-        self.logger.info(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
+        self.logger.debug(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
         
         # Fast dictionary copy
         label_context = dict(record)
@@ -1704,7 +1704,7 @@ class TemplateProcessor:
             
             if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
                 vendor_from_record = str(val).strip()
-                self.logger.info(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
+                self.logger.debug(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
                 break
         
         # If not found in standard fields, check ALL vendor-related keys from BOTH label_context and record
@@ -1717,7 +1717,7 @@ class TemplateProcessor:
                 
                 if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
                     vendor_from_record = str(val).strip()
-                    self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
+                    self.logger.debug(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
                     break
         
         # Store vendor early so it's available throughout processing
@@ -1746,7 +1746,7 @@ class TemplateProcessor:
                         label_context['ProductName'] = group_display_name
                         label_context['Product Name*'] = group_display_name
                         label_context['Description'] = group_display_name
-                        self.logger.info(f"PREROLL GROUP OVERRIDE: Set ProductName/Description to '{group_display_name}' (group_id: {group_id})")
+                        self.logger.debug(f"PREROLL GROUP OVERRIDE: Set ProductName/Description to '{group_display_name}' (group_id: {group_id})")
         
         has_cbd_blend_strain = False
         cbd_signal_tokens = ['CBD', 'CBG', 'CBN', 'CBC']
@@ -1796,7 +1796,7 @@ class TemplateProcessor:
                 label_context['Product Strain'] = cbd_blend_value
                 record['ProductStrain'] = cbd_blend_value
                 record['Product Strain'] = cbd_blend_value
-                self.logger.info(f"CBD BLEND STRAIN ENFORCEMENT: Set ProductStrain to '{cbd_blend_value}' for '{product_name}'")
+                self.logger.debug(f"CBD BLEND STRAIN ENFORCEMENT: Set ProductStrain to '{cbd_blend_value}' for '{product_name}'")
             elif current_strain_clean.upper() == 'CBD BLEND':
                 # Normalize capitalization
                 cbd_blend_value = 'CBD Blend'
@@ -1821,7 +1821,7 @@ class TemplateProcessor:
                 # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
                 db_lineage = str(record_lineage).strip()
                 if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                    self.logger.info(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
+                    self.logger.debug(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
             elif product_name:
                 # Record lineage missing - query database directly (avoid get_product_lineage which applies override)
                 from app import get_product_database, get_current_store_name
@@ -1844,7 +1844,7 @@ class TemplateProcessor:
                         # Priority: sovereign_lineage > Lineage > canonical_lineage
                         if result and result[0]:
                             db_lineage = str(result[0]).strip()
-                            self.logger.info(f"🔒 DOCX: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
+                            self.logger.debug(f"🔒 DOCX: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
                         elif result and result[1]:
                             db_lineage = str(result[1]).strip()
                         elif result and result[2]:
@@ -1873,7 +1873,7 @@ class TemplateProcessor:
                         # Always override Excel lineage with database lineage
                         if excel_lineage and str(excel_lineage).strip().upper() != db_lineage_upper:
                             # Database lineage differs from Excel - use database
-                            self.logger.info(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
+                            self.logger.debug(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
                         label_context['Lineage'] = db_lineage_upper
                     else:
                         # No DB lineage - use defaults based on product type (never Excel)
@@ -1886,7 +1886,7 @@ class TemplateProcessor:
                         else:
                             default_lineage = 'MIXED'
                         
-                        self.logger.info(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                        self.logger.debug(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
                         label_context['Lineage'] = default_lineage
         except Exception as e:
             self.logger.warning(f"Could not check database lineage for DOCX output: {e}")
@@ -1900,7 +1900,7 @@ class TemplateProcessor:
             else:
                 default_lineage = 'MIXED'
             
-            self.logger.info(f"⚠️ LINEAGE DEFAULT (DOCX ERROR): '{product_name}' - Error checking DB, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+            self.logger.debug(f"⚠️ LINEAGE DEFAULT (DOCX ERROR): '{product_name}' - Error checking DB, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
             label_context['Lineage'] = default_lineage
         
         # CRITICAL FIX: Force DOH to be read from the actual data source, not defaults
@@ -1936,30 +1936,31 @@ class TemplateProcessor:
             # 1) High‑signal concentrate patterns
             if any(keyword in name_lower for keyword in ['live rosin', 'hash rosin', 'solventless', 'rosin']):
                 product_type = 'solventless concentrate'
-                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'solventless concentrate' (from name)")
+                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'solventless concentrate' (from name)")
 
             # 2) Vape / disposable patterns
             elif any(keyword in name_lower for keyword in ['disposable vape', 'disposable cart', 'vape cart', 'cartridge', 'vape pen']):
                 product_type = 'vape cartridge'
-                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'vape cartridge' (from name)")
+                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'vape cartridge' (from name)")
 
             # 3) Classic flower keywords
             elif any(keyword in name_lower for keyword in ['flower', 'bud', 'nug', 'herb']):
                 product_type = 'flower'
-                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
+                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
 
             # 4) Pre‑roll patterns
             elif any(keyword in name_lower for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
                 product_type = 'pre-roll'
-                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
+                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
 
             # 5) Fallback – keep previous behaviour
             else:
                 product_type = 'flower'  # Default to flower for new products
-                self.logger.info(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
+                self.logger.debug(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
         
-        # ALWAYS LOG TO SEE WHAT PRODUCT TYPES ARE PROCESSED
-        self.logger.info(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{raw_product_type}', Processed: '{product_type}'")
+        # Reduced logging for performance - only log for first few products
+        if self.chunk_count == 1 and len([r for r in [record] if r == record]) <= 3:
+            self.logger.debug(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{raw_product_type}', Processed: '{product_type}'")
         
         # CRITICAL FIX: Store the processed product type in the context
         label_context['ProductType'] = product_type
@@ -1980,13 +1981,13 @@ class TemplateProcessor:
                         if joint_ratio_cache and product_name:
                             joint_ratio = joint_ratio_cache.get(product_name)
                             if joint_ratio:
-                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
+                                self.logger.debug(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
                             else:
                                 self.logger.debug(f"No JointRatio in cache for '{product_name}'")
                     except Exception as e:
                         self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from cache: {e}")
             
-            self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
+            self.logger.debug(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 # Format JointRatio with soft hyphen and nonbreaking space, then prefix with newline for prerolls
                 formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
@@ -2069,7 +2070,7 @@ class TemplateProcessor:
                         if has_weight_in_name:
                             # Group name already includes weight, use it as-is
                             desc_and_weight = group_display_name
-                            self.logger.info(f"PREROLL GROUP: Using group name as-is (already contains weight): '{desc_and_weight}' (group_id: {group_id})")
+                            self.logger.debug(f"PREROLL GROUP: Using group name as-is (already contains weight): '{desc_and_weight}' (group_id: {group_id})")
                         else:
                             # Group name doesn't include weight, add it from JointRatio/WeightUnits
                             # Get JointRatio-derived weight from WeightUnits (set earlier for preroll products)
@@ -2088,11 +2089,11 @@ class TemplateProcessor:
                                 else:
                                     # Add hyphen and space before weight
                                     desc_and_weight = f"{group_display_name} - {clean_weight}"
-                                self.logger.info(f"PREROLL GROUP: Added weight to group name: '{desc_and_weight}' (group: '{group_display_name}', weight: '{clean_weight}', group_id: {group_id})")
+                                self.logger.debug(f"PREROLL GROUP: Added weight to group name: '{desc_and_weight}' (group: '{group_display_name}', weight: '{clean_weight}', group_id: {group_id})")
                             else:
                                 # No weight available, use group name only
                                 desc_and_weight = group_display_name
-                                self.logger.info(f"PREROLL GROUP: Using group name only (no weight available): '{group_display_name}' (group_id: {group_id})")
+                                self.logger.debug(f"PREROLL GROUP: Using group name only (no weight available): '{group_display_name}' (group_id: {group_id})")
 
                         label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
                         # Skip all DescAndWeight construction below - we're done
@@ -2193,21 +2194,21 @@ class TemplateProcessor:
                         match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
                         if match1:
                             clean_weight = f"{match1.group(1)}{match1.group(2)}"
-                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                            self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         else:
                             # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
                             integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
                             match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
                             if match2:
                                 clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
-                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                                self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                             else:
                                 # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
                                 mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
                                 match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
                                 if match3:
                                     clean_weight = f"{match3.group(1)}{match3.group(2)}"
-                                    self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                                    self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         
                         # Keep weight on the same line as description with non-breaking space
                         # Use consistent space-hyphen-space pattern for all templates

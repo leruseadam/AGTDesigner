@@ -7825,11 +7825,28 @@ def generate_labels():
                                         db_canonical_lineage = db_record.get('canonical_lineage')
                                         logging.info(f"🔍 DEBUG LINEAGE: Product '{product_name_for_record}' - db_record Lineage='{db_lineage}', canonical_lineage='{db_canonical_lineage}', db_lineage_raw='{db_lineage_raw}'")
                                     
-                                    # CRITICAL: Always use database lineage, never UI lineage (which may have sativa hybrid override)
-                                    if db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
+                                    # CRITICAL FIX: Check UI lineage FIRST, then fall back to database lineage
+                                    # This ensures user's lineage changes are respected in the output
+                                    product_name_key = product_name_for_record.strip()
+                                    ui_lineage_for_this = None
+                                    if ui_lineage_map:
+                                        # Try exact match first
+                                        ui_lineage_for_this = ui_lineage_map.get(product_name_key)
+                                        # If no exact match, try case-insensitive match
+                                        if not ui_lineage_for_this:
+                                            for ui_name, ui_lin in ui_lineage_map.items():
+                                                if ui_name.lower().strip() == product_name_key.lower().strip():
+                                                    ui_lineage_for_this = ui_lin
+                                                    break
+                                    
+                                    if ui_lineage_for_this:
+                                        docx_lineage = ui_lineage_for_this
+                                        if idx < 3:
+                                            logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (user change)")
+                                    elif db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
                                         docx_lineage = str(db_lineage_raw).strip().upper()
-                                        if 'lemon' in product_name_for_record.lower() or 'cherry' in product_name_for_record.lower():
-                                            logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}' (ignoring UI lineage to avoid sativa hybrid override)")
+                                        if idx < 3:
+                                            logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
                                     else:
                                         # No database lineage found - use defaults based on product type
                                         product_type = processed_record.get('Product Type*', '').lower()
@@ -7841,7 +7858,8 @@ def generate_labels():
                                         else:
                                             docx_lineage = 'MIXED'
                                         
-                                        logging.info(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type")
+                                        if idx < 3:
+                                            logging.info(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type")
                                     
                                     # Extract price with logging (only first 3 for performance)
                                     extracted_price = _extract_price_from_database_product(processed_record)
@@ -8050,14 +8068,24 @@ def generate_labels():
                         if product_name and ui_lineage:
                             ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
                 
-                # Apply UI lineage values first
+                # Apply UI lineage values first - ensure user changes are reflected
                 ui_lineage_applied = 0
                 for record in records:
                     product_name = record.get('Product Name*', record.get('ProductName', ''))
                     if not product_name:
                         continue
                     
-                    ui_lineage = ui_lineage_map.get(product_name.strip())
+                    # Try multiple matching strategies for product name
+                    product_name_key = product_name.strip()
+                    ui_lineage = ui_lineage_map.get(product_name_key)
+                    
+                    # If no exact match, try case-insensitive match
+                    if not ui_lineage:
+                        for ui_name, ui_lin in ui_lineage_map.items():
+                            if ui_name.lower().strip() == product_name_key.lower().strip():
+                                ui_lineage = ui_lin
+                                break
+                    
                     if ui_lineage:
                         original_lineage = record.get('Lineage', '')
                         if str(original_lineage).strip().upper() != ui_lineage:
@@ -8069,6 +8097,10 @@ def generate_labels():
                             ui_lineage_applied += 1
                         else:
                             logging.debug(f"✅ UI LINEAGE CONFIRMED: '{product_name}' - Already matches UI: '{ui_lineage}'")
+                    else:
+                        # Log if UI lineage exists but didn't match (for debugging)
+                        if ui_lineage_map:
+                            logging.debug(f"⚠️ UI LINEAGE NOT FOUND: '{product_name}' not in UI lineage map ({len(ui_lineage_map)} entries)")
                 
                 if ui_lineage_applied > 0:
                     logging.info(f"✅ UI LINEAGE: Applied {ui_lineage_applied} UI lineage values to records (matches UI display)")

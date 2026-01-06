@@ -2476,7 +2476,8 @@ const TagManager = {
             const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
                 // Check vendor filter - only apply if not empty and not "All"
                 if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
-                    const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
+                    // CRITICAL FIX: Check all possible vendor field names
+                    const tagVendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '').toString().trim();
                     if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) {
                         return false;
                     }
@@ -2599,7 +2600,8 @@ const TagManager = {
                 const tag = tagsForOptions[i];
                 
                 // Always add vendor options (show all vendors)
-                const vendor = (tag.Vendor || tag.vendor || '').toString().trim();
+                // CRITICAL FIX: Check all possible vendor field names to ensure all vendors are shown
+                const vendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '').toString().trim();
                 if (vendor) availableOptions.vendor.add(vendor);
                 
                 // Always add brand options (show all brands)
@@ -11091,14 +11093,29 @@ const TagManager = {
 
             // CRITICAL FIX: Restore filters from localStorage IMMEDIATELY before API call
             // This prevents filters from disappearing on page refresh
+            // CRITICAL FIX: Clear vendor filter on page load so users see all tags by default
             const savedFilters = this.loadFiltersFromStorage();
             if (savedFilters && Object.keys(savedFilters).length > 0) {
                 console.log('⚡ Restoring filters from localStorage:', savedFilters);
+                // CRITICAL FIX: Clear vendor filter to show all tags by default
+                if (savedFilters.vendor && savedFilters.vendor !== 'All') {
+                    console.log('🔄 Clearing vendor filter on page load to show all tags');
+                    savedFilters.vendor = 'All';
+                    // Save cleared vendor filter back to localStorage
+                    this.saveFiltersToStorage();
+                }
                 // Apply saved filters to dropdowns immediately
                 Object.entries(savedFilters).forEach(([key, value]) => {
                     const filterElement = document.getElementById(`${key}Filter`);
-                    if (filterElement && value) {
-                        filterElement.value = value;
+                    if (filterElement) {
+                        // CRITICAL FIX: Always set vendor filter to empty on page load
+                        if (key === 'vendor') {
+                            filterElement.value = '';
+                        } else if (value && value !== 'All') {
+                            filterElement.value = value;
+                        } else {
+                            filterElement.value = '';
+                        }
                     }
                 });
             }
@@ -11187,6 +11204,7 @@ const TagManager = {
         });
         
         // GUARANTEED FIX: Restore filters from localStorage on page load
+        // CRITICAL FIX: Clear vendor filter on page load so users see all tags by default
         const savedFilters = this.loadFiltersFromStorage();
         this.state.filters = savedFilters || {
             vendor: 'All',
@@ -11195,6 +11213,13 @@ const TagManager = {
             lineage: 'All',
             weight: 'All'
         };
+        
+        // CRITICAL FIX: Clear vendor filter on page load to show all tags
+        // Users can still select a vendor filter if they want, but by default show all
+        if (this.state.filters.vendor && this.state.filters.vendor !== 'All') {
+            console.log('🔄 Clearing vendor filter on page load to show all tags');
+            this.state.filters.vendor = 'All';
+        }
         
         // Set each filter dropdown to saved value or 'All' (or '')
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
@@ -11212,13 +11237,20 @@ const TagManager = {
             if (el) {
                 const filterKey = filterMap[id];
                 const savedValue = this.state.filters[filterKey];
-                if (savedValue && savedValue !== 'All') {
+                // CRITICAL FIX: Always set vendor filter to empty/All on page load
+                if (filterKey === 'vendor') {
+                    el.value = '';
+                } else if (savedValue && savedValue !== 'All') {
                     el.value = savedValue;
                 } else {
                     el.value = '';
                 }
             }
         });
+        
+        // CRITICAL FIX: Save cleared vendor filter to localStorage
+        this.saveFiltersToStorage();
+        
         // Don't apply filters immediately - let checkForExistingData handle it
         // this.applyFilters();
         
@@ -11322,6 +11354,7 @@ const TagManager = {
     // Continue initialization without showing splash (for cache hits)
     _continueInitWithoutSplash() {
         // GUARANTEED FIX: Restore filters from localStorage on page load
+        // CRITICAL FIX: Clear vendor filter on page load so users see all tags by default
         const savedFilters = this.loadFiltersFromStorage();
         this.state.filters = savedFilters || {
             vendor: 'All',
@@ -11330,6 +11363,13 @@ const TagManager = {
             lineage: 'All',
             weight: 'All'
         };
+        
+        // CRITICAL FIX: Clear vendor filter on page load to show all tags
+        // Users can still select a vendor filter if they want, but by default show all
+        if (this.state.filters.vendor && this.state.filters.vendor !== 'All') {
+            console.log('🔄 Clearing vendor filter on page load to show all tags');
+            this.state.filters.vendor = 'All';
+        }
         
         // Set each filter dropdown to saved value or 'All' (or '')
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
@@ -11347,13 +11387,19 @@ const TagManager = {
             if (el) {
                 const filterKey = filterMap[id];
                 const savedValue = this.state.filters[filterKey];
-                if (savedValue && savedValue !== 'All') {
+                // CRITICAL FIX: Always set vendor filter to empty/All on page load
+                if (filterKey === 'vendor') {
+                    el.value = '';
+                } else if (savedValue && savedValue !== 'All') {
                     el.value = savedValue;
                 } else {
                     el.value = '';
                 }
             }
         });
+        
+        // CRITICAL FIX: Save cleared vendor filter to localStorage
+        this.saveFiltersToStorage();
         
         // Add filter change event listeners immediately
         verboseLog('=== SETTING UP FILTER EVENT LISTENERS ===');
