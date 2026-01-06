@@ -696,7 +696,9 @@ class JSONMatcher:
             
         matched_products: List[Dict[str, Any]] = []
         matched_names: List[str] = []
+        matched_items: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []  # (matched, json_item) pairs
 
+        # First pass: Match all items and collect product names
         for item in items:
             description = self._extract_description_from_item(item)
             # Prefer per-item vendor, fall back to any global vendor from the payload
@@ -705,8 +707,6 @@ class JSONMatcher:
             if not matched:
                 continue
             
-            # CRITICAL: Fetch complete database record to ensure we have all database values
-            # If the match came from database, refresh it; if from Excel, try to find in database
             product_name = (
                 matched.get("Product Name*")
                 or matched.get("ProductName")
@@ -716,36 +716,71 @@ class JSONMatcher:
             )
             
             if product_name:
-                # Try to get complete database record
+                matched_items.append((matched, item))
+        
+        # PERFORMANCE FIX: Batch database lookup for all matched products at once
+        if matched_items:
+            product_names = [
+                str(
+                    matched.get("Product Name*")
+                    or matched.get("ProductName")
+                    or matched.get("Description")
+                    or matched.get("product_name")
+                    or ""
+                ).strip()
+                for matched, _ in matched_items
+            ]
+            product_names = [name for name in product_names if name]
+            
+            # Build a map of product_name -> database record
+            db_products_map: Dict[str, Dict[str, Any]] = {}
+            if product_names:
                 product_db = self._get_product_database()
                 if product_db:
                     try:
-                        db_products = product_db.get_products_by_names([str(product_name)])
-                        if db_products and len(db_products) > 0:
-                            db_product = db_products[0]
-                            # Only use database record if it has an id (not a placeholder)
-                            if db_product.get("id") is not None:
-                                # Use complete database record instead of candidate index match
-                                # Preserve json_match_score and json_raw from the match
-                                db_product["json_match_score"] = matched.get("json_match_score", 0)
-                                matched = db_product
-                                logging.debug(f"Using complete database record for '{product_name}'")
-                            else:
-                                logging.debug(f"Database returned placeholder for '{product_name}', using candidate match")
+                        # Single batch query for all products
+                        db_products = product_db.get_products_by_names(product_names)
+                        for db_product in db_products:
+                            if db_product.get("id") is not None:  # Only use real database records
+                                product_name_key = (
+                                    db_product.get("Product Name*")
+                                    or db_product.get("ProductName")
+                                    or ""
+                                )
+                                if product_name_key:
+                                    db_products_map[product_name_key] = db_product
+                        logging.debug(f"Fetched {len(db_products_map)} complete database records in batch")
                     except Exception as e:
-                        logging.warning(f"Could not fetch database record for '{product_name}': {e}")
-                        # Fall back to matched product from candidate index
+                        logging.warning(f"Could not batch fetch database records: {e}")
             
-            # CRITICAL: Use database/Excel values only - do NOT enrich from JSON
-            # Attach raw JSON context for debugging only; do not overwrite database/Excel
-            # description fields so the final tags use canonical names/descriptions.
-            matched.setdefault("json_raw", item)
+            # Second pass: Use database records where available, otherwise use candidate match
+            for matched, item in matched_items:
+                product_name = (
+                    matched.get("Product Name*")
+                    or matched.get("ProductName")
+                    or matched.get("Description")
+                    or matched.get("product_name")
+                    or ""
+                )
+                
+                # Try to use complete database record if available
+                if product_name and product_name in db_products_map:
+                    db_product = db_products_map[product_name]
+                    # Preserve json_match_score and json_raw from the match
+                    db_product["json_match_score"] = matched.get("json_match_score", 0)
+                    matched = db_product
+                    logging.debug(f"Using complete database record for '{product_name}'")
+                
+                # CRITICAL: Use database/Excel values only - do NOT enrich from JSON
+                # Attach raw JSON context for debugging only; do not overwrite database/Excel
+                # description fields so the final tags use canonical names/descriptions.
+                matched.setdefault("json_raw", item)
 
-            name = str(product_name).strip()
+                name = str(product_name).strip()
 
-            matched_products.append(matched)
-            if name:
-                matched_names.append(name)
+                matched_products.append(matched)
+                if name:
+                    matched_names.append(name)
 
         # Optionally deduplicate by (Product Name*, Vendor/Supplier*)
         if deduplicate and matched_products:
