@@ -8135,25 +8135,23 @@ def generate_labels():
                     logging.warning(f"⚠️ Error enriching Excel records with database data: {enrich_error}")
             
             # CRITICAL FIX: Ensure ALL records have DescAndWeight and Price set (even if not enriched)
+            # PERFORMANCE: Fast validation loop - only process records that need fixing
             for record in records:
-                # Ensure Price is always set
-                if not record.get('Price') or str(record.get('Price', '')).strip() in ['', 'None', 'nan', 'N/A', '$0', '$0.00']:
-                    price_fallback = (
-                        record.get('Price*', '') or
-                        record.get('Med Price', '') or
-                        '$0.00'
-                    )
+                # Ensure Price is always set (fast check)
+                price = record.get('Price', '')
+                if not price or (isinstance(price, str) and price.strip() in ['', 'None', 'nan', 'N/A', '$0', '$0.00']):
+                    price_fallback = record.get('Price*', '') or record.get('Med Price', '') or '$0.00'
                     record['Price'] = price_fallback
                     record['Price*'] = price_fallback
                     record['Price* (Tier Name for Bulk)'] = price_fallback
                 
-                # Ensure DescAndWeight is always set
-                if not record.get('DescAndWeight') or str(record.get('DescAndWeight', '')).strip() in ['', 'None', 'nan', 'N/A']:
-                    product_name_fallback = record.get('ProductName', record.get('Product Name*', ''))
-                    weight_fallback = record.get('WeightUnits', record.get('CombinedWeight', '1g'))
-                    desc_and_weight_fallback = f"{product_name_fallback} - {weight_fallback}" if product_name_fallback else weight_fallback
-                    record['DescAndWeight'] = desc_and_weight_fallback
-                    record['Description'] = desc_and_weight_fallback
+                # Ensure DescAndWeight is always set (fast check)
+                desc_and_weight = record.get('DescAndWeight', '')
+                if not desc_and_weight or (isinstance(desc_and_weight, str) and desc_and_weight.strip() in ['', 'None', 'nan', 'N/A']):
+                    product_name_fallback = record.get('ProductName') or record.get('Product Name*', '')
+                    weight_fallback = record.get('WeightUnits') or record.get('CombinedWeight', '1g')
+                    record['DescAndWeight'] = f"{product_name_fallback} - {weight_fallback}" if product_name_fallback else weight_fallback
+                    record['Description'] = record['DescAndWeight']
             
             # CRITICAL FIX: Apply UI lineage values AFTER enrichment to ensure user changes override database
             # This ensures DOCX matches what's displayed in the UI and user changes are respected
