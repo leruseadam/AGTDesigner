@@ -10767,8 +10767,8 @@ def get_available_tags():
         
         # PERFORMANCE: Query database for lineage for ALL tags using optimized batch query
         # Database lineage is the source of truth and overrides Excel/cached lineage
-        # CRITICAL FIX: Always query database even during fast_load - lineage must come from DB
-        if all_tags:
+        # PERFORMANCE FIX: Skip database query during fast_load if tags already have lineage
+        if all_tags and not fast_load:
             try:
                 store_name = get_current_store_name(allow_fallback=True)  # Use fallback to ensure we have a store
                 if not store_name:
@@ -10777,12 +10777,14 @@ def get_available_tags():
                 else:
                     product_db = get_product_database(store_name)
                     if product_db:
-                        # Get all product names from tags
+                        # PERFORMANCE: Only query for tags that don't already have database lineage
                         product_names = []
                         for tag in all_tags:
-                            name = tag.get('Product Name*') or tag.get('ProductName') or ''
-                            if name:
-                                product_names.append(name)
+                            # Skip if tag already has database lineage fields
+                            if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                                name = tag.get('Product Name*') or tag.get('ProductName') or ''
+                                if name:
+                                    product_names.append(name)
                         
                         if product_names:
                             try:
@@ -10814,6 +10816,10 @@ def get_available_tags():
                                 updated_count = 0
                                 tags_needing_individual_query_guaranteed = []  # Track tags that need individual queries
                                 for tag in all_tags:
+                                    # Skip tags that already have database lineage
+                                    if tag.get('canonical_lineage') or tag.get('currentLineage'):
+                                        continue
+                                    
                                     tag_name = tag.get('Product Name*') or tag.get('ProductName') or ''
                                     if not tag_name:
                                         continue

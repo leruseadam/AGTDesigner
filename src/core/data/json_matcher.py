@@ -718,8 +718,10 @@ class JSONMatcher:
             if product_name:
                 matched_items.append((matched, item))
         
-        # PERFORMANCE FIX: Batch database lookup for all matched products at once
-        if matched_items:
+        # PERFORMANCE FIX: Skip database lookup when force_simplified=True for faster matching
+        # Only do database lookup when explicitly requested (force_simplified=False)
+        db_products_map: Dict[str, Dict[str, Any]] = {}
+        if not force_simplified and matched_items:
             product_names = [
                 str(
                     matched.get("Product Name*")
@@ -733,7 +735,6 @@ class JSONMatcher:
             product_names = [name for name in product_names if name]
             
             # Build a map of product_name -> database record
-            db_products_map: Dict[str, Dict[str, Any]] = {}
             if product_names:
                 product_db = self._get_product_database()
                 if product_db:
@@ -752,35 +753,37 @@ class JSONMatcher:
                         logging.debug(f"Fetched {len(db_products_map)} complete database records in batch")
                     except Exception as e:
                         logging.warning(f"Could not batch fetch database records: {e}")
+        else:
+            logging.debug(f"Skipping database lookup (force_simplified={force_simplified}) for faster matching")
+        
+        # Second pass: Use database records where available, otherwise use candidate match
+        for matched, item in matched_items:
+            product_name = (
+                matched.get("Product Name*")
+                or matched.get("ProductName")
+                or matched.get("Description")
+                or matched.get("product_name")
+                or ""
+            )
             
-            # Second pass: Use database records where available, otherwise use candidate match
-            for matched, item in matched_items:
-                product_name = (
-                    matched.get("Product Name*")
-                    or matched.get("ProductName")
-                    or matched.get("Description")
-                    or matched.get("product_name")
-                    or ""
-                )
-                
-                # Try to use complete database record if available
-                if product_name and product_name in db_products_map:
-                    db_product = db_products_map[product_name]
-                    # Preserve json_match_score and json_raw from the match
-                    db_product["json_match_score"] = matched.get("json_match_score", 0)
-                    matched = db_product
-                    logging.debug(f"Using complete database record for '{product_name}'")
-                
-                # CRITICAL: Use database/Excel values only - do NOT enrich from JSON
-                # Attach raw JSON context for debugging only; do not overwrite database/Excel
-                # description fields so the final tags use canonical names/descriptions.
-                matched.setdefault("json_raw", item)
+            # Try to use complete database record if available (only if we did the lookup)
+            if product_name and product_name in db_products_map:
+                db_product = db_products_map[product_name]
+                # Preserve json_match_score and json_raw from the match
+                db_product["json_match_score"] = matched.get("json_match_score", 0)
+                matched = db_product
+                logging.debug(f"Using complete database record for '{product_name}'")
+            
+            # CRITICAL: Use database/Excel values only - do NOT enrich from JSON
+            # Attach raw JSON context for debugging only; do not overwrite database/Excel
+            # description fields so the final tags use canonical names/descriptions.
+            matched.setdefault("json_raw", item)
 
-                name = str(product_name).strip()
+            name = str(product_name).strip()
 
-                matched_products.append(matched)
-                if name:
-                    matched_names.append(name)
+            matched_products.append(matched)
+            if name:
+                matched_names.append(name)
 
         # Optionally deduplicate by (Product Name*, Vendor/Supplier*)
         if deduplicate and matched_products:
