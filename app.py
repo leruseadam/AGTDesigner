@@ -9763,6 +9763,14 @@ def get_available_tags():
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags")
 
+                # CRITICAL PERFORMANCE FIX: Cache the processed tags to avoid reloading Excel (10+ seconds) on every request
+                # This is the main fix for the 30-second tag loading timeout
+                try:
+                    cache.set(cache_key, safe_simple_tags, timeout=3600)  # Cache for 1 hour
+                    logging.info(f"💾 SIMPLE PATH: Cached {len(safe_simple_tags)} tags with key: {cache_key[:50]}...")
+                except Exception as cache_set_err:
+                    logging.warning(f"Failed to cache tags: {cache_set_err}")
+
                 # CRITICAL FIX: Wrap response in try-catch to handle OSError: write error
                 # This can happen if response is too large or client disconnects
                 try:
