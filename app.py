@@ -9516,6 +9516,11 @@ def get_available_tags():
 
         # CRITICAL: SIMPLE PATH - When Excel exists, load ONLY from Excel, skip ALL other logic
         logging.info(f"✅ Excel file exists: {session_file_path} - using SIMPLE Excel-only path")
+
+        # PERFORMANCE: Check fast_load parameter early to skip slow database enrichment
+        fast_load_param = request.args.get('fast_load')
+        enable_fast_load = fast_load_param in ('1', 'true', 'True') or fast_load_param not in ('0', 'false', 'False')
+
         try:
             from src.core.data.excel_processor import ExcelProcessor
 
@@ -9537,6 +9542,33 @@ def get_available_tags():
             if simple_processor.df is not None and not simple_processor.df.empty:
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
+
+                # PERFORMANCE: Skip database enrichment entirely when fast_load is enabled
+                # This prevents slow database queries from blocking tag loading
+                if enable_fast_load and not prefer_db:
+                    logging.info("⚡ FAST LOAD: Skipping database enrichment for instant tag loading")
+                    # Just use Excel lineage as-is
+                    for tag in simple_tags:
+                        excel_lineage = tag.get('Lineage')
+                        if excel_lineage and str(excel_lineage).strip():
+                            excel_lineage_clean = str(excel_lineage).strip().upper()
+                            tag['currentLineage'] = excel_lineage_clean
+                            tag['canonical_lineage'] = excel_lineage_clean
+                            tag['lineage'] = excel_lineage_clean.lower()
+
+                    # Return tags immediately without database enrichment
+                    safe_simple_tags = make_json_safe(simple_tags)
+                    try:
+                        response = jsonify({
+                            'tags': safe_simple_tags,
+                            'total_count': len(safe_simple_tags),
+                            'source': 'excel-fast-load',
+                            'message': f'Loaded {len(safe_simple_tags)} products from Excel file (fast load mode)'
+                        })
+                        return response
+                    except OSError as write_err:
+                        logging.error(f"❌ OSError writing response: {write_err}")
+                        return jsonify({'error': 'Response too large or connection error', 'tag_count': len(safe_simple_tags)}), 500
 
                 # Enrich with database lineage ONLY (don't add database products)
                 try:
