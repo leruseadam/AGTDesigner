@@ -7777,6 +7777,26 @@ def generate_labels():
                                 logging.info(f"Switching to Excel data for {len(valid_selected_tags)} tags")
                                 has_database = False  # Force Excel fallback
                             else:
+                                # CRITICAL FIX: Track which products were found in database
+                                # Products NOT in database need to fall back to Excel data
+                                db_product_names = {record.get('Product Name*', '').strip() for record in valid_db_records if record.get('Product Name*')}
+                                
+                                # Find products that are selected but NOT in database
+                                missing_from_db = []
+                                for tag_name in valid_selected_tags:
+                                    # Try multiple matching strategies for product name
+                                    tag_name_clean = str(tag_name).strip()
+                                    found_in_db = False
+                                    for db_name in db_product_names:
+                                        if tag_name_clean.lower() == db_name.lower() or tag_name_clean == db_name:
+                                            found_in_db = True
+                                            break
+                                    if not found_in_db:
+                                        missing_from_db.append(tag_name)
+                                
+                                if missing_from_db:
+                                    logging.info(f"⚠️ {len(missing_from_db)} products not found in database, will use Excel data for: {missing_from_db[:5]}")
+                                
                                 # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
                                 # This ensures DOCX uses the same lineage shown in the UI
                                 ui_lineage_map = {}
@@ -7939,6 +7959,33 @@ def generate_labels():
                                     print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
                                     records.append(record)
                                 logging.info(f"✅ Generated {len(records)} records from database")
+                                
+                                # CRITICAL FIX: For products NOT in database, get them from Excel
+                                if missing_from_db and has_excel_data:
+                                    logging.info(f"🔄 Getting {len(missing_from_db)} missing products from Excel data...")
+                                    
+                                    # Ensure selected tags are set for Excel processor (only missing ones)
+                                    original_selected_tags = getattr(excel_processor, 'selected_tags', [])
+                                    excel_processor.selected_tags = missing_from_db
+                                    
+                                    # Get Excel records for missing products
+                                    excel_records_for_missing = excel_processor.get_selected_records(template_type)
+                                    
+                                    # Restore original selected tags
+                                    excel_processor.selected_tags = original_selected_tags
+                                    
+                                    if excel_records_for_missing:
+                                        # Merge Excel records with database records
+                                        records.extend(excel_records_for_missing)
+                                        logging.info(f"✅ Added {len(excel_records_for_missing)} Excel records for products not in database")
+                                        
+                                        # Log which products came from Excel vs database
+                                        excel_product_names = {r.get('Product Name*', r.get('ProductName', '')).strip() for r in excel_records_for_missing}
+                                        logging.info(f"📊 Excel products added: {sorted(excel_product_names)[:5]}")
+                                    else:
+                                        logging.warning(f"⚠️ Excel processor returned no records for {len(missing_from_db)} missing products")
+                                elif missing_from_db:
+                                    logging.warning(f"⚠️ {len(missing_from_db)} products not in database but Excel data not available: {missing_from_db[:5]}")
                         else:
                             logging.warning(f"⚠️ Database returned empty or None records for {len(enhanced_tags)} tags")
                             logging.warning(f"⚠️ Falling back to Excel data")
