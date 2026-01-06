@@ -2856,17 +2856,6 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
-            
-            // If search bar is active, re-apply the search with the cleared filter results
-            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-                const searchTerm = availableTagsSearchInput.value.trim();
-                verboseLog(`🔍 Re-applying search "${searchTerm}" after clearing filters`);
-                // Use setTimeout to ensure filter update completes before re-applying search
-                setTimeout(() => {
-                    this.handleSearch('availableTags', 'availableTagsSearch');
-                }, 50);
-            }
             return;
         }
         
@@ -2896,17 +2885,6 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
-            
-            // If search bar is active, re-apply the search with the cached filter results
-            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-                const searchTerm = availableTagsSearchInput.value.trim();
-                verboseLog(`🔍 Re-applying search "${searchTerm}" after applying cached filter`);
-                // Use setTimeout to ensure filter update completes before re-applying search
-                setTimeout(() => {
-                    this.handleSearch('availableTags', 'availableTagsSearch');
-                }, 50);
-            }
             return;
         }
         
@@ -3131,29 +3109,15 @@ const TagManager = {
         requestAnimationFrame(() => {
             this._scrollAvailableTagsToTop();
         });
-        
-        // If search bar is active, re-apply the search with the new filter results
-        const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-        if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-            const searchTerm = availableTagsSearchInput.value.trim();
-            verboseLog(`🔍 Re-applying search "${searchTerm}" after filter change`);
-            // Use setTimeout to ensure filter update completes before re-applying search
-            setTimeout(() => {
-                this.handleSearch('availableTags', 'availableTagsSearch');
-            }, 50);
-        }
     },
 
     handleSearch(listId, searchInputId) {
-        try {
+        // PERFORMANCE FIX: Use requestAnimationFrame for smoother updates
+        return requestAnimationFrame(() => {
             const searchInput = document.getElementById(searchInputId);
-            if (!searchInput) {
-                console.warn(`⚠️ Search input not found: ${searchInputId}`);
-                return false;
-            }
+            if (!searchInput) return false;
             
             const searchTerm = searchInput.value.toLowerCase().trim();
-            verboseLog(`🔍 Search triggered for ${listId}: "${searchTerm}"`);
 
             // Choose which tags to filter
             let tags = [];
@@ -3193,8 +3157,6 @@ const TagManager = {
                 return tagName.toLowerCase().includes(searchTerm);
             });
 
-            verboseLog(`🔍 Found ${filteredTags.length} matching tags out of ${tags.length} total`);
-
             // Update the list with only matching tags
             if (listId === 'availableTags') {
                 this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
@@ -3224,37 +3186,7 @@ const TagManager = {
 
             // Return boolean indicating whether any tags match the search
             return filteredTags.length > 0;
-        } catch (error) {
-            console.error(`❌ Error in handleSearch for ${listId}:`, error);
-            return false;
-        }
-    },
-
-    expandAllTagGroups() {
-        try {
-            const availableTagsContainer = document.getElementById('availableTags');
-            if (!availableTagsContainer) {
-                return;
-            }
-
-            // Find all collapsed content elements (vendor-content, brand-content, product-type-content, weight-content, price-content)
-            const collapsedElements = availableTagsContainer.querySelectorAll('.vendor-content.collapsed, .brand-content.collapsed, .product-type-content.collapsed, .weight-content.collapsed, .price-content.collapsed');
-            
-            // Expand all collapsed groups
-            collapsedElements.forEach(element => {
-                element.classList.remove('collapsed');
-            });
-
-            // Update all collapse icons to show expanded state (▼)
-            const collapseIcons = availableTagsContainer.querySelectorAll('.collapse-icon');
-            collapseIcons.forEach(icon => {
-                icon.textContent = '▼';
-            });
-
-            verboseLog(`✅ Expanded all tag groups (${collapsedElements.length} groups expanded)`);
-        } catch (error) {
-            console.error('❌ Error expanding tag groups:', error);
-        }
+        });
     },
 
     handleAvailableTagsSearch(event) {
@@ -9743,12 +9675,6 @@ const TagManager = {
             this.state.hydratedFromCache = false;
             this.saveAvailableTagsToCache(liteTags);
 
-            // CRITICAL UX FIX: Ensure the upcoming full /available-tags payload does NOT
-            // trigger a second heavy DOM repaint with another "Organizing tags..." pass.
-            // We mark a one-time flag here so fetchAndUpdateAvailableTags can treat the
-            // next full payload as a background refresh only (state update, no DOM repaint).
-            this._skipNextDomRerender = true;
-
             this._updateAvailableTags(liteTags);
             if (savedScrollPosition) {
                 this._restoreAvailableScrollPosition(savedScrollPosition);
@@ -10017,10 +9943,11 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // PERFORMANCE FIX: Use fast_load=1 for fast loading - backend will still get lineage efficiently
-            // Backend optimizations ensure lineage is loaded when needed without blocking tag display
-            // This dramatically improves load time from 10+ seconds to <2 seconds
-            const fastLoadParam = '&fast_load=1';
+            // CRITICAL FIX: Use fast_load=0 to ensure lineage is included in tags
+            // We disabled the background lineage refresh (was causing 18s page loads)
+            // So we MUST get lineage on initial load, otherwise large batches missing lineage
+            // Small performance trade-off, but lineage is essential for labels
+            const fastLoadParam = '&fast_load=0';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
@@ -10334,40 +10261,19 @@ const TagManager = {
                 console.log(`✅ Lineage alignment detected (source: ${responseData.source}), re-rendering UI with database lineage`);
             }
             
-            // PERFORMANCE FIX: Avoid double-rendering AVAILABLE / SELECTED TAGS when we already
-            // have a full tag list on screen (from cache or lite prefetch).
-            //
-            // Cases:
-            // - cacheUsedForDisplay === true → fetchAndUpdateAvailableTags itself rendered from cache
-            // - state.hydratedFromCache === true and hasExistingTags & DOM already contains tag items
-            //   → an earlier code path (inline hydration) rendered from cache before this fetch
-            //
-            // In both situations, the fresh payload for the same Excel file is usually identical,
-            // so repainting the DOM causes a second "Organizing tags..." pass and can interfere
-            // with checkbox/select-all behavior on the first click.
-            const availableContainer = document.getElementById('availableTags');
-            const domHasTags = !!(availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0);
-            const alreadyHydratedFromCache = !!this.state.hydratedFromCache;
-
-            const shouldSkipDomRerender =
-                cacheUsedForDisplay ||                                        // rendered from cache in this call
-                (alreadyHydratedFromCache && hasExistingTags && domHasTags) || // rendered from cache earlier
-                this._skipNextDomRerender === true;                           // lite prefetch already painted DOM
-
-            if (shouldSkipDomRerender) {
-                // One-time flag – reset so future loads (like a new Excel upload)
-                // can repaint the DOM normally.
-                if (this._skipNextDomRerender) {
-                    this._skipNextDomRerender = false;
-                }
-                // Update state silently so filters/counts/lineage stay fresh, but keep the
-                // existing DOM intact to avoid flicker and checkbox glitches.
+            // PERFORMANCE FIX: Only update UI if we didn't already show cached tags
+            // If cache was used, we already displayed tags - only update if tags changed significantly
+            // This prevents flickering and maintains instant display from cache
+            if (!cacheUsedForDisplay || tags.length !== (cachedTags?.length || 0)) {
+                // Always update available tags - _updateAvailableTags clears container and re-renders everything
+                // This ensures lineage dropdowns reflect the database values from the normalized tags
+                this._updateAvailableTags(tags);
+            } else {
+                // Cache was used and tag count matches - just update state silently
+                // This prevents UI flicker while keeping data fresh
                 this.state.tags = [...tags];
                 this.state.originalTags = [...tags];
-                console.log(`✅ Background refresh complete: ${tags.length} tags (state updated without second DOM render)`);
-            } else {
-                // No prior cache-based render detected – perform full render from fetched tags.
-                this._updateAvailableTags(tags);
+                console.log(`✅ Background refresh complete: ${tags.length} tags (UI already showing from cache)`);
             }
             
             // CRITICAL: ALWAYS update selected tags after loading tags to ensure they have database lineage
@@ -15523,63 +15429,48 @@ const TagManager = {
         }
         
         // CRITICAL FIX: Create debounced functions as instance properties so we can properly remove them
-        // Always recreate to ensure they're fresh and working
-        this._debouncedAvailableSearch = (event) => {
-            if (this._searchDebounceTimers.available) {
-                clearTimeout(this._searchDebounceTimers.available);
-            }
-            this._searchDebounceTimers.available = setTimeout(() => {
-                try {
+        // Only create them once, reuse if they already exist
+        if (!this._debouncedAvailableSearch) {
+            this._debouncedAvailableSearch = (event) => {
+                if (this._searchDebounceTimers.available) {
+                    clearTimeout(this._searchDebounceTimers.available);
+                }
+                this._searchDebounceTimers.available = setTimeout(() => {
                     this.handleAvailableTagsSearch(event);
-                } catch (error) {
-                    console.error('❌ Error in available tags search handler:', error);
-                }
-            }, 300); // 300ms debounce delay
-        };
+                }, 300); // 300ms debounce delay
+            };
+        }
         
-        this._debouncedSelectedSearch = (event) => {
-            if (this._searchDebounceTimers.selected) {
-                clearTimeout(this._searchDebounceTimers.selected);
-            }
-            this._searchDebounceTimers.selected = setTimeout(() => {
-                try {
-                    this.handleSelectedTagsSearch(event);
-                } catch (error) {
-                    console.error('❌ Error in selected tags search handler:', error);
+        if (!this._debouncedSelectedSearch) {
+            this._debouncedSelectedSearch = (event) => {
+                if (this._searchDebounceTimers.selected) {
+                    clearTimeout(this._searchDebounceTimers.selected);
                 }
-            }, 300); // 300ms debounce delay
-        };
+                this._searchDebounceTimers.selected = setTimeout(() => {
+                    this.handleSelectedTagsSearch(event);
+                }, 300); // 300ms debounce delay
+            };
+        }
         
         let foundCount = 0;
         
         // Add search event listeners for available tags
         const availableTagsSearch = document.getElementById('availableTagsSearch');
         if (availableTagsSearch) {
-            // Remove old listeners if they exist
+            // Remove old listeners if they exist (using stored function reference)
             if (this._boundAvailableSearch) {
                 availableTagsSearch.removeEventListener('input', this._boundAvailableSearch);
             }
-            // Also try removing the debounced function directly
+            // Remove the debounced function if it was previously added
             if (this._debouncedAvailableSearch) {
                 availableTagsSearch.removeEventListener('input', this._debouncedAvailableSearch);
             }
             
             // Store bound function and add new listener
             this._boundAvailableSearch = this._debouncedAvailableSearch;
-            availableTagsSearch.addEventListener('input', this._debouncedAvailableSearch, { passive: true });
-            
-            // CRITICAL FIX: Also add direct handler as backup (non-debounced for immediate feedback)
-            availableTagsSearch.addEventListener('input', (e) => {
-                // Visual feedback that search is active
-                if (e.target.value.trim()) {
-                    e.target.classList.add('search-active');
-                } else {
-                    e.target.classList.remove('search-active');
-                }
-            }, { passive: true });
-            
+            availableTagsSearch.addEventListener('input', this._debouncedAvailableSearch);
             foundCount++;
-            console.log('✅ Added debounced event listener to availableTagsSearch', availableTagsSearch);
+            verboseLog('✅ Added debounced event listener to availableTagsSearch');
         } else {
             console.warn('⚠️ Available tags search element not found');
         }
@@ -15587,31 +15478,20 @@ const TagManager = {
         // Add search event listeners for selected tags
         const selectedTagsSearch = document.getElementById('selectedTagsSearch');
         if (selectedTagsSearch) {
-            // Remove old listeners if they exist
+            // Remove old listeners if they exist (using stored function reference)
             if (this._boundSelectedSearch) {
                 selectedTagsSearch.removeEventListener('input', this._boundSelectedSearch);
             }
-            // Also try removing the debounced function directly
+            // Remove the debounced function if it was previously added
             if (this._debouncedSelectedSearch) {
                 selectedTagsSearch.removeEventListener('input', this._debouncedSelectedSearch);
             }
             
             // Store bound function and add new listener
             this._boundSelectedSearch = this._debouncedSelectedSearch;
-            selectedTagsSearch.addEventListener('input', this._debouncedSelectedSearch, { passive: true });
-            
-            // CRITICAL FIX: Also add direct handler as backup (non-debounced for immediate feedback)
-            selectedTagsSearch.addEventListener('input', (e) => {
-                // Visual feedback that search is active
-                if (e.target.value.trim()) {
-                    e.target.classList.add('search-active');
-                } else {
-                    e.target.classList.remove('search-active');
-                }
-            }, { passive: true });
-            
+            selectedTagsSearch.addEventListener('input', this._debouncedSelectedSearch);
             foundCount++;
-            console.log('✅ Added debounced event listener to selectedTagsSearch', selectedTagsSearch);
+            verboseLog('✅ Added debounced event listener to selectedTagsSearch');
         } else {
             console.warn('⚠️ Selected tags search element not found');
         }
@@ -15625,7 +15505,7 @@ const TagManager = {
         } else if (foundCount < 2) {
             console.warn(`⚠️ Only ${foundCount}/2 search inputs found. Some search functionality may not work.`);
         } else {
-            console.log(`✅ All ${foundCount} search event listeners attached successfully`);
+            verboseLog(`✅ All ${foundCount} search event listeners attached successfully`);
         }
     },
 
@@ -16294,22 +16174,14 @@ const TagManager = {
             // Mark as initialized
             this.state.initialized = true;
 
-            // CRITICAL FIX: Setup filter and search event listeners IMMEDIATELY
-            // This ensures filters and tag searches work on initial load regardless of cache state
+            // CRITICAL FIX: Setup filter event listeners IMMEDIATELY
+            // This ensures filters work on initial load regardless of cache state
             console.log('🔧 Setting up filter event listeners in init()...');
             if (typeof this.setupFilterEventListeners === 'function') {
                 this.setupFilterEventListeners();
                 console.log('✅ Filter event listeners setup complete in init()');
             } else {
                 console.error('❌ setupFilterEventListeners method not found!');
-            }
-
-            console.log('🔍 Setting up search event listeners in init()...');
-            if (typeof this.setupSearchEventListeners === 'function') {
-                this.setupSearchEventListeners();
-                console.log('✅ Search event listeners setup complete in init()');
-            } else {
-                console.error('❌ setupSearchEventListeners method not found!');
             }
 
             // CRITICAL FIX: Always fetch fresh data from server, skip cache

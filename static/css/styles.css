@@ -11015,14 +11015,14 @@ body.modal-open #mainContent.store-selection-disabled,
   top: 5px !important;
 }
 
-/* Adjust top spacing for center controls on larger screens (template select area) */
+/* Add more top padding on larger screens to prevent Template header cutoff */
 @media (min-width: 992px) {
   [data-container-type="center"] .control-panel {
-    padding-top: 0.25rem !important; /* Small, natural spacing above Template select */
+    padding-top: 1.5rem !important;
   }
   
   [data-container-type="center"] .control-section:first-child {
-    margin-top: 0.25rem !important;  /* Match panel padding for balanced look */
+    margin-top: 0.5rem !important;
   }
 }
 

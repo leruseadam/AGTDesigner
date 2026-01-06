@@ -1782,35 +1782,12 @@ class ProductDatabase:
                 if 'Product Type*' in cols:
                     filtered_df['Product Type*'] = filtered_df['Product Type*'].astype(str).str.strip()
 
-                # Price - Check multiple Excel price column variations
-                price_cols = ['Price', 'Price*', 'Price* (Tier Name for Bulk)']
-                price_found = None
-                for pcol in price_cols:
-                    if pcol in cols:
-                        price_found = pcol
-                        break
-                
-                if price_found and 'Price' not in cols:
-                    filtered_df['Price'] = filtered_df[price_found]
+                # Price
+                if 'Price' not in cols and 'Price* (Tier Name for Bulk)' in cols:
+                    filtered_df['Price'] = filtered_df['Price* (Tier Name for Bulk)']
                     cols.add('Price')
-                    logger.info(f"📊 PRICE MAPPING: Mapped '{price_found}' column to 'Price'")
-                elif 'Price' in cols:
+                if 'Price' in cols:
                     filtered_df['Price'] = filtered_df['Price'].astype(str).str.strip()
-
-                # DOH - Check multiple Excel DOH column variations
-                doh_cols = ['DOH', 'DOH Compliant (Yes/No)', 'DOH Compliant*', 'DOH*']
-                doh_found = None
-                for dcol in doh_cols:
-                    if dcol in cols:
-                        doh_found = dcol
-                        break
-                
-                if doh_found and 'DOH' not in cols:
-                    filtered_df['DOH'] = filtered_df[doh_found]
-                    cols.add('DOH')
-                    logger.info(f"📊 DOH MAPPING: Mapped '{doh_found}' column to 'DOH'")
-                elif 'DOH' in cols:
-                    filtered_df['DOH'] = filtered_df['DOH'].astype(str).str.strip()
 
                 # Ensure minimal required fields exist to avoid skipping rows later
                 for required_col in ['Product Name*', 'Product Type*', 'Vendor/Supplier*']:
@@ -1916,12 +1893,15 @@ class ProductDatabase:
                         ),
                         'Weight*': weight_value,
                         'Units': units_value,
-                        # EXCEL PRICE PRIORITY: Check all price column variations, Excel price always wins
-                        'Price': self._get_excel_price(row_dict),
+                        'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
                         'Product Strain': row_dict.get('Product Strain', ''),
                         'Quantity*': row_dict.get('Quantity*', ''),
-                        # EXCEL DOH PRIORITY: Check all DOH column variations, Excel DOH always wins
-                        'DOH': self._get_excel_doh(row_dict),
+                        # CRITICAL FIX: Check multiple DOH column names from Excel
+                        'DOH': (row_dict.get('DOH', '') or 
+                                row_dict.get('DOH Compliant (Yes/No)', '') or 
+                                row_dict.get('DOH Compliant*', '') or 
+                                row_dict.get('DOH*', '') or 
+                                ''),
                         'Concentrate Type': row_dict.get('Concentrate Type', ''),
                         'Ratio': self._extract_ratio_from_product_name(
                             row_dict.get('Product Name*', ''), 
@@ -3919,31 +3899,6 @@ class ProductDatabase:
             return fallback
         return str(value).strip()
     
-    def _get_excel_price(self, row_dict):
-        """Extract price from Excel row, checking all price column variations. Excel price always wins."""
-        # Check all possible price column names in priority order
-        excel_price = (row_dict.get('Price*', '') or 
-                      row_dict.get('Price', '') or 
-                      row_dict.get('Price* (Tier Name for Bulk)', ''))
-        
-        # Return price if valid, otherwise return '0.00' as fallback
-        if excel_price and str(excel_price).strip() not in ['', 'nan', 'none', 'null', 'NaN', 'None']:
-            return str(excel_price).strip()
-        return '0.00'
-    
-    def _get_excel_doh(self, row_dict):
-        """Extract DOH from Excel row, checking all DOH column variations. Excel DOH always wins."""
-        # Check all possible DOH column names in priority order
-        excel_doh = (row_dict.get('DOH', '') or 
-                    row_dict.get('DOH Compliant (Yes/No)', '') or 
-                    row_dict.get('DOH Compliant*', '') or 
-                    row_dict.get('DOH*', ''))
-        
-        # Return DOH if valid, otherwise return empty string
-        if excel_doh and str(excel_doh).strip() not in ['', 'nan', 'none', 'null', 'NaN', 'None']:
-            return str(excel_doh).strip()
-        return ''
-    
     def _calculate_ai_value(self, row_dict):
         """Calculate AI value (THC) using all available THC columns."""
         try:
@@ -4189,8 +4144,8 @@ class ProductDatabase:
             # PRIORITY SYSTEM:
             # - Price and DOH: Excel can overwrite (these change frequently)
             # - Other fields: Database takes precedence, Excel only fills gaps
-            excel_doh = self._get_excel_doh(product_data)
-            excel_price = self._get_excel_price(product_data)
+            excel_doh = product_data.get('DOH', '')
+            excel_price = product_data.get('Price', '')
 
             # Determine Price: ALWAYS use Excel if available (prices change frequently)
             has_excel_price = excel_price and str(excel_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
