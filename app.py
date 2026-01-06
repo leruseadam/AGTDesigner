@@ -9617,52 +9617,52 @@ def get_available_tags():
 
                             lineage_map = {}
                             if product_names:
-                            try:
-                                # PERFORMANCE FIX: Query only lineage fields, not all 47 columns
-                                conn = product_db._get_connection()
-                                cursor = conn.cursor()
+                                try:
+                                    # PERFORMANCE FIX: Query only lineage fields, not all 47 columns
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
 
-                                # PERFORMANCE: Build lowercase lookup for O(1) matching
-                                excel_lower_map = {name.lower().strip(): name for name in product_names}
+                                    # PERFORMANCE: Build lowercase lookup for O(1) matching
+                                    excel_lower_map = {name.lower().strip(): name for name in product_names}
 
-                                # SQLite has a parameter limit (typically 999) – chunk to avoid failures
-                                chunk_size = 400
-                                total_results = 0
-                                for chunk_start in range(0, len(product_names), chunk_size):
-                                    chunk = product_names[chunk_start:chunk_start + chunk_size]
-                                    chunk_lower = [name.lower() for name in chunk]
-                                    placeholders = ','.join(['?' for _ in chunk_lower])
-                                    # Use LOWER() with index for fast case-insensitive matching
-                                    cursor.execute(f'''
-                                        SELECT "Product Name*", "Lineage"
-                                        FROM products
-                                        WHERE LOWER("Product Name*") IN ({placeholders})
-                                    ''', chunk_lower)
-                                    results = cursor.fetchall()
-                                    total_results += len(results)
+                                    # SQLite has a parameter limit (typically 999) – chunk to avoid failures
+                                    chunk_size = 400
+                                    total_results = 0
+                                    for chunk_start in range(0, len(product_names), chunk_size):
+                                        chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                        chunk_lower = [name.lower() for name in chunk]
+                                        placeholders = ','.join(['?' for _ in chunk_lower])
+                                        # Use LOWER() with index for fast case-insensitive matching
+                                        cursor.execute(f'''
+                                            SELECT "Product Name*", "Lineage"
+                                            FROM products
+                                            WHERE LOWER("Product Name*") IN ({placeholders})
+                                        ''', chunk_lower)
+                                        results = cursor.fetchall()
+                                        total_results += len(results)
 
-                                    # Build lineage map with O(1) lookups
-                                    for row in results:
-                                        db_name = row[0]
-                                        db_lineage = row[1]
+                                        # Build lineage map with O(1) lookups
+                                        for row in results:
+                                            db_name = row[0]
+                                            db_lineage = row[1]
 
-                                        if db_lineage:
-                                            clean_lineage = str(db_lineage).strip().upper()
-                                            lineage_map[db_name] = clean_lineage
-                                            # O(1) lookup instead of O(n) loop
-                                            excel_key = db_name.lower().strip()
-                                            if excel_key in excel_lower_map:
-                                                lineage_map[excel_lower_map[excel_key]] = clean_lineage
+                                            if db_lineage:
+                                                clean_lineage = str(db_lineage).strip().upper()
+                                                lineage_map[db_name] = clean_lineage
+                                                # O(1) lookup instead of O(n) loop
+                                                excel_key = db_name.lower().strip()
+                                                if excel_key in excel_lower_map:
+                                                    lineage_map[excel_lower_map[excel_key]] = clean_lineage
 
-                                logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products from {len(product_names)} Excel products")
-                                logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
-                                if len(lineage_map) > 0:
-                                    sample = list(lineage_map.items())[:2]
-                                    logging.info(f"📋 Sample mappings: {sample}")
-                            except Exception as lineage_query_err:
-                                logging.warning(f"Lineage enrichment query failed: {lineage_query_err}")
-                                import traceback
-                                logging.warning(traceback.format_exc())
+                                    logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products from {len(product_names)} Excel products")
+                                    logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
+                                    if len(lineage_map) > 0:
+                                        sample = list(lineage_map.items())[:2]
+                                        logging.info(f"📋 Sample mappings: {sample}")
+                                except Exception as lineage_query_err:
+                                    logging.warning(f"Lineage enrichment query failed: {lineage_query_err}")
+                                    import traceback
+                                    logging.warning(traceback.format_exc())
 
                             enriched_count = 0
                             fallback_count = 0
