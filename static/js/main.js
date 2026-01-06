@@ -4677,6 +4677,30 @@ const TagManager = {
             const hasNoTags = !this.state.tags || this.state.tags.length === 0;
             const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database' || hasNoTags;
             
+            // CRITICAL FIX: Check if tags are being fetched - show loading instead of upload prompt
+            const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData;
+            
+            if (isFetchingTags) {
+                // Show loading indicator while tags are being fetched
+                availableTagsContainer.innerHTML = `
+                    <div style="
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: 400px;
+                        padding: 3rem 2rem;
+                    ">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading tags...</h5>
+                        <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
+                    </div>
+                `;
+                return;
+            }
+            
             if (noFileUploaded) {
                 // Show prominent upload prompt when Excel is needed
                 availableTagsContainer.innerHTML = `
@@ -11752,10 +11776,28 @@ const TagManager = {
             if (response.ok) {
                 const data = await response.json();
                 verboseLog('Initial data response:', data);
-                // CRITICAL: Check data_loaded flag first - if false, wait briefly before showing upload prompt
-                // This prevents showing the prompt when tags are loading asynchronously
+                // CRITICAL: Check data_loaded flag first - if false, show loading splash while checking
+                // This prevents showing misleading upload prompt when tags are loading asynchronously
                 if (data.success && data.data_loaded === false) {
                     verboseLog('No data loaded (data_loaded=false), checking if tags are loading...');
+                    
+                    // CRITICAL FIX: Show loading splash instead of upload prompt while checking
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    if (availableTagsContainer) {
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-5">
+                                <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-3 text-white">Loading tags...</p>
+                            </div>
+                        `;
+                    }
+                    
+                    // Show action splash to indicate loading
+                    if (this.showActionSplash) {
+                        this.showActionSplash('Loading tags...');
+                    }
                     
                     // CRITICAL FIX: Wait briefly to allow async tag loading to complete
                     // This prevents showing upload prompt when tags are loading in background
@@ -11764,6 +11806,9 @@ const TagManager = {
                     // Check again if tags have loaded in the meantime
                     if (this.state.tags && this.state.tags.length > 0) {
                         verboseLog('Tags loaded during wait, skipping upload prompt');
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
                         this._checkingExistingData = false;
                         return;
                     }
@@ -11771,6 +11816,17 @@ const TagManager = {
                     // Also check if fetchAndUpdateAvailableTags is in progress
                     if (this._fetchingAvailableTags) {
                         verboseLog('Tag fetch in progress, waiting for completion...');
+                        // Update loading message
+                        if (availableTagsContainer) {
+                            availableTagsContainer.innerHTML = `
+                                <div class="text-center py-5">
+                                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <p class="mt-3 text-white">Loading tags from server...</p>
+                                </div>
+                            `;
+                        }
                         // Wait up to 3 seconds for fetch to complete
                         let waitCount = 0;
                         while (this._fetchingAvailableTags && waitCount < 30) {
@@ -11780,6 +11836,9 @@ const TagManager = {
                         // Check again after waiting
                         if (this.state.tags && this.state.tags.length > 0) {
                             verboseLog('Tags loaded after waiting for fetch, skipping upload prompt');
+                            if (this.hideActionSplash) {
+                                this.hideActionSplash();
+                            }
                             this._checkingExistingData = false;
                             return;
                         }
@@ -11797,7 +11856,6 @@ const TagManager = {
                     }
                     
                     // Show upload prompt in Current Inventory when no file/data
-                    const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
                         availableTagsContainer.innerHTML = `
                             <div class="text-center py-5">
