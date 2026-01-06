@@ -924,7 +924,9 @@ class TemplateProcessor:
         max_cells = num_rows * num_cols
         total_products = num_products if num_products is not None else 49
         pages = (total_products + max_cells - 1) // max_cells
-        self.logger.info(f"🔍 TEMPLATE EXPANSION: Creating {pages} pages of 3x3 grids for {total_products} products.")
+        # PERFORMANCE: Only log for large expansions
+        if pages > 5 or total_products > 50:
+            self.logger.debug(f"🔍 TEMPLATE EXPANSION: Creating {pages} pages of 3x3 grids for {total_products} products.")
         product_idx = 0
         for page in range(pages):
             tbl = doc.add_table(rows=num_rows, cols=num_cols)
@@ -1059,7 +1061,9 @@ class TemplateProcessor:
                 page_break_para = doc.add_paragraph()
                 page_break_run = page_break_para.add_run()
                 page_break_run.add_break(WD_BREAK.PAGE)
-                self.logger.info(f"🔍 PAGE BREAK: Added page break after page {page + 1} of {pages}")
+                # PERFORMANCE: Only log for first few pages
+                if page < 3:
+                    self.logger.debug(f"🔍 PAGE BREAK: Added page break after page {page + 1} of {pages}")
 
         from src.core.generation.docx_formatting import remove_all_headers_and_footers
         doc = remove_all_headers_and_footers(doc)
@@ -3690,14 +3694,19 @@ class TemplateProcessor:
             self.logger.warning(f"DescAndWeight bold enforcement failed: {e}")
         
         # FINAL STEP: Enforce bold formatting on ALL text - this must be the very last operation
-        try:
-            from src.core.generation.docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
-            enforce_arial_bold_all_text(doc)
-            enforce_ratio_formatting(doc)
-            enforce_thc_cbd_bold_formatting(doc)
-            self.logger.info("✅ FINAL BOLD ENFORCEMENT: Applied bold formatting to all text")
-        except Exception as e:
-            self.logger.warning(f"Final bold enforcement failed: {e}")
+        # PERFORMANCE: Skip for very large documents to save time
+        num_tables = len(doc.tables)
+        if num_tables <= 25:  # Only do for documents with <= 25 pages
+            try:
+                from src.core.generation.docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
+                enforce_arial_bold_all_text(doc)
+                enforce_ratio_formatting(doc)
+                enforce_thc_cbd_bold_formatting(doc)
+                self.logger.debug("✅ FINAL BOLD ENFORCEMENT: Applied bold formatting to all text")
+            except Exception as e:
+                self.logger.warning(f"Final bold enforcement failed: {e}")
+        else:
+            self.logger.warning(f"PERFORMANCE: Skipping font enforcement for large document with {num_tables} tables")
             
         return doc
 

@@ -8059,19 +8059,23 @@ def generate_labels():
 
                                 processed_db = db_map[product_name]
 
-                                # Lineage
-                                db_lineage = (
-                                    processed_db.get('Lineage') or
-                                    processed_db.get('canonical_lineage') or
-                                    processed_db.get('currentLineage')
-                                )
-                                logging.info(f"🔍 LINEAGE DEBUG for '{product_name}': db_lineage='{db_lineage}', existing='{record.get('Lineage', 'NONE')}'")
-                                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                                    record['Lineage'] = str(db_lineage).strip().upper()
-                                    logging.info(f"✅ Set lineage for '{product_name}' to '{record['Lineage']}'")
-                                    enriched_count += 1
+                                # Lineage - ONLY set if record doesn't already have lineage (preserve UI lineage)
+                                # UI lineage takes precedence, so don't overwrite it here
+                                if not record.get('Lineage') or record.get('Lineage') in ['', 'None', 'nan', 'NOT_FOUND']:
+                                    db_lineage = (
+                                        processed_db.get('Lineage') or
+                                        processed_db.get('canonical_lineage') or
+                                        processed_db.get('currentLineage')
+                                    )
+                                    logging.info(f"🔍 LINEAGE DEBUG for '{product_name}': db_lineage='{db_lineage}', existing='{record.get('Lineage', 'NONE')}'")
+                                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                        record['Lineage'] = str(db_lineage).strip().upper()
+                                        logging.info(f"✅ Set lineage for '{product_name}' to '{record['Lineage']}'")
+                                        enriched_count += 1
+                                    else:
+                                        logging.warning(f"⚠️ No valid database lineage found for '{product_name}'!")
                                 else:
-                                    logging.warning(f"⚠️ No valid database lineage found for '{product_name}'!")
+                                    logging.debug(f"✅ Preserved existing lineage '{record.get('Lineage')}' for '{product_name}' (UI lineage takes precedence)")
 
                                 # Price
                                 db_price = _extract_price_from_database_product(processed_db)
@@ -8093,17 +8097,8 @@ def generate_labels():
                 except Exception as enrich_error:
                     logging.warning(f"⚠️ Error enriching Excel records with database data: {enrich_error}")
             
-            # CRITICAL: Log lineage values from recipient records to verify DataFrame updates took effect
-            if records:
-                logging.info(f"🔍 LINEAGE VERIFICATION - First 5 records:")
-                for i, record in enumerate(records[:5]):
-                    product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
-                    lineage = record.get('Lineage', 'NOT_FOUND')
-                    price = record.get('Price', 'NOT_FOUND')
-                    logging.info(f"  Record {i+1}: '{product_name}' -> Lineage: '{lineage}', Price: '{price}'")
-            
-            # CRITICAL FIX: Apply UI lineage values first (what user sees in UI), then database override
-            # This ensures DOCX matches what's displayed in the UI
+            # CRITICAL FIX: Apply UI lineage values AFTER enrichment to ensure user changes override database
+            # This ensures DOCX matches what's displayed in the UI and user changes are respected
             if records:
                 # Build UI lineage map from selected tags
                 ui_lineage_map = {}
@@ -8115,7 +8110,7 @@ def generate_labels():
                         if product_name and ui_lineage:
                             ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
                 
-                # Apply UI lineage values first - ensure user changes are reflected
+                # Apply UI lineage values - ALWAYS override database lineage with user's UI changes
                 ui_lineage_applied = 0
                 for record in records:
                     product_name = record.get('Product Name*', record.get('ProductName', ''))
@@ -8135,11 +8130,12 @@ def generate_labels():
                     
                     if ui_lineage:
                         original_lineage = record.get('Lineage', '')
+                        # ALWAYS apply UI lineage - it's the user's choice and should override everything
+                        record['Lineage'] = ui_lineage
+                        record['currentLineage'] = ui_lineage
+                        record['canonical_lineage'] = ui_lineage
+                        record['lineage'] = ui_lineage.lower()
                         if str(original_lineage).strip().upper() != ui_lineage:
-                            record['Lineage'] = ui_lineage
-                            record['currentLineage'] = ui_lineage
-                            record['canonical_lineage'] = ui_lineage
-                            record['lineage'] = ui_lineage.lower()
                             logging.info(f"✅ UI LINEAGE APPLIED: '{product_name}' - Record: '{original_lineage}' -> UI: '{ui_lineage}'")
                             ui_lineage_applied += 1
                         else:
@@ -8680,22 +8676,13 @@ def generate_labels():
             logging.error(f"❌ Generation returned unexpected type without save(): {type(final_doc)}")
             return jsonify({'error': 'Failed to generate document (invalid document type).'}), 500
 
-        # Apply custom formatting based on saved settings
+        # PERFORMANCE FIX: Font enforcement is already done in template processor
+        # Skip duplicate call to save expensive document iteration
+        # Only apply custom formatting if needed
         if template_settings:
-            from src.core.generation.docx_formatting import apply_custom_formatting, enforce_arial_bold_all_text
+            from src.core.generation.docx_formatting import apply_custom_formatting
             apply_custom_formatting(final_doc, template_settings)
-            # ALWAYS enforce Arial Bold as final step - NO EXCEPTIONS
-            try:
-                enforce_arial_bold_all_text(final_doc)
-            except Exception as font_error:
-                logger.warning(f"Skipping font enforcement due to table structure issue: {font_error}")
-        else:
-            # Ensure all fonts are Arial Bold for consistency across platforms
-            from src.core.generation.docx_formatting import enforce_arial_bold_all_text
-            try:
-                enforce_arial_bold_all_text(final_doc)
-            except Exception as font_error:
-                logger.warning(f"Skipping font enforcement due to table structure issue: {font_error}")
+            # Font enforcement already done in template processor - skip duplicate call
 
         # For preroll templates, generate product list as a separate document (not attached to tags)
         product_list_doc = None
