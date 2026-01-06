@@ -3173,6 +3173,10 @@ def upload_file():
                         processor = ExcelProcessor(store_name=selected_store)
                         logging.info(f"[BACKGROUND] Created ExcelProcessor with store: {selected_store}")
                         
+                        # PERFORMANCE FIX: Skip expensive database operations during upload
+                        processor._skip_database_strain = True
+                        logging.info("[BACKGROUND] ⚡ Skipping database Product Strain application for fast upload")
+                        
                         # Load the file with timeout check
                         if time.time() - bg_start_time > max_bg_time:
                             raise TimeoutError(f"Background processing exceeded {max_bg_time}s")
@@ -9503,16 +9507,86 @@ def get_available_tags():
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
 
-        # CRITICAL FIX: When no Excel file, return empty tags - DO NOT load from database
-        # User only wants tags from Excel file, not entire database
+        # CRITICAL FIX: When no Excel file, load tags from database instead of returning empty
+        # This allows the app to work with database-only mode
         if not has_excel_data:
-            logging.info("⚡ No Excel file in memory - returning empty tags (not loading from database)")
-            return jsonify({
-                'tags': [],
-                'total_count': 0,
-                'source': 'empty-no-excel',
-                'message': 'No Excel file uploaded. Please upload an Excel file to see tags.'
-            }), 200
+            logging.info("📦 No Excel file - loading tags from database instead")
+            try:
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # Load all products from database
+                    conn = product_db._get_connection()
+                    cursor = conn.cursor()
+                    
+                    # Get all available columns
+                    cursor.execute("PRAGMA table_info(products)")
+                    available_columns = [row[1] for row in cursor.fetchall()]
+                    columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
+                    quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
+                    
+                    # Query all products with lineage priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
+                    query = f'''
+                        SELECT {quoted_columns}, 
+                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
+                        FROM products p
+                        LEFT JOIN strains s ON p.strain_id = s.id
+                        ORDER BY p.id DESC
+                    '''
+                    cursor.execute(query)
+                    rows = cursor.fetchall()
+                    columns = columns_to_query + ['preferred_lineage']
+                    
+                    database_tags = []
+                    for row in rows:
+                        try:
+                            product_dict = dict(zip(columns, row))
+                            # Use preferred_lineage for lineage
+                            preferred_lin = product_dict.pop('preferred_lineage', None)
+                            if preferred_lin:
+                                db_lin_clean = str(preferred_lin).strip().upper()
+                                product_dict['currentLineage'] = db_lin_clean
+                                product_dict['canonical_lineage'] = db_lin_clean
+                                product_dict['Lineage'] = db_lin_clean
+                            database_tags.append(product_dict)
+                        except Exception as row_err:
+                            logging.debug(f"Error processing database row: {row_err}")
+                            continue
+                    
+                    if database_tags:
+                        safe_tags = make_json_safe(database_tags)
+                        logging.info(f"✅ Loaded {len(safe_tags)} tags from database (no Excel file)")
+                        return jsonify({
+                            'tags': safe_tags,
+                            'total_count': len(safe_tags),
+                            'source': 'database-only',
+                            'message': f'Loaded {len(safe_tags)} products from database (no Excel file uploaded)'
+                        }), 200
+                    else:
+                        logging.info("📦 Database is empty - returning empty tags")
+                        return jsonify({
+                            'tags': [],
+                            'total_count': 0,
+                            'source': 'empty-database',
+                            'message': 'No products in database. Please upload an Excel file or add products to the database.'
+                        }), 200
+                else:
+                    logging.info("📦 No database available - returning empty tags")
+                    return jsonify({
+                        'tags': [],
+                        'total_count': 0,
+                        'source': 'empty-no-db',
+                        'message': 'No Excel file uploaded and no database available. Please upload an Excel file.'
+                    }), 200
+            except Exception as db_load_err:
+                logging.error(f"Error loading tags from database: {db_load_err}")
+                import traceback
+                logging.error(traceback.format_exc())
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'error',
+                    'error': f'Error loading from database: {str(db_load_err)}'
+                }), 500
 
         # CRITICAL: Validate that the session file matches the selected store
         # This prevents wrong store data from being loaded
