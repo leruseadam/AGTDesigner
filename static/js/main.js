@@ -10717,27 +10717,15 @@ const TagManager = {
         const retryDelay = 200; // Reduced to 200ms for faster response
         
         try {
-            // PERFORMANCE: Try to build filters from cached tags first (instant)
-            if (this.state.tags && this.state.tags.length > 0) {
+            // CRITICAL FIX: Always fetch filter options from backend API to ensure all vendors are included
+            // Building from this.state.tags can be incomplete if it only contains selected tags after refresh
+            // The backend API uses the full DataFrame, so it always has all available vendors
+            // PERFORMANCE: Only use cached tags as fallback if backend fetch fails
+            const useCachedTags = false; // Disable cached tag building to fix vendor filter issue
+            
+            if (useCachedTags && this.state.tags && this.state.tags.length > 0) {
                 verboseLog('⚡ Building filters from cached tags for instant population');
                 this.buildFilterOptionsFromTags(this.state.tags);
-                // DISABLED: Background fetch was causing disruptive filter reloads while user is working
-                // The cached filter build is accurate enough - no need to update again from backend
-                // fetch(`/api/filter-options?t=${Date.now()}`, {
-                //     method: 'GET',
-                //     headers: { 'Content-Type': 'application/json' }
-                // }).then(response => {
-                //     if (response.ok) {
-                //         return response.json();
-                //     }
-                // }).then(filterOptions => {
-                //     if (filterOptions && !filterOptions.error) {
-                //         // Update with backend data (more accurate)
-                //         this.updateFilters(filterOptions, true);
-                //     }
-                // }).catch(err => {
-                //     verboseLog('Background filter fetch failed (non-critical):', err);
-                // });
                 return; // Return immediately after building from cache
             }
             

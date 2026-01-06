@@ -1252,9 +1252,13 @@ class TemplateProcessor:
             num_products = len(chunk)
             cache_key = f"{self.template_type}_{num_products}"
             
-            if cache_key in self._template_expansion_cache:
+            # PERFORMANCE: Use class-level cache (shared across instances) for better hit rate
+            if not hasattr(TemplateProcessor, '_template_expansion_cache'):
+                TemplateProcessor._template_expansion_cache = {}
+            
+            if cache_key in TemplateProcessor._template_expansion_cache:
                 # Use cached template expansion (create a copy since BytesIO is consumed)
-                cached_buffer = self._template_expansion_cache[cache_key]
+                cached_buffer = TemplateProcessor._template_expansion_cache[cache_key]
                 if hasattr(cached_buffer, 'getvalue'):
                     self._expanded_template_buffer = BytesIO(cached_buffer.getvalue())
                 else:
@@ -1272,9 +1276,10 @@ class TemplateProcessor:
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
                 
                 # Cache the expansion (create a copy since BytesIO is consumed)
+                # PERFORMANCE: Use class-level cache for better sharing across instances
                 if hasattr(self._expanded_template_buffer, 'getvalue'):
                     cached_buffer = BytesIO(self._expanded_template_buffer.getvalue())
-                    self._template_expansion_cache[cache_key] = cached_buffer
+                    TemplateProcessor._template_expansion_cache[cache_key] = cached_buffer
                     self._expanded_template_buffer.seek(0)
                     self.logger.debug(f"⚡ TEMPLATE CACHE MISS: Cached expansion for {cache_key}")
                 elif hasattr(self._expanded_template_buffer, 'seek'):
@@ -1752,60 +1757,33 @@ class TemplateProcessor:
             product_name = record.get('ProductName', record.get('Product Name*', ''))
             excel_lineage = label_context.get('Lineage', '') or record.get('Lineage', '')
             
-            # CRITICAL: Use record lineage first (already enriched with database value, no sativa hybrid override)
-            # Only query database if record lineage is missing
+            # PERFORMANCE FIX: Use pre-loaded cache FIRST to avoid N+1 queries
+            # Check cache before doing any database queries
             db_lineage = None
-            # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-            record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-            if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
-                # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
-                db_lineage = str(record_lineage).strip()
-                if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                    self.logger.debug(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
-            elif product_name:
-                # Record lineage missing - query database directly (avoid get_product_lineage which applies override)
-                from app import get_product_database, get_current_store_name
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    # Query database directly to avoid sativa hybrid override in get_product_lineage()
-                    try:
-                        conn = product_db._get_connection()
-                        cursor = conn.cursor()
-                        # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
-                        cursor.execute('''
-                            SELECT sovereign_lineage, "Lineage", "canonical_lineage"
-                            FROM products
-                            WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                            ORDER BY id DESC
-                            LIMIT 1
-                        ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
-                        result = cursor.fetchone()
-                        # Priority: sovereign_lineage > Lineage > canonical_lineage
-                        if result and result[0]:
-                            db_lineage = str(result[0]).strip()
-                            self.logger.debug(f"🔒 DOCX: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
-                        elif result and result[1]:
-                            db_lineage = str(result[1]).strip()
-                        elif result and result[2]:
-                            db_lineage = str(result[2]).strip()
-                    except Exception as db_err:
-                        self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
-                        # Fallback to get_product_lineage if direct query fails
-                        db_lineage = product_db.get_product_lineage(product_name)
-                    
-                    # If no product-level lineage, check strain-level lineage
-                    if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
-                        product_strain = record.get('Product Strain', '')
-                        if product_strain:
-                            strain_info = product_db.get_strain_info(product_strain)
-                            if strain_info:
-                                db_lineage = (
-                                    strain_info.get('display_lineage') or
-                                    strain_info.get('sovereign_lineage') or
-                                    strain_info.get('canonical_lineage') or
-                                    None
-                                )
+            if product_lineage_cache and product_name in product_lineage_cache:
+                db_lineage = product_lineage_cache[product_name]
+                self.logger.debug(f"⚡ CACHE HIT: Using cached lineage '{db_lineage}' for '{product_name}'")
+            else:
+                # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
+                record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
+                if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                    # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
+                    db_lineage = str(record_lineage).strip()
+                elif product_name and strain_info_cache:
+                    # Check strain cache if available
+                    product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+                    if product_strain and product_strain in strain_info_cache:
+                        strain_info = strain_info_cache[product_strain]
+                        db_lineage = (
+                            strain_info.get('display_lineage') or
+                            strain_info.get('sovereign_lineage') or
+                            strain_info.get('canonical_lineage') or
+                            None
+                        )
+                # PERFORMANCE: Skip individual database queries - rely on batch-loaded cache
+                # If cache doesn't have it, use defaults instead of querying database
+                if not db_lineage:
+                    self.logger.debug(f"⚡ CACHE MISS: No lineage in cache for '{product_name}', using defaults")
                     
                     # CRITICAL: Always use database lineage if available, never Excel
                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
@@ -3343,6 +3321,29 @@ class TemplateProcessor:
             # Clean the product name or URL
             clean_name = str(product_name).strip()
             
+            # PERFORMANCE: Cache QR codes to avoid regenerating same codes
+            if not hasattr(TemplateProcessor, '_qr_code_cache'):
+                TemplateProcessor._qr_code_cache = {}
+            
+            cache_key = f"{clean_name}_{self.template_type}_{getattr(self, 'scale_factor', 1.0)}"
+            if cache_key in TemplateProcessor._qr_code_cache:
+                cached_qr = TemplateProcessor._qr_code_cache[cache_key]
+                # Create a new InlineImage from cached data
+                img_buffer = BytesIO(cached_qr['image_data'])
+                img_buffer.seek(0)
+                qr_size = cached_qr['size']
+                if hasattr(doc, 'docx'):
+                    qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
+                else:
+                    qr_inline_image = InlineImage(None, img_buffer, width=qr_size)
+                    qr_inline_image._doc = doc
+                img_buffer.seek(0)
+                qr_inline_image._raw_image_data = img_buffer.read()
+                qr_inline_image._raw_image_width = qr_size
+                qr_inline_image._product_name = clean_name
+                self.logger.debug(f"⚡ QR CACHE HIT: Using cached QR code for '{clean_name[:50]}'")
+                return qr_inline_image
+            
             # For preroll URLs, ensure it's an absolute URL if possible, without hardcoding any domain.
             if is_url and not clean_name.startswith('http'):
                 try:
@@ -3413,6 +3414,18 @@ class TemplateProcessor:
             qr_inline_image._raw_image_data = img_buffer.read()
             qr_inline_image._raw_image_width = qr_size
             qr_inline_image._product_name = clean_name  # Store product name for reference
+            
+            # PERFORMANCE: Cache QR code for reuse
+            img_buffer.seek(0)
+            TemplateProcessor._qr_code_cache[cache_key] = {
+                'image_data': img_buffer.read(),
+                'size': qr_size
+            }
+            # Limit cache size to prevent memory issues
+            if len(TemplateProcessor._qr_code_cache) > 1000:
+                # Remove oldest entries (simple FIFO)
+                oldest_key = next(iter(TemplateProcessor._qr_code_cache))
+                del TemplateProcessor._qr_code_cache[oldest_key]
             
             self.logger.debug(f"Generated QR code for product: '{clean_name}' with font size: {font_size_pt.pt}pt, converted to {qr_size_mm:.1f}mm")
             return qr_inline_image
