@@ -9365,15 +9365,15 @@ def get_available_tags():
                 # Return cached data instead of 429 error
                 cache_key = get_session_cache_key('available_tags')
                 cached_tags = cache.get(cache_key)
-            if cached_tags:
-                # CRITICAL: Always align with DB lineage to ensure database values are used
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
-                safe_cached_tags = make_json_safe(aligned_cached_tags)
-                return jsonify({
-                    'tags': safe_cached_tags,
-                    'total_count': len(safe_cached_tags),
-                    'source': 'rate-limited-cache'
-                })
+                if cached_tags:
+                    # CRITICAL: Always align with DB lineage to ensure database values are used
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+                    safe_cached_tags = make_json_safe(aligned_cached_tags)
+                    return jsonify({
+                        'tags': safe_cached_tags,
+                        'total_count': len(safe_cached_tags),
+                        'source': 'rate-limited-cache'
+                    })
         
         # Record this request
         if client_ip not in get_available_tags._rate_limit_data:
