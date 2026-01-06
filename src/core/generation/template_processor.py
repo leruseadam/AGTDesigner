@@ -3614,29 +3614,31 @@ class TemplateProcessor:
         if num_tables <= 15:
             try:
                 for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during DOH centering")
-                    continue
-                
-                for row in table.rows:
-                    for cell in row.cells:
-                        # Fast check for image-only cells
-                        if len(cell.paragraphs) > 0 and all(len(paragraph.runs) == 1 and not paragraph.text.strip() for paragraph in cell.paragraphs):
-                            for paragraph in cell.paragraphs:
-                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Fast inner table centering
-                        for inner_table in cell.tables:
-                            inner_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                        # Explicit DOH image centering - check for InlineImage objects
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                # Check if this run contains an InlineImage (DOH image)
-                                if hasattr(run, '_element') and run._element.find(qn('w:drawing')) is not None:
+                    # Validate table structure before processing
+                    if not self._validate_and_repair_table_structure(table):
+                        self.logger.warning(f"Skipping table with invalid structure during DOH centering")
+                        continue
+                    
+                    for row in table.rows:
+                        for cell in row.cells:
+                            # Fast check for image-only cells
+                            if len(cell.paragraphs) > 0 and all(len(paragraph.runs) == 1 and not paragraph.text.strip() for paragraph in cell.paragraphs):
+                                for paragraph in cell.paragraphs:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    # Also center the cell content
-                                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-                                    
+                            # Fast inner table centering
+                            for inner_table in cell.tables:
+                                inner_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                            # Explicit DOH image centering - check for InlineImage objects
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    # Check if this run contains an InlineImage (DOH image)
+                                    if hasattr(run, '_element') and run._element.find(qn('w:drawing')) is not None:
+                                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                        # Also center the cell content
+                                        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            except Exception as e:
+                self.logger.warning(f"Error during DOH centering: {e}")
+            
             # Additional comprehensive DOH centering pass
             self._ensure_doh_image_centering(doc)
             
@@ -3655,8 +3657,6 @@ class TemplateProcessor:
             # PREROLL TEMPLATE: Center QR codes
             if self.template_type == 'preroll':
                 self._ensure_preroll_qr_centering(doc)
-        except Exception as e:
-            self.logger.warning(f"DOH centering failed: {e}")
         
         # OPTIMIZATION: Only call prevent_table_expansion_enhanced once - it already does everything
         # enforce_fixed_cell_dimensions does, plus more, so we don't need both

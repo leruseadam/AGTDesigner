@@ -2606,21 +2606,23 @@ class JSONMatcher:
                                             score = 0
                                             continue
                                     
-                                    # If both have identifiers, they MUST overlap significantly
+                                    # If both have identifiers, they MUST overlap significantly (more lenient)
                                     identifier_overlap = len(json_identifiers & excel_identifiers) / max(len(json_identifiers), len(excel_identifiers))
-                                    if identifier_overlap < 0.5:  # Less than 50% overlap of product identifiers
+                                    if identifier_overlap < 0.3:  # Less than 30% overlap of product identifiers (lowered from 50%)
                                         score = 0  # Not a match - different products
                                         logging.debug(f"🚫 REJECTED: Low identifier overlap ({identifier_overlap:.1%})")
                                         continue
                                 
-                                # 3. Partial name match only if words align
+                                # 3. Partial name match only if words align (more lenient)
                                 if product_name.lower() in excel_product_name or excel_product_name in product_name.lower():
                                     # Check word overlap
                                     word_overlap = len(json_words & excel_words) / max(len(json_words), len(excel_words))
-                                    if word_overlap >= 0.5:  # At least 50% word overlap
+                                    if word_overlap >= 0.4:  # At least 40% word overlap (lowered from 50%)
                                         score += 80.0
+                                    elif word_overlap >= 0.2:  # New threshold for partial matches
+                                        score += 40.0  # Increased from 30.0 for weak overlap
                                     else:
-                                        score += 30.0  # Reduced score for weak overlap
+                                        score += 20.0  # Small bonus for any overlap
                                 
                                 # 4. Enhanced fuzzy matching with more lenient threshold
                                 try:
@@ -2630,27 +2632,29 @@ class JSONMatcher:
                                     token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
                                     
                                     # More lenient thresholds for better product discovery
-                                    if token_sort_score >= 60:  # Lowered from 70 for more matches
-                                        score += token_sort_score * 0.6  # Increased weight
-                                    elif token_sort_score >= 50:
-                                        score += token_sort_score * 0.4  # Increased weight for marginal matches
+                                    if token_sort_score >= 50:  # Lowered from 60 for more matches
+                                        score += token_sort_score * 0.7  # Increased weight from 0.6
+                                    elif token_sort_score >= 40:  # Lowered from 50
+                                        score += token_sort_score * 0.5  # Increased weight for marginal matches
+                                    elif token_sort_score >= 30:  # New threshold for very lenient matching
+                                        score += token_sort_score * 0.3  # Small bonus for weak matches
                                         
                                 except ImportError:
                                     pass
                             
-                            # 5. Brand matching bonus
+                            # 5. Brand matching bonus (increased)
                             excel_brand = cache_item.get('brand', '').lower().strip()
                             json_brand = str(item.get('brand', '')).lower().strip()
                             if excel_brand and json_brand and excel_brand in json_brand or json_brand in excel_brand:
-                                score += 20.0
+                                score += 25.0  # Increased from 20.0
                             
                             # 6. Add vendor matching bonus
                             score += vendor_match_bonus
                             
-                            # 7. Product type matching bonus
+                            # 7. Product type matching bonus (increased)
                             excel_type = cache_item.get('product_type', '').lower().strip()
                             if product_type and excel_type and any(word in excel_type for word in product_type.lower().split()):
-                                score += 15.0
+                                score += 20.0  # Increased from 15.0
                             
                             # 8. Weight matching - not available in cache
                             # (Skip weight bonus for now)
@@ -2683,7 +2687,7 @@ class JSONMatcher:
                 # This prevents matching "GSC Cartridge" → "Golden Pineapple Crystal" just because
                 # they have the same vendor, weight, and product type
                 name_similarity_required = False
-                if best_match is not None and best_score >= 50.0:
+                if best_match is not None and best_score >= 40.0:  # Lowered from 50 to catch more matches
                     # Calculate actual name similarity using fuzzy matching
                     json_name = product_name.lower()
                     db_name = str(best_match.get('Product Name*', '') or best_match.get('Description', '')).strip().lower()
@@ -2692,14 +2696,14 @@ class JSONMatcher:
                         from fuzzywuzzy import fuzz
                         name_similarity = fuzz.token_sort_ratio(json_name, db_name)
                         
-                        # Require at least 50% name similarity for ANY match (lowered from 60% for better match discovery)
+                        # Require at least 40% name similarity for ANY match (lowered from 50% for better match discovery)
                         # This allows legitimate matches like:
                         # - "Jet Fuel Gelato Vaporizer" → "Jet Fuel Gelato Live Resin" (75%+)
                         # - "Wedding Cake Cartridge" → "Wedding Cake Live Resin" (75%+)
                         # - Products with slight variations in naming
                         # But prevents wrong matches like:
-                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (below 50%)
-                        if name_similarity < 50:
+                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (below 40%)
+                        if name_similarity < 40:
                             logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
                             best_match = None
                             best_score = 0
@@ -2719,7 +2723,7 @@ class JSONMatcher:
                 if best_match is not None and best_score >= 100.0:  # Very high confidence - auto-approve
                     validated = True
                     logging.info(f"✅ HIGH CONFIDENCE: Score {best_score:.1f} >= 100.0")
-                elif best_match is not None and best_score >= 50.0 and name_similarity_required:
+                elif best_match is not None and best_score >= 40.0 and name_similarity_required:  # Lowered from 50
                     # Medium confidence (50-100) - perform additional validation
                     json_name_str = product_name
                     db_name_str = str(best_match.get('Product Name*', '') or best_match.get('Description', '')).strip()
@@ -2774,19 +2778,19 @@ class JSONMatcher:
                             if has_common_term:
                                 validated = True
                                 logging.info(f"✅ VALIDATED: Common terms {set(core_terms_json) & set(core_terms_db)}")
-                            elif best_score >= 70.0:  # Allow matches with high enough score even without common terms
+                            elif best_score >= 60.0:  # Allow matches with high enough score even without common terms (lowered from 70)
                                 validated = True
                                 logging.info(f"✅ VALIDATED: High score ({best_score:.1f}) despite no common product type terms")
                             else:
                                 logging.warning(f"🚫 VALIDATION FAILED: No common product type and score too low - JSON:{core_terms_json} vs DB:{core_terms_db}, score:{best_score:.1f}")
                                 best_match = None
                     else:
-                        # No clear product type terms - use more lenient score threshold (lowered from 85 to 70)
-                        validated = (best_score >= 70.0)
+                        # No clear product type terms - use more lenient score threshold (lowered from 70 to 60)
+                        validated = (best_score >= 60.0)
                         if validated:
-                            logging.info(f"✅ SCORE VALIDATED: {best_score:.1f} >= 70.0")
+                            logging.info(f"✅ SCORE VALIDATED: {best_score:.1f} >= 60.0")
                         else:
-                            logging.warning(f"🚫 SCORE TOO LOW: {best_score:.1f} < 70.0")
+                            logging.warning(f"🚫 SCORE TOO LOW: {best_score:.1f} < 60.0")
                             best_match = None
                 
                 if best_match is not None and validated:  # Only use validated matches
