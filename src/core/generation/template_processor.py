@@ -1447,6 +1447,14 @@ class TemplateProcessor:
             # CRITICAL FIX: Ensure all tables have proper tblGrid elements before processing
             self._ensure_table_grids_exist(rendered_doc)
             
+            # PERFORMANCE OPTIMIZATION: Check timeout early to avoid expensive operations
+            if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK * 0.7:
+                self.logger.warning(f"Chunk processing taking too long, skipping expensive post-processing")
+                # Only do minimal required processing
+                from src.core.generation.docx_formatting import remove_all_headers_and_footers
+                rendered_doc = remove_all_headers_and_footers(rendered_doc)
+                return rendered_doc
+            
             # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
             try:
                 # Post-process the document to apply dynamic font sizing first
@@ -1460,8 +1468,8 @@ class TemplateProcessor:
                 # Apply lineage colors last to ensure they are not overwritten
                 apply_lineage_colors(rendered_doc)
                 
-                # Apply final marker cleanup for all templates
-                self._final_marker_cleanup(rendered_doc)
+                # PERFORMANCE: Skip redundant marker cleanup - _post_process already does this
+                # self._final_marker_cleanup(rendered_doc)  # REMOVED - redundant with _post_process
                 
             except Exception as processing_error:
                 self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
@@ -1486,83 +1494,11 @@ class TemplateProcessor:
             chunk_time = time.time() - chunk_start_time
             # Chunk processed
             
-            # FINAL MARKER CLEANUP: Remove any lingering *_START and *_END markers AFTER font sizing has been applied
-            # This cleanup should only remove markers that weren't processed by the font sizing system
-            marker_pattern = re.compile(r'\b\w+_(START|END)\b')
-            prefix_pattern = re.compile(r'^(?:[A-Z0-9_]+_)+')
-            
-            # Clean in tables
+            # PERFORMANCE OPTIMIZATION: Skip redundant marker cleanup - already done in _post_process_and_replace_content
+            # The _post_process_and_replace_content method already handles marker cleanup, so this is redundant
+            # Only do final cleanup steps that are truly needed
             try:
-                for table in rendered_doc.tables:
-                    try:
-                        # Use safe table iteration to validate and repair if needed
-                        if not self._safe_table_iteration(table, "marker cleanup"):
-                            self.logger.warning(f"Skipping table with invalid structure during marker cleanup")
-                            continue
-                        
-                        for row in table.rows:
-                            try:
-                                # Validate row structure before processing
-                                if not hasattr(row, 'cells') or not row.cells:
-                                    self.logger.warning(f"Skipping row with invalid structure during marker cleanup")
-                                    continue
-                                    
-                                for cell in row.cells:
-                                    try:
-                                        for para in cell.paragraphs:
-                                            # Check if this paragraph was processed by font sizing system
-                                            # If it has non-default font sizes, it was processed
-                                            was_processed = False
-                                            for run in para.runs:
-                                                if hasattr(run, 'font') and hasattr(run.font, 'size') and run.font.size:
-                                                    # Check if font size is not the default (12pt)
-                                                    if hasattr(run.font.size, 'pt') and run.font.size.pt != 12:
-                                                        was_processed = True
-                                                        break
-                                            
-                                            # CRITICAL FIX: Always clean markers regardless of font sizing processing
-                                            # This ensures DESC_START, DESC_END, PRICE_START, PRICE_END are always removed
-                                            for run in para.runs:
-                                                if marker_pattern.search(run.text):
-                                                    run.text = marker_pattern.sub('', run.text)
-                                                if prefix_pattern.search(run.text):
-                                                    run.text = prefix_pattern.sub('', run.text)
-                                    except Exception as cell_error:
-                                        self.logger.warning(f"Skipping cell due to error during marker cleanup: {cell_error}")
-                                        continue
-                            except Exception as row_error:
-                                self.logger.warning(f"Skipping row due to error during marker cleanup: {row_error}")
-                                continue
-                    except Exception as e:
-                        self.logger.warning(f"Skipping table due to error during marker cleanup: {e}")
-                        continue
-            except Exception as overall_error:
-                self.logger.error(f"Critical error during marker cleanup: {overall_error}")
-                # Continue processing other parts of the document
-            
-            # Clean in paragraphs outside tables
-            for para in rendered_doc.paragraphs:
-                # Check if this paragraph was processed by font sizing system
-                was_processed = False
-                for run in para.runs:
-                    if hasattr(run, 'font') and hasattr(run.font, 'size') and run.font.size:
-                        # Check if font size is not the default (12pt)
-                        if hasattr(run.font.size, 'pt') and run.font.size.pt != 12:
-                            was_processed = True
-                            break
-                
-                # CRITICAL FIX: Always clean markers regardless of font sizing processing
-                # This ensures DESC_START, DESC_END, PRICE_START, PRICE_END are always removed
-                # (Removed was_processed check)
-                if True:
-                    for run in para.runs:
-                        if marker_pattern.search(run.text):
-                            run.text = marker_pattern.sub('', run.text)
-                        if prefix_pattern.search(run.text):
-                            run.text = prefix_pattern.sub('', run.text)
-            
-            # FINAL STEP: Clean up any remaining concatenated lineage+brand content for classic types
-            try:
+                # FINAL STEP: Clean up any remaining concatenated lineage+brand content for classic types
                 self._clean_up_lineage_brand_concatenation(rendered_doc)
             except Exception as e:
                 self.logger.warning(f"Lineage brand concatenation cleanup failed: {e}")
@@ -3520,11 +3456,21 @@ class TemplateProcessor:
         """Post-process the document after template rendering."""
         # Skip unnecessary processing for inventory templates
         if self.template_type == 'inventory':
-            self.logger.info("Skipping post-processing for inventory template - just filling placeholders")
+            self.logger.debug("Skipping post-processing for inventory template - just filling placeholders")
+            return doc
+        
+        # PERFORMANCE OPTIMIZATION: Skip expensive processing for very large documents
+        num_tables = len(doc.tables)
+        if num_tables > 20:  # More than 20 pages
+            self.logger.warning(f"PERFORMANCE: Skipping expensive post-processing for large document with {num_tables} tables")
+            # Only do essential marker cleanup
+            self._final_marker_cleanup(doc)
             return doc
         
         # CRITICAL FIX: Preserve apostrophes and following letters before any processing
-        self._preserve_apostrophes_in_document(doc)
+        # PERFORMANCE: Skip for large documents
+        if num_tables <= 10:
+            self._preserve_apostrophes_in_document(doc)
         """
         Ultra-optimized post-processing for maximum performance.
         """
@@ -3612,52 +3558,62 @@ class TemplateProcessor:
             self.logger.warning(f"Font sizing failed: {e}")
 
         # Fast BR marker conversion - only process if needed
-        try:
-            br_found = False
-            for table in doc.tables:
-                # Validate table structure before processing
-                if not self._validate_and_repair_table_structure(table):
-                    self.logger.warning(f"Skipping table with invalid structure during BR marker conversion")
-                    continue
+        # PERFORMANCE: Skip for large documents
+        if num_tables <= 15:
+            try:
+                br_found = False
+                for table in doc.tables:
+                    # Validate table structure before processing
+                    if not self._validate_and_repair_table_structure(table):
+                        self.logger.warning(f"Skipping table with invalid structure during BR marker conversion")
+                        continue
+                    
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for paragraph in cell.paragraphs:
+                                if '|BR|' in paragraph.text:
+                                    self._convert_br_markers_to_line_breaks(paragraph)
+                                    br_found = True
                 
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            if '|BR|' in paragraph.text:
-                                self._convert_br_markers_to_line_breaks(paragraph)
-                                br_found = True
-            
-            # Only process paragraphs outside tables if BR markers were found
-            if br_found:
-                for paragraph in doc.paragraphs:
-                    if '|BR|' in paragraph.text:
-                        self._convert_br_markers_to_line_breaks(paragraph)
-        except Exception as e:
-            self.logger.warning(f"BR marker conversion failed: {e}")
+                # Only process paragraphs outside tables if BR markers were found
+                if br_found:
+                    for paragraph in doc.paragraphs:
+                        if '|BR|' in paragraph.text:
+                            self._convert_br_markers_to_line_breaks(paragraph)
+            except Exception as e:
+                self.logger.warning(f"BR marker conversion failed: {e}")
         
         # Fast ratio spacing fix
-        try:
-            self._fix_ratio_paragraph_spacing(doc)
-        except Exception as e:
-            self.logger.warning(f"Ratio spacing failed: {e}")
+        # PERFORMANCE: Skip for large documents
+        if num_tables <= 15:
+            try:
+                self._fix_ratio_paragraph_spacing(doc)
+            except Exception as e:
+                self.logger.warning(f"Ratio spacing failed: {e}")
 
         # Ensure consistent spacing above lineage/brand section for equal margins
-        try:
-            self._ensure_consistent_lineage_spacing(doc)
-        except Exception as e:
-            self.logger.warning(f"Lineage spacing consistency failed: {e}")
+        # PERFORMANCE: Skip for large documents
+        if num_tables <= 15:
+            try:
+                self._ensure_consistent_lineage_spacing(doc)
+            except Exception as e:
+                self.logger.warning(f"Lineage spacing consistency failed: {e}")
 
         # Add consistent spacing above main content sections for better visual balance
-        try:
-            self._add_consistent_content_spacing(doc)
-        except Exception as e:
-            self.logger.warning(f"Content spacing consistency failed: {e}")
+        # PERFORMANCE: Skip for large documents
+        if num_tables <= 15:
+            try:
+                self._add_consistent_content_spacing(doc)
+            except Exception as e:
+                self.logger.warning(f"Content spacing consistency failed: {e}")
 
         # Arial Bold enforcement moved to the very end to prevent override
 
         # Fast DOH image centering
-        try:
-            for table in doc.tables:
+        # PERFORMANCE: Skip for large documents
+        if num_tables <= 15:
+            try:
+                for table in doc.tables:
                 # Validate table structure before processing
                 if not self._validate_and_repair_table_structure(table):
                     self.logger.warning(f"Skipping table with invalid structure during DOH centering")

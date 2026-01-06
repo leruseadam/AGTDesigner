@@ -7137,15 +7137,15 @@ const TagManager = {
     handleLineageChange(tagName, newLineage) {
         const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
         if (tag) {
-            // Update the lineage in the tag object
+            // Update the lineage in the tag object IMMEDIATELY
             tag.lineage = newLineage;
             
-            // Update the color based on the new lineage
+            // Update the color based on the new lineage IMMEDIATELY
             const newColor = this.getLineageColor(newLineage);
             this.updateTagColor(tag, newColor);
             
-            // CRITICAL FIX: Debounce backend updates to prevent database lock conflicts when doing many rapid changes
-            // This batches rapid changes so they don't all hit the database at once
+            // IMMEDIATE: Update backend immediately (no debounce delay)
+            // UI already updates instantly, backend processes in background
             this.updateLineageOnBackendDebounced(tagName, newLineage);
         }
     },
@@ -7174,11 +7174,11 @@ const TagManager = {
             this._lineageUpdateTimeout = null;
         }
         
-        // Debounce: wait 500ms before starting to process updates
-        // This batches rapid changes across ALL tags, not just per-tag
+        // IMMEDIATE: Process updates immediately (no debounce delay)
+        // UI already updates instantly, backend can process in background
         this._lineageUpdateTimeout = setTimeout(() => {
             this._processLineageUpdateQueue();
-        }, 500); // 500ms debounce - batches rapid changes across all tags
+        }, 0); // 0ms - immediate processing for instant lineage changes
     },
     
     async _processLineageUpdateQueue() {
@@ -7217,13 +7217,12 @@ const TagManager = {
             
             while (retryCount <= maxRetries) {
                 try {
-                    // Wait between updates (longer delay if retrying)
-                    if (i > 0 || retryCount > 0) {
-                        const delay = retryCount > 0 
-                            ? Math.min(500 * Math.pow(2, retryCount - 1), 2000) // Exponential backoff: 500ms, 1000ms, 2000ms
-                            : 300; // 300ms delay between different tags (increased from 100ms)
+                    // Wait between updates (minimal delay only if retrying)
+                    if (retryCount > 0) {
+                        const delay = Math.min(500 * Math.pow(2, retryCount - 1), 2000); // Exponential backoff: 500ms, 1000ms, 2000ms
                         await new Promise(resolve => setTimeout(resolve, delay));
                     }
+                    // No delay between different tags - process immediately for instant updates
                     
                     await this.updateLineageOnBackend(tagName, newLineage);
                     verboseLog(`✅ Processed lineage update ${i + 1}/${updatesToProcess.length}: ${tagName}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
