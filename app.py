@@ -9549,6 +9549,16 @@ def get_available_tags():
                         lineage_map = {}
                         if product_names:
                             try:
+                                # TIMEOUT PROTECTION: Skip lineage enrichment if it takes too long
+                                import signal
+
+                                def lineage_timeout_handler(signum, frame):
+                                    raise TimeoutError("Lineage enrichment timed out")
+
+                                # Set 5-second timeout for lineage enrichment
+                                signal.signal(signal.SIGALRM, lineage_timeout_handler)
+                                signal.alarm(5)  # 5 seconds max for lineage queries
+
                                 # PERFORMANCE FIX: Query only lineage fields, not all 47 columns
                                 conn = product_db._get_connection()
                                 cursor = conn.cursor()
@@ -9585,12 +9595,19 @@ def get_available_tags():
                                             if excel_key in excel_lower_map:
                                                 lineage_map[excel_lower_map[excel_key]] = clean_lineage
 
+                                signal.alarm(0)  # Cancel timeout
+
                                 logging.info(f"📦 SIMPLE PATH: Database returned {total_results} products from {len(product_names)} Excel products")
                                 logging.info(f"🗺️ SIMPLE PATH: Built lineage map with {len(lineage_map)} entries")
                                 if len(lineage_map) > 0:
                                     sample = list(lineage_map.items())[:2]
                                     logging.info(f"📋 Sample mappings: {sample}")
+                            except TimeoutError:
+                                logging.warning("⏱️ Lineage enrichment timed out - returning tags without database lineage for faster load")
+                                signal.alarm(0)  # Cancel timeout
+                                lineage_map = {}  # Clear any partial results
                             except Exception as lineage_query_err:
+                                signal.alarm(0)  # Cancel timeout
                                 logging.warning(f"Lineage enrichment query failed: {lineage_query_err}")
                                 import traceback
                                 logging.warning(traceback.format_exc())
@@ -9629,6 +9646,16 @@ def get_available_tags():
                         # This ensures DOH badges show up in preroll menus and other tag lists
                         if product_names:
                             try:
+                                # TIMEOUT PROTECTION: Skip DOH enrichment if it takes too long
+                                import signal
+
+                                def doh_timeout_handler(signum, frame):
+                                    raise TimeoutError("DOH enrichment timed out")
+
+                                # Set 3-second timeout for DOH enrichment
+                                signal.signal(signal.SIGALRM, doh_timeout_handler)
+                                signal.alarm(3)  # 3 seconds max for DOH queries
+
                                 logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database DOH data...")
 
                                 # Query DOH field from database for all products
@@ -9668,6 +9695,8 @@ def get_available_tags():
                                             if excel_key in excel_lower_map:
                                                 doh_map[excel_lower_map[excel_key]] = clean_doh
 
+                                signal.alarm(0)  # Cancel timeout
+
                                 logging.info(f"📦 SIMPLE PATH: Database returned DOH for {len(doh_map)} products")
                                 if len(doh_map) > 0:
                                     sample_doh = list(doh_map.items())[:2]
@@ -9684,7 +9713,11 @@ def get_available_tags():
                                         doh_enriched_count += 1
 
                                 logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH data")
+                            except TimeoutError:
+                                logging.warning("⏱️ DOH enrichment timed out - returning tags without database DOH data for faster load")
+                                signal.alarm(0)  # Cancel timeout
                             except Exception as doh_enrich_err:
+                                signal.alarm(0)  # Cancel timeout
                                 logging.warning(f"Failed to enrich with database DOH data: {doh_enrich_err}")
                                 import traceback
                                 logging.warning(traceback.format_exc())
@@ -9789,15 +9822,32 @@ def get_available_tags():
 
         try:
             # Check if product database has any lineage data (strains with sovereign_lineage)
-            product_db = get_product_database(store_name)
-            if product_db:
-                conn = product_db._get_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM strains WHERE sovereign_lineage IS NOT NULL AND sovereign_lineage != ''")
-                strain_count = cursor.fetchone()[0]
-                if strain_count > 0:
-                    has_db_lineage = True
-                    logging.info(f"✅ Found {strain_count} strains with database lineage - will use prefer_db mode")
+            # TIMEOUT PROTECTION: Skip database check if it takes too long (prevents page freeze)
+            import signal
+
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Database lineage check timed out")
+
+            # Set 2-second timeout for database check
+            try:
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(2)  # 2 seconds max for this check
+
+                product_db = get_product_database(store_name)
+                if product_db:
+                    conn = product_db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM strains WHERE sovereign_lineage IS NOT NULL AND sovereign_lineage != ''")
+                    strain_count = cursor.fetchone()[0]
+                    if strain_count > 0:
+                        has_db_lineage = True
+                        logging.info(f"✅ Found {strain_count} strains with database lineage - will use prefer_db mode")
+
+                signal.alarm(0)  # Cancel timeout
+            except TimeoutError:
+                logging.warning("⏱️ Database lineage check timed out - skipping database lineage enrichment for faster load")
+                has_db_lineage = False
+                signal.alarm(0)  # Cancel timeout
         except Exception as db_check_err:
             logging.warning(f"Could not check for database lineage: {db_check_err}")
 
