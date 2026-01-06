@@ -1076,10 +1076,21 @@ class TemplateProcessor:
         documents = []
         # FULLY DISABLE CHUNKING for horizontal, vertical, and double templates
         try:
+            # PERFORMANCE FIX: Re-enable chunking for large batches to improve performance
+            # Only disable chunking for small batches (< 30 records) to maintain quality
             if self.template_type in ['horizontal', 'vertical', 'double']:
-                self.chunk_size = len(records)
-                self.logger.debug(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
-                self.logger.debug(f"🔍 LABEL RENDER: Chunking is fully disabled. All {len(records)} records will be processed in one pass.")
+                if len(records) <= 30:
+                    # Small batches: process all at once for better quality
+                    self.chunk_size = len(records)
+                    self.logger.debug(f"🔍 LABEL RENDER: For template '{self.template_type}', processing {len(records)} records in one pass (small batch).")
+                else:
+                    # Large batches: use chunking for better performance
+                    # Use reasonable chunk size based on template type
+                    if self.template_type == 'double':
+                        self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # 4x3 grid = 12 labels per page
+                    else:
+                        self.chunk_size = min(50, CHUNK_SIZE_LIMIT)  # 3x3 grid = 9 labels per page, but allow up to 50 for performance
+                    self.logger.info(f"⚡ PERFORMANCE: Large batch ({len(records)} records) - using chunking with size {self.chunk_size} for '{self.template_type}' template")
                 self.start_time = time.time()
                 self.chunk_count = 1
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
@@ -1322,20 +1333,22 @@ class TemplateProcessor:
                             placeholders = ','.join(['?'] * len(product_names))
                             
                             # OPTIMIZATION: Combine all product queries into a single query for better performance
+                            # CRITICAL: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
                             combined_query = f'''
                                 SELECT 
-                                    "Product Name*",
-                                    "Product Brand",
+                                    p."Product Name*",
+                                    p."Product Brand",
                                     CASE 
-                                        WHEN "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' THEN "Vendor/Supplier*"
-                                        WHEN "Vendor" IS NOT NULL AND "Vendor" != '' THEN "Vendor"
-                                        WHEN "ProductVendor" IS NOT NULL AND "ProductVendor" != '' THEN "ProductVendor"
+                                        WHEN p."Vendor/Supplier*" IS NOT NULL AND p."Vendor/Supplier*" != '' THEN p."Vendor/Supplier*"
+                                        WHEN p."Vendor" IS NOT NULL AND p."Vendor" != '' THEN p."Vendor"
+                                        WHEN p."ProductVendor" IS NOT NULL AND p."ProductVendor" != '' THEN p."ProductVendor"
                                         ELSE NULL
                                     END as vendor,
-                                    COALESCE(sovereign_lineage, "Lineage", canonical_lineage) as lineage,
-                                    JointRatio
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
+                                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                                    p.JointRatio
+                                FROM products p
+                                LEFT JOIN strains s ON p.strain_id = s.id
+                                WHERE p."Product Name*" IN ({placeholders})
                             '''
                             cursor.execute(combined_query, product_names)
                             for row_result in cursor.fetchall():
@@ -1465,17 +1478,24 @@ class TemplateProcessor:
                 return rendered_doc
             
             # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
-            try:
-                # Post-process the document to apply dynamic font sizing first
-                self._post_process_and_replace_content(rendered_doc)
-                
-                # Check timeout before lineage colors
-                if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                    self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                    return rendered_doc
-                
-                # Apply lineage colors last to ensure they are not overwritten
-                apply_lineage_colors(rendered_doc)
+            # PERFORMANCE: Skip post-processing for large chunks to save time
+            num_tables = len(rendered_doc.tables)
+            if num_tables <= 10:  # Only post-process smaller documents
+                try:
+                    # Post-process the document to apply dynamic font sizing first
+                    self._post_process_and_replace_content(rendered_doc)
+                    
+                    # Check timeout before lineage colors
+                    if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
+                        self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
+                        return rendered_doc
+                    
+                    # Apply lineage colors last to ensure they are not overwritten
+                    apply_lineage_colors(rendered_doc)
+                except Exception as processing_error:
+                    self.logger.warning(f"Skipping post-processing due to error: {processing_error}")
+            else:
+                self.logger.warning(f"PERFORMANCE: Skipping post-processing for large chunk with {num_tables} tables")
                 
                 # PERFORMANCE: Skip redundant marker cleanup - _post_process already does this
                 # self._final_marker_cleanup(rendered_doc)  # REMOVED - redundant with _post_process
@@ -3476,17 +3496,20 @@ class TemplateProcessor:
             self.logger.debug("Skipping post-processing for inventory template - just filling placeholders")
             return doc
         
-        # PERFORMANCE OPTIMIZATION: Skip expensive processing for very large documents
+        # PERFORMANCE OPTIMIZATION: Skip expensive processing for large documents
         num_tables = len(doc.tables)
-        if num_tables > 20:  # More than 20 pages
+        if num_tables > 10:  # More than 10 pages - skip most post-processing
             self.logger.warning(f"PERFORMANCE: Skipping expensive post-processing for large document with {num_tables} tables")
             # Only do essential marker cleanup
-            self._final_marker_cleanup(doc)
+            try:
+                self._final_marker_cleanup(doc)
+            except Exception:
+                pass
             return doc
         
         # CRITICAL FIX: Preserve apostrophes and following letters before any processing
-        # PERFORMANCE: Skip for large documents
-        if num_tables <= 10:
+        # PERFORMANCE: Skip for medium/large documents
+        if num_tables <= 5:
             self._preserve_apostrophes_in_document(doc)
         """
         Ultra-optimized post-processing for maximum performance.

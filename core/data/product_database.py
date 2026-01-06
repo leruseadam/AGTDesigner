@@ -4417,11 +4417,16 @@ class ProductDatabase:
                 logger.debug(f"No product name provided for lineage lookup")
                 return None
             
-            # Try exact match first (fastest) - also get strain for sativa hybrid check
+            # Try exact match first (fastest) - CRITICAL: Check p.sovereign_lineage first (user changes)
+            # Priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE "Product Name*" = ? OR "ProductName" = ?
-                ORDER BY id DESC
+                SELECT 
+                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage,
+                    p."Product Strain" AS product_strain
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" = ? OR p.ProductName = ?
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -4454,12 +4459,16 @@ class ProductDatabase:
                 _set_cached_lineage(product_name, lineage)
                 return lineage
             
-            # Fallback: Case-insensitive and whitespace-insensitive match
+            # Fallback: Case-insensitive and whitespace-insensitive match - CRITICAL: Check p.sovereign_lineage first
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
-                   OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
-                ORDER BY id DESC
+                SELECT 
+                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage,
+                    p."Product Strain" AS product_strain
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
+                   OR TRIM(LOWER(p.ProductName)) = TRIM(LOWER(?))
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -4483,11 +4492,15 @@ class ProductDatabase:
                 _set_cached_lineage(product_name, lineage)
                 return lineage
             
-            # Last resort: Partial match (in case product name has extra characters)
+            # Last resort: Partial match (in case product name has extra characters) - CRITICAL: Check p.sovereign_lineage first
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
-                ORDER BY id DESC
+                SELECT 
+                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage,
+                    p."Product Strain" AS product_strain
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" LIKE ? OR p.ProductName LIKE ?
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (f'%{product_name_norm}%', f'%{product_name_norm}%'))
             

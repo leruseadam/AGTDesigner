@@ -902,13 +902,15 @@ def process_chunk(args):
                     conn = product_db._get_connection()
                     cur = conn.cursor()
                     placeholders = ','.join(['?'] * len(product_names))
-                    # CRITICAL FIX: Use sovereign_lineage first (user changes), then fall back to Lineage column
+                    # CRITICAL FIX: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
                     # This ensures lineage updates from /api/update-lineage are used in generation
                     batch_lineage_query = f'''
-                        SELECT "Product Name*", COALESCE(sovereign_lineage, "Lineage") as lineage
-                        FROM products
-                        WHERE "Product Name*" IN ({placeholders})
-                        ORDER BY id DESC
+                        SELECT p."Product Name*", 
+                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
+                        FROM products p
+                        LEFT JOIN strains s ON p.strain_id = s.id
+                        WHERE p."Product Name*" IN ({placeholders})
+                        ORDER BY p.id DESC
                     '''
                     cur.execute(batch_lineage_query, product_names)
                     for row_result in cur.fetchall():

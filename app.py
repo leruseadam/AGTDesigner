@@ -10197,11 +10197,11 @@ def get_available_tags():
                         # Prepare connection once
                         conn = product_db._get_connection()
                         cur = conn.cursor()
-                        # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
-                        # This ensures UI matches database method which uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                        # CRITICAL FIX: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
+                        # This ensures user lineage changes persist - products.sovereign_lineage is saved when user updates lineage
                         lineage_query_join_by_name = '''
                             SELECT 
-                                COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
+                                COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
                                 COALESCE(s.strain_name, p."Product Strain") AS current_strain
                             FROM products p
                             LEFT JOIN strains s ON p.strain_id = s.id
@@ -10262,7 +10262,7 @@ def get_available_tags():
                                             placeholders = ','.join(['?'] * len(chunk))
                                             chunk_query = f'''
                                                 SELECT DISTINCT
-                                                    COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
+                                                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
                                                     COALESCE(s.strain_name, p."Product Strain") AS current_strain,
                                                     p."Product Name*" AS product_name,
                                                     p.normalized_name AS normalized_name
@@ -10281,7 +10281,7 @@ def get_available_tags():
                                     placeholders = ','.join(['?'] * len(all_search_names))
                                     batch_query = f'''
                                         SELECT DISTINCT
-                                            COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
+                                            COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS current_lineage,
                                             COALESCE(s.strain_name, p."Product Strain") AS current_strain,
                                             p."Product Name*" AS product_name,
                                             p.normalized_name AS normalized_name
@@ -10931,11 +10931,11 @@ def get_available_tags():
                                         # Filter to only columns we want, excluding internal ones
                                         columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
                                     
-                                        # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
-                                        # This ensures UI matches database method which uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                                        # CRITICAL FIX: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
+                                        # This ensures user lineage changes persist - products.sovereign_lineage is saved when user updates lineage
                                         quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                                         query = f'''
-                                            SELECT {quoted_columns}, COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
+                                            SELECT {quoted_columns}, COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                             FROM products p
                                             LEFT JOIN strains s ON p.strain_id = s.id
                                     ORDER BY p.id DESC
@@ -10998,11 +10998,11 @@ def get_available_tags():
                                 quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
                             
                                 # PERFORMANCE: Use simpler query without strain join for faster loading
-                                # CRITICAL FIX: Match get_products_by_names priority: sovereign_lineage > canonical_lineage > products.Lineage
+                                # CRITICAL FIX: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
                                 # REMOVED LIMIT: Allow all products to be fetched (was limiting to 2000, causing missing products)
                                 lineage_query_join_by_name = f'''
                                     SELECT {quoted_columns}, 
-                                           COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
+                                           COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
                                     FROM products p
                                     LEFT JOIN strains s ON p.strain_id = s.id
                                     ORDER BY p.id DESC
@@ -11058,7 +11058,7 @@ def get_available_tags():
                                         product_dict = dict(zip(columns, row))
                                     
                                         # CRITICAL: Use get_product_lineage() for EXACT same lineage as output generation
-                                        # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                                        # This ensures UI lineages match output - uses COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
                                         product_name = product_dict.get('Product Name*') or product_dict.get('ProductName', '')
                                         if product_name and product_db:
                                             try:
@@ -11271,10 +11271,11 @@ def get_available_tags():
                             SELECT 
                                 p."Product Name*" AS product_name,
                                 p.normalized_name AS normalized_name,
-                                COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                                COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
                             FROM products p
                             LEFT JOIN strains s ON p.strain_id = s.id
-                            WHERE p."Lineage" IS NOT NULL AND p."Lineage" != ''
+                            WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL 
+                              AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
                         '''
                         cur.execute(lineage_query)
                         rows = cur.fetchall()
@@ -11371,7 +11372,7 @@ def get_available_tags():
                                 break
             
                 # CRITICAL: Use get_product_lineage() for EXACT same lineage as output generation
-                # This ensures UI lineages match output - uses COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                # This ensures UI lineages match output - uses COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
                 db_lineage_from_method = None
                 if product_db:
                     try:
@@ -13310,11 +13311,11 @@ def _get_filter_options_from_database(store_name=None):
             conn = product_db._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT DISTINCT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                SELECT DISTINCT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL
-                  AND COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
+                WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL
+                  AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
             ''')
             db_lineages = [str(row[0]).strip() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
             lineages = set(db_lineages)
@@ -14490,7 +14491,7 @@ def database_view():
                 SELECT p."Product Name*" as product_name, p."Product Type*" as product_type, 
                        p."Vendor/Supplier*" as vendor, p."Product Brand" as brand, 
                        p."Lineage" as products_table_lineage,
-                       COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
+                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
                        s.sovereign_lineage, s.canonical_lineage,
                        p."Product Strain" as strain_name, 
                        1 as total_occurrences, 'N/A' as first_seen_date, 'N/A' as last_seen_date

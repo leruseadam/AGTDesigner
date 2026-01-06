@@ -1126,13 +1126,16 @@ class TemplateProcessor:
                                 if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_brand_cache[pname] = str(brand).strip()
                             
-                            # Batch query for product lineage (use sovereign_lineage first, then Lineage)
+                            # Batch query for product lineage - CRITICAL: Check p.sovereign_lineage first (user changes)
+                            # Priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
                             batch_lineage_query = f'''
-                                SELECT "Product Name*", COALESCE(sovereign_lineage, "Lineage") as lineage
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND (sovereign_lineage IS NOT NULL OR "Lineage" IS NOT NULL)
-                                ORDER BY id DESC
+                                SELECT p."Product Name*", 
+                                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
+                                FROM products p
+                                LEFT JOIN strains s ON p.strain_id = s.id
+                                WHERE p."Product Name*" IN ({placeholders})
+                                AND (p.sovereign_lineage IS NOT NULL OR s.sovereign_lineage IS NOT NULL OR s.canonical_lineage IS NOT NULL OR p."Lineage" IS NOT NULL)
+                                ORDER BY p.id DESC
                             '''
                             cursor.execute(batch_lineage_query, product_names)
                             for row_result in cursor.fetchall():
