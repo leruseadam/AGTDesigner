@@ -1818,39 +1818,37 @@ class TemplateProcessor:
                 lineage_val = str(lineage_text).strip().upper()
                 self.logger.info(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
             else:
-                # PRIORITY 2: Fallback to database lookup if record lineage is empty
-                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking database...")
+                # PRIORITY 2: Fallback to cache lookup if record lineage is empty (avoid N+1 queries)
+                self.logger.debug(f"⚠️ No lineage in record for '{product_name}', checking cache...")
                 try:
-                    from app import get_product_database, get_current_store_name
-                    store_name = get_current_store_name()
-                    product_db = get_product_database(store_name)
-                    
-                    # Try to get product-level lineage first (more specific, includes manual updates)
-                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                    # Use cached product-level lineage first (preserves user changes)
                     db_lineage = None
-                    if product_name:
-                        db_lineage = product_db.get_product_lineage(product_name)
-                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                        lineage_val = str(db_lineage).strip().upper()
-                        self.logger.info(f"✅ Using database product lineage fallback: '{lineage_val}' for '{product_name}'")
+                    product_name_for_cache = record.get('Product Name*', record.get('ProductName', ''))
+                    if product_name_for_cache and product_name_for_cache in product_lineage_cache:
+                        db_lineage = product_lineage_cache[product_name_for_cache]
+                        if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                            lineage_val = str(db_lineage).strip().upper()
+                            self.logger.debug(f"✅ Using cached product lineage fallback: '{lineage_val}' for '{product_name_for_cache}'")
                     
-                    # If no product-level lineage, try strain-level
+                    # If no product-level lineage in cache, try strain-level cache
                     if not lineage_val and product_strain:
-                        strain_info = product_db.get_strain_info(product_strain)
-                        if strain_info:
-                            preferred = (
-                                strain_info.get('display_lineage') or
-                                strain_info.get('sovereign_lineage') or
-                                strain_info.get('canonical_lineage')
-                            )
-                            if preferred:
-                                lineage_val = str(preferred).strip().upper()
-                                self.logger.info(f"✅ Using database strain lineage fallback: '{lineage_val}' for strain '{product_strain}'")
+                        if product_strain and str(product_strain).strip() in strain_info_cache:
+                            strain_info = strain_info_cache[str(product_strain).strip()]
+                            if strain_info:
+                                preferred = (
+                                    strain_info.get('display_lineage') or
+                                    strain_info.get('sovereign_lineage') or
+                                    strain_info.get('canonical_lineage') or
+                                    strain_info.get('lineage')
+                                )
+                                if preferred:
+                                    lineage_val = str(preferred).strip().upper()
+                                    self.logger.debug(f"✅ Using cached strain lineage fallback: '{lineage_val}' for strain '{product_strain}'")
                     
                     if not lineage_val:
-                        self.logger.debug(f"No lineage found in record or database")
+                        self.logger.debug(f"No lineage found in record or cache")
                 except Exception as e:
-                    # Default fallback if database lookup fails
+                    # Default fallback if cache lookup fails
                     lineage_val = ""
                     self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
             
@@ -2279,23 +2277,32 @@ class TemplateProcessor:
                        label_context.get('ProductType', '').lower())
         product_strain = record.get('ProductStrain') or record.get('Product Strain', '')
         
-        # For classic types, ALWAYS try to get the strain's canonical lineage from the database
+        # For classic types, ALWAYS try to get the strain's canonical lineage from cache (avoid N+1 queries)
         if is_classic_type and product_strain:
             self.logger.debug(f"DEBUG: Processing classic type '{product_type}' with strain '{product_strain}'")
             try:
-                from src.core.data.product_database import get_product_database
-                product_db = get_product_database()
-                strain_info = product_db.get_strain_info(product_strain)
-                self.logger.debug(f"DEBUG: Strain info: {strain_info}")
-                if strain_info and strain_info.get('canonical_lineage'):
-                    lineage_value = strain_info['canonical_lineage'].upper()
-                    self.logger.debug(f"DEBUG: Using database lineage: '{lineage_value}'")
+                # Use cached strain info instead of individual database query
+                strain_info = None
+                if product_strain and str(product_strain).strip() in strain_info_cache:
+                    strain_info = strain_info_cache[str(product_strain).strip()]
+                    self.logger.debug(f"DEBUG: Strain info from cache: {strain_info}")
+                
+                if strain_info:
+                    # Check for canonical_lineage or lineage in cache
+                    canonical_lineage = strain_info.get('canonical_lineage') or strain_info.get('lineage')
+                    if canonical_lineage:
+                        lineage_value = str(canonical_lineage).upper()
+                        self.logger.debug(f"DEBUG: Using cached lineage: '{lineage_value}'")
+                    else:
+                        # Fallback to Excel lineage if no cached lineage found
+                        lineage_value = label_context.get('Lineage', '')
+                        self.logger.debug(f"DEBUG: Using Excel lineage fallback: '{lineage_value}'")
                 else:
-                    # Fallback to Excel lineage if no database lineage found
+                    # Fallback to Excel lineage if no cached strain info found
                     lineage_value = label_context.get('Lineage', '')
-                    self.logger.debug(f"DEBUG: Using Excel lineage fallback: '{lineage_value}'")
+                    self.logger.debug(f"DEBUG: Using Excel lineage fallback (no cache): '{lineage_value}'")
             except Exception as e:
-                # Fallback to Excel lineage if database lookup fails
+                # Fallback to Excel lineage if cache lookup fails
                 lineage_value = label_context.get('Lineage', '')
                 self.logger.debug(f"DEBUG: Using Excel lineage due to error: '{lineage_value}' (error: {e})")
             
