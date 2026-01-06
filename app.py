@@ -9757,11 +9757,19 @@ def get_available_tags():
                                 logging.warning(f"Failed to enrich with database DOH data: {doh_enrich_err}")
                                 import traceback
                                 logging.warning(traceback.format_exc())
-
-                except Exception as enrich_err:
-                    logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
-                    import traceback
-                    logging.warning(traceback.format_exc())
+                    except Exception as enrich_err:
+                        logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+                        import traceback
+                        logging.warning(traceback.format_exc())
+                else:
+                    # PERFORMANCE: During fast_load, populate lineage from Excel only (no DB query)
+                    for tag in simple_tags:
+                        excel_lineage = tag.get('Lineage')
+                        if excel_lineage and str(excel_lineage).strip():
+                            excel_lineage_clean = str(excel_lineage).strip().upper()
+                            tag['currentLineage'] = excel_lineage_clean
+                            tag['canonical_lineage'] = excel_lineage_clean
+                            tag['lineage'] = excel_lineage_clean.lower()
 
                 safe_simple_tags = make_json_safe(simple_tags)
                 elapsed = (time.time() - start_time) * 1000
