@@ -3371,11 +3371,12 @@ class TemplateProcessor:
                     self.logger.warning(f"Could not convert relative URL to absolute; leaving as-is: {clean_name}")
             
             # Create QR code instance
+            # PERFORMANCE: Reduced box_size and border for faster generation
             qr = qrcode.QRCode(
                 version=1,  # Auto-determine version based on content
                 error_correction=qrcode.constants.ERROR_CORRECT_L,
-                box_size=10,  # Size of each box in pixels
-                border=4,     # Border size in boxes
+                box_size=8,  # Size of each box in pixels (reduced from 10 for speed)
+                border=2,     # Border size in boxes (reduced from 4 for speed)
             )
             
             # Add data to QR code
@@ -3434,11 +3435,12 @@ class TemplateProcessor:
                 'image_data': img_buffer.read(),
                 'size': qr_size
             }
-            # Limit cache size to prevent memory issues
-            if len(TemplateProcessor._qr_code_cache) > 1000:
-                # Remove oldest entries (simple FIFO)
-                oldest_key = next(iter(TemplateProcessor._qr_code_cache))
-                del TemplateProcessor._qr_code_cache[oldest_key]
+            # PERFORMANCE: Increased cache size from 1000 to 5000 for better hit rate
+            if len(TemplateProcessor._qr_code_cache) > 5000:
+                # Remove oldest 100 entries in batch (more efficient than one at a time)
+                keys_to_remove = list(TemplateProcessor._qr_code_cache.keys())[:100]
+                for key in keys_to_remove:
+                    del TemplateProcessor._qr_code_cache[key]
             
             self.logger.debug(f"Generated QR code for product: '{clean_name}' with font size: {font_size_pt.pt}pt, converted to {qr_size_mm:.1f}mm")
             return qr_inline_image
