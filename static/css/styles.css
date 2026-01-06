@@ -792,12 +792,17 @@ body.modal-open #mainContent.store-selection-disabled,
   @supports (height: 100dvh) {
     :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(78rem, var(--tag-list-height)); }
   }
-  .control-panel,
   .center-panel,
   #availableTags,
   #selectedTags {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
+  }
+  /* Center column should not scroll */
+  .control-panel,
+  [data-container-type="center"] {
+    overflow-y: visible !important;
+    overflow-x: hidden !important;
   }
   .header-buttons-container { margin-top: 0.25rem !important; }
 }
@@ -11008,6 +11013,24 @@ body.modal-open #mainContent.store-selection-disabled,
   margin-top: 10px !important;
   position: relative !important;
   top: 5px !important;
+}
+
+/* Adjust top spacing for center controls on larger screens (template select area) */
+@media (min-width: 992px) {
+  [data-container-type="center"] .control-panel {
+    padding-top: 0.25rem !important; /* Small, natural spacing above Template select */
+  }
+  
+  [data-container-type="center"] .control-section:first-child {
+    margin-top: 0.25rem !important;  /* Match panel padding for balanced look */
+  }
+}
+
+/* Prevent center column from scrolling */
+[data-container-type="center"],
+[data-container-type="center"] .control-panel {
+  overflow-y: visible !important;
+  overflow-x: hidden !important;
 }
 
 /* Scale-to-fit support - REMOVED transform-origin from html/body to fix canvas positioning */

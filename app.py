@@ -136,15 +136,42 @@ def get_memory_usage():
         except:
             return 0
 
-def cleanup_memory():
-    """Cleanup memory by clearing caches and forcing garbage collection."""
+def cleanup_memory(preserve_keys=None):
+    """Cleanup memory by clearing caches and forcing garbage collection.
+    
+    Args:
+        preserve_keys: Optional list of cache keys to preserve during cleanup.
+                       If None, all caches are cleared.
+    """
     try:
         import gc
         gc.collect()
         
-        # Clear Flask cache if available
+        # Clear Flask cache if available, but preserve critical caches
         if hasattr(app, 'cache') and app.cache:
-            app.cache.clear()
+            if preserve_keys:
+                # Preserve specific cache keys by temporarily storing them
+                preserved_data = {}
+                for key in preserve_keys:
+                    try:
+                        value = app.cache.get(key)
+                        if value is not None:
+                            preserved_data[key] = value
+                    except Exception:
+                        pass
+                
+                # Clear all caches
+                app.cache.clear()
+                
+                # Restore preserved keys
+                for key, value in preserved_data.items():
+                    try:
+                        app.cache.set(key, value)
+                    except Exception:
+                        pass
+            else:
+                # Clear all caches if no keys to preserve
+                app.cache.clear()
             
         return True
     except Exception as e:
@@ -9323,12 +9350,33 @@ def get_available_tags():
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
-        # Check memory before processing - but don't block if we have cached data
-        memory_ok = check_memory_limit()
+        
+        # CRITICAL FIX: Check memory FIRST, but use lightweight cleanup (GC only, no cache clear)
+        # when we might need cached data as fallback. This prevents clearing the cache we need.
+        memory_mb = get_memory_usage()
+        memory_ok = memory_mb <= MAX_MEMORY_MB
+        
         if not memory_ok:
-            # Try to return cached data instead of failing
-            cache_key = get_session_cache_key('available_tags')
-            cached_tags = cache.get(cache_key)
+            logging.warning(f"Memory usage high: {memory_mb:.1f}MB (limit: {MAX_MEMORY_MB}MB)")
+            # Try lightweight cleanup (GC only) to preserve cache for fallback
+            try:
+                import gc
+                gc.collect()
+            except Exception:
+                pass
+            
+            # CRITICAL: Check for cached data as fallback BEFORE doing aggressive cleanup
+            # Try both possible cache key formats (simple and file-specific)
+            simple_cache_key = get_session_cache_key('available_tags')
+            cached_tags = None if (prefer_db or nocache) else cache.get(simple_cache_key)
+            
+            # Also try file-specific cache key if we have session file path info
+            session_file_path = session.get('file_path', '')
+            upload_timestamp = session.get('upload_timestamp', '')
+            if not cached_tags and session_file_path:
+                file_cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}')
+                cached_tags = None if (prefer_db or nocache) else cache.get(file_cache_key)
+            
             if cached_tags:
                 logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
                 # CRITICAL: Always align with DB lineage to ensure database values are used
@@ -9340,9 +9388,21 @@ def get_available_tags():
                     'source': 'cache-memory-fallback',
                     'warning': 'Memory usage high, serving cached data'
                 })
-            # Only return 503 if we have no cached data
-            logging.error("Memory usage too high and no cached data available")
-            return jsonify({'error': 'Memory usage too high, please try again later'}), 503
+            
+            # Only do aggressive cleanup (clear caches) if no cached data available
+            # This ensures we don't clear caches unnecessarily
+            cleanup_memory()
+            
+            # POLICY: When memory is high and we have no cached tags, return an empty Excel-style
+            # payload instead of a 503. This keeps the UI responsive and still guarantees that
+            # CURRENT INVENTORY will not be populated from database-only products.
+            logging.error("Memory usage too high and no cached data available - returning empty tag list")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'memory-high-empty',
+                'warning': 'Memory usage high, tags not loaded; upload Excel to populate CURRENT INVENTORY.'
+            }), 200
         
         # Rate limiting: prevent rapid successive requests
         client_ip = request.remote_addr
@@ -9365,15 +9425,15 @@ def get_available_tags():
                 # Return cached data instead of 429 error
                 cache_key = get_session_cache_key('available_tags')
                 cached_tags = cache.get(cache_key)
-            if cached_tags:
-                # CRITICAL: Always align with DB lineage to ensure database values are used
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
-                safe_cached_tags = make_json_safe(aligned_cached_tags)
-                return jsonify({
-                    'tags': safe_cached_tags,
-                    'total_count': len(safe_cached_tags),
-                    'source': 'rate-limited-cache'
-                })
+                if cached_tags:
+                    # CRITICAL: Always align with DB lineage to ensure database values are used
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False)
+                    safe_cached_tags = make_json_safe(aligned_cached_tags)
+                    return jsonify({
+                        'tags': safe_cached_tags,
+                        'total_count': len(safe_cached_tags),
+                        'source': 'rate-limited-cache'
+                    })
         
         # Record this request
         if client_ip not in get_available_tags._rate_limit_data:
@@ -9507,86 +9567,17 @@ def get_available_tags():
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
 
-        # CRITICAL FIX: When no Excel file, load tags from database instead of returning empty
-        # This allows the app to work with database-only mode
+        # POLICY: When no Excel file is loaded, do NOT populate CURRENT INVENTORY from database products.
+        # This guarantees that CURRENT INVENTORY only reflects products coming from the active Excel file
+        # (including any rows created by JSON Match and written back into Excel).
         if not has_excel_data:
-            logging.info("📦 No Excel file - loading tags from database instead")
-            try:
-                product_db = get_product_database(store_name)
-                if product_db:
-                    # Load all products from database
-                    conn = product_db._get_connection()
-                    cursor = conn.cursor()
-                    
-                    # Get all available columns
-                    cursor.execute("PRAGMA table_info(products)")
-                    available_columns = [row[1] for row in cursor.fetchall()]
-                    columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
-                    quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
-                    
-                    # Query all products with lineage priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
-                    query = f'''
-                        SELECT {quoted_columns}, 
-                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
-                        FROM products p
-                        LEFT JOIN strains s ON p.strain_id = s.id
-                        ORDER BY p.id DESC
-                    '''
-                    cursor.execute(query)
-                    rows = cursor.fetchall()
-                    columns = columns_to_query + ['preferred_lineage']
-                    
-                    database_tags = []
-                    for row in rows:
-                        try:
-                            product_dict = dict(zip(columns, row))
-                            # Use preferred_lineage for lineage
-                            preferred_lin = product_dict.pop('preferred_lineage', None)
-                            if preferred_lin:
-                                db_lin_clean = str(preferred_lin).strip().upper()
-                                product_dict['currentLineage'] = db_lin_clean
-                                product_dict['canonical_lineage'] = db_lin_clean
-                                product_dict['Lineage'] = db_lin_clean
-                            database_tags.append(product_dict)
-                        except Exception as row_err:
-                            logging.debug(f"Error processing database row: {row_err}")
-                            continue
-                    
-                    if database_tags:
-                        safe_tags = make_json_safe(database_tags)
-                        logging.info(f"✅ Loaded {len(safe_tags)} tags from database (no Excel file)")
-                        return jsonify({
-                            'tags': safe_tags,
-                            'total_count': len(safe_tags),
-                            'source': 'database-only',
-                            'message': f'Loaded {len(safe_tags)} products from database (no Excel file uploaded)'
-                        }), 200
-                    else:
-                        logging.info("📦 Database is empty - returning empty tags")
-                        return jsonify({
-                            'tags': [],
-                            'total_count': 0,
-                            'source': 'empty-database',
-                            'message': 'No products in database. Please upload an Excel file or add products to the database.'
-                        }), 200
-                else:
-                    logging.info("📦 No database available - returning empty tags")
-                    return jsonify({
-                        'tags': [],
-                        'total_count': 0,
-                        'source': 'empty-no-db',
-                        'message': 'No Excel file uploaded and no database available. Please upload an Excel file.'
-                    }), 200
-            except Exception as db_load_err:
-                logging.error(f"Error loading tags from database: {db_load_err}")
-                import traceback
-                logging.error(traceback.format_exc())
-                return jsonify({
-                    'tags': [],
-                    'total_count': 0,
-                    'source': 'error',
-                    'error': f'Error loading from database: {str(db_load_err)}'
-                }), 500
+            logging.info("📦 No Excel file - suppressing database-only inventory to enforce Excel-only CURRENT INVENTORY")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'no-excel',
+                'message': 'No Excel file is loaded. CURRENT INVENTORY only shows products from the active Excel file.'
+            }), 200
 
         # CRITICAL: Validate that the session file matches the selected store
         # This prevents wrong store data from being loaded
@@ -9789,9 +9780,57 @@ def get_available_tags():
                     import traceback
                     logging.warning(traceback.format_exc())
 
-                safe_simple_tags = make_json_safe(simple_tags)
+                # CRITICAL FIX: Check for JSON matched tags in cache and merge with Excel tags
+                json_matched_tags = []
+                json_matched_cache_key = session.get('json_matched_cache_key')
+                if json_matched_cache_key:
+                    try:
+                        cached_json_tags = cache.get(json_matched_cache_key)
+                        if cached_json_tags and isinstance(cached_json_tags, list):
+                            json_matched_tags = cached_json_tags
+                            logging.info(f"📦 Found {len(json_matched_tags)} JSON matched tags in cache")
+                    except Exception as json_cache_err:
+                        logging.warning(f"Error retrieving JSON matched tags from cache: {json_cache_err}")
+                
+                # Merge JSON matched tags with Excel tags, avoiding duplicates
+                if json_matched_tags:
+                    # Create a set of existing tag keys for deduplication
+                    # Use Product Name* + Vendor/Supplier* as unique key
+                    existing_keys = set()
+                    for tag in simple_tags:
+                        name = str(tag.get('Product Name*') or tag.get('ProductName') or '').strip().lower()
+                        vendor = str(tag.get('Vendor/Supplier*') or tag.get('Vendor') or '').strip().lower()
+                        key = f"{name}|{vendor}"
+                        existing_keys.add(key)
+                    
+                    # Add JSON matched tags that aren't already in Excel tags
+                    added_count = 0
+                    for json_tag in json_matched_tags:
+                        if not isinstance(json_tag, dict):
+                            continue
+                        name = str(json_tag.get('Product Name*') or json_tag.get('ProductName') or '').strip().lower()
+                        vendor = str(json_tag.get('Vendor/Supplier*') or json_tag.get('Vendor') or '').strip().lower()
+                        key = f"{name}|{vendor}"
+                        if key not in existing_keys:
+                            simple_tags.append(json_tag)
+                            existing_keys.add(key)
+                            added_count += 1
+                    
+                    if added_count > 0:
+                        logging.info(f"✅ Merged {added_count} JSON matched tags with Excel tags (total: {len(simple_tags)})")
+                
+                # CRITICAL: Re-align ALL tags (Excel + JSON-matched) with database lineage so lineage
+                # is consistent and uses DB as source of truth for every tag in CURRENT INVENTORY.
+                try:
+                    store_for_lineage = store_name or get_current_store_name()
+                    aligned_simple_tags = _align_tags_with_db_lineage(simple_tags, store_for_lineage)
+                except Exception as align_err:
+                    logging.warning(f"Lineage re-alignment failed for SIMPLE PATH, using original tags: {align_err}")
+                    aligned_simple_tags = simple_tags
+                
+                safe_simple_tags = make_json_safe(aligned_simple_tags)
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags")
+                logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} tags (Excel + JSON matched)")
 
                 # CRITICAL FIX: Wrap response in try-catch to handle OSError: write error
                 # This can happen if response is too large or client disconnects
@@ -9989,7 +10028,53 @@ def get_available_tags():
                     # CRITICAL FIX: Always align tags with database lineage before returning
                     # This ensures UI shows current database lineage, not stale Excel lineage
                     aligned_excel_tags = _align_tags_with_db_lineage(excel_tags, store_name) if excel_tags else []
-                    safe_excel_tags = make_json_safe(aligned_excel_tags)
+                    
+                    # CRITICAL FIX: Check for JSON matched tags in cache and merge with Excel tags
+                    json_matched_tags = []
+                    json_matched_cache_key = session.get('json_matched_cache_key')
+                    if json_matched_cache_key:
+                        try:
+                            cached_json_tags = cache.get(json_matched_cache_key)
+                            if cached_json_tags and isinstance(cached_json_tags, list):
+                                json_matched_tags = cached_json_tags
+                                logging.info(f"📦 Found {len(json_matched_tags)} JSON matched tags in cache (excel-fresh path)")
+                        except Exception as json_cache_err:
+                            logging.warning(f"Error retrieving JSON matched tags from cache: {json_cache_err}")
+                    
+                    # Merge JSON matched tags with Excel tags, avoiding duplicates
+                    if json_matched_tags:
+                        existing_keys = set()
+                        for tag in aligned_excel_tags:
+                            name = str(tag.get('Product Name*') or tag.get('ProductName') or '').strip().lower()
+                            vendor = str(tag.get('Vendor/Supplier*') or tag.get('Vendor') or '').strip().lower()
+                            key = f"{name}|{vendor}"
+                            existing_keys.add(key)
+                        
+                        added_count = 0
+                        for json_tag in json_matched_tags:
+                            if not isinstance(json_tag, dict):
+                                continue
+                            name = str(json_tag.get('Product Name*') or json_tag.get('ProductName') or '').strip().lower()
+                            vendor = str(json_tag.get('Vendor/Supplier*') or json_tag.get('Vendor') or '').strip().lower()
+                            key = f"{name}|{vendor}"
+                            if key not in existing_keys:
+                                aligned_excel_tags.append(json_tag)
+                                existing_keys.add(key)
+                                added_count += 1
+                        
+                        if added_count > 0:
+                            logging.info(f"✅ Merged {added_count} JSON matched tags with Excel tags (excel-fresh path)")
+                    
+                    # CRITICAL: Re-align ALL tags (Excel + JSON-matched) with database lineage so JSON
+                    # matched products get the same lineage normalization as regular Excel tags.
+                    try:
+                        store_for_lineage = store_name or get_current_store_name()
+                        fully_aligned_tags = _align_tags_with_db_lineage(aligned_excel_tags, store_for_lineage)
+                    except Exception as align_err:
+                        logging.warning(f"Lineage re-alignment failed for excel-fresh path, using original tags: {align_err}")
+                        fully_aligned_tags = aligned_excel_tags
+                    
+                    safe_excel_tags = make_json_safe(fully_aligned_tags)
                     # Log first few product names for debugging
                     if safe_excel_tags:
                         sample_products = [tag.get('Product Name*', 'NO_NAME') for tag in safe_excel_tags[:5]]
@@ -11699,33 +11784,8 @@ def get_available_tags():
                 'message': 'Served cached tags while recovering from an error.'
             })
         
-        # EMERGENCY FALLBACK: Try database directly
-        try:
-            store_name = get_current_store_name()
-            product_db = get_product_database(store_name)
-            if product_db:
-                logging.info("🔄 EMERGENCY: Attempting direct database query after error...")
-                database_tags = product_db.get_all_products()
-                if database_tags and len(database_tags) > 0:
-                    all_tags = []
-                    for db_tag in database_tags[:5000]:  # Limit for emergency
-                        try:
-                            processed_db_tag = process_database_product_for_api(db_tag)
-                            all_tags.append(processed_db_tag)
-                        except:
-                            all_tags.append(db_tag)
-                    logging.info(f"✅ EMERGENCY FALLBACK: Returning {len(all_tags)} tags from database")
-                    resp = jsonify({
-                        'tags': all_tags,
-                        'total_count': len(all_tags),
-                        'source': 'error-fallback',
-                        'warning': f'Primary method failed, using database fallback: {str(e)}'
-                    })
-                    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                    resp.headers['Pragma'] = 'no-cache'
-                    return resp
-        except Exception as fallback_error:
-            logging.error(f"❌ Emergency fallback also failed: {fallback_error}")
+        # POLICY: Even in error conditions, do NOT construct CURRENT INVENTORY from database-only
+        # products. Fall back to Excel-only tags if available, otherwise return an empty list.
         
         # Try to return a basic fallback response to prevent total failure
         try:
@@ -13184,37 +13244,18 @@ def get_web_available_tags():
             except Exception as e:
                 logging.warning(f"Excel processor error: {e}")
         
-        # If we have tags from Excel, use those and skip heavy database queries
-        if not all_tags:
-            # Fallback: attempt to build tags from product database when Excel is unavailable
-            try:
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name) if store_name else None
-                if product_db:
-                    logging.info(f"WEB TAGS: Building tags from database fallback for store: {store_name}")
-                    db_products = product_db.get_all_products()
-                    db_tags = []
-                    for product in db_products:
-                        try:
-                            processed = process_database_product_for_api(product)
-                            db_tags.append(processed)
-                        except Exception as tag_error:
-                            logging.debug(f"WEB TAGS: Skipping product due to processing error: {tag_error}")
-                    all_tags.extend(db_tags)
-                    logging.info(f"WEB TAGS: Database fallback returned {len(db_tags)} tags")
-                else:
-                    logging.warning("WEB TAGS: No product database available for fallback")
-            except Exception as db_error:
-                logging.error(f"WEB TAGS: Database fallback failed: {db_error}")
-        
+        # If we have tags from Excel, use those and skip any database tag fallback.
+        # POLICY: Web clients must see the same Excel-only inventory as the main UI.
         if all_tags:
             # WEB OPTIMIZATION: Cache the results for web clients
             cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
             
             elapsed = (time.time() - start_time) * 1000
             if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_success(f"Web available tags (Excel-only) completed ({elapsed:.1f}ms)", 
-                                          {'tags_count': len(all_tags), 'cached': True})
+                enhanced_logger.log_success(
+                    f"Web available tags (Excel-only) completed ({elapsed:.1f}ms)", 
+                    {'tags_count': len(all_tags), 'cached': True}
+                )
             else:
                 logging.info(f"✅ Web available tags (Excel-only) completed ({elapsed:.1f}ms)")
             
@@ -13227,16 +13268,16 @@ def get_web_available_tags():
             response = compress_response(response)
             return response
         
-        # Fallback: return empty list for web clients
+        # Fallback: return empty list for web clients when no Excel data is available.
         if ENHANCED_LOGGING_AVAILABLE:
-            enhanced_logger.log_warning("No Excel data available for web available tags")
+            enhanced_logger.log_warning("No Excel data available for web available tags (Excel-only policy)")
         else:
-            logging.warning("No Excel data available for web available tags")
+            logging.warning("No Excel data available for web available tags (Excel-only policy)")
         
         response = make_response(jsonify({
             'tags': [],
             'total_count': 0,
-            'source': 'web-empty'
+            'source': 'web-empty-excel-only'
         }))
         response = compress_response(response)
         return response
@@ -16973,7 +17014,8 @@ def json_match():
                     p['CombinedWeight'] = clean_weight(p['CombinedWeight'])
 
         # Initialize matched_names to ensure it's always defined
-        # Format: "Product Name - Weight" (e.g., "Biscotti Live Resin Disposable Vape - 1g")
+        # Default format: "Product Name - Weight" (e.g., "Biscotti Live Resin Disposable Vape - 1g")
+        # but avoid adding weight twice if it's already in the product name.
         matched_names = []
         if matched_products:
             for p in matched_products:
@@ -16983,20 +17025,37 @@ def json_match():
                 # Get product name
                 product_name = p.get('Product Name*') or p.get('Description') or 'Unknown Product'
 
-                # Get weight information (already cleaned above)
-                weight = p.get('Weight*') or p.get('Weight') or ''
-                units = p.get('Units') or ''
-                combined_weight = p.get('CombinedWeight') or ''
+                # If the product name already contains a weight-like pattern (e.g., "0.5g", "1 oz"),
+                # use it as-is so we don't append a second weight for JSON match preview.
+                name_has_weight = False
+                try:
+                    import re as _re_weight_check
+                    name_has_weight = bool(
+                        _re_weight_check.search(
+                            r'\d+(?:\.\d+)?\s*(?:g|gram|grams|mg|oz|ounce|ounces)\b',
+                            str(product_name)
+                        )
+                    )
+                except Exception:
+                    name_has_weight = False
 
-                # Build display name: "Product Name - Weight"
-                if combined_weight:
-                    display_name = f"{product_name} - {combined_weight}"
-                elif weight and units:
-                    display_name = f"{product_name} - {weight}{units}"
-                elif weight:
-                    display_name = f"{product_name} - {weight}"
-                else:
+                if name_has_weight:
                     display_name = product_name
+                else:
+                    # Get weight information (already cleaned above)
+                    weight = p.get('Weight*') or p.get('Weight') or ''
+                    units = p.get('Units') or ''
+                    combined_weight = p.get('CombinedWeight') or ''
+
+                    # Build display name: "Product Name - Weight"
+                    if combined_weight:
+                        display_name = f"{product_name} - {combined_weight}"
+                    elif weight and units:
+                        display_name = f"{product_name} - {weight}{units}"
+                    elif weight:
+                        display_name = f"{product_name} - {weight}"
+                    else:
+                        display_name = product_name
 
                 matched_names.append(display_name)
         
@@ -17134,6 +17193,13 @@ def json_match():
             logging.info(f"🔍   - displayName: {matched_products[0].get('displayName', 'MISSING')}")
             logging.info(f"🔍   - All keys: {list(matched_products[0].keys())}")
 
+        # CRITICAL FIX: Cache JSON matched tags with json_matched_cache_key so they can be retrieved later
+        if matched_products:
+            json_matched_cache_key = get_session_cache_key('json_matched_tags')
+            session['json_matched_cache_key'] = json_matched_cache_key
+            cache.set(json_matched_cache_key, matched_products, timeout=3600)
+            logging.info(f"✅ Cached {len(matched_products)} JSON matched tags with key: {json_matched_cache_key[:50]}...")
+
         # Auto-select JSON matched products
         if excel_processor and hasattr(excel_processor, 'selected_tags'):
             excel_processor.selected_tags = matched_names.copy()
@@ -17247,6 +17313,14 @@ def json_inventory():
         # Debug logging
         logging.info(f"Creating TemplateProcessor with type: {template_type}")
         logging.info(f"Template path: {template_path}")
+        
+        # CRITICAL FIX: Get excel_processor from session or use None for inventory slips
+        # Inventory slips don't require ExcelProcessor, but we can use it if available
+        excel_processor = None
+        try:
+            excel_processor = get_excel_processor()
+        except Exception:
+            excel_processor = None  # Inventory slips can work without ExcelProcessor
         
         processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor)
         

@@ -1316,7 +1316,7 @@ const TagManager = {
             }
 
             // Verify tags have database lineage before caching
-            const sampleTag = tags[0];
+            const sampleTag = tags && tags.length > 0 ? tags[0] : null;
             if (sampleTag) {
                 verboseLog('💾 Saving to cache - sample tag lineage:', {
                     name: sampleTag['Product Name*'],
@@ -1661,9 +1661,11 @@ const TagManager = {
                 if (!tagName) return;
 
                 // Find tag in state
-                const tag = this.state.tags.find(t =>
-                    (t['Product Name*'] === tagName) || (t.ProductName === tagName)
-                );
+                const tag = (this.state.tags && Array.isArray(this.state.tags))
+                    ? this.state.tags.find(t =>
+                        (t['Product Name*'] === tagName) || (t.ProductName === tagName)
+                    )
+                    : null;
 
                 if (tag) {
                     // Get updated lineage
@@ -1708,12 +1710,12 @@ const TagManager = {
                 let tag = this._tagLookupMap?.get(name);
                 
                 // If not in Map, fallback to originalTags (only if Map wasn't built yet)
-                if (!tag && this.state.originalTags) {
+                if (!tag && this.state.originalTags && Array.isArray(this.state.originalTags)) {
                     tag = this.state.originalTags.find(t => t['Product Name*'] === name);
                 }
                 
                 // Last resort: current tags (filtered view)
-                if (!tag && this.state.tags) {
+                if (!tag && this.state.tags && Array.isArray(this.state.tags)) {
                     tag = this.state.tags.find(t => t['Product Name*'] === name);
                 }
                 
@@ -2898,7 +2900,7 @@ const TagManager = {
         }
         
         verboseLog('applyFilters - tagsToFilter length:', tagsToFilter.length);
-        verboseLog('applyFilters - first tag sample:', tagsToFilter[0]);
+        verboseLog('applyFilters - first tag sample:', tagsToFilter && tagsToFilter.length > 0 ? tagsToFilter[0] : null);
         
         const filteredTags = tagsToFilter.filter(tag => {
             // Check vendor filter - only apply if not empty and not "All"
@@ -3081,8 +3083,8 @@ const TagManager = {
                     if (!checkbox._changeHandler && !checkbox.onchange) {
                         const tagName = checkbox.value;
                         const tag = this._tagLookupMap?.get(tagName) ||
-                                   this.state.tags.find(t => t['Product Name*'] === tagName) ||
-                                   this.state.originalTags.find(t => t['Product Name*'] === tagName);
+                                   (this.state.tags && Array.isArray(this.state.tags) ? this.state.tags.find(t => t['Product Name*'] === tagName) : null) ||
+                                   (this.state.originalTags && Array.isArray(this.state.originalTags) ? this.state.originalTags.find(t => t['Product Name*'] === tagName) : null);
                         if (tag) {
                             // Recreate the tag element to get proper handlers
                             const tagElement = this.createTagElement(tag, true);
@@ -3110,12 +3112,15 @@ const TagManager = {
     },
 
     handleSearch(listId, searchInputId) {
-        // PERFORMANCE FIX: Use requestAnimationFrame for smoother updates
-        return requestAnimationFrame(() => {
+        try {
             const searchInput = document.getElementById(searchInputId);
-            if (!searchInput) return false;
+            if (!searchInput) {
+                console.warn(`⚠️ Search input not found: ${searchInputId}`);
+                return false;
+            }
             
             const searchTerm = searchInput.value.toLowerCase().trim();
+            verboseLog(`🔍 Search triggered for ${listId}: "${searchTerm}"`);
 
             // Choose which tags to filter
             let tags = [];
@@ -3127,7 +3132,9 @@ const TagManager = {
                 tags = filtered || this.state.originalTags || [];
             } else if (listId === 'selectedTags') {
                 tags = Array.from(this.state.selectedTags).map(name =>
-                    this.state.originalTags.find(t => t['Product Name*'] === name)
+                    (this.state.originalTags && Array.isArray(this.state.originalTags))
+                        ? this.state.originalTags.find(t => t['Product Name*'] === name)
+                        : null
                 ).filter(Boolean);
             }
 
@@ -3152,6 +3159,8 @@ const TagManager = {
                 const tagName = tag['Product Name*'] || '';
                 return tagName.toLowerCase().includes(searchTerm);
             });
+
+            verboseLog(`🔍 Found ${filteredTags.length} matching tags out of ${tags.length} total`);
 
             // Update the list with only matching tags
             if (listId === 'availableTags') {
@@ -3182,7 +3191,10 @@ const TagManager = {
 
             // Return boolean indicating whether any tags match the search
             return filteredTags.length > 0;
-        });
+        } catch (error) {
+            console.error(`❌ Error in handleSearch for ${listId}:`, error);
+            return false;
+        }
     },
 
     handleAvailableTagsSearch(event) {
@@ -3754,8 +3766,8 @@ const TagManager = {
             }
             
             // Find the tag object for this checkbox
-            const tag = this.state.tags.find(t => t['Product Name*'] === tagName) ||
-                       this.state.originalTags.find(t => t['Product Name*'] === tagName);
+            const tag = (this.state.tags && Array.isArray(this.state.tags) ? this.state.tags.find(t => t['Product Name*'] === tagName) : null) ||
+                       (this.state.originalTags && Array.isArray(this.state.originalTags) ? this.state.originalTags.find(t => t['Product Name*'] === tagName) : null);
             
             if (!tag) {
                 // Tag not found, but still ensure checkbox is enabled
@@ -4184,7 +4196,9 @@ const TagManager = {
                         return;
                     }
                     const tagName = checkbox.value;
-                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                    const tag = (this.state.tags && Array.isArray(this.state.tags))
+                        ? this.state.tags.find(t => t['Product Name*'] === tagName)
+                        : null;
                     if (tag) {
                         checkbox.checked = isChecked;
                         if (isChecked) {
@@ -6173,11 +6187,15 @@ const TagManager = {
                     if (tag) return tag;
                     
                     // Fallback to state.tags
-                    tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
-                    if (tag) return tag;
+                    if (this.state.tags && Array.isArray(this.state.tags)) {
+                        tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                        if (tag) return tag;
+                    }
                     
                     // Fallback to originalTags
-                    tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                    if (this.state.originalTags && Array.isArray(this.state.originalTags)) {
+                        tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                    }
                     if (tag) return tag;
                     
                     // If still not found, log warning but don't filter out - preserve selection
@@ -6376,12 +6394,15 @@ const TagManager = {
         const lowerProductType = (productTypeCheck || '').toString().toLowerCase();
 
         const hasCbdIndicator = () => {
+            // Check for all CBD family cannabinoids: CBD, CBG, CBN, CBC
             const tokens = ['cbd', 'cbg', 'cbn', 'cbc'];
             const sources = [nameStr, descStr, brandStr, ratioStr, lineageStr];
             if (tokens.some(token => sources.some(text => text && text.includes(token)))) {
                 return true;
             }
-            if (lowerProductType.includes('high cbd') || lowerProductType.includes('cbd')) {
+            // Also check product type for CBD family indicators
+            const cbdFamilyInProductType = ['high cbd', 'cbd', 'high cbg', 'cbg', 'high cbn', 'cbn', 'high cbc', 'cbc'];
+            if (cbdFamilyInProductType.some(indicator => lowerProductType.includes(indicator))) {
                 return true;
             }
             return false;
@@ -6473,8 +6494,15 @@ const TagManager = {
             }
         } else {
             // Classic types - use database lineage or default to HYBRID (never MIXED for classic types)
-            // CRITICAL FIX: Always use the resolved lineage (which already has database value and MIXED->HYBRID conversion)
-            displayLineage = lineage || 'HYBRID';
+            // CRITICAL FIX: Check for CBD family indicators (CBD, CBG, CBN, CBC) in product name and force CBD_BLEND if detected
+            // This ensures products with CBD, CBG, CBN, or CBC in the title get yellow color regardless of database lineage
+            if (hasCbdIndicator()) {
+                displayLineage = 'CBD_BLEND';
+                verboseLog(`🎨 CLASSIC with CBD family indicator (CBD/CBG/CBN/CBC): "${displayName}" → CBD_BLEND (yellow)`);
+            } else {
+                // CRITICAL FIX: Always use the resolved lineage (which already has database value and MIXED->HYBRID conversion)
+                displayLineage = lineage || 'HYBRID';
+            }
             verboseLog(`🎨 Classic type using database lineage: "${displayName}" → ${displayLineage}`);
         }
         } // End of else block for High CBD check
@@ -7830,8 +7858,12 @@ const TagManager = {
             if (!tagDataName) return;
             
             // Find and update the tag in state
-            const stateTag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagDataName);
-            const originalTag = this.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagDataName);
+            const stateTag = (this.state.tags && Array.isArray(this.state.tags)) 
+                ? this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagDataName)
+                : null;
+            const originalTag = (this.state.originalTags && Array.isArray(this.state.originalTags))
+                ? this.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagDataName)
+                : null;
             
             if (stateTag) {
                 stateTag.lineage = newLineage;
@@ -9651,6 +9683,12 @@ const TagManager = {
             this.state.hydratedFromCache = false;
             this.saveAvailableTagsToCache(liteTags);
 
+            // CRITICAL UX FIX: Ensure the upcoming full /available-tags payload does NOT
+            // trigger a second heavy DOM repaint with another "Organizing tags..." pass.
+            // We mark a one-time flag here so fetchAndUpdateAvailableTags can treat the
+            // next full payload as a background refresh only (state update, no DOM repaint).
+            this._skipNextDomRerender = true;
+
             this._updateAvailableTags(liteTags);
             if (savedScrollPosition) {
                 this._restoreAvailableScrollPosition(savedScrollPosition);
@@ -9723,6 +9761,19 @@ const TagManager = {
         // This must be set before any UI updates to ensure loading state is shown
         this._fetchingAvailableTags = true;
         this._fetchingAvailableTagsStartTime = Date.now();
+        
+        // CRITICAL FIX: Set a safety timeout to reset flag if it gets stuck
+        // This prevents infinite loading state
+        if (this._fetchingTimeout) {
+            clearTimeout(this._fetchingTimeout);
+        }
+        this._fetchingTimeout = setTimeout(() => {
+            if (this._fetchingAvailableTags) {
+                console.warn('⚠️ Tag fetch timeout - resetting flag after 60 seconds');
+                this._fetchingAvailableTags = false;
+                this.hideActionSplash();
+            }
+        }, 60000); // 60 second safety timeout
         
         // CRITICAL FIX: Immediately show loading state if container is empty
         // This prevents upload prompt from flashing while tags are being fetched
@@ -10224,19 +10275,40 @@ const TagManager = {
                 console.log(`✅ Lineage alignment detected (source: ${responseData.source}), re-rendering UI with database lineage`);
             }
             
-            // PERFORMANCE FIX: Only update UI if we didn't already show cached tags
-            // If cache was used, we already displayed tags - only update if tags changed significantly
-            // This prevents flickering and maintains instant display from cache
-            if (!cacheUsedForDisplay || tags.length !== (cachedTags?.length || 0)) {
-                // Always update available tags - _updateAvailableTags clears container and re-renders everything
-                // This ensures lineage dropdowns reflect the database values from the normalized tags
-                this._updateAvailableTags(tags);
-            } else {
-                // Cache was used and tag count matches - just update state silently
-                // This prevents UI flicker while keeping data fresh
+            // PERFORMANCE FIX: Avoid double-rendering AVAILABLE / SELECTED TAGS when we already
+            // have a full tag list on screen (from cache or lite prefetch).
+            //
+            // Cases:
+            // - cacheUsedForDisplay === true → fetchAndUpdateAvailableTags itself rendered from cache
+            // - state.hydratedFromCache === true and hasExistingTags & DOM already contains tag items
+            //   → an earlier code path (inline hydration) rendered from cache before this fetch
+            //
+            // In both situations, the fresh payload for the same Excel file is usually identical,
+            // so repainting the DOM causes a second "Organizing tags..." pass and can interfere
+            // with checkbox/select-all behavior on the first click.
+            const availableContainer = document.getElementById('availableTags');
+            const domHasTags = !!(availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0);
+            const alreadyHydratedFromCache = !!this.state.hydratedFromCache;
+
+            const shouldSkipDomRerender =
+                cacheUsedForDisplay ||                                        // rendered from cache in this call
+                (alreadyHydratedFromCache && hasExistingTags && domHasTags) || // rendered from cache earlier
+                this._skipNextDomRerender === true;                           // lite prefetch already painted DOM
+
+            if (shouldSkipDomRerender) {
+                // One-time flag – reset so future loads (like a new Excel upload)
+                // can repaint the DOM normally.
+                if (this._skipNextDomRerender) {
+                    this._skipNextDomRerender = false;
+                }
+                // Update state silently so filters/counts/lineage stay fresh, but keep the
+                // existing DOM intact to avoid flicker and checkbox glitches.
                 this.state.tags = [...tags];
                 this.state.originalTags = [...tags];
-                console.log(`✅ Background refresh complete: ${tags.length} tags (UI already showing from cache)`);
+                console.log(`✅ Background refresh complete: ${tags.length} tags (state updated without second DOM render)`);
+            } else {
+                // No prior cache-based render detected – perform full render from fetched tags.
+                this._updateAvailableTags(tags);
             }
             
             // CRITICAL: ALWAYS update selected tags after loading tags to ensure they have database lineage
@@ -10479,6 +10551,12 @@ const TagManager = {
             // CRITICAL FIX: Always reset flag in finally block to ensure it's cleared even if error occurs
             // This prevents the hangup issue where the flag gets stuck in true state
             this._fetchingAvailableTags = false;
+            
+            // Clear safety timeout since operation completed
+            if (this._fetchingTimeout) {
+                clearTimeout(this._fetchingTimeout);
+                this._fetchingTimeout = null;
+            }
         }
     },
 
@@ -11132,27 +11210,27 @@ const TagManager = {
             const savedFilters = this.loadFiltersFromStorage();
             if (savedFilters && Object.keys(savedFilters).length > 0) {
                 console.log('⚡ Restoring filters from localStorage:', savedFilters);
-                // CRITICAL FIX: Clear vendor filter to show all tags by default
-                if (savedFilters.vendor && savedFilters.vendor !== 'All') {
+                // CRITICAL FIX: Always clear vendor filter on page load - remove it from saved filters
+                if (savedFilters.vendor) {
                     console.log('🔄 Clearing vendor filter on page load to show all tags');
-                    savedFilters.vendor = 'All';
-                    // Save cleared vendor filter back to localStorage
+                    delete savedFilters.vendor; // Remove vendor from saved filters
+                    // Save cleared filters back to localStorage (without vendor)
                     this.saveFiltersToStorage();
                 }
                 // Apply saved filters to dropdowns immediately
                 Object.entries(savedFilters).forEach(([key, value]) => {
                     const filterElement = document.getElementById(`${key}Filter`);
-                    if (filterElement) {
-                        // CRITICAL FIX: Always set vendor filter to empty on page load
-                        if (key === 'vendor') {
-                            filterElement.value = '';
-                        } else if (value && value !== 'All') {
-                            filterElement.value = value;
-                        } else {
-                            filterElement.value = '';
-                        }
+                    if (filterElement && value && value !== 'All') {
+                        filterElement.value = value;
                     }
                 });
+            }
+            
+            // CRITICAL FIX: Always ensure vendor filter is empty on page load, regardless of saved filters
+            const vendorFilterElement = document.getElementById('vendorFilter');
+            if (vendorFilterElement) {
+                vendorFilterElement.value = '';
+                console.log('✅ Vendor filter cleared on page load');
             }
 
             // CRITICAL FIX: Only fetch filter options from API if we didn't populate from cache
@@ -11598,6 +11676,14 @@ const TagManager = {
 
     // Hide loading indicator
     hideLoadingIndicator() {
+        // CRITICAL FIX: Reset fetching flags when hiding loading indicator
+        // This prevents stuck state after clear/undo operations
+        if (!this._fetchingAvailableTags && !this._checkingExistingData) {
+            // Only reset if we're not actively fetching - don't interrupt in-progress operations
+            this._fetchingAvailableTags = false;
+            this._checkingExistingData = false;
+        }
+        
         const availableTagsContainer = document.getElementById('availableTags');
         if (availableTagsContainer) {
             // Check if we have any tags loaded
@@ -15378,48 +15464,63 @@ const TagManager = {
         }
         
         // CRITICAL FIX: Create debounced functions as instance properties so we can properly remove them
-        // Only create them once, reuse if they already exist
-        if (!this._debouncedAvailableSearch) {
-            this._debouncedAvailableSearch = (event) => {
-                if (this._searchDebounceTimers.available) {
-                    clearTimeout(this._searchDebounceTimers.available);
-                }
-                this._searchDebounceTimers.available = setTimeout(() => {
+        // Always recreate to ensure they're fresh and working
+        this._debouncedAvailableSearch = (event) => {
+            if (this._searchDebounceTimers.available) {
+                clearTimeout(this._searchDebounceTimers.available);
+            }
+            this._searchDebounceTimers.available = setTimeout(() => {
+                try {
                     this.handleAvailableTagsSearch(event);
-                }, 300); // 300ms debounce delay
-            };
-        }
-        
-        if (!this._debouncedSelectedSearch) {
-            this._debouncedSelectedSearch = (event) => {
-                if (this._searchDebounceTimers.selected) {
-                    clearTimeout(this._searchDebounceTimers.selected);
+                } catch (error) {
+                    console.error('❌ Error in available tags search handler:', error);
                 }
-                this._searchDebounceTimers.selected = setTimeout(() => {
+            }, 300); // 300ms debounce delay
+        };
+        
+        this._debouncedSelectedSearch = (event) => {
+            if (this._searchDebounceTimers.selected) {
+                clearTimeout(this._searchDebounceTimers.selected);
+            }
+            this._searchDebounceTimers.selected = setTimeout(() => {
+                try {
                     this.handleSelectedTagsSearch(event);
-                }, 300); // 300ms debounce delay
-            };
-        }
+                } catch (error) {
+                    console.error('❌ Error in selected tags search handler:', error);
+                }
+            }, 300); // 300ms debounce delay
+        };
         
         let foundCount = 0;
         
         // Add search event listeners for available tags
         const availableTagsSearch = document.getElementById('availableTagsSearch');
         if (availableTagsSearch) {
-            // Remove old listeners if they exist (using stored function reference)
+            // Remove old listeners if they exist
             if (this._boundAvailableSearch) {
                 availableTagsSearch.removeEventListener('input', this._boundAvailableSearch);
             }
-            // Remove the debounced function if it was previously added
+            // Also try removing the debounced function directly
             if (this._debouncedAvailableSearch) {
                 availableTagsSearch.removeEventListener('input', this._debouncedAvailableSearch);
             }
             
             // Store bound function and add new listener
             this._boundAvailableSearch = this._debouncedAvailableSearch;
-            availableTagsSearch.addEventListener('input', this._debouncedAvailableSearch);
+            availableTagsSearch.addEventListener('input', this._debouncedAvailableSearch, { passive: true });
+            
+            // CRITICAL FIX: Also add direct handler as backup (non-debounced for immediate feedback)
+            availableTagsSearch.addEventListener('input', (e) => {
+                // Visual feedback that search is active
+                if (e.target.value.trim()) {
+                    e.target.classList.add('search-active');
+                } else {
+                    e.target.classList.remove('search-active');
+                }
+            }, { passive: true });
+            
             foundCount++;
-            verboseLog('✅ Added debounced event listener to availableTagsSearch');
+            console.log('✅ Added debounced event listener to availableTagsSearch', availableTagsSearch);
         } else {
             console.warn('⚠️ Available tags search element not found');
         }
@@ -15427,20 +15528,31 @@ const TagManager = {
         // Add search event listeners for selected tags
         const selectedTagsSearch = document.getElementById('selectedTagsSearch');
         if (selectedTagsSearch) {
-            // Remove old listeners if they exist (using stored function reference)
+            // Remove old listeners if they exist
             if (this._boundSelectedSearch) {
                 selectedTagsSearch.removeEventListener('input', this._boundSelectedSearch);
             }
-            // Remove the debounced function if it was previously added
+            // Also try removing the debounced function directly
             if (this._debouncedSelectedSearch) {
                 selectedTagsSearch.removeEventListener('input', this._debouncedSelectedSearch);
             }
             
             // Store bound function and add new listener
             this._boundSelectedSearch = this._debouncedSelectedSearch;
-            selectedTagsSearch.addEventListener('input', this._debouncedSelectedSearch);
+            selectedTagsSearch.addEventListener('input', this._debouncedSelectedSearch, { passive: true });
+            
+            // CRITICAL FIX: Also add direct handler as backup (non-debounced for immediate feedback)
+            selectedTagsSearch.addEventListener('input', (e) => {
+                // Visual feedback that search is active
+                if (e.target.value.trim()) {
+                    e.target.classList.add('search-active');
+                } else {
+                    e.target.classList.remove('search-active');
+                }
+            }, { passive: true });
+            
             foundCount++;
-            verboseLog('✅ Added debounced event listener to selectedTagsSearch');
+            console.log('✅ Added debounced event listener to selectedTagsSearch', selectedTagsSearch);
         } else {
             console.warn('⚠️ Selected tags search element not found');
         }
@@ -15454,7 +15566,7 @@ const TagManager = {
         } else if (foundCount < 2) {
             console.warn(`⚠️ Only ${foundCount}/2 search inputs found. Some search functionality may not work.`);
         } else {
-            verboseLog(`✅ All ${foundCount} search event listeners attached successfully`);
+            console.log(`✅ All ${foundCount} search event listeners attached successfully`);
         }
     },
 
@@ -15573,6 +15685,11 @@ const TagManager = {
         verboseLog('🔄 Clearing all filters...');
         
         try {
+            // CRITICAL FIX: Reset stuck flags that might prevent tag refresh
+            this._fetchingAvailableTags = false;
+            this._checkingExistingData = false;
+            verboseLog('✅ Reset fetching flags');
+            
             // CRITICAL FIX: Prevent infinite recursion - don't call performFullAppReset which calls this again
             // Instead, do the filter clearing directly
             
@@ -16118,14 +16235,22 @@ const TagManager = {
             // Mark as initialized
             this.state.initialized = true;
 
-            // CRITICAL FIX: Setup filter event listeners IMMEDIATELY
-            // This ensures filters work on initial load regardless of cache state
+            // CRITICAL FIX: Setup filter and search event listeners IMMEDIATELY
+            // This ensures filters and tag searches work on initial load regardless of cache state
             console.log('🔧 Setting up filter event listeners in init()...');
             if (typeof this.setupFilterEventListeners === 'function') {
                 this.setupFilterEventListeners();
                 console.log('✅ Filter event listeners setup complete in init()');
             } else {
                 console.error('❌ setupFilterEventListeners method not found!');
+            }
+
+            console.log('🔍 Setting up search event listeners in init()...');
+            if (typeof this.setupSearchEventListeners === 'function') {
+                this.setupSearchEventListeners();
+                console.log('✅ Search event listeners setup complete in init()');
+            } else {
+                console.error('❌ setupSearchEventListeners method not found!');
             }
 
             // CRITICAL FIX: Always fetch fresh data from server, skip cache
