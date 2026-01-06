@@ -8099,13 +8099,28 @@ def generate_labels():
                                 else:
                                     logging.debug(f"✅ Preserved existing lineage '{record.get('Lineage')}' for '{product_name}' (UI lineage takes precedence)")
 
-                                # Price
+                                # Price - CRITICAL FIX: Always set price with fallback
                                 db_price = _extract_price_from_database_product(processed_db)
                                 if db_price:
                                     formatted_price = _format_price_value(db_price)
-                                    record['Price'] = formatted_price
-                                    record['Price*'] = formatted_price
-                                    record['Price* (Tier Name for Bulk)'] = formatted_price
+                                else:
+                                    # Fallback to existing price or default
+                                    formatted_price = record.get('Price', '') or record.get('Price*', '') or '$0.00'
+                                
+                                record['Price'] = formatted_price
+                                record['Price*'] = formatted_price
+                                record['Price* (Tier Name for Bulk)'] = formatted_price
+
+                                # DescAndWeight - CRITICAL FIX: Always set DescAndWeight with fallback
+                                db_desc_and_weight = processed_db.get('DescAndWeight', '')
+                                if not db_desc_and_weight or str(db_desc_and_weight).strip() in ['', 'None', 'nan', 'N/A']:
+                                    # Fallback: construct from product name and weight
+                                    product_name_fallback = record.get('ProductName', record.get('Product Name*', ''))
+                                    weight_fallback = record.get('WeightUnits', record.get('CombinedWeight', '1g'))
+                                    db_desc_and_weight = f"{product_name_fallback} - {weight_fallback}" if product_name_fallback else weight_fallback
+                                
+                                record['DescAndWeight'] = db_desc_and_weight
+                                record['Description'] = db_desc_and_weight
 
                                 # Other fields
                                 if processed_db.get('Product Brand'):
