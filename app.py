@@ -6207,18 +6207,20 @@ def check_store_required():
         
         # Only use session store if BOTH conditions are met:
         # 1. store_just_selected flag is True (explicit selection)
-        # 2. Has a valid recent timestamp (within last 10 minutes)
+        # 2. Has a valid recent timestamp (within last 6 hours - matches session lifetime)
         if session_store and store_just_selected:
             store_timestamp = session.get('store_selected_timestamp')
             if store_timestamp:
                 try:
                     from datetime import datetime, timedelta
                     timestamp = datetime.fromisoformat(store_timestamp)
-                    if datetime.now() - timestamp < timedelta(minutes=10):
+                    # CRITICAL FIX: Increased from 10 minutes to 6 hours to match session lifetime
+                    # This prevents the modal from reappearing while user is actively using the app
+                    if datetime.now() - timestamp < timedelta(hours=6):
                         current_store = session_store
                         logging.info(f"Store found in session with valid flags: {current_store}")
                     else:
-                        logging.info(f"Store timestamp expired (older than 10 minutes), requiring new selection")
+                        logging.info(f"Store timestamp expired (older than 6 hours), requiring new selection")
                         # Clear all store-related session data
                         session.pop('selected_store', None)
                         session.pop('store_selected_timestamp', None)
