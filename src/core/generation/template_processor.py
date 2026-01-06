@@ -187,7 +187,10 @@ class TemplateProcessor:
         self.chunk_count = 0
         
         # Template expansion cache - avoid re-expanding templates with same size
-        self._template_expansion_cache = {}
+        # Use class-level cache for better performance across instances
+        if not hasattr(TemplateProcessor, '_class_template_cache'):
+            TemplateProcessor._class_template_cache = {}
+        self._template_expansion_cache = TemplateProcessor._class_template_cache
 
         # CRITICAL FIX: Disable chunking only for templates that support dynamic grids
         if self.template_type in ['horizontal', 'vertical', 'double']:
@@ -1231,11 +1234,11 @@ class TemplateProcessor:
         from docx import Document
         from io import BytesIO
         
-        # DEBUG_CHUNK_SIZE_TRACKING: Log actual chunk sizes
-        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Processing chunk with {len(chunk)} records")
-        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Expected all {len(chunk)} records in this chunk for template '{self.template_type}'")
+        # DEBUG_CHUNK_SIZE_TRACKING: Log actual chunk sizes (reduced to debug for performance)
+        self.logger.debug(f"🔍 CHUNK SIZE DEBUG: Processing chunk with {len(chunk)} records")
+        self.logger.debug(f"🔍 CHUNK SIZE DEBUG: Expected all {len(chunk)} records in this chunk for template '{self.template_type}'")
         # After rendering, log the number of labels actually created
-        self.logger.info(f"🔍 LABEL RENDER: Actually rendered {len(chunk)} labels in this chunk.")
+        self.logger.debug(f"🔍 LABEL RENDER: Actually rendered {len(chunk)} labels in this chunk.")
         
         chunk_start_time = time.time()
         
@@ -1246,10 +1249,15 @@ class TemplateProcessor:
             cache_key = f"{self.template_type}_{num_products}"
             
             if cache_key in self._template_expansion_cache:
-                # Use cached template expansion
-                self._expanded_template_buffer = self._template_expansion_cache[cache_key]
+                # Use cached template expansion (create a copy since BytesIO is consumed)
+                cached_buffer = self._template_expansion_cache[cache_key]
+                if hasattr(cached_buffer, 'getvalue'):
+                    self._expanded_template_buffer = BytesIO(cached_buffer.getvalue())
+                else:
+                    self._expanded_template_buffer = cached_buffer
                 if hasattr(self._expanded_template_buffer, 'seek'):
                     self._expanded_template_buffer.seek(0)
+                self.logger.debug(f"⚡ TEMPLATE CACHE HIT: Using cached expansion for {cache_key}")
             else:
                 # For all templates, re-expand with correct number of products
                 if self.template_type in ['horizontal', 'vertical']:
@@ -1264,17 +1272,18 @@ class TemplateProcessor:
                     cached_buffer = BytesIO(self._expanded_template_buffer.getvalue())
                     self._template_expansion_cache[cache_key] = cached_buffer
                     self._expanded_template_buffer.seek(0)
+                    self.logger.debug(f"⚡ TEMPLATE CACHE MISS: Cached expansion for {cache_key}")
                 elif hasattr(self._expanded_template_buffer, 'seek'):
                     self._expanded_template_buffer.seek(0)
             
             doc = DocxTemplate(self._expanded_template_buffer)
             
-            # Debug: Log the order of records in this chunk (only for small chunks to reduce logging overhead)
-            if len(chunk) <= 10:
+            # Debug: Log the order of records in this chunk (reduced to debug for performance)
+            if len(chunk) <= 5:  # Only log for very small chunks
                 chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
-                self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
+                self.logger.debug(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
             else:
-                self.logger.info(f"Processing chunk with {len(chunk)} records")
+                self.logger.debug(f"Processing chunk with {len(chunk)} records")
             
             # OPTIMIZATION: Pre-load all brand, vendor, lineage, and strain data in batch to avoid N+1 queries
             # This reduces 200+ queries for 100 products to just 3-4 queries total
@@ -1303,71 +1312,39 @@ class TemplateProcessor:
                             cursor = conn.cursor()
                             placeholders = ','.join(['?'] * len(product_names))
                             
-                            # Load brand data
-                            batch_brand_query = f'''
-                                SELECT "Product Name*", "Product Brand"
+                            # OPTIMIZATION: Combine all product queries into a single query for better performance
+                            combined_query = f'''
+                                SELECT 
+                                    "Product Name*",
+                                    "Product Brand",
+                                    CASE 
+                                        WHEN "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' THEN "Vendor/Supplier*"
+                                        WHEN "Vendor" IS NOT NULL AND "Vendor" != '' THEN "Vendor"
+                                        WHEN "ProductVendor" IS NOT NULL AND "ProductVendor" != '' THEN "ProductVendor"
+                                        ELSE NULL
+                                    END as vendor,
+                                    COALESCE(sovereign_lineage, "Lineage", canonical_lineage) as lineage,
+                                    JointRatio
                                 FROM products
                                 WHERE "Product Name*" IN ({placeholders})
-                                AND "Product Brand" IS NOT NULL
-                                AND "Product Brand" != ""
                             '''
-                            cursor.execute(batch_brand_query, product_names)
+                            cursor.execute(combined_query, product_names)
                             for row_result in cursor.fetchall():
-                                pname, brand = row_result
+                                pname, brand, vendor, lineage, joint_ratio = row_result
+                                
+                                # Cache brand
                                 if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_brand_cache[pname] = str(brand).strip()
-                            
-                            # Load vendor data - try Vendor/Supplier* first, then Vendor, then ProductVendor
-                            batch_vendor_query = f'''
-                                SELECT "Product Name*", 
-                                       CASE 
-                                           WHEN "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' THEN "Vendor/Supplier*"
-                                           WHEN "Vendor" IS NOT NULL AND "Vendor" != '' THEN "Vendor"
-                                           WHEN "ProductVendor" IS NOT NULL AND "ProductVendor" != '' THEN "ProductVendor"
-                                           ELSE NULL
-                                       END as vendor
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND (
-                                    ("Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '')
-                                    OR ("Vendor" IS NOT NULL AND "Vendor" != '')
-                                    OR ("ProductVendor" IS NOT NULL AND "ProductVendor" != '')
-                                )
-                            '''
-                            cursor.execute(batch_vendor_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, vendor = row_result
+                                
+                                # Cache vendor
                                 if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_vendor_cache[pname] = str(vendor).strip()
-                            
-                            # Load lineage data (sovereign_lineage, Lineage, canonical_lineage)
-                            batch_lineage_query = f'''
-                                SELECT "Product Name*", sovereign_lineage, "Lineage", canonical_lineage
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                            '''
-                            cursor.execute(batch_lineage_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, sov_lineage, lineage, canon_lineage = row_result
-                                # Priority: sovereign_lineage > Lineage > canonical_lineage
-                                if sov_lineage and str(sov_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(sov_lineage).strip()
-                                elif lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                
+                                # Cache lineage (priority already handled by COALESCE)
+                                if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_lineage_cache[pname] = str(lineage).strip()
-                                elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(canon_lineage).strip()
-                            
-                            # Load JointRatio data
-                            batch_joint_ratio_query = f'''
-                                SELECT "Product Name*", JointRatio
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND JointRatio IS NOT NULL
-                                AND JointRatio != ""
-                            '''
-                            cursor.execute(batch_joint_ratio_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, joint_ratio = row_result
+                                
+                                # Cache JointRatio
                                 if joint_ratio and str(joint_ratio).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     joint_ratio_cache[pname] = str(joint_ratio).strip()
                             
@@ -1423,10 +1400,10 @@ class TemplateProcessor:
                     label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
                                                                product_lineage_cache, strain_info_cache, joint_ratio_cache)
                 context[f'Label{i+1}'] = label_context
-                # Debug logging to check field values and order (only for first few labels to reduce overhead)
-                if i < 3:
+                # Debug logging to check field values and order (only for first label to reduce overhead)
+                if i == 0:
                     product_name = record.get('ProductName', 'Unknown')
-                    self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
+                    self.logger.debug(f"Label1 -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}'")
             
             # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
             # to prevent Jinja template errors when template references missing labels
@@ -1434,20 +1411,20 @@ class TemplateProcessor:
                 empty_label_context = self._get_empty_label_context()
                 for i in range(len(chunk) + 1, required_labels + 1):
                     context[f'Label{i}'] = empty_label_context
-                self.logger.info(f"🔧 FIXED GRID: Created {len(chunk)} product labels + {required_labels - len(chunk)} empty labels = {required_labels} total for {self.template_type} template")
+                self.logger.debug(f"🔧 FIXED GRID: Created {len(chunk)} product labels + {required_labels - len(chunk)} empty labels = {required_labels} total for {self.template_type} template")
             else:
                 # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
                 # This saves printer ink by not generating empty cells
-                self.logger.info(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
+                self.logger.debug(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
             # QR code functionality enabled
-            # Debug: Log QR code presence in context before rendering
+            # Debug: Log QR code presence in context before rendering (reduced to debug for performance)
             qr_count = sum(1 for label_key, label_data in context.items() 
                           if isinstance(label_data, dict) and label_data.get('QR') and 
                           not (isinstance(label_data.get('QR'), str) and label_data.get('QR').strip() == ''))
-            self.logger.info(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
+            self.logger.debug(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
             
             try:
                 doc.render(context)

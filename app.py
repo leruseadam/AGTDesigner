@@ -2295,14 +2295,18 @@ def get_session_excel_processor():
             if not session_file_path:
                 try:
                     import json
-                    uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-                    persistence_file = os.path.join(uploads_dir, '.last_upload.json')
+                    # CRITICAL FIX: Use UPLOADS_DIR constant instead of constructing path for Windows compatibility
+                    persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                     if os.path.exists(persistence_file):
                         with open(persistence_file, 'r') as f:
                             last_upload = json.load(f)
                         persisted_file_path = last_upload.get('file_path')
                         persisted_store = last_upload.get('store')
                         current_store = get_current_store_name() if has_store_selection() else None
+                        
+                        # CRITICAL FIX: Normalize path for Windows compatibility
+                        if persisted_file_path:
+                            persisted_file_path = os.path.normpath(persisted_file_path)
                         
                         # Only restore if file exists and store matches (or no store selected)
                         if persisted_file_path and os.path.exists(persisted_file_path):
@@ -2314,8 +2318,12 @@ def get_session_excel_processor():
                                 session['file_store'] = persisted_store
                                 session.modified = True
                                 logging.info(f"✅ Restored upload from persistent file in get_session_excel_processor: {session_file_path}")
+                        else:
+                            if persisted_file_path:
+                                logging.warning(f"⚠️ Persistent file path does not exist: {persisted_file_path}")
                 except Exception as restore_err:
                     logging.warning(f"Could not restore upload from persistent file: {restore_err}")
+                    logging.error(traceback.format_exc())
 
             if session_file_path and os.path.exists(session_file_path):
                 # CRITICAL: Load the session file into the new processor instance
@@ -2338,17 +2346,20 @@ def get_session_excel_processor():
                 # Only clear if persistent file also doesn't exist
                 try:
                     import json
-                    uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-                    persistence_file = os.path.join(uploads_dir, '.last_upload.json')
+                    # CRITICAL FIX: Use UPLOADS_DIR constant for Windows compatibility
+                    persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                     if os.path.exists(persistence_file):
                         with open(persistence_file, 'r') as f:
                             last_upload = json.load(f)
-                        if last_upload.get('file_path') == session_file_path:
+                        # CRITICAL FIX: Normalize paths for comparison on Windows
+                        persisted_path = os.path.normpath(last_upload.get('file_path', ''))
+                        session_path = os.path.normpath(session_file_path)
+                        if persisted_path == session_path:
                             # Persistent file also references missing file - clear both
                             os.remove(persistence_file)
                             logging.info(f"Removed persistent file referencing missing upload: {session_file_path}")
-                except Exception:
-                    pass
+                except Exception as clear_err:
+                    logging.warning(f"Error checking persistent file: {clear_err}")
                 # Clear invalid session data
                 session.pop('file_path', None)
                 session.pop('uploaded_filename', None)
@@ -2754,14 +2765,18 @@ def index():
         if not uploaded_file:
             try:
                 import json
-                uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-                persistence_file = os.path.join(uploads_dir, '.last_upload.json')
+                # CRITICAL FIX: Use UPLOADS_DIR constant for Windows compatibility
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                 if os.path.exists(persistence_file):
                     with open(persistence_file, 'r') as f:
                         last_upload = json.load(f)
                     persisted_file_path = last_upload.get('file_path')
                     persisted_store = last_upload.get('store')
                     current_store = get_current_store_name() if has_store_selection() else None
+                    
+                    # CRITICAL FIX: Normalize path for Windows compatibility
+                    if persisted_file_path:
+                        persisted_file_path = os.path.normpath(persisted_file_path)
                     
                     # Only restore if file exists and store matches (or no store selected)
                     if persisted_file_path and os.path.exists(persisted_file_path):
@@ -3025,9 +3040,9 @@ def upload_file():
         # Initialize warning tracking variables
         warning_to_return = warning_msg if warning_msg else None
         
-        # Create uploads directory
-        import os
-        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        # Create uploads directory - use UPLOADS_DIR constant for consistent path handling
+        # CRITICAL FIX: Use BASE_DIR-based path instead of os.getcwd() for Windows compatibility
+        uploads_dir = UPLOADS_DIR
         os.makedirs(uploads_dir, exist_ok=True)
         
         # Save file with timestamp
@@ -3057,7 +3072,9 @@ def upload_file():
         
         # Update session with permanent flag for persistence
         session.permanent = True
-        session['file_path'] = file_path
+        # CRITICAL FIX: Normalize file path for Windows compatibility before storing in session
+        normalized_session_path = os.path.normpath(file_path)
+        session['file_path'] = normalized_session_path
         session['uploaded_filename'] = file.filename
         session['upload_timestamp'] = timestamp
         session['file_store'] = selected_store  # Store which store this file belongs to
@@ -3076,16 +3093,20 @@ def upload_file():
             import json
             # Use the same uploads_dir that was used to save the file
             persistence_file = os.path.join(uploads_dir, '.last_upload.json')
+            # CRITICAL FIX: Normalize file path for Windows compatibility (use forward slashes or os.path.normpath)
+            normalized_file_path = os.path.normpath(file_path)
             with open(persistence_file, 'w') as f:
                 json.dump({
-                    'file_path': file_path,
+                    'file_path': normalized_file_path,
                     'filename': file.filename,
                     'timestamp': timestamp,
                     'store': selected_store
                 }, f)
             logging.info(f"✅ Saved upload info to persistent file: {persistence_file}")
+            logging.info(f"✅ Normalized file path stored: {normalized_file_path}")
         except Exception as persist_err:
             logging.warning(f"Could not save persistent upload info: {persist_err}")
+            logging.error(traceback.format_exc())
         
         logging.info(f"✅ Session updated and saved: file_path={file_path}, filename={file.filename}, permanent={session.permanent}")
         logging.info(f"✅ Session data: {dict(session)}")
@@ -8540,7 +8561,10 @@ def generate_labels():
             logging.error(f"Lineage enrichment failed: {enrich_err}")
 
         _enrichment_time = time.time() - _enrichment_start
-        logging.info(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
+        if _enrichment_time > 1.0:  # Only log if it takes more than 1 second
+            logging.info(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
+        else:
+            logging.debug(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
 
         # Bail out early if no records made it this far (prevents NoneType errors downstream)
         if not records:
@@ -8557,10 +8581,17 @@ def generate_labels():
         cache_hit = fast_engine.cache_hits > cache_hits_before
         update_generation_stats(len(records), generation_time, cache_hit)
         
-        logging.info(
-            f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s "
-            f"({generation_time/len(records):.3f}s per label, cache_hit={cache_hit})"
-        )
+        # Only log detailed stats if generation takes more than 5 seconds or has many records
+        if generation_time > 5.0 or len(records) > 50:
+            logging.info(
+                f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s "
+                f"({generation_time/len(records):.3f}s per label, cache_hit={cache_hit})"
+            )
+        else:
+            logging.debug(
+                f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s "
+                f"({generation_time/len(records):.3f}s per label, cache_hit={cache_hit})"
+            )
         if hasattr(final_doc, 'labels_rendered'):
             logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
         if final_doc is None:
