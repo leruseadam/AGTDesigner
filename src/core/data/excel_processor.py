@@ -3729,19 +3729,28 @@ class ExcelProcessor:
             # Skip tags that already have canonical_lineage/currentLineage to speed up loading
             tags_to_enrich = []
             tags_with_lineage = 0
+            product_names = []
             for tag in tags:
                 if tag.get('canonical_lineage') or tag.get('currentLineage'):
                     tags_with_lineage += 1
                 else:
                     tags_to_enrich.append(tag)
+                    # Collect product names while iterating (performance optimization)
+                    product_name = tag.get('Product Name*', tag.get('ProductName', ''))
+                    if product_name:
+                        product_names.append(product_name)
             
             # If most tags already have lineage, skip enrichment for speed
             if tags_with_lineage >= len(tags) * 0.9:  # 90%+ already have lineage
                 logger.info(f"⚡ Skipping enrichment - {tags_with_lineage}/{len(tags)} tags already have lineage")
                 return tags
             
+            # PERFORMANCE: Early exit if no product names to lookup
+            if not product_names:
+                logger.debug("⚡ No product names to enrich - skipping database lookup")
+                return tags
+            
             # Batch lookup products from database (only for tags missing lineage)
-            product_names = [tag.get('Product Name*', tag.get('ProductName', '')) for tag in tags_to_enrich if tag.get('Product Name*') or tag.get('ProductName')]
             if not product_names:
                 logger.debug("No product names to enrich")
                 return tags
