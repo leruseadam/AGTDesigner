@@ -672,6 +672,10 @@ class ProductDatabase:
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor ON products("Vendor/Supplier*")')
                 if 'canonical_lineage' in product_columns:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_canonical_lineage ON products(canonical_lineage)')
+
+                # CRITICAL PERFORMANCE FIX: Add index on LOWER("Product Name*") for tag enrichment queries
+                # This prevents full table scans during tag generation (5-minute delay fix)
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_name_lower ON products(LOWER("Product Name*"))')
                 
                 conn.commit()
                 
