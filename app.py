@@ -8037,15 +8037,9 @@ def generate_labels():
                 excel_processor.selected_tags = valid_selected_tags
                 logging.info(f"🔍 Set selected_tags on Excel processor: {len(valid_selected_tags)} tags")
             
-            # GUARANTEED FIX: Update DataFrame from database BEFORE getting records
-            # This ensures records are built with database lineage, not Excel file lineage
-            if excel_processor and hasattr(excel_processor, '_update_dataframe_lineage_from_database'):
-                try:
-                    logging.info("🔄 GUARANTEED FIX: Updating DataFrame lineage from database before get_selected_records...")
-                    excel_processor._update_dataframe_lineage_from_database()
-                    logging.info("✅ GUARANTEED FIX: DataFrame lineage updated from database")
-                except Exception as df_update_err:
-                    logging.warning(f"Could not update DataFrame lineage from database: {df_update_err}")
+            # PERFORMANCE: Skip expensive DataFrame update - enrichment below will handle database lineage
+            # This dramatically speeds up generation by avoiding expensive DataFrame update
+            # Database enrichment happens after records are built, which is faster
             
             records = excel_processor.get_selected_records(template_type)
             logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
