@@ -9615,8 +9615,8 @@ def get_available_tags():
                             product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
                             logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
 
-                        lineage_map = {}
-                        if product_names:
+                            lineage_map = {}
+                            if product_names:
                             try:
                                 # PERFORMANCE FIX: Query only lineage fields, not all 47 columns
                                 conn = product_db._get_connection()
