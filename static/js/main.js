@@ -11996,11 +11996,12 @@ const TagManager = {
                     // Update file info
                     const fileInfoText = document.getElementById('fileInfoText');
                     if (fileInfoText) {
-                        fileInfoText.textContent = fileData.filename;
+                        // Prefer full file path if available
+                        fileInfoText.textContent = fileData.file_path || fileData.filename;
                     }
                     const currentFileInfo = document.getElementById('currentFileInfo');
                     if (currentFileInfo) {
-                        currentFileInfo.textContent = fileData.filename;
+                        currentFileInfo.textContent = fileData.file_path || fileData.filename;
                     }
                     verboseLog(`File info updated: ${fileData.filename} (${fileData.row_count || 0} rows)`);
                 }
@@ -14705,7 +14706,8 @@ const TagManager = {
             // Update file info immediately
             const fileInfoText = document.getElementById('fileInfoText');
             if (fileInfoText) {
-                fileInfoText.textContent = file.name;
+                // Prefer server-returned full path when available
+                fileInfoText.textContent = uploadData?.file_path || file.name;
             }
             
             // CRITICAL FIX: Save filename to sessionStorage for cache key generation
