@@ -2927,7 +2927,10 @@ def upload_file():
         logging.info(f"🔍 Request headers: X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}, Remote-Addr={request.remote_addr}")
         
         # CRITICAL: Require store selection before upload
-        if not has_store_selection():
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
             logging.error(f"❌ Upload attempted without store selection - IP: {ip_address}, Session: {session_store}")
             logging.error(f"❌ IP store selections: {list(_ip_store_selections.keys())}")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
@@ -3806,11 +3809,12 @@ def upload_file_simple_pythonanywhere():
         request_start = time.time()
         logging.info("=== INSTANT UPLOAD START ===")
 
-        if not has_store_selection():
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
             logging.error("Upload attempted without store selection")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
-
-        selected_store = get_current_store_name()
 
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
