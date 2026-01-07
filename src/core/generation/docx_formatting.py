@@ -469,7 +469,13 @@ def set_cell_background(cell, color_hex):
         shd.set(qn('w:themeFill'), '0')
         tcPr.append(shd)
         for paragraph in cell.paragraphs:
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            # Check if this cell contains PRODUCTBRAND_CENTER markers (brand names should be centered)
+            # Otherwise use left alignment for lineage (strain types like HYBRID, INDICA)
+            cell_text = ''.join(run.text for run in paragraph.runs)
+            if 'PRODUCTBRAND_CENTER_START' in cell_text or 'PRODUCTBRAND_CENTER_END' in cell_text:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            else:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
             for run in paragraph.runs:
                 run.font.color.rgb = RGBColor(255, 255, 255)
                 run.font.bold = True
