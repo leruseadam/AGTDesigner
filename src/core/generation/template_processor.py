@@ -1516,6 +1516,8 @@ class TemplateProcessor:
                 # Only do minimal required processing
                 from src.core.generation.docx_formatting import remove_all_headers_and_footers
                 rendered_doc = remove_all_headers_and_footers(rendered_doc)
+                # CRITICAL FIX: Always clean markers even when skipping other post-processing
+                self._final_marker_cleanup(rendered_doc)
                 return rendered_doc
             
             # PERFORMANCE FIX: Disable expensive post-processing to eliminate 3-minute delays
@@ -1527,6 +1529,9 @@ class TemplateProcessor:
             # PERFORMANCE FIX: Skip expensive operations, just do essential cleanup
             from src.core.generation.docx_formatting import remove_all_headers_and_footers
             rendered_doc = remove_all_headers_and_footers(rendered_doc)
+            
+            # CRITICAL FIX: Always clean markers even when skipping other post-processing
+            self._final_marker_cleanup(rendered_doc)
             
             return rendered_doc
             
