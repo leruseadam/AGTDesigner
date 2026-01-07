@@ -148,6 +148,10 @@ class TemplateProcessor:
         self.font_scheme = font_scheme
         self.logger = logging.getLogger(__name__)  # Initialize logger first
         
+        # PERFORMANCE: Reduce logging on PythonAnywhere for speed
+        if IS_PYTHONANYWHERE:
+            self.logger.setLevel(logging.ERROR)  # Only show errors, skip all debug/info/warning
+        
         # CRITICAL FIX: Adjust scale factor for double template 12-label expansion
         # When the double template expands to 12 labels, cells become smaller, so we need to adjust the scale factor
         if template_type == 'double':
@@ -1094,11 +1098,19 @@ class TemplateProcessor:
                 else:
                     # Large batches: use chunking for better performance
                     # Use reasonable chunk size based on template type
-                    if self.template_type == 'double':
-                        self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # 4x3 grid = 12 labels per page
+                    # PERFORMANCE: On PythonAnywhere, use smaller chunks for faster processing
+                    if IS_PYTHONANYWHERE:
+                        if self.template_type == 'double':
+                            self.chunk_size = 8  # Smaller chunks on PythonAnywhere
+                        else:
+                            self.chunk_size = 20  # Much smaller chunks for speed
+                        self.logger.info(f"⚡ PYTHONANYWHERE: Large batch ({len(records)} records) - using smaller chunk size {self.chunk_size} for speed")
                     else:
-                        self.chunk_size = min(50, CHUNK_SIZE_LIMIT)  # 3x3 grid = 9 labels per page, but allow up to 50 for performance
-                    self.logger.info(f"⚡ PERFORMANCE: Large batch ({len(records)} records) - using chunking with size {self.chunk_size} for '{self.template_type}' template")
+                        if self.template_type == 'double':
+                            self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # 4x3 grid = 12 labels per page
+                        else:
+                            self.chunk_size = min(50, CHUNK_SIZE_LIMIT)  # 3x3 grid = 9 labels per page, but allow up to 50 for performance
+                        self.logger.info(f"⚡ PERFORMANCE: Large batch ({len(records)} records) - using chunking with size {self.chunk_size} for '{self.template_type}' template")
                 self.start_time = time.time()
                 self.chunk_count = 1
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
@@ -1487,23 +1499,32 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
             # PERFORMANCE: Skip post-processing for large chunks to save time
-            num_tables = len(rendered_doc.tables)
-            if num_tables <= 10:  # Only post-process smaller documents
+            # PERFORMANCE: On PythonAnywhere, skip all post-processing for speed
+            if IS_PYTHONANYWHERE:
+                self.logger.info(f"⚡ PYTHONANYWHERE: Skipping post-processing for speed")
+                # Apply lineage colors only (fast operation)
                 try:
-                    # Post-process the document to apply dynamic font sizing first
-                    self._post_process_and_replace_content(rendered_doc)
-                    
-                    # Check timeout before lineage colors
-                    if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                        self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                        return rendered_doc
-                    
-                    # Apply lineage colors last to ensure they are not overwritten
                     apply_lineage_colors(rendered_doc)
-                except Exception as processing_error:
-                    self.logger.warning(f"Skipping post-processing due to error: {processing_error}")
+                except Exception as e:
+                    self.logger.warning(f"Lineage color error: {e}")
             else:
-                self.logger.warning(f"PERFORMANCE: Skipping post-processing for large chunk with {num_tables} tables")
+                num_tables = len(rendered_doc.tables)
+                if num_tables <= 10:  # Only post-process smaller documents
+                    try:
+                        # Post-process the document to apply dynamic font sizing first
+                        self._post_process_and_replace_content(rendered_doc)
+                        
+                        # Check timeout before lineage colors
+                        if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
+                            self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
+                            return rendered_doc
+                        
+                        # Apply lineage colors last to ensure they are not overwritten
+                        apply_lineage_colors(rendered_doc)
+                    except Exception as processing_error:
+                        self.logger.warning(f"Skipping post-processing due to error: {processing_error}")
+                else:
+                    self.logger.warning(f"PERFORMANCE: Skipping post-processing for large chunk with {num_tables} tables")
             
             # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
             # Cell widths already standardized
