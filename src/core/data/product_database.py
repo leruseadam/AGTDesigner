@@ -828,11 +828,50 @@ class ProductDatabase:
                     except Exception as e:
                         logger.warning(f"Could not add essential column {col_name}: {e}")
             
+            # PERFORMANCE FIX: Add normalized_product_strain column for fast joins
+            if 'normalized_product_strain' not in existing_columns:
+                try:
+                    cursor.execute('ALTER TABLE products ADD COLUMN normalized_product_strain TEXT')
+                    logger.info("Added normalized_product_strain column for performance optimization")
+                    added_columns.append('normalized_product_strain')
+                except Exception as e:
+                    logger.warning(f"Could not add normalized_product_strain column: {e}")
+            
             if added_columns:
                 conn.commit()
                 logger.info(f"Added {len(added_columns)} essential columns to products table")
             else:
                 logger.debug("All essential columns already exist")
+            
+            # PERFORMANCE FIX: Populate normalized_product_strain if column exists but is empty
+            cursor.execute("PRAGMA table_info(products)")
+            product_columns = {row[1] for row in cursor.fetchall()}
+            if 'normalized_product_strain' in product_columns:
+                try:
+                    # Check if column needs population
+                    cursor.execute('SELECT COUNT(*) FROM products WHERE normalized_product_strain IS NULL AND "Product Strain" IS NOT NULL AND "Product Strain" != ""')
+                    count_result = cursor.fetchone()
+                    needs_population = count_result and count_result[0] > 0
+                    if needs_population:
+                        logger.info(f"Populating normalized_product_strain for {count_result[0]} products...")
+                        cursor.execute('SELECT id, "Product Strain" FROM products WHERE normalized_product_strain IS NULL AND "Product Strain" IS NOT NULL AND "Product Strain" != ""')
+                        products_to_update = cursor.fetchall()
+                        updated_count = 0
+                        for product_id, product_strain in products_to_update:
+                            if product_strain:
+                                normalized_strain = self._normalize_strain_name(str(product_strain).strip())
+                                if normalized_strain:
+                                    cursor.execute('UPDATE products SET normalized_product_strain = ? WHERE id = ?', (normalized_strain, product_id))
+                                    updated_count += 1
+                        conn.commit()
+                        logger.info(f"✅ Populated normalized_product_strain for {updated_count} products")
+                    
+                    # Create index for fast joins
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized_strain ON products(normalized_product_strain)')
+                    conn.commit()
+                    logger.info("✅ Created index on normalized_product_strain")
+                except Exception as e:
+                    logger.warning(f"Could not populate normalized_product_strain: {e}")
             
             # Ensure lineage_history table exists even on legacy databases
             cursor.execute('''
@@ -1562,15 +1601,19 @@ class ProductDatabase:
                     values_to_insert = []
                     
                     # Map of data to potential column names
+                    product_strain = self._calculate_product_strain_original(
+                        product_data.get('Product Type*', ''),
+                        product_data.get('Product Name*', ''),
+                        product_data.get('Description', ''),
+                        product_data.get('Ratio', '')
+                    )
+                    normalized_product_strain = self._normalize_strain_name(product_strain) if product_strain else None
+                    
                     column_data_map = {
                         'Product Name*': product_name,
                         'normalized_name': normalized_name,
-                        'Product Strain': self._calculate_product_strain_original(
-                            product_data.get('Product Type*', ''),
-                            product_data.get('Product Name*', ''),
-                            product_data.get('Description', ''),
-                            product_data.get('Ratio', '')
-                        ),
+                        'Product Strain': product_strain,
+                        'normalized_product_strain': normalized_product_strain,
                         'Product Type*': product_data.get('Product Type*'),  # EXCEL PRIORITY: Excel Product Type (High THC/CBD) always overwrites DB
                         'Vendor/Supplier*': product_data.get('Vendor/Supplier*'),
                         'Product Brand': product_data.get('Product Brand'),
@@ -4262,12 +4305,18 @@ class ProductDatabase:
                     elif col_name == 'AJ':
                         update_values.append(product_data.get('THC Content', ''))
                     elif col_name == 'Product Strain':
-                        update_values.append(self._calculate_product_strain_original(
+                        product_strain = self._calculate_product_strain_original(
                             product_data.get('Product Type*', ''),
                             product_data.get('Product Name*', ''),
                             product_data.get('Description', ''),
                             product_data.get('Ratio', '')
-                        ))
+                        )
+                        update_values.append(product_strain)
+                        # Also update normalized_product_strain if column exists
+                        if 'normalized_product_strain' in available_columns:
+                            normalized_strain = self._normalize_strain_name(product_strain) if product_strain else None
+                            update_fields.append('"normalized_product_strain" = ?')
+                            update_values.append(normalized_strain)
                     else:
                         update_values.append(col_value)
             
@@ -5022,7 +5071,7 @@ class ProductDatabase:
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                 WHERE p."Product Name*" = ? OR p."ProductName" = ?
                 ORDER BY p.id DESC
                 LIMIT 1
@@ -5066,7 +5115,7 @@ class ProductDatabase:
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                 WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
                    OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
                 ORDER BY p.id DESC

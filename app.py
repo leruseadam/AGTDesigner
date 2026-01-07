@@ -7150,7 +7150,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
                     COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                 WHERE p.normalized_name IN ({placeholders})
             ''', chunk)
             for row in cursor.fetchall():
@@ -7928,9 +7928,9 @@ def generate_labels():
                                             SELECT p."Product Name*",
                                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage
                                             FROM products p
-                                            LEFT JOIN strains s1 ON p.strain_id = s1.id
-                                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
-                                            WHERE p."Product Name*" IN ({placeholders})
+                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            WHERE p."Product Name*" IN ({placeholders})
                                         ''', product_names_for_batch)
                                         for row in cur.fetchall():
                                             pname, lineage = row[0], row[1]
@@ -8634,9 +8634,9 @@ def generate_labels():
                                     p.normalized_name,
                                     COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
                                 FROM products p
-                                LEFT JOIN strains s1 ON p.strain_id = s1.id
-                                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
-                                WHERE p."Product Name*" IN ({placeholders})
+                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            WHERE p."Product Name*" IN ({placeholders})
                             ''', product_names)
                             for row in cur.fetchall():
                                 pname, norm_name, lineage = row[0], row[1], row[2]
@@ -10515,9 +10515,9 @@ def get_available_tags():
                                 COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS current_lineage,
                                 COALESCE(s1.strain_name, s2.strain_name, p."Product Strain") AS current_strain
                             FROM products p
-                            LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
-                            WHERE p."Product Name*" = ? OR p.normalized_name = ?
+                LEFT JOIN strains s1 ON p.strain_id = s1.id
+                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                WHERE p."Product Name*" = ? OR p.normalized_name = ?
                             ORDER BY p.id DESC
                             LIMIT 1
                         '''
@@ -10580,9 +10580,9 @@ def get_available_tags():
                                                     p."Product Name*" AS product_name,
                                                     p.normalized_name AS normalized_name
                                                 FROM products p
-                                                LEFT JOIN strains s1 ON p.strain_id = s1.id
-                                                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
-                                                WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                                 ORDER BY p.id DESC
                                             '''
                                             cur.execute(chunk_query, chunk + chunk)
@@ -10601,9 +10601,9 @@ def get_available_tags():
                                             p."Product Name*" AS product_name,
                                             p.normalized_name AS normalized_name
                                         FROM products p
-                                        LEFT JOIN strains s1 ON p.strain_id = s1.id
-                                        LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
-                                        WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                         ORDER BY p.id DESC
                                     '''
                                     # Add query timing to detect slow queries
