@@ -7950,6 +7950,7 @@ def generate_labels():
                                 
                                 # Convert database records to the format expected by TemplateProcessor
                                 records = []
+                                batch_lineage_update_count = 0  # Track how many lineages were updated from batch query
                                 # PERFORMANCE: Remove all per-record logging for speed (only log summary)
                                 for idx, db_record in enumerate(valid_db_records):
                                     product_name_for_record = db_record.get('Product Name*', '')
@@ -7991,9 +7992,9 @@ def generate_labels():
                                         docx_lineage = str(db_lineage_from_method).strip().upper()
                                         # Log if lineage differs from what's in db_record (first 5 only)
                                         old_lineage = db_record.get('Lineage', '')
-                                        if old_lineage != docx_lineage and forced_count < 5:
+                                        if old_lineage != docx_lineage and batch_lineage_update_count < 5:
                                             logging.info(f"🔄 BATCH LINEAGE UPDATE: '{product_name_for_record[:50]}' - '{old_lineage}' → '{docx_lineage}'")
-                                            forced_count += 1
+                                            batch_lineage_update_count += 1
                                     else:
                                         # No database lineage found - use defaults based on product type
                                         product_type = processed_record.get('Product Type*', '').lower()
