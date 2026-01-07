@@ -684,6 +684,10 @@ class ProductDatabase:
                 # This prevents full table scans during tag generation (5-minute delay fix)
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_name_lower ON products(LOWER("Product Name*"))')
                 
+                # CRITICAL PERFORMANCE FIX: Add index on normalized_name for fast get_products_by_names queries
+                # This is critical for tag generation performance on PythonAnywhere
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized_name ON products(normalized_name)')
+                
                 conn.commit()
                 
                 # Check if we need to add missing columns (migration)
@@ -5682,7 +5686,121 @@ class ProductDatabase:
             logger.error(f"Error adding missing columns: {e}")
             raise
 
-    @timed_operation("get_products_by_names")
+    @timed_operation("get_products_by_names_fast")
+    def get_products_by_names_fast(self, product_names: List[str], fields: List[str] = None) -> List[Dict[str, Any]]:
+        """
+        Fast version that only selects needed fields for tag enrichment.
+        Use this instead of get_products_by_names when you only need lineage, DOH, price, THC/CBD.
+        
+        Args:
+            product_names: List of product names to look up
+            fields: Optional list of specific fields to select. If None, selects only enrichment fields.
+        
+        Returns:
+            List of product dictionaries with requested fields
+        """
+        try:
+            self.init_database()
+            
+            if not product_names:
+                return []
+            
+            # Normalize all product names
+            normalized_names = [self._normalize_product_name(name) for name in product_names]
+            
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # PERFORMANCE FIX: Only select fields needed for tag enrichment by default
+            # This reduces query time from seconds to milliseconds on PythonAnywhere
+            if fields is None:
+                # Default: only fields needed for tag enrichment (lineage, DOH, price, THC/CBD)
+                fields = [
+                    '"Product Name*"', 'normalized_name', '"Lineage"', 'sovereign_lineage',
+                    '"DOH"', '"DOH Compliant (Yes/No)"', '"Price"',
+                    '"THC test result"', '"CBD test result"'
+                ]
+            
+            # Use placeholders for the IN clause
+            placeholders = ','.join(['?' for _ in normalized_names])
+            fields_str = ', '.join(fields)
+            
+            # PERFORMANCE: Optimized query with only needed columns
+            cursor.execute(f'''
+                SELECT {fields_str}
+                FROM products
+                WHERE normalized_name IN ({placeholders})
+            ''', normalized_names)
+            
+            results = cursor.fetchall()
+            
+            # Create a mapping from normalized names to results
+            products_map = {}
+            for result in results:
+                # Find normalized_name column index
+                normalized_name_idx = fields.index('normalized_name') if 'normalized_name' in fields else 1
+                normalized_name = result[normalized_name_idx]
+                if normalized_name not in products_map:
+                    products_map[normalized_name] = []
+                products_map[normalized_name].append(result)
+            
+            # Build the final list maintaining the order of requested product names
+            products = []
+            for i, product_name in enumerate(product_names):
+                normalized_name = normalized_names[i]
+                if normalized_name in products_map:
+                    result = products_map[normalized_name][0]
+                    
+                    # Build product dict based on available fields
+                    product_info = {}
+                    for idx, field in enumerate(fields):
+                        field_clean = field.strip('"')
+                        if field_clean == 'Product Name*':
+                            product_info['Product Name*'] = result[idx]
+                            product_info['ProductName'] = result[idx]
+                        elif field_clean == 'normalized_name':
+                            product_info['normalized_name'] = result[idx]
+                        elif field_clean == 'Lineage':
+                            product_info['Lineage'] = result[idx]
+                        elif field_clean == 'sovereign_lineage':
+                            product_info['sovereign_lineage'] = result[idx]
+                            # Use sovereign_lineage if available, otherwise use Lineage
+                            if result[idx] and str(result[idx]).strip() not in ['', 'None', 'nan']:
+                                product_info['canonical_lineage'] = result[idx]
+                                product_info['Lineage'] = result[idx]
+                        elif field_clean in ['DOH', 'DOH Compliant (Yes/No)']:
+                            product_info[field_clean] = result[idx]
+                            if field_clean == 'DOH Compliant (Yes/No)':
+                                product_info['DOH'] = result[idx]
+                        elif field_clean == 'Price':
+                            product_info['Price'] = result[idx]
+                        elif field_clean == 'THC test result':
+                            product_info['THC test result'] = result[idx]
+                            product_info['THC'] = result[idx]
+                        elif field_clean == 'CBD test result':
+                            product_info['CBD test result'] = result[idx]
+                            product_info['CBD'] = result[idx]
+                    
+                    # Ensure canonical_lineage is set
+                    if 'canonical_lineage' not in product_info:
+                        product_info['canonical_lineage'] = product_info.get('Lineage', 'MIXED')
+                    
+                    products.append(product_info)
+                else:
+                    # Product not found - return minimal placeholder
+                    products.append({
+                        'Product Name*': product_name,
+                        'ProductName': product_name,
+                        'Lineage': 'MIXED',
+                        'canonical_lineage': 'MIXED'
+                    })
+            
+            return products
+            
+        except Exception as e:
+            logger.error(f"Error in get_products_by_names_fast: {e}")
+            return []
+
     def get_products_by_names(self, product_names: List[str]) -> List[Dict[str, Any]]:
         """Get information about multiple products by their names (with caching)."""
         try:

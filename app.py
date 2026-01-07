@@ -7083,21 +7083,28 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
+        # PERFORMANCE FIX: Normalize product names and use normalized_name index for faster lookups
+        # This is much faster than LOWER("Product Name*") which requires a function call on every row
+        normalized_names = [product_db._normalize_product_name(name) for name in product_names]
+        
         chunk_size = 400
-        for start in range(0, len(product_names), chunk_size):
-            chunk = product_names[start:start + chunk_size]
+        for start in range(0, len(normalized_names), chunk_size):
+            chunk = normalized_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
+            # PERFORMANCE: Use normalized_name index instead of LOWER() function
             cursor.execute(f'''
-                SELECT "Product Name*", "Lineage", "canonical_lineage"
+                SELECT "Product Name*", "Lineage", "canonical_lineage", sovereign_lineage
                 FROM products
-                WHERE LOWER("Product Name*") IN ({placeholders})
-            ''', [name.lower() for name in chunk])
+                WHERE normalized_name IN ({placeholders})
+            ''', chunk)
             for row in cursor.fetchall():
                 db_name = row[0]
-                # CRITICAL FIX: Prioritize canonical_lineage (database source of truth) over Lineage field
-                # canonical_lineage is what the UI displays and should be used consistently
-                db_lineage = row[2] or row[1]  # canonical_lineage first, then Lineage as fallback
+                # CRITICAL FIX: Prioritize sovereign_lineage (manual edits) > canonical_lineage > Lineage
+                db_lineage = (row[3] if row[3] and str(row[3]).strip() not in ['', 'None', 'nan'] else None) or row[2] or row[1]
                 if db_name and db_lineage:
+                    # Map by both normalized and original name for O(1) lookup
+                    normalized = product_db._normalize_product_name(db_name)
+                    lineage_map[normalized] = str(db_lineage).strip().upper()
                     lineage_map[db_name.lower().strip()] = str(db_lineage).strip().upper()
         
         if not lineage_map:
@@ -7113,7 +7120,9 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
                 continue
             # Only align if missing canonical_lineage/currentLineage
             if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
-                db_lineage = lineage_map.get(str(name).lower().strip())
+                # Try normalized name first (faster), then fallback to lowercase
+                normalized = product_db._normalize_product_name(name)
+                db_lineage = lineage_map.get(normalized) or lineage_map.get(str(name).lower().strip())
                 if db_lineage:
                     tag['Lineage'] = db_lineage
                     tag['lineage'] = db_lineage.lower()
@@ -9632,6 +9641,12 @@ def get_available_tags():
                 simple_processor._last_loaded_file = session_file_path
                 logging.info(f"📂 Loaded Excel file: {session_file_path}")
 
+            # PERFORMANCE FIX: Set skip_enrichment flag when fast_load is enabled
+            # This prevents expensive database queries during tag generation
+            if fast_load:
+                simple_processor._skip_enrichment = True
+                logging.info("⚡ PERFORMANCE: Set _skip_enrichment=True for fast_load mode")
+
             if simple_processor.df is not None and not simple_processor.df.empty:
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
@@ -9921,8 +9936,15 @@ def get_available_tags():
         # CRITICAL: Never return cached tags when Excel data exists
         if fast_load and cached_tags and not recently_updated_lineage and not has_excel_data:
             logging.info(f"⚡ FAST-LOAD: Returning cached available_tags immediately ({len(cached_tags)} tags)")
-            # PERFORMANCE: Skip alignment if tags already have lineage (90%+ aligned)
-            aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
+            # PERFORMANCE FIX: Skip database alignment entirely in fast_load mode if tags already have lineage
+            # Check if tags already have lineage before calling expensive database query
+            tags_with_lineage = sum(1 for t in cached_tags if isinstance(t, dict) and (t.get('canonical_lineage') or t.get('currentLineage')))
+            if tags_with_lineage >= len(cached_tags) * 0.9:  # 90%+ already have lineage
+                logging.info(f"⚡ FAST-LOAD: Skipping database alignment - {tags_with_lineage}/{len(cached_tags)} tags already have lineage")
+                aligned_cached_tags = cached_tags  # Use cached tags as-is
+            else:
+                # Only align if most tags are missing lineage
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
             safe_cached_tags = make_json_safe(aligned_cached_tags)
             return jsonify({
                 'tags': safe_cached_tags,

@@ -3770,8 +3770,13 @@ class ExcelProcessor:
                 logger.debug("No product names to enrich")
                 return tags
             
-            # Get database records in batch
-            db_records = product_db.get_products_by_names(product_names)
+            # PERFORMANCE FIX: Use fast method that only selects needed columns (lineage, DOH, price, THC/CBD)
+            # This reduces query time from seconds to milliseconds on PythonAnywhere
+            if hasattr(product_db, 'get_products_by_names_fast'):
+                db_records = product_db.get_products_by_names_fast(product_names)
+            else:
+                # Fallback to full method if fast method not available
+                db_records = product_db.get_products_by_names(product_names)
             if not db_records:
                 logger.debug("No database records found for tag enrichment")
                 return tags
