@@ -7403,9 +7403,34 @@ def generate_labels():
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
             logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly without file I/O")
             import pandas as pd
-            excel_processor.df = pd.DataFrame(selected_tags_from_request)
+            import re
+            
+            # Clean markers from tag data before loading
+            cleaned_tags = []
+            for tag in selected_tags_from_request:
+                cleaned_tag = tag.copy()
+                # Remove all START/END markers from fields
+                for key, value in cleaned_tag.items():
+                    if isinstance(value, str):
+                        # Remove START/END markers - match them without requiring spaces
+                        value = re.sub(r'DESC_START', '', value)
+                        value = re.sub(r'DESC_END', '', value)
+                        value = re.sub(r'PRICE_START', '', value)
+                        value = re.sub(r'PRICE_END', '', value)
+                        value = re.sub(r'LINEAGE_START', '', value)
+                        value = re.sub(r'LINEAGE_END', '', value)
+                        value = re.sub(r'RATIO_START', '', value)
+                        value = re.sub(r'RATIO_END', '', value)
+                        value = re.sub(r'WEIGHTUNITS_START', '', value)
+                        value = re.sub(r'WEIGHTUNITS_END', '', value)
+                        value = re.sub(r'INCL_START', '', value)
+                        value = re.sub(r'INCL_END', '', value)
+                        cleaned_tag[key] = value.strip()
+                cleaned_tags.append(cleaned_tag)
+            
+            excel_processor.df = pd.DataFrame(cleaned_tags)
             excel_processor._last_loaded_file = file_path
-            logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time)")
+            logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time, markers cleaned)")
             needs_file_load = False
         else:
             logging.info("📂 No tags in request - using normal file loading")
@@ -11472,6 +11497,27 @@ def get_available_tags():
             
                 if final_lineage_check_count > 0:
                     logging.info(f"✅ FINAL CHECK: Set database lineage on {final_lineage_check_count} tags that were missing it")
+    
+        # CRITICAL: Clean all markers from tags before returning to frontend
+        import re
+        for tag in all_tags:
+            for key, value in list(tag.items()):
+                if isinstance(value, str):
+                    # Remove all START/END markers
+                    value = re.sub(r'DESC_START', '', value)
+                    value = re.sub(r'DESC_END', '', value)
+                    value = re.sub(r'PRICE_START', '', value)
+                    value = re.sub(r'PRICE_END', '', value)
+                    value = re.sub(r'LINEAGE_START', '', value)
+                    value = re.sub(r'LINEAGE_END', '', value)
+                    value = re.sub(r'RATIO_START', '', value)
+                    value = re.sub(r'RATIO_END', '', value)
+                    value = re.sub(r'WEIGHTUNITS_START', '', value)
+                    value = re.sub(r'WEIGHTUNITS_END', '', value)
+                    value = re.sub(r'INCL_START', '', value)
+                    value = re.sub(r'INCL_END', '', value)
+                    tag[key] = value.strip()
+        logging.info(f"🧹 Cleaned markers from {len(all_tags)} tags before returning to frontend")
     
         safe_all_tags = make_json_safe(all_tags)
         # CRITICAL: NO CACHING - always return fresh data to prevent stale data issues
