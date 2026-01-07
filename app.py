@@ -7086,7 +7086,7 @@ def _normalize_weight_fields(record):
     
     return record
 
-def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
+def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_overwrite: bool = False):
     """
     Ensure tags shown in the UI use the latest lineage from the database.
     Returns a shallow-copied list so cached tag objects are not mutated.
@@ -7100,7 +7100,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
         return tags
     
     # PERFORMANCE: Skip alignment if tags already have database lineage fields
-    if skip_if_aligned:
+    if skip_if_aligned and not force_overwrite:
         tags_with_lineage = sum(1 for t in tags if isinstance(t, dict) and (t.get('canonical_lineage') or t.get('currentLineage')))
         if tags_with_lineage >= len(tags) * 0.9:  # 90%+ already have lineage
             logging.debug(f"⚡ Skipping lineage alignment - {tags_with_lineage}/{len(tags)} tags already have lineage")
@@ -7114,13 +7114,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
         # Copy tags so we don't mutate cached objects
         aligned_tags = [tag.copy() if isinstance(tag, dict) else tag for tag in tags]
         
-        # Collect product names for lookup (only those missing lineage)
+        # Collect product names for lookup
         product_names = []
         for t in aligned_tags:
             if isinstance(t, dict) and t.get('Product Name*'):
-                # Only align if missing canonical_lineage/currentLineage
-                if not (t.get('canonical_lineage') or t.get('currentLineage')):
+                if force_overwrite:
                     product_names.append(t.get('Product Name*'))
+                else:
+                    # Only align if missing canonical_lineage/currentLineage
+                    if not (t.get('canonical_lineage') or t.get('currentLineage')):
+                        product_names.append(t.get('Product Name*'))
         
         if not product_names:
             logging.debug("⚡ No products need lineage alignment")
@@ -7138,26 +7141,33 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
         for start in range(0, len(normalized_names), chunk_size):
             chunk = normalized_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
-            # PERFORMANCE: Use normalized_name index instead of LOWER() function
+        # PERFORMANCE: Use normalized_name index instead of LOWER() function
             cursor.execute(f'''
-                SELECT "Product Name*", "Lineage", "canonical_lineage", sovereign_lineage
-                FROM products
-                WHERE normalized_name IN ({placeholders})
+                SELECT 
+                    p."Product Name*" AS product_name,
+                    p.normalized_name AS normalized_name,
+                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p.normalized_name IN ({placeholders})
             ''', chunk)
             for row in cursor.fetchall():
                 db_name = row[0]
-                # CRITICAL FIX: Prioritize sovereign_lineage (manual edits) > canonical_lineage > Lineage
-                db_lineage = (row[3] if row[3] and str(row[3]).strip() not in ['', 'None', 'nan'] else None) or row[2] or row[1]
-                if db_name and db_lineage:
-                    # Map by both normalized and original name for O(1) lookup
+                db_norm = row[1]
+                db_lineage = row[2]
+                if db_name and db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                    lineage_clean = str(db_lineage).strip().upper()
+                    # Map by normalized and original name for O(1) lookup
+                    if db_norm:
+                        lineage_map[str(db_norm).strip().lower()] = lineage_clean
                     normalized = product_db._normalize_product_name(db_name)
-                    lineage_map[normalized] = str(db_lineage).strip().upper()
-                    lineage_map[db_name.lower().strip()] = str(db_lineage).strip().upper()
+                    lineage_map[normalized] = lineage_clean
+                    lineage_map[db_name.lower().strip()] = lineage_clean
         
         if not lineage_map:
             return aligned_tags
         
-        # Apply lineage to tags (only those that were missing it)
+        # Apply lineage to tags
         aligned_count = 0
         for tag in aligned_tags:
             if not isinstance(tag, dict):
@@ -7165,20 +7175,20 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True):
             name = tag.get('Product Name*')
             if not name:
                 continue
-            # Only align if missing canonical_lineage/currentLineage
-            if not (tag.get('canonical_lineage') or tag.get('currentLineage')):
-                # Try normalized name first (faster), then fallback to lowercase
-                normalized = product_db._normalize_product_name(name)
-                db_lineage = lineage_map.get(normalized) or lineage_map.get(str(name).lower().strip())
-                if db_lineage:
-                    tag['Lineage'] = db_lineage
-                    tag['lineage'] = db_lineage.lower()
-                    tag['canonical_lineage'] = db_lineage
-                    tag['currentLineage'] = db_lineage
-                    aligned_count += 1
+            # Try normalized name first (faster), then fallback to lowercase
+            normalized = product_db._normalize_product_name(name)
+            db_lineage = lineage_map.get(normalized) or lineage_map.get(str(name).lower().strip())
+            if not db_lineage:
+                continue
+            if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                tag['Lineage'] = db_lineage
+                tag['lineage'] = db_lineage.lower()
+                tag['canonical_lineage'] = db_lineage
+                tag['currentLineage'] = db_lineage
+                aligned_count += 1
         
         if aligned_count > 0:
-            logging.debug(f"✅ Aligned {aligned_count} tags with database lineage")
+            logging.info(f"✅ Aligned {aligned_count} tags with database lineage (force_overwrite={force_overwrite})")
         
         return aligned_tags
     except Exception as e:
@@ -8545,6 +8555,72 @@ def generate_labels():
         
         # Log the number of records passed to the template processor
         logging.info(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
+        
+        # CRITICAL FIX: Force database lineage on ALL records before generation
+        # This ensures sovereign_lineage from strains table is used, not Excel Lineage
+        try:
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
+            if product_db and records:
+                logging.info(f"🔄 FORCING DB LINEAGE: Overwriting lineage for {len(records)} records from database...")
+                conn = product_db._get_connection()
+                cur = conn.cursor()
+                
+                # Build lineage lookup with strain join (same as get_product_lineage uses)
+                lineage_lookup = {}
+                try:
+                    cur.execute('''
+                        SELECT 
+                            p."Product Name*",
+                            p.normalized_name,
+                            COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                        FROM products p
+                        LEFT JOIN strains s ON p.strain_id = s.id
+                        WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL
+                          AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
+                    ''')
+                    for row in cur.fetchall():
+                        pname, norm_name, lineage = row[0], row[1], row[2]
+                        if pname and lineage:
+                            lineage_upper = str(lineage).strip().upper()
+                            lineage_lookup[pname] = lineage_upper
+                            lineage_lookup[pname.lower().strip()] = lineage_upper
+                            if norm_name:
+                                lineage_lookup[norm_name] = lineage_upper
+                    logging.info(f"✅ Built lineage lookup with {len(lineage_lookup)} entries")
+                except Exception as q_err:
+                    logging.warning(f"Lineage lookup query failed: {q_err}")
+                
+                # Apply to records
+                forced_count = 0
+                for rec in records:
+                    pname = rec.get('ProductName') or rec.get('Product Name*') or ''
+                    if not pname:
+                        continue
+                    
+                    # Try exact match, then lowercase, then normalized
+                    db_lineage = lineage_lookup.get(pname) or lineage_lookup.get(pname.lower().strip())
+                    if not db_lineage:
+                        try:
+                            norm = product_db._normalize_product_name(pname)
+                            db_lineage = lineage_lookup.get(norm)
+                        except Exception:
+                            pass
+                    
+                    if db_lineage:
+                        old_lineage = rec.get('Lineage', '')
+                        rec['Lineage'] = db_lineage
+                        rec['lineage'] = db_lineage.lower()
+                        rec['currentLineage'] = db_lineage
+                        rec['canonical_lineage'] = db_lineage
+                        if old_lineage != db_lineage:
+                            forced_count += 1
+                            if forced_count <= 5:  # Log first 5 changes
+                                logging.info(f"🔄 LINEAGE FORCED: '{pname}' - '{old_lineage}' → '{db_lineage}'")
+                
+                logging.info(f"✅ FORCED DB LINEAGE: Updated {forced_count}/{len(records)} records")
+        except Exception as force_err:
+            logging.warning(f"Force DB lineage failed: {force_err}")
 
         # For horizontal/vertical/double templates, ensure all records are processed (no chunking)
         if template_type in ['horizontal', 'vertical', 'double']:

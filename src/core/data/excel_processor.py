@@ -3580,9 +3580,22 @@ class ExcelProcessor:
                 safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
             )
             
+            # FALLBACK: If vendor is missing, try to extract from product name (e.g., "Product Name by Vendor Name")
+            # This handles cases where Excel file doesn't have vendor columns populated
+            if not vendor_value and product_name:
+                import re
+                # Pattern: "Product Name by Vendor Name" or "Product Name by Vendor Name - Weight"
+                match = re.search(r'\s+by\s+([^-]+?)(?:\s*-\s*\d|$)', product_name, re.IGNORECASE)
+                if match:
+                    extracted_vendor = match.group(1).strip()
+                    if extracted_vendor and len(extracted_vendor) > 1:
+                        vendor_value = extracted_vendor
+                        logger.debug(f"Extracted vendor '{vendor_value}' from product name '{product_name}'")
+            
             # Debug logging for vendor field detection
             if not vendor_value and product_name:
-                logger.debug(f"Vendor field is empty for product '{product_name}'. Available vendor columns: {[col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
+                available_vendor_cols = [col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]
+                logger.warning(f"⚠️ Vendor field is empty for product '{product_name}'. Available vendor columns: {available_vendor_cols}")
                 logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
             
             # Extract THC/CBD values from the appropriate columns

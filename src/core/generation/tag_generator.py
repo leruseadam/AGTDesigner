@@ -1368,6 +1368,9 @@ def combine_documents(docs):
                 # Continue with other documents instead of failing completely
                 continue
 
+        # CRITICAL FIX: Remove all markers from the combined document before saving
+        _final_marker_cleanup(master_doc)
+
         # Save final document to bytes
         final_buffer = BytesIO()
         master_doc.save(final_buffer)
@@ -1580,6 +1583,9 @@ def generate_multiple_label_tables(records, template_path):
         from src.core.generation.docx_formatting import enforce_arial_bold_all_text
         enforce_arial_bold_all_text(final_doc)
         
+        # CRITICAL FIX: Remove all markers from the final document before saving
+        _final_marker_cleanup(final_doc)
+        
         # Save final document
         output = BytesIO()
         final_doc.save(output)
@@ -1614,6 +1620,109 @@ def set_table_borders(table):
         tblBorders.append(bd)
         
     tblPr.append(tblBorders)
+
+def _final_marker_cleanup(doc):
+    """
+    Final marker cleanup to ensure ALL markers are stripped from the final output.
+    This method runs after all other processing to catch any remaining markers.
+    """
+    try:
+        # Enhanced patterns to catch all marker variations
+        marker_patterns = [
+            r'\b\w+_(START|END)\b',           # Standard markers like PRODUCTBRAND_START
+            r'\b\w+_START\b',                 # START markers specifically
+            r'\b\w+_END\b',                   # END markers specifically
+            r'PRODUCTBRAND_START\s*',         # PRODUCTBRAND_START with optional spaces
+            r'\s*PRODUCTBRAND_END\b',         # PRODUCTBRAND_END with optional spaces
+            r'PRODUCTBRAND_CENTER_START\s*',  # PRODUCTBRAND_CENTER_START with optional spaces
+            r'\s*PRODUCTBRAND_CENTER_END\b',  # PRODUCTBRAND_CENTER_END with optional spaces
+            r'PRODUCTSTRAIN_START\s*',        # PRODUCTSTRAIN_START with optional spaces
+            r'\s*PRODUCTSTRAIN_END\b',        # PRODUCTSTRAIN_END with optional spaces
+            r'LINEAGE_START\s*',              # LINEAGE_START with optional spaces
+            r'\s*LINEAGE_END\b',              # LINEAGE_END with optional spaces
+            r'PRODUCTVENDOR_START\s*',        # PRODUCTVENDOR_START with optional spaces
+            r'\s*PRODUCTVENDOR_END\b',        # PRODUCTVENDOR_END with optional spaces
+            r'THC_CBD_START\s*',              # THC_CBD_START with optional spaces
+            r'\s*THC_CBD_END\b',              # THC_CBD_END with optional spaces
+            r'RATIO_START\s*',                # RATIO_START with optional spaces
+            r'\s*RATIO_END\b',                # RATIO_END with optional spaces
+            r'WEIGHTUNITS_START\s*',          # WEIGHTUNITS_START with optional spaces
+            r'\s*WEIGHTUNITS_END\b',          # WEIGHTUNITS_END with optional spaces
+            r'PRICE_START\s*',                # PRICE_START with optional spaces
+            r'\s*PRICE_END\b',                # PRICE_END with optional spaces
+            r'DESC_START\s*',                 # DESC_START with optional spaces
+            r'\s*DESC_END\b',                 # DESC_END with optional spaces
+            r'\bPRODUCTBRAND\b',              # Standalone PRODUCTBRAND
+            r'\bPRODUCTSTRAIN\b',             # Standalone PRODUCTSTRAIN
+            r'\bPRODUCTVENDOR\b',             # Standalone PRODUCTVENDOR
+            r'\bTHC_CBD\b',                   # Standalone THC_CBD
+            r'\bWEIGHTUNITS\b',               # Standalone WEIGHTUNITS
+            r'\bPRICE\b',                     # Standalone PRICE
+            r'\bDESC\b',                      # Standalone DESC
+        ]
+        
+        def clean_text(text):
+            """Clean text by removing all marker patterns while preserving content."""
+            cleaned = text
+            
+            # Extract content from markers before removing them
+            lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE)
+            if lineage_match:
+                lineage_content = lineage_match.group(1)
+                cleaned = re.sub(r'LINEAGE_START(.+?)LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE)
+            
+            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE)
+            if brand_match:
+                brand_content = brand_match.group(1)
+                cleaned = re.sub(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_content, cleaned, flags=re.IGNORECASE)
+            
+            strain_match = re.search(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', cleaned, re.IGNORECASE)
+            if strain_match:
+                strain_content = strain_match.group(1)
+                cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
+            
+            # Remove other marker patterns
+            for pattern in marker_patterns:
+                cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+            
+            # Clean up any double spaces, leading/trailing spaces
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            return cleaned
+        
+        # Clean markers in all tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        original_para_text = paragraph.text
+                        cleaned_para_text = clean_text(original_para_text)
+
+                        if cleaned_para_text != original_para_text:
+                            # Clear all runs and set cleaned text in first run
+                            for run in paragraph.runs:
+                                run.text = ''
+                            if paragraph.runs:
+                                paragraph.runs[0].text = cleaned_para_text
+                            elif cleaned_para_text:
+                                paragraph.add_run(cleaned_para_text)
+
+        # Clean markers in paragraphs outside tables
+        for paragraph in doc.paragraphs:
+            original_para_text = paragraph.text
+            cleaned_para_text = clean_text(original_para_text)
+
+            if cleaned_para_text != original_para_text:
+                for run in paragraph.runs:
+                    run.text = ''
+                if paragraph.runs:
+                    paragraph.runs[0].text = cleaned_para_text
+                elif cleaned_para_text:
+                    paragraph.add_run(cleaned_para_text)
+        
+        logger.info("Final marker cleanup completed")
+        
+    except Exception as e:
+        logger.warning(f"Error in final marker cleanup: {e}")
 
 def debug_markers(text):
     """Debug helper to identify marker issues."""
