@@ -4284,23 +4284,41 @@ class TemplateProcessor:
                 return cleaned
             
             # Clean markers in all tables
+            # CRITICAL FIX: Process entire paragraph text, not individual runs
+            # Markers often span multiple runs, so we must concatenate run text first
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                original_text = run.text
-                                cleaned_text = clean_text(original_text)
-                                if cleaned_text != original_text:
-                                    run.text = cleaned_text
-            
+                            # Get full paragraph text
+                            original_para_text = paragraph.text
+                            cleaned_para_text = clean_text(original_para_text)
+
+                            if cleaned_para_text != original_para_text:
+                                # Clear all runs and set cleaned text in first run
+                                for run in paragraph.runs:
+                                    run.text = ''
+                                if paragraph.runs:
+                                    paragraph.runs[0].text = cleaned_para_text
+                                elif cleaned_para_text:
+                                    # No runs exist, add one
+                                    paragraph.add_run(cleaned_para_text)
+
             # Clean markers in paragraphs outside tables
             for paragraph in doc.paragraphs:
-                for run in paragraph.runs:
-                    original_text = run.text
-                    cleaned_text = clean_text(original_text)
-                    if cleaned_text != original_text:
-                        run.text = cleaned_text
+                # Get full paragraph text
+                original_para_text = paragraph.text
+                cleaned_para_text = clean_text(original_para_text)
+
+                if cleaned_para_text != original_para_text:
+                    # Clear all runs and set cleaned text in first run
+                    for run in paragraph.runs:
+                        run.text = ''
+                    if paragraph.runs:
+                        paragraph.runs[0].text = cleaned_para_text
+                    elif cleaned_para_text:
+                        # No runs exist, add one
+                        paragraph.add_run(cleaned_para_text)
             
             # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content
             self._final_lineage_cleanup(doc)
