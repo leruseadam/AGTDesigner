@@ -8541,13 +8541,19 @@ def generate_labels():
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
 
         # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
-        # PERFORMANCE OPTIMIZATION: Batch query all lineages at once instead of N+1 queries
+        # PERFORMANCE OPTIMIZATION: Skip enrichment if records already came from database (they're already enriched!)
         _enrichment_start = time.time()
-        try:
-            store_name = session.get('current_store')
-            if store_name:
-                product_db = get_product_database(store_name)
-                if product_db:
+        _enrichment_needed = False
+        
+        # PERFORMANCE: Only enrich if records came from Excel (not database)
+        # Database records are already enriched, so skip this expensive step
+        if records and not has_database:
+            _enrichment_needed = True
+            try:
+                store_name = session.get('current_store')
+                if store_name:
+                    product_db = get_product_database(store_name)
+                    if product_db:
                     # Collect all product names and strains that need enrichment
                     products_to_enrich = []
                     strains_to_enrich = set()
@@ -8645,15 +8651,22 @@ def generate_labels():
                         
                         if enriched_count > 0:
                             logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
-        except Exception as enrich_err:
-            logging.error(f"Lineage enrichment failed: {enrich_err}")
+            except Exception as enrich_err:
+                logging.error(f"Lineage enrichment failed: {enrich_err}")
+        else:
+            if has_database:
+                logging.info(f"⚡ PERFORMANCE: Skipping lineage enrichment - records already from database (already enriched)")
+            else:
+                logging.info(f"⚡ PERFORMANCE: Skipping lineage enrichment - no database available")
 
         _enrichment_time = time.time() - _enrichment_start
         # PERFORMANCE: Only log if enrichment is slow (threshold increased to reduce noise)
-        if _enrichment_time > 2.0:
+        if _enrichment_needed and _enrichment_time > 2.0:
             logging.warning(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records (consider optimizing)")
-        elif _enrichment_time > 0.5:
+        elif _enrichment_needed and _enrichment_time > 0.5:
             logging.info(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
+        elif _enrichment_needed:
+            logging.debug(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
 
         # Bail out early if no records made it this far (prevents NoneType errors downstream)
         if not records:
