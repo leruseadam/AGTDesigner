@@ -23564,7 +23564,12 @@ if __name__ == '__main__':
     # Use the LabelMakerApp class for proper startup
     print("Starting Label Maker application...")
     print(f"🆔 Process ID: {os.getpid()}")
-    print(f"🆔 Parent Process ID: {os.getppid()}")
+    # CRITICAL FIX: os.getppid() not available on Windows
+    try:
+        if not is_windows:
+            print(f"🆔 Parent Process ID: {os.getppid()}")
+    except (AttributeError, OSError):
+        pass  # Not available on this platform
     print("🛑 Press Ctrl+C to stop the app")
     
     try:
