@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 # Try to import cachetools, fall back to simple dict if not available
 try:
     from cachetools import TTLCache
-    # PERFORMANCE: Increased cache from 100 to 500 entries for better hit rate
-    _generation_cache = TTLCache(maxsize=500, ttl=300)  # 5-minute cache
+    _generation_cache = TTLCache(maxsize=100, ttl=300)  # 5-minute cache
     HAS_CACHETOOLS = True
 except ImportError:
     logger.warning("cachetools not available, using simple dict cache (install with: pip install cachetools)")
@@ -119,8 +118,8 @@ class FastGenerationEngine:
         # Track timestamp for manual TTL
         if not HAS_CACHETOOLS:
             _cache_timestamps[cache_key] = time.time()
-            # PERFORMANCE: Increased cache limit from 100 to 500 for better hit rate
-            if len(_generation_cache) > 500:
+            # Clean up old entries if cache is too large
+            if len(_generation_cache) > 100:
                 self._cleanup_cache()
 
         generation_time = time.time() - start_time

@@ -2677,18 +2677,18 @@ class TemplateProcessor:
                     label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
                     self.logger.info(f"🎯 PREROLL TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for preroll template")
                 elif self.template_type == 'double':
-                    # DOUBLE TEMPLATE: behave like horizontal template for lineage/brand
-                    # Use cleaned brand text in the lineage band (blue bar), no LINEAGE_HINT tokens.
+                    # For double template, use brand text as-is with markers for downstream formatting
                     final_brand_text = str(brand_center_text).strip().upper()
-
+                    
                     # Remove trailing strain content if it was concatenated with the brand text
                     product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
                     if product_strain_value:
                         strain_token = str(product_strain_value).strip().upper()
+                        # Remove marker remnants if present
                         strain_token = strain_token.replace('PRODUCTSTRAIN_START', '').replace('PRODUCTSTRAIN_END', '').strip()
                         if strain_token:
                             original_brand = final_brand_text
-
+                            
                             # Tokenize strain string into individual tokens (split on separators)
                             strain_components = {strain_token}
                             strain_components.update(
@@ -2756,31 +2756,42 @@ class TemplateProcessor:
                                 self.logger.info(
                                     f"🎯 DOUBLE TEMPLATE STRAIN SPLIT: Removed strain/lineage token from brand -> '{final_brand_text}'"
                                 )
-
                     if not final_brand_text:
                         final_brand_text = clean_brand_text or str(brand_center_text).strip().upper()
-
+                    
                     # CRITICAL FIX: Add debugging to see final brand text
                     self.logger.info(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
-
-                    # Use PRODUCTBRAND_CENTER markers for the Lineage band, no LINEAGE_HINT
-                    clean_brand_text = str(final_brand_text).strip().upper()
-                    clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', clean_brand_text)
-                    clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*', '', clean_brand_text)
-                    clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
-                    clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
-                    clean_brand_text = clean_brand_text.strip()
-
-                    if clean_brand_text:
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
-                    else:
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
-
-                    # For double template we don't need separate ProductBrand fields (avoid duplication)
+                    
+                    # Preserve the original lineage value (if any) so we can drive color assignment later
+                    lineage_for_color_source = (
+                        label_context.get('Lineage') or
+                        record.get('Lineage') or
+                        ''
+                    )
+                    if is_already_wrapped(lineage_for_color_source, 'LINEAGE'):
+                        lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
+                    lineage_for_color = str(lineage_for_color_source).strip().upper()
+                    
+                    if not lineage_for_color:
+                        # Fall back to CBD lineage when we have CBD signal, otherwise treat as MIXED (blue)
+                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
+                    
+                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+                    lineage_content = (
+                        f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    )
+                    
+                    label_context['Lineage'] = lineage_content
                     label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-
-                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{clean_brand_text or final_brand_text}' for double template (no LINEAGE_HINT)")
+                    label_context['ProductBrand_Center'] = (
+                        f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    )
+                    self.logger.debug(
+                        f"DOUBLE TEMPLATE LINEAGE COLOR: Brand '{final_brand_text}' -> lineage '{lineage_for_color}' "
+                        f"(product_type='{product_type}')"
+                    )
+                    
+                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' for double template (with markers)")
                 else:
                     # For other templates (horizontal, etc.), use marker-based formatting
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption
@@ -3360,12 +3371,11 @@ class TemplateProcessor:
                     self.logger.warning(f"Could not convert relative URL to absolute; leaving as-is: {clean_name}")
             
             # Create QR code instance
-            # PERFORMANCE: Reduced box_size and border for faster generation
             qr = qrcode.QRCode(
                 version=1,  # Auto-determine version based on content
                 error_correction=qrcode.constants.ERROR_CORRECT_L,
-                box_size=8,  # Size of each box in pixels (reduced from 10 for speed)
-                border=2,     # Border size in boxes (reduced from 4 for speed)
+                box_size=10,  # Size of each box in pixels
+                border=4,     # Border size in boxes
             )
             
             # Add data to QR code
@@ -3424,12 +3434,11 @@ class TemplateProcessor:
                 'image_data': img_buffer.read(),
                 'size': qr_size
             }
-            # PERFORMANCE: Increased cache size from 1000 to 5000 for better hit rate
-            if len(TemplateProcessor._qr_code_cache) > 5000:
-                # Remove oldest 100 entries in batch (more efficient than one at a time)
-                keys_to_remove = list(TemplateProcessor._qr_code_cache.keys())[:100]
-                for key in keys_to_remove:
-                    del TemplateProcessor._qr_code_cache[key]
+            # Limit cache size to prevent memory issues
+            if len(TemplateProcessor._qr_code_cache) > 1000:
+                # Remove oldest entries (simple FIFO)
+                oldest_key = next(iter(TemplateProcessor._qr_code_cache))
+                del TemplateProcessor._qr_code_cache[oldest_key]
             
             self.logger.debug(f"Generated QR code for product: '{clean_name}' with font size: {font_size_pt.pt}pt, converted to {qr_size_mm:.1f}mm")
             return qr_inline_image

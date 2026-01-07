@@ -1251,7 +1251,7 @@ const TagManager = {
             if (payload.timestamp && age > this.CACHE_TTL_MS) {
                 return null;
             }
-            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded${payload._optimized ? ' (optimized cache)' : ''}`);
+            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
 
             return payload.tags;
         } catch (error) {
@@ -1287,34 +1287,9 @@ const TagManager = {
                 console.log(`🗑️ Cleared ${keysToRemove.length} old cache entries to make space`);
             }
 
-            // OPTIMIZATION: Store only essential fields to reduce cache size
-            // This reduces cache from ~14MB to ~2-3MB for 5000 tags
-            const optimizedTags = tags.map(tag => {
-                // Keep only essential fields needed for display and filtering
-                return {
-                    'Product Name*': tag['Product Name*'],
-                    'Vendor*': tag['Vendor*'],
-                    'Brand*': tag['Brand*'],
-                    'Product Type*': tag['Product Type*'],
-                    'Weight*': tag['Weight*'],
-                    'Price*': tag['Price*'],
-                    'Lineage*': tag['Lineage*'] || tag.Lineage || tag.canonical_lineage || tag.currentLineage,
-                    canonical_lineage: tag.canonical_lineage || tag.currentLineage,
-                    currentLineage: tag.currentLineage || tag.canonical_lineage,
-                    Lineage: tag.Lineage || tag.canonical_lineage || tag.currentLineage,
-                    // Keep source for JSON matched tags
-                    Source: tag.Source,
-                    // Keep SKU if present (used for matching)
-                    SKU: tag.SKU,
-                    // Keep any other critical fields that might be needed
-                    ...(tag._db_product ? { _db_product: tag._db_product } : {})
-                };
-            });
-
             const payload = {
                 timestamp: Date.now(),
-                tags: optimizedTags,
-                _optimized: true // Flag to indicate this is optimized cache
+                tags
             };
 
             const payloadStr = JSON.stringify(payload);
@@ -2881,14 +2856,6 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
-            
-            // If search bar is active, re-apply the search with the cleared filter results
-            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-                setTimeout(() => {
-                    this.handleSearch('availableTags', 'availableTagsSearch');
-                }, 50);
-            }
             return;
         }
         
@@ -2918,14 +2885,6 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
-            
-            // If search bar is active, re-apply the search with the cached filter results
-            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-                setTimeout(() => {
-                    this.handleSearch('availableTags', 'availableTagsSearch');
-                }, 50);
-            }
             return;
         }
         
@@ -3150,26 +3109,15 @@ const TagManager = {
         requestAnimationFrame(() => {
             this._scrollAvailableTagsToTop();
         });
-        
-        // If search bar is active, re-apply the search with the new filter results
-        const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-        if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-            setTimeout(() => {
-                this.handleSearch('availableTags', 'availableTagsSearch');
-            }, 50);
-        }
     },
 
     handleSearch(listId, searchInputId) {
-        try {
+        // PERFORMANCE FIX: Use requestAnimationFrame for smoother updates
+        return requestAnimationFrame(() => {
             const searchInput = document.getElementById(searchInputId);
-            if (!searchInput) {
-                console.warn(`⚠️ Search input not found: ${searchInputId}`);
-                return false;
-            }
+            if (!searchInput) return false;
             
             const searchTerm = searchInput.value.toLowerCase().trim();
-            verboseLog(`🔍 Search triggered for ${listId}: "${searchTerm}"`);
 
             // Choose which tags to filter
             let tags = [];
@@ -3209,8 +3157,6 @@ const TagManager = {
                 return tagName.toLowerCase().includes(searchTerm);
             });
 
-            verboseLog(`🔍 Found ${filteredTags.length} matching tags out of ${tags.length} total`);
-
             // Update the list with only matching tags
             if (listId === 'availableTags') {
                 this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
@@ -3240,37 +3186,7 @@ const TagManager = {
 
             // Return boolean indicating whether any tags match the search
             return filteredTags.length > 0;
-        } catch (error) {
-            console.error(`❌ Error in handleSearch for ${listId}:`, error);
-            return false;
-        }
-    },
-
-    expandAllTagGroups() {
-        try {
-            const availableTagsContainer = document.getElementById('availableTags');
-            if (!availableTagsContainer) {
-                return;
-            }
-
-            // Find all collapsed content elements (vendor-content, brand-content, product-type-content, weight-content, price-content)
-            const collapsedElements = availableTagsContainer.querySelectorAll('.vendor-content.collapsed, .brand-content.collapsed, .product-type-content.collapsed, .weight-content.collapsed, .price-content.collapsed');
-            
-            // Expand all collapsed groups
-            collapsedElements.forEach(element => {
-                element.classList.remove('collapsed');
-            });
-
-            // Update all collapse icons to show expanded state (▼)
-            const collapseIcons = availableTagsContainer.querySelectorAll('.collapse-icon');
-            collapseIcons.forEach(icon => {
-                icon.textContent = '▼';
-            });
-
-            verboseLog(`✅ Expanded all tag groups (${collapsedElements.length} groups expanded)`);
-        } catch (error) {
-            console.error('❌ Error expanding tag groups:', error);
-        }
+        });
     },
 
     handleAvailableTagsSearch(event) {
@@ -9782,9 +9698,9 @@ const TagManager = {
         }
     },
 
-    async fetchAndUpdateAvailableTags(forceReload = false) {
-        // CRITICAL FIX: Reset stuck flag if it's been set for too long, or if force reload
-        if (this._fetchingAvailableTags && !forceReload) {
+    async fetchAndUpdateAvailableTags() {
+        // CRITICAL FIX: Reset stuck flag if it's been set for too long
+        if (this._fetchingAvailableTags) {
             const fetchStartTime = this._fetchingAvailableTagsStartTime || Date.now();
             const stuckDuration = Date.now() - fetchStartTime;
             if (stuckDuration > 30000) {
@@ -9810,14 +9726,6 @@ const TagManager = {
                     return false;
                 }
             }
-        } else if (forceReload && this._fetchingAvailableTags) {
-            // Force reload: reset flag immediately
-            console.log('🔄 FORCE RELOAD: Resetting _fetchingAvailableTags flag');
-            this._fetchingAvailableTags = false;
-            if (this._fetchingTimeout) {
-                clearTimeout(this._fetchingTimeout);
-                this._fetchingTimeout = null;
-            }
         }
         
         // PERFORMANCE FIX: Use cache first for fast reloads, then refresh in background
@@ -9837,9 +9745,7 @@ const TagManager = {
         
         // CRITICAL FIX: Set flag EARLY to prevent upload prompt from showing while fetching
         // This must be set before any UI updates to ensure loading state is shown
-        console.log('🚩 Setting _fetchingAvailableTags = true');
         this._fetchingAvailableTags = true;
-        this._fetchingAvailableTagsStartTime = Date.now();
         this._fetchingAvailableTagsStartTime = Date.now();
         
         // CRITICAL FIX: Set a safety timeout to reset flag if it gets stuck
@@ -9988,27 +9894,18 @@ const TagManager = {
                 verboseLog('Lite prefetch error (non-critical):', err);
             });
             
-            // Rate limiting: prevent rapid successive calls (unless force reload)
+            // Rate limiting: prevent rapid successive calls
             // Increased to 1000ms to prevent restarts from multiple rapid calls
-            if (!forceReload) {
-                const now = Date.now();
-                if (this._lastFetchTime && (now - this._lastFetchTime) < 1000) {
-                    const timeSinceLastFetch = now - this._lastFetchTime;
-                    console.warn(`⏸️ Rate limiting: skipping fetch (${timeSinceLastFetch}ms since last fetch, need 1000ms)`);
-                    verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
-                    // Hide splash if we're skipping
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                    return false;
+            const now = Date.now();
+            if (this._lastFetchTime && (now - this._lastFetchTime) < 1000) {
+                verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
+                // Hide splash if we're skipping
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
                 }
-                this._lastFetchTime = now;
-            } else {
-                // Force reload: reset rate limiting
-                this._lastFetchTime = 0;
-                console.log('🔄 FORCE RELOAD: Bypassing rate limiting');
+                return false;
             }
-            console.log(`✅ Rate limit check passed, proceeding with fetch`);
+            this._lastFetchTime = now;
             
             // Check if we're in JSON matching mode and have JSON matched tags
             const hasJsonMatchedTags = this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0;
@@ -10043,14 +9940,14 @@ const TagManager = {
                 // DO NOT return; continue to fetch to pull DB-aligned lineage for regular tags
             }
             
-            console.log('🔍 Starting fetch process...');
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // PERFORMANCE: Use fast_load=1 by default for fast tag loading
-            // Background refresh will enrich with database lineage later if needed
-            // This dramatically speeds up initial tag loading
-            const fastLoadParam = '&fast_load=1';
+            // CRITICAL FIX: Use fast_load=0 to ensure lineage is included in tags
+            // We disabled the background lineage refresh (was causing 18s page loads)
+            // So we MUST get lineage on initial load, otherwise large batches missing lineage
+            // Small performance trade-off, but lineage is essential for labels
+            const fastLoadParam = '&fast_load=0';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
@@ -10062,41 +9959,29 @@ const TagManager = {
             let processingRetryCount = 0;
             let lastError;
             
-            console.log(`🔄 Entering retry loop (maxRetries: ${maxRetries}, maxProcessingRetries: ${maxProcessingRetries})`);
-            console.log(`📊 Current state: retryCount=${retryCount}, processingRetryCount=${processingRetryCount}`);
-            
             // CRITICAL: Continue retrying as long as EITHER condition is met (not both)
             // This allows 202 retries to continue even after error retries are exhausted
             while (retryCount < maxRetries || processingRetryCount < maxProcessingRetries) {
-                console.log(`🔄 Loop iteration: retryCount=${retryCount}/${maxRetries}, processingRetryCount=${processingRetryCount}/${maxProcessingRetries}`);
                 try {
-                    console.log(`🔄 Retry attempt ${retryCount + 1} (processing retries: ${processingRetryCount})`);
                     const controller = new AbortController();
-                    // PERFORMANCE: Increased timeout to 60 seconds for large datasets
-                    // Large files (5000+ tags) can take 30-45 seconds to process on first load
+                    // PERFORMANCE: Reduced timeout to 30 seconds for faster failure/retry
+                    // Tags should load much faster with all the optimizations
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn('⚠️ Tag loading timeout after 60 seconds - will try cache or show error');
-                    }, 60000); // 60 seconds - needed for large datasets
+                        console.warn('⚠️ Tag loading timeout after 30 seconds - will try cache or show error');
+                    }, 30000); // 30 seconds - should be plenty with optimizations
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
                     const forceDbLineage = this._forceDatabaseLineage || false;
-                    const useCache = retryCount === 0 && !forceDbLineage && !forceReload; // Don't use cache after upload or force reload
+                    const useCache = retryCount === 0 && !forceDbLineage; // Don't use cache after upload
                     const cacheParam = useCache ? '' : '&nocache=1';
                     // Only use prefer_db when forcing database lineage (after upload), otherwise let fast_load optimize
                     const preferDbParam = forceDbLineage ? '&prefer_db=1' : '';
-                    
-                    const fetchUrl = `/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
-                    console.log(`🌐 Fetching tags from: ${fetchUrl}`);
-                    console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
-                    
-                    response = await fetch(fetchUrl, {
+                    response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`, {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
-                    
-                    console.log(`✅ Fetch completed with status: ${response.status} at ${new Date().toISOString()}`);
 
                     verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}, processing retries: ${processingRetryCount + 1}/${maxProcessingRetries}):`, response.status);
 
@@ -10144,40 +10029,31 @@ const TagManager = {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
                     
-                    console.log(`📥 Reading response text...`);
                     const responseText = await response.text();
-                    console.log(`✅ Response text received (length: ${responseText ? responseText.length : 0})`);
                     try {
                         responseData = responseText ? JSON.parse(responseText) : null;
-                        console.log(`✅ JSON parsed successfully, responseData type:`, responseData ? (Array.isArray(responseData) ? 'array' : typeof responseData) : 'null');
                     } catch (parseError) {
-                        console.error('❌ Failed to parse available tags JSON response:', {
+                        console.error('Failed to parse available tags JSON response:', {
                             parseError,
                             snippet: responseText ? responseText.slice(0, 500) : ''
                         });
                         throw parseError;
                     }
-                    console.log(`✅ Breaking from retry loop - fetch successful`);
                     break; // Success - exit retry loop
                     
                 } catch (error) {
                     lastError = error;
-                    console.error(`❌ Fetch error (attempt ${retryCount + 1}/${maxRetries}):`, error);
                     if (error.name === 'AbortError') {
-                        console.warn(`⏱️ Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
                         verboseLog(`Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
                     } else {
-                        console.error(`❌ Request error (attempt ${retryCount + 1}/${maxRetries}):`, error.message || error);
                         verboseLog(`Request error (attempt ${retryCount + 1}/${maxRetries}):`, error);
                     }
                     
                     if (retryCount < maxRetries - 1) {
                         retryCount++;
-                        console.log(`🔄 Retrying immediately... (${retryCount}/${maxRetries})`);
                         verboseLog(`Retrying immediately...`);
                         // PERFORMANCE: No delay - retry immediately for faster response
                     } else {
-                        console.error(`❌ Max retries reached, throwing error:`, error);
                         throw error;
                     }
                 }
@@ -10626,11 +10502,8 @@ const TagManager = {
                             <p class="mb-3">${isProcessingError 
                                 ? 'The file is still being processed. Please wait a moment and try again, or refresh the page.' 
                                 : 'There was a problem loading the product tags. This can happen if the database is temporarily unavailable or the connection timed out.'}</p>
-                            <button class="btn btn-primary me-2" onclick="TagManager.retryLoadTags()">
+                            <button class="btn btn-primary" onclick="TagManager.retryLoadTags()">
                                 <i class="fas fa-redo"></i> Retry Loading Tags
-                            </button>
-                            <button class="btn btn-secondary" onclick="TagManager.forceReloadTags()">
-                                <i class="fas fa-sync-alt"></i> Force Reload (Clear Cache)
                             </button>
                         </div>
                         <small class="text-muted d-block mt-2">Error: ${errorMessage}</small>
@@ -10654,58 +10527,15 @@ const TagManager = {
 
     async retryLoadTags() {
         verboseLog('User requested retry of tag loading');
-        // Force reset all flags to allow immediate retry
+        // Reset rate limiting to allow immediate retry
         this._lastFetchTime = 0;
-        this._fetchingAvailableTags = false;
-        this._checkingExistingData = false;
-        this._fetchingAvailableTagsStartTime = null;
-        this._checkingExistingDataStartTime = null;
-        if (this._fetchingTimeout) {
-            clearTimeout(this._fetchingTimeout);
-            this._fetchingTimeout = null;
-        }
         // Show loading indicator
         this.showActionSplash('Retrying tag loading...');
-        // Attempt to load tags again with force flag
+        // Attempt to load tags again
         try {
-            await this.fetchAndUpdateAvailableTags(true); // Pass true to force reload
+            await this.fetchAndUpdateAvailableTags();
         } catch (error) {
             console.error('Retry failed:', error);
-            this.hideActionSplash();
-        }
-    },
-    
-    // Force reload tags - bypasses all rate limiting and stuck flags
-    async forceReloadTags() {
-        console.log('🔄 FORCE RELOAD: Resetting all flags and forcing tag reload');
-        // Reset all flags and timeouts
-        this._lastFetchTime = 0;
-        this._fetchingAvailableTags = false;
-        this._checkingExistingData = false;
-        this._fetchingAvailableTagsStartTime = null;
-        this._checkingExistingDataStartTime = null;
-        if (this._fetchingTimeout) {
-            clearTimeout(this._fetchingTimeout);
-            this._fetchingTimeout = null;
-        }
-        // Clear cache to force fresh load
-        try {
-            const cacheKey = this.getAvailableTagsCacheKey();
-            if (window.sessionStorage) {
-                sessionStorage.removeItem(cacheKey);
-            }
-        } catch (e) {
-            console.warn('Failed to clear cache:', e);
-        }
-        // Show loading indicator
-        this.showActionSplash('Reloading tags...');
-        // Force reload
-        try {
-            await this.fetchAndUpdateAvailableTags(true); // Pass true to force reload
-        } catch (error) {
-            console.error('Force reload failed:', error);
-            this.hideActionSplash();
-            throw error;
         }
     },
     
@@ -16403,15 +16233,6 @@ try {
         if (TagManager.fetchAndUpdateSelectedTags) {
             window.fetchAndUpdateSelectedTags = TagManager.fetchAndUpdateSelectedTags.bind(TagManager);
         }
-        // Expose force reload function for easy debugging and recovery
-        if (TagManager.forceReloadTags) {
-            window.forceReloadTags = TagManager.forceReloadTags.bind(TagManager);
-            console.log('✅ forceReloadTags() available globally - call it to force reload tags');
-            console.log('💡 Tip: Press Ctrl+Shift+R (or Cmd+Shift+R on Mac) to force reload tags');
-        }
-        if (TagManager.retryLoadTags) {
-            window.retryLoadTags = TagManager.retryLoadTags.bind(TagManager);
-        }
     }
 } catch (error) {
     console.error('❌ Error assigning TagManager to window:', error);
@@ -16924,20 +16745,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no rendered tags found, attempting retry...');
                 // Reset flags to allow retry
                 window.TagManager._checkingExistingData = false;
-                window.TagManager._fetchingAvailableTags = false;
                 window.TagManager.state.initialDataAttempts = 0;
                 // Try to load tags
                 if (typeof window.TagManager.checkForExistingData === 'function') {
                     window.TagManager.checkForExistingData().catch(err => {
                         console.error('Safeguard retry failed:', err);
-                        // Last resort: try force reload to bypass all flags
-                        if (typeof window.TagManager.forceReloadTags === 'function') {
-                            console.log('🔄 SAFEGUARD: Attempting force reload as last resort...');
-                            window.TagManager.forceReloadTags().catch(e => {
-                                console.error('Safeguard force reload also failed:', e);
-                            });
-                        } else if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
-                            window.TagManager.fetchAndUpdateAvailableTags(true).catch(e => {
+                        // Last resort: try direct fetch
+                        if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+                            window.TagManager.fetchAndUpdateAvailableTags().catch(e => {
                                 console.error('Safeguard direct fetch also failed:', e);
                             });
                         }
@@ -16957,19 +16772,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
             if (!hasTags && !hasRenderedTags) {
-                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no rendered tags found - forcing reload');
+                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no rendered tags found - forcing direct fetch');
                 // Force reset all flags
                 window.TagManager._checkingExistingData = false;
                 window.TagManager._fetchingAvailableTags = false;
                 window.TagManager.state.initialDataAttempts = 0;
-                // Force reload using forceReloadTags to bypass all restrictions
-                if (typeof window.TagManager.forceReloadTags === 'function') {
-                    console.log('🔄 CRITICAL SAFEGUARD: Using forceReloadTags to bypass all restrictions');
-                    window.TagManager.forceReloadTags().catch(e => {
-                        console.error('Critical safeguard force reload failed:', e);
-                    });
-                } else if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
-                    window.TagManager.fetchAndUpdateAvailableTags(true).catch(e => {
+                // Force direct fetch
+                if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+                    window.TagManager.fetchAndUpdateAvailableTags().catch(e => {
                         console.error('Critical safeguard fetch failed:', e);
                     });
                 }
@@ -17016,25 +16826,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else if (hasTags || hasRenderedTags) {
                 console.log('✅ VISIBILITY: Tags already loaded or rendered, skipping reload');
-            }
-        }
-    });
-    
-    // Add keyboard shortcut for force reload (Ctrl+Shift+R or Cmd+Shift+R)
-    document.addEventListener('keydown', (e) => {
-        // Ctrl+Shift+R (Windows/Linux) or Cmd+Shift+R (Mac)
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R') {
-            // Prevent browser reload
-            e.preventDefault();
-            e.stopPropagation();
-            
-            if (window.TagManager && typeof window.TagManager.forceReloadTags === 'function') {
-                console.log('🔄 Keyboard shortcut triggered: Force reloading tags...');
-                window.TagManager.forceReloadTags().catch(err => {
-                    console.error('Force reload from keyboard shortcut failed:', err);
-                });
-            } else {
-                console.warn('⚠️ TagManager.forceReloadTags not available');
             }
         }
     });
