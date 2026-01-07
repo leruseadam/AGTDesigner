@@ -8601,77 +8601,83 @@ def generate_labels():
         
         # CRITICAL FIX: Force database lineage on ALL records before generation
         # This ensures sovereign_lineage from strains table is used, not Excel Lineage
-        # PERFORMANCE FIX: Only query products in current batch, not all products in database
+        # PERFORMANCE: Skip if records already came from database (they should already have correct lineage)
+        # Only force overwrite for Excel-derived records
         try:
             store_name = get_current_store_name()
             product_db = get_product_database(store_name)
             if product_db and records:
-                logging.info(f"🔄 FORCING DB LINEAGE: Overwriting lineage for {len(records)} records from database...")
-                conn = product_db._get_connection()
-                cur = conn.cursor()
-                
-                # Build lineage lookup with strain join (same as get_product_lineage uses)
-                lineage_lookup = {}
-                try:
-                    # PERFORMANCE: Only query products in current batch, not all products
-                    product_names = [r.get('ProductName') or r.get('Product Name*') or '' for r in records]
-                    product_names = [p for p in product_names if p]  # Remove empty
+                # PERFORMANCE: Check if records already have database lineage (from batch query)
+                # If most records already have lineage set, skip the expensive query
+                records_with_lineage = sum(1 for r in records if r.get('Lineage') and r.get('Lineage') not in ['', 'MIXED', 'HYBRID'])
+                if records_with_lineage >= len(records) * 0.8:  # 80%+ already have lineage
+                    logging.info(f"⚡ PERFORMANCE: Skipping force overwrite - {records_with_lineage}/{len(records)} records already have lineage")
+                else:
+                    logging.info(f"🔄 FORCING DB LINEAGE: Overwriting lineage for {len(records)} records from database...")
+                    conn = product_db._get_connection()
+                    cur = conn.cursor()
                     
-                    if product_names:
-                        placeholders = ','.join(['?'] * len(product_names))
-                        # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
-                        # PERFORMANCE: Query only products in current batch (already limited)
-                        # PERFORMANCE: LOWER(TRIM()) join is necessary but we limit to current batch only
-                        cur.execute(f'''
-                            SELECT 
-                                p."Product Name*",
-                                p.normalized_name,
-                                COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
-                            FROM products p
-                            LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
-                            WHERE p."Product Name*" IN ({placeholders})
-                        ''', product_names)
-                        for row in cur.fetchall():
-                            pname, norm_name, lineage = row[0], row[1], row[2]
-                            if pname and lineage:
-                                lineage_upper = str(lineage).strip().upper()
-                                lineage_lookup[pname] = lineage_upper
-                                lineage_lookup[pname.lower().strip()] = lineage_upper
-                                if norm_name:
-                                    lineage_lookup[norm_name] = lineage_upper
-                        logging.info(f"✅ Built lineage lookup with {len(lineage_lookup)} entries for {len(product_names)} products")
-                except Exception as q_err:
-                    logging.warning(f"Lineage lookup query failed: {q_err}")
-                
-                # Apply to records
-                forced_count = 0
-                for rec in records:
-                    pname = rec.get('ProductName') or rec.get('Product Name*') or ''
-                    if not pname:
-                        continue
+                    # Build lineage lookup with strain join (same as get_product_lineage uses)
+                    lineage_lookup = {}
+                    try:
+                        # PERFORMANCE: Only query products in current batch, not all products
+                        product_names = [r.get('ProductName') or r.get('Product Name*') or '' for r in records]
+                        product_names = [p for p in product_names if p]  # Remove empty
+                        
+                        if product_names:
+                            placeholders = ','.join(['?'] * len(product_names))
+                            # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+                            # PERFORMANCE: Query only products in current batch (already limited)
+                            cur.execute(f'''
+                                SELECT 
+                                    p."Product Name*",
+                                    p.normalized_name,
+                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
+                                FROM products p
+                                LEFT JOIN strains s1 ON p.strain_id = s1.id
+                                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                                WHERE p."Product Name*" IN ({placeholders})
+                            ''', product_names)
+                            for row in cur.fetchall():
+                                pname, norm_name, lineage = row[0], row[1], row[2]
+                                if pname and lineage:
+                                    lineage_upper = str(lineage).strip().upper()
+                                    lineage_lookup[pname] = lineage_upper
+                                    lineage_lookup[pname.lower().strip()] = lineage_upper
+                                    if norm_name:
+                                        lineage_lookup[norm_name] = lineage_upper
+                            logging.info(f"✅ Built lineage lookup with {len(lineage_lookup)} entries for {len(product_names)} products")
+                    except Exception as q_err:
+                        logging.warning(f"Lineage lookup query failed: {q_err}")
                     
-                    # Try exact match, then lowercase, then normalized
-                    db_lineage = lineage_lookup.get(pname) or lineage_lookup.get(pname.lower().strip())
-                    if not db_lineage:
-                        try:
-                            norm = product_db._normalize_product_name(pname)
-                            db_lineage = lineage_lookup.get(norm)
-                        except Exception:
-                            pass
+                    # Apply to records
+                    forced_count = 0
+                    for rec in records:
+                        pname = rec.get('ProductName') or rec.get('Product Name*') or ''
+                        if not pname:
+                            continue
+                        
+                        # Try exact match, then lowercase, then normalized
+                        db_lineage = lineage_lookup.get(pname) or lineage_lookup.get(pname.lower().strip())
+                        if not db_lineage:
+                            try:
+                                norm = product_db._normalize_product_name(pname)
+                                db_lineage = lineage_lookup.get(norm)
+                            except Exception:
+                                pass
+                        
+                        if db_lineage:
+                            old_lineage = rec.get('Lineage', '')
+                            rec['Lineage'] = db_lineage
+                            rec['lineage'] = db_lineage.lower()
+                            rec['currentLineage'] = db_lineage
+                            rec['canonical_lineage'] = db_lineage
+                            if old_lineage != db_lineage:
+                                forced_count += 1
+                                if forced_count <= 5:  # Log first 5 changes
+                                    logging.info(f"🔄 LINEAGE FORCED: '{pname}' - '{old_lineage}' → '{db_lineage}'")
                     
-                    if db_lineage:
-                        old_lineage = rec.get('Lineage', '')
-                        rec['Lineage'] = db_lineage
-                        rec['lineage'] = db_lineage.lower()
-                        rec['currentLineage'] = db_lineage
-                        rec['canonical_lineage'] = db_lineage
-                        if old_lineage != db_lineage:
-                            forced_count += 1
-                            if forced_count <= 5:  # Log first 5 changes
-                                logging.info(f"🔄 LINEAGE FORCED: '{pname}' - '{old_lineage}' → '{db_lineage}'")
-                
-                logging.info(f"✅ FORCED DB LINEAGE: Updated {forced_count}/{len(records)} records")
+                    logging.info(f"✅ FORCED DB LINEAGE: Updated {forced_count}/{len(records)} records")
         except Exception as force_err:
             logging.warning(f"Force DB lineage failed: {force_err}")
 
