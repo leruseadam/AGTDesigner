@@ -7321,7 +7321,7 @@ def generate_labels():
         
         # TRACE: Check current store at start of generation
         current_store_at_start = get_current_store_name()
-        logging.info(f"🔍 TRACE START: Current store = {current_store_at_start}")
+        logging.debug(f"🔍 TRACE START: Current store = {current_store_at_start}")
         
         # Rate limiting for label generation
         client_ip = request.remote_addr
@@ -7364,7 +7364,7 @@ def generate_labels():
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
         
         # TRACE: Check store before getting excel_processor
-        logging.info(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
+        logging.debug(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
         
         # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
@@ -8033,7 +8033,7 @@ def generate_labels():
             
             # PERFORMANCE FIX: Batch enrich Excel records with single database query
             if records and has_database:
-                logging.info("🔄 Enriching Excel records with database data...")
+                logging.debug("🔄 Enriching Excel records with database data...")
                 try:
                     store_name = get_current_store_name() or 'AGT_Bothell'
                     product_db = get_product_database(store_name)
