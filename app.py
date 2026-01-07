@@ -9359,6 +9359,7 @@ def get_available_tags():
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
+        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         # Check memory before processing - but don't block if we have cached data
         memory_ok = check_memory_limit()
         if not memory_ok:
