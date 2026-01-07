@@ -5066,12 +5066,13 @@ class ProductDatabase:
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+            # FIX: Use LOWER(TRIM()) to normalize Product Strain on-the-fly since normalized_product_strain column doesn't exist
             cursor.execute('''
                 SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = s2.normalized_name
                 WHERE p."Product Name*" = ? OR p."ProductName" = ?
                 ORDER BY p.id DESC
                 LIMIT 1
@@ -5110,12 +5111,13 @@ class ProductDatabase:
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+            # FIX: Use LOWER(TRIM()) to normalize Product Strain on-the-fly since normalized_product_strain column doesn't exist
             cursor.execute('''
                 SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = s2.normalized_name
                 WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
                    OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
                 ORDER BY p.id DESC

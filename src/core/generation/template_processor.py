@@ -1221,6 +1221,7 @@ class TemplateProcessor:
                 # CRITICAL FIX: Remove all markers from single document before returning
                 single_doc = documents[0]
                 self._final_marker_cleanup(single_doc)
+                self._nuclear_marker_cleanup(single_doc)
                 return single_doc
             
             # Combine documents
@@ -1240,6 +1241,7 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Remove all markers from final document before returning
             self._final_marker_cleanup(final_doc)
+            self._nuclear_marker_cleanup(final_doc)
             
             total_time = time.time() - self.start_time
             self.logger.info(f"Template processing completed in {total_time:.2f}s for {len(records)} records")
@@ -1518,6 +1520,7 @@ class TemplateProcessor:
                 rendered_doc = remove_all_headers_and_footers(rendered_doc)
                 # CRITICAL FIX: Always clean markers even when skipping other post-processing
                 self._final_marker_cleanup(rendered_doc)
+                self._nuclear_marker_cleanup(rendered_doc)
                 return rendered_doc
             
             # PERFORMANCE FIX: Disable expensive post-processing to eliminate 3-minute delays
@@ -1532,6 +1535,9 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Always clean markers even when skipping other post-processing
             self._final_marker_cleanup(rendered_doc)
+            
+            # ULTRA-AGGRESSIVE MARKER CLEANUP: Direct string replacement on XML
+            self._nuclear_marker_cleanup(rendered_doc)
             
             return rendered_doc
             
@@ -1587,31 +1593,31 @@ class TemplateProcessor:
             'DescAndWeight': '',
             'JointRatio': '',
             'ProductType': '',
-            # Marker fields for template processing
-            'ProductStrain_START': 'PRODUCTSTRAIN_START',
-            'ProductStrain_END': 'PRODUCTSTRAIN_END',
-            'Lineage_START': 'LINEAGE_START',
-            'Lineage_END': 'LINEAGE_END',
-            'ProductBrand_START': 'PRODUCTBRAND_START',
-            'ProductBrand_END': 'PRODUCTBRAND_END',
-            'ProductVendor_START': 'PRODUCTVENDOR_START',
-            'ProductVendor_END': 'PRODUCTVENDOR_END',
-            'DescAndWeight_START': 'DESC_START',
-            'DescAndWeight_END': 'DESC_END',
-            'Ratio_or_THC_CBD_START': 'THC_CBD_START',
-            'Ratio_or_THC_CBD_END': 'THC_CBD_END',
-            'Price_START': 'PRICE_START',
-            'Price_END': 'PRICE_END',
-            'WeightUnits_START': 'WEIGHTUNITS_START',
-            'WeightUnits_END': 'WEIGHTUNITS_END',
-            'Ratio_START': 'RATIO_START',
-            'Ratio_END': 'RATIO_END',
-            'JointRatio_START': 'JOINT_RATIO_START',
-            'JointRatio_END': 'JOINT_RATIO_END',
-            'THC_START': 'THC_START',
-            'THC_END': 'THC_END',
-            'CBD_START': 'CBD_START',
-            'CBD_END': 'CBD_END',
+            # Marker fields for template processing - SET TO EMPTY to prevent visibility
+            'ProductStrain_START': '',
+            'ProductStrain_END': '',
+            'Lineage_START': '',
+            'Lineage_END': '',
+            'ProductBrand_START': '',
+            'ProductBrand_END': '',
+            'ProductVendor_START': '',
+            'ProductVendor_END': '',
+            'DescAndWeight_START': '',
+            'DescAndWeight_END': '',
+            'Ratio_or_THC_CBD_START': '',
+            'Ratio_or_THC_CBD_END': '',
+            'Price_START': '',
+            'Price_END': '',
+            'WeightUnits_START': '',
+            'WeightUnits_END': '',
+            'Ratio_START': '',
+            'Ratio_END': '',
+            'JointRatio_START': '',
+            'JointRatio_END': '',
+            'THC_START': '',
+            'THC_END': '',
+            'CBD_START': '',
+            'CBD_END': '',
             # QR code field (empty for blank labels)
             'QR': '',
         }
@@ -2927,35 +2933,35 @@ class TemplateProcessor:
 
         # Lineage logic is now handled earlier in the method for both classic and non-classic types
 
-        # Add marker strings for template processing
-        label_context['ProductStrain_START'] = 'PRODUCTSTRAIN_START'
-        label_context['ProductStrain_END'] = 'PRODUCTSTRAIN_END'
-        label_context['Lineage_START'] = 'LINEAGE_START'
-        label_context['Lineage_END'] = 'LINEAGE_END'
-        label_context['ProductBrand_START'] = 'PRODUCTBRAND_START'
-        label_context['ProductBrand_END'] = 'PRODUCTBRAND_END'
-        label_context['ProductVendor_START'] = 'PRODUCTVENDOR_START'
-        label_context['ProductVendor_END'] = 'PRODUCTVENDOR_END'
-        label_context['DescAndWeight_START'] = 'DESC_START'
-        label_context['DescAndWeight_END'] = 'DESC_END'
-        label_context['Ratio_or_THC_CBD_START'] = 'THC_CBD_START'
-        label_context['Ratio_or_THC_CBD_END'] = 'THC_CBD_END'
-        label_context['Price_START'] = 'PRICE_START'
-        label_context['Price_END'] = 'PRICE_END'
+        # Add marker strings for template processing - SET TO EMPTY to prevent visibility
+        label_context['ProductStrain_START'] = ''
+        label_context['ProductStrain_END'] = ''
+        label_context['Lineage_START'] = ''
+        label_context['Lineage_END'] = ''
+        label_context['ProductBrand_START'] = ''
+        label_context['ProductBrand_END'] = ''
+        label_context['ProductVendor_START'] = ''
+        label_context['ProductVendor_END'] = ''
+        label_context['DescAndWeight_START'] = ''
+        label_context['DescAndWeight_END'] = ''
+        label_context['Ratio_or_THC_CBD_START'] = ''
+        label_context['Ratio_or_THC_CBD_END'] = ''
+        label_context['Price_START'] = ''
+        label_context['Price_END'] = ''
         
         # Wrap WeightUnits with markers if it exists
         if label_context.get('WeightUnits'):
             label_context['WeightUnits'] = wrap_with_marker(label_context['WeightUnits'], 'WEIGHTUNITS')
-        label_context['WeightUnits_START'] = 'WEIGHTUNITS_START'
-        label_context['WeightUnits_END'] = 'WEIGHTUNITS_END'
-        label_context['Ratio_START'] = 'RATIO_START'
-        label_context['Ratio_END'] = 'RATIO_END'
-        label_context['JointRatio_START'] = 'JOINT_RATIO_START'
-        label_context['JointRatio_END'] = 'JOINT_RATIO_END'
-        label_context['THC_START'] = 'THC_START'
-        label_context['THC_END'] = 'THC_END'
-        label_context['CBD_START'] = 'CBD_START'
-        label_context['CBD_END'] = 'CBD_END'
+        label_context['WeightUnits_START'] = ''
+        label_context['WeightUnits_END'] = ''
+        label_context['Ratio_START'] = ''
+        label_context['Ratio_END'] = ''
+        label_context['JointRatio_START'] = ''
+        label_context['JointRatio_END'] = ''
+        label_context['THC_START'] = ''
+        label_context['THC_END'] = ''
+        label_context['CBD_START'] = ''
+        label_context['CBD_END'] = ''
 
         # Fast joint ratio handling
         if label_context.get('JointRatio'):
@@ -4365,6 +4371,85 @@ class TemplateProcessor:
 
         except Exception as e:
             self.logger.error(f"❌ ERROR in marker cleanup: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+
+    def _nuclear_marker_cleanup(self, doc):
+        """
+        ULTRA-AGGRESSIVE MARKER CLEANUP
+        Uses direct XML manipulation and string replacement to remove markers.
+        This is a nuclear option when regex cleanup fails.
+        """
+        try:
+            self.logger.info("🔥 NUCLEAR MARKER CLEANUP STARTING")
+            
+            # All possible marker patterns
+            markers = [
+                'ProductStrain', 'PRODUCTSTRAIN', 'DescAndWeight', 'DESCANDWEIGHT',
+                'Description', 'DESCRIPTION', 'DESC', 'Price', 'PRICE', 'RICE',
+                'Lineage', 'LINEAGE', 'ProductType', 'PRODUCTTYPE', 'Weight', 'WEIGHT',
+                'THCA', 'THCATOTAL', 'THC', 'CBD', 'CBDTOTAL', 'CBG', 'CBGTOTAL',
+                'CBN', 'CBNTOTAL', 'CANNABINOIDS', 'Cultivator', 'CULTIVATOR',
+                'CULT', 'LotBatch', 'LOTBATCH', 'Harvest', 'HARVEST', 'Package',
+                'PACKAGE', 'TEST', 'Expires', 'EXPIRES', 'NET', 'EQUIV',
+                'NETWEIGHT', 'Warnings', 'WARNINGS'
+            ]
+            
+            replacements_made = 0
+            
+            # Process all paragraphs
+            for paragraph in doc.paragraphs:
+                original_text = paragraph.text
+                modified_text = original_text
+                
+                # Remove all marker patterns
+                for marker in markers:
+                    modified_text = modified_text.replace(f'{marker}_START', '')
+                    modified_text = modified_text.replace(f'{marker}_END', '')
+                
+                # If text changed, replace the entire paragraph
+                if modified_text != original_text:
+                    self.logger.warning(f"🔥 NUKING: '{original_text[:100]}' -> '{modified_text[:100]}'")
+                    replacements_made += 1
+                    
+                    # Clear all runs and create new one
+                    for run in paragraph.runs:
+                        run.text = ''
+                    if paragraph.runs:
+                        paragraph.runs[0].text = modified_text
+                    else:
+                        paragraph.add_run(modified_text)
+            
+            # Process all tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            original_text = paragraph.text
+                            modified_text = original_text
+                            
+                            # Remove all marker patterns
+                            for marker in markers:
+                                modified_text = modified_text.replace(f'{marker}_START', '')
+                                modified_text = modified_text.replace(f'{marker}_END', '')
+                            
+                            # If text changed, replace the entire paragraph
+                            if modified_text != original_text:
+                                self.logger.warning(f"🔥 NUKING TABLE: '{original_text[:100]}' -> '{modified_text[:100]}'")
+                                replacements_made += 1
+                                
+                                # Clear all runs and create new one
+                                for run in paragraph.runs:
+                                    run.text = ''
+                                if paragraph.runs:
+                                    paragraph.runs[0].text = modified_text
+                                else:
+                                    paragraph.add_run(modified_text)
+            
+            self.logger.info(f"🔥 NUCLEAR CLEANUP COMPLETE: {replacements_made} replacements made")
+            
+        except Exception as e:
+            self.logger.error(f"❌ NUCLEAR CLEANUP ERROR: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
 
