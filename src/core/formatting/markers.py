@@ -40,11 +40,11 @@ MARKER_MAP = {
 }
 
 def wrap_with_marker(text, marker):
-    """Wrap text with start and end markers."""
+    """DISABLED: No longer wrap text with markers - return text as-is to prevent markers in output."""
     if not text:
         return ""
-    safe_text = str(text).replace('&', '&amp;')
-    return f"{marker}_START{safe_text}{marker}_END"
+    # Return text without wrapping to eliminate marker problem
+    return str(text)
 
 def unwrap_marker(value, marker):
     """Remove markers from a value if present."""
