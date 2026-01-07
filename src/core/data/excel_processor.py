@@ -3598,6 +3598,7 @@ class ExcelProcessor:
                 'Product Name*': product_name,
                 'Vendor': vendor_value,
                 'Vendor/Supplier*': vendor_value,
+                'ProductVendor': vendor_value,  # CRITICAL: Template processor needs ProductVendor field
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
                 'Lineage': safe_get_value(row.get('Lineage', '')),
@@ -4078,6 +4079,8 @@ class ExcelProcessor:
                                             'Product Strain': product.get('Product Strain', ''),
                                             'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'Vendor/Supplier*': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'ProductVendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
                                             'Price': product.get('Price', ''),  # Database uses 'Price' field
                                             'Price*': product.get('Price', ''),  # Also set Price* for compatibility
                                             'Weight*': product.get('Weight*', ''),
@@ -4142,10 +4145,12 @@ class ExcelProcessor:
                                                         record['Units'] = excel_units
                                                         logger.debug(f"CRITICAL FIX: Updated units from Excel: {excel_units}")
                                                 
-                                                if excel_match.get('Vendor') or excel_match.get('Vendor/Supplier*'):
-                                                    excel_vendor = excel_match.get('Vendor') or excel_match.get('Vendor/Supplier*', '')
+                                                if excel_match.get('Vendor') or excel_match.get('Vendor/Supplier*') or excel_match.get('ProductVendor'):
+                                                    excel_vendor = excel_match.get('Vendor') or excel_match.get('Vendor/Supplier*') or excel_match.get('ProductVendor', '')
                                                     if excel_vendor:
                                                         record['Vendor'] = excel_vendor
+                                                        record['Vendor/Supplier*'] = excel_vendor
+                                                        record['ProductVendor'] = excel_vendor
                                                         logger.debug(f"CRITICAL FIX: Updated vendor from Excel: {excel_vendor}")
                                                 
                                                 if excel_match.get('Product Brand'):
@@ -4214,6 +4219,8 @@ class ExcelProcessor:
                                             'Product Strain': product.get('Product Strain', ''),
                                             'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'Vendor/Supplier*': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'ProductVendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
                                             'Price': product.get('Price', ''),  # Database uses 'Price' field
                                             'Price*': product.get('Price', ''),  # Also set Price* for compatibility
                                             'Weight*': product.get('Weight*', ''),
@@ -4331,6 +4338,19 @@ class ExcelProcessor:
             
             for record in records_sorted:
                 try:
+                    # CRITICAL: Ensure ProductVendor is set from Vendor/Supplier* for template processor
+                    vendor_value = (
+                        record.get('Vendor/Supplier*') or
+                        record.get('Vendor') or
+                        record.get('ProductVendor') or
+                        ''
+                    )
+                    vendor_value = str(vendor_value).strip()
+                    if vendor_value and vendor_value not in ['', 'None', 'nan', 'NULL', 'null']:
+                        record['Vendor/Supplier*'] = vendor_value
+                        record['Vendor'] = vendor_value
+                        record['ProductVendor'] = vendor_value
+                    
                     # Use the correct product name column
                     product_name = record.get(product_name_col, '').strip()
                     # Use the calculated Description field (which is processed from Product Name*)
