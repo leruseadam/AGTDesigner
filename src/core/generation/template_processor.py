@@ -4206,25 +4206,24 @@ class TemplateProcessor:
                 original_text = text
                 cleaned = text
                 
-                # CRITICAL: Remove exact literal marker strings FIRST before regex patterns
-                exact_markers = [
-                    'DESC_START', 'DESC_END',
-                    'PRICE_START', 'PRICE_END', 'RICE_END',  # Include RICE_END in case truncated
-                    'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
-                    'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
-                    'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END',
-                    'LINEAGE_START', 'LINEAGE_END',
-                    'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END',
-                    'THC_CBD_START', 'THC_CBD_END',
-                    'RATIO_START', 'RATIO_END',
-                    'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
-                ]
+                # CRITICAL FIX: Extract content for special markers FIRST before removing them
+                # This prevents markers from being removed before content extraction
                 
-                for marker in exact_markers:
-                    # Case-insensitive replacement
-                    cleaned = cleaned.replace(marker, '')
-                    cleaned = cleaned.replace(marker.lower(), '')
-                    cleaned = cleaned.replace(marker.capitalize(), '')
+                # CRITICAL FIX: Handle PRICE markers specially to preserve content
+                # Extract price content BEFORE removing markers to prevent "PRICE_END" -> "RICE_END"
+                price_match = re.search(r'PRICE_START(.+?)PRICE_END', cleaned, re.IGNORECASE)
+                if price_match:
+                    price_content = price_match.group(1)
+                    # Replace the full price marker pattern with just the content
+                    cleaned = re.sub(r'PRICE_START(.+?)PRICE_END', price_content, cleaned, flags=re.IGNORECASE)
+                
+                # CRITICAL FIX: Handle DESC markers specially to preserve content
+                # Extract description content BEFORE removing markers
+                desc_match = re.search(r'DESC_START(.+?)DESC_END', cleaned, re.IGNORECASE)
+                if desc_match:
+                    desc_content = desc_match.group(1)
+                    # Replace the full desc marker pattern with just the content
+                    cleaned = re.sub(r'DESC_START(.+?)DESC_END', desc_content, cleaned, flags=re.IGNORECASE)
                 
                 # CRITICAL FIX: Handle lineage markers specially to preserve content
                 # Extract lineage content before removing markers
@@ -4253,21 +4252,27 @@ class TemplateProcessor:
                     # Replace the full product strain marker pattern with just the content
                     cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
                 
-                # CRITICAL FIX: Handle PRICE markers specially to preserve content
-                # Extract price content before removing markers to prevent "PRICE_END" -> "RICE_END"
-                price_match = re.search(r'PRICE_START(.+?)PRICE_END', cleaned, re.IGNORECASE)
-                if price_match:
-                    price_content = price_match.group(1)
-                    # Replace the full price marker pattern with just the content
-                    cleaned = re.sub(r'PRICE_START(.+?)PRICE_END', price_content, cleaned, flags=re.IGNORECASE)
+                # CRITICAL: Now remove exact literal marker strings (but exclude PRICE/DESC since we already extracted them)
+                exact_markers = [
+                    # PRICE and DESC are handled above, so don't remove them again here
+                    'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
+                    'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
+                    'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END',
+                    'LINEAGE_START', 'LINEAGE_END',
+                    'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END',
+                    'THC_CBD_START', 'THC_CBD_END',
+                    'RATIO_START', 'RATIO_END',
+                    'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
+                    # Also remove any remaining PRICE/DESC markers that weren't caught by regex (edge cases)
+                    'PRICE_START', 'PRICE_END', 'RICE_END',  # Include RICE_END in case truncated
+                    'DESC_START', 'DESC_END',
+                ]
                 
-                # CRITICAL FIX: Handle DESC markers specially to preserve content
-                # Extract description content before removing markers
-                desc_match = re.search(r'DESC_START(.+?)DESC_END', cleaned, re.IGNORECASE)
-                if desc_match:
-                    desc_content = desc_match.group(1)
-                    # Replace the full desc marker pattern with just the content
-                    cleaned = re.sub(r'DESC_START(.+?)DESC_END', desc_content, cleaned, flags=re.IGNORECASE)
+                for marker in exact_markers:
+                    # Case-insensitive replacement
+                    cleaned = cleaned.replace(marker, '')
+                    cleaned = cleaned.replace(marker.lower(), '')
+                    cleaned = cleaned.replace(marker.capitalize(), '')
                 
                 # Remove other marker patterns
                 for pattern in marker_patterns:
