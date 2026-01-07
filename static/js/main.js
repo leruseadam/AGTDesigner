@@ -1251,7 +1251,7 @@ const TagManager = {
             if (payload.timestamp && age > this.CACHE_TTL_MS) {
                 return null;
             }
-            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
+            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded${payload._optimized ? ' (optimized cache)' : ''}`);
 
             return payload.tags;
         } catch (error) {
@@ -1287,9 +1287,34 @@ const TagManager = {
                 console.log(`🗑️ Cleared ${keysToRemove.length} old cache entries to make space`);
             }
 
+            // OPTIMIZATION: Store only essential fields to reduce cache size
+            // This reduces cache from ~14MB to ~2-3MB for 5000 tags
+            const optimizedTags = tags.map(tag => {
+                // Keep only essential fields needed for display and filtering
+                return {
+                    'Product Name*': tag['Product Name*'],
+                    'Vendor*': tag['Vendor*'],
+                    'Brand*': tag['Brand*'],
+                    'Product Type*': tag['Product Type*'],
+                    'Weight*': tag['Weight*'],
+                    'Price*': tag['Price*'],
+                    'Lineage*': tag['Lineage*'] || tag.Lineage || tag.canonical_lineage || tag.currentLineage,
+                    canonical_lineage: tag.canonical_lineage || tag.currentLineage,
+                    currentLineage: tag.currentLineage || tag.canonical_lineage,
+                    Lineage: tag.Lineage || tag.canonical_lineage || tag.currentLineage,
+                    // Keep source for JSON matched tags
+                    Source: tag.Source,
+                    // Keep SKU if present (used for matching)
+                    SKU: tag.SKU,
+                    // Keep any other critical fields that might be needed
+                    ...(tag._db_product ? { _db_product: tag._db_product } : {})
+                };
+            });
+
             const payload = {
                 timestamp: Date.now(),
-                tags
+                tags: optimizedTags,
+                _optimized: true // Flag to indicate this is optimized cache
             };
 
             const payloadStr = JSON.stringify(payload);
@@ -10047,12 +10072,12 @@ const TagManager = {
                 try {
                     console.log(`🔄 Retry attempt ${retryCount + 1} (processing retries: ${processingRetryCount})`);
                     const controller = new AbortController();
-                    // PERFORMANCE: Reduced timeout to 30 seconds for faster failure/retry
-                    // Tags should load much faster with all the optimizations
+                    // PERFORMANCE: Increased timeout to 60 seconds for large datasets
+                    // Large files (5000+ tags) can take 30-45 seconds to process on first load
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn('⚠️ Tag loading timeout after 30 seconds - will try cache or show error');
-                    }, 30000); // 30 seconds - should be plenty with optimizations
+                        console.warn('⚠️ Tag loading timeout after 60 seconds - will try cache or show error');
+                    }, 60000); // 60 seconds - needed for large datasets
 
                     // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
                     // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads

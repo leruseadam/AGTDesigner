@@ -7546,18 +7546,20 @@ def generate_labels():
                     logging.debug(f"🔍 VALIDATION DEBUG: About to validate {len(normalized_tags)} normalized tags")
                     logging.debug(f"🔍 VALIDATION DEBUG: First 10 tags: {normalized_tags[:10]}")
                     
-                    # Use batched queries for better performance
+                    # PERFORMANCE: Use batched queries for better performance
                     from src.core.generation.fast_generation import BatchedDatabaseQuerier
                     batched_querier = BatchedDatabaseQuerier(product_db)
                     
                     # Use fuzzy matching for JSON matched sessions
                     if is_json_matched_session:
-                        logging.debug(f"🔍 JSON SESSION: Using fuzzy matching for better JSON abbreviation handling")
+                        # PERFORMANCE: Only log for small batches
+                        if len(normalized_tags) <= 20:
+                            logging.debug(f"🔍 JSON SESSION: Using fuzzy matching for better JSON abbreviation handling")
                         # For fuzzy matching, still use direct query but with batching if possible
-                        if len(normalized_tags) > 20:
-                            # Split into batches for fuzzy matching too
+                        if len(normalized_tags) > 50:  # PERFORMANCE: Increased batch threshold
+                            # Split into larger batches for fuzzy matching
                             db_records = []
-                            batch_size = 50
+                            batch_size = 100  # PERFORMANCE: Increased batch size
                             for i in range(0, len(normalized_tags), batch_size):
                                 batch = normalized_tags[i:i + batch_size]
                                 batch_records = product_db.get_products_by_names_with_fuzzy(batch)
@@ -7565,29 +7567,14 @@ def generate_labels():
                         else:
                             db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
                     else:
-                        # Use batched queries for better performance
-                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=50)
+                        # PERFORMANCE: Use larger batch size for better performance
+                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=100)
                     
-                    logging.debug(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records")
-                    
-                    # Count valid vs placeholder records
-                    valid_count = 0
-                    placeholder_count = 0
-                    for i, record in enumerate(db_records):
-                        has_id = record.get('id') is not None
-                        product_name = record.get('Product Name*', '')
-                        vendor = record.get('Vendor/Supplier*', '')
-                        
-                        if has_id:
-                            valid_count += 1
-                            if i < 3:  # Log first 3 valid matches only
-                                logging.debug(f"🔍 VALIDATION DEBUG: Valid match {valid_count}: '{product_name}' (Vendor: {vendor})")
-                        else:
-                            placeholder_count += 1
-                            if i < 3:  # Log first 3 placeholders only
-                                logging.debug(f"🔍 VALIDATION DEBUG: Placeholder {placeholder_count}: '{product_name}' (NOT FOUND IN DB)")
-                    
-                    logging.debug(f"🔍 VALIDATION DEBUG: Found {valid_count} valid records, {placeholder_count} placeholders")
+                    # PERFORMANCE: Reduced logging - only log summary
+                    valid_count = sum(1 for r in db_records if r.get('id') is not None)
+                    placeholder_count = len(db_records) - valid_count
+                    if len(normalized_tags) <= 20:  # Only detailed logging for small batches
+                        logging.debug(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records ({valid_count} valid, {placeholder_count} placeholders)")
                     
                     if db_records:
                         # Some or all tags were found in database
@@ -7815,21 +7802,16 @@ def generate_labels():
                                 
                                 # Convert database records to the format expected by TemplateProcessor
                                 records = []
-                                # PERFORMANCE: Process records with minimal logging (only first 3)
+                                # PERFORMANCE: Process records with minimal logging (only first record for large batches)
+                                log_threshold = 1 if len(valid_db_records) > 10 else 3
                                 for idx, db_record in enumerate(valid_db_records):
                                     product_name_for_record = db_record.get('Product Name*', '')
-                                    if idx < 3:  # Only log first 3 records for performance
+                                    # PERFORMANCE: Only log first record for large batches
+                                    if idx < log_threshold and len(valid_db_records) <= 10:
                                         logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
-                                        logging.info(f"🔍 DOH value in database record for {product_name_for_record}: DOH='{db_record.get('DOH', 'MISSING')}', Compliant='{db_record.get('DOH Compliant (Yes/No)', 'MISSING')}'")
 
                                     # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                     processed_record = process_database_product_for_api(db_record)
-
-                                    # DEBUG: Log vendor field before and after processing (first 3 records only)
-                                    if idx < 3:
-                                        db_vendor = db_record.get('Vendor/Supplier*') or db_record.get('Vendor')
-                                        processed_vendor = processed_record.get('Vendor/Supplier*') or processed_record.get('Vendor')
-                                        logging.info(f"🏢 VENDOR DEBUG: Product '{product_name_for_record}' - db_record vendor: '{db_vendor}', processed_record vendor: '{processed_vendor}'")
 
                                     # CRITICAL FIX: ALWAYS use database lineage as source of truth for tag generation
                                     # UI lineage may contain sativa hybrid overrides that shouldn't affect tag output
@@ -7852,45 +7834,36 @@ def generate_labels():
                                     
                                     # CRITICAL FIX: Check UI lineage FIRST, then fall back to database lineage
                                     # This ensures user's lineage changes are respected in the output
+                                    # PERFORMANCE: Use case-insensitive lookup map for O(1) access
                                     product_name_key = product_name_for_record.strip()
                                     ui_lineage_for_this = None
                                     if ui_lineage_map:
-                                        # Try exact match first
+                                        # Try exact match first (O(1))
                                         ui_lineage_for_this = ui_lineage_map.get(product_name_key)
-                                        # If no exact match, try case-insensitive match
-                                        if not ui_lineage_for_this:
-                                            for ui_name, ui_lin in ui_lineage_map.items():
-                                                if ui_name.lower().strip() == product_name_key.lower().strip():
-                                                    ui_lineage_for_this = ui_lin
-                                                    break
+                                        # If no exact match, try case-insensitive match (O(1) with pre-built map)
+                                        if not ui_lineage_for_this and hasattr(generate_labels, '_ui_lineage_lower_map'):
+                                            ui_lineage_for_this = generate_labels._ui_lineage_lower_map.get(product_name_key.lower().strip())
+                                        elif not ui_lineage_for_this:
+                                            # Build case-insensitive map once (only if needed)
+                                            if not hasattr(generate_labels, '_ui_lineage_lower_map'):
+                                                generate_labels._ui_lineage_lower_map = {k.lower().strip(): v for k, v in ui_lineage_map.items()}
+                                            ui_lineage_for_this = generate_labels._ui_lineage_lower_map.get(product_name_key.lower().strip())
                                     
+                                    # PERFORMANCE: Reduced logging - only log for small batches
                                     if ui_lineage_for_this:
                                         docx_lineage = ui_lineage_for_this
-                                        if idx < 3:
-                                            logging.info(f"✅ DOCX LINEAGE: Using UI lineage '{docx_lineage}' for '{product_name_for_record}' (user change)")
                                     elif db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
                                         docx_lineage = str(db_lineage_raw).strip().upper()
-                                        if idx < 3:
-                                            logging.info(f"✅ DOCX LINEAGE: Using database lineage '{docx_lineage}' for '{product_name_for_record}'")
                                     else:
                                         # No database lineage found - use defaults based on product type
                                         product_type = processed_record.get('Product Type*', '').lower()
                                         CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
                                         is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                                        
-                                        if is_classic:
-                                            docx_lineage = 'HYBRID'
-                                        else:
-                                            docx_lineage = 'MIXED'
-                                        
-                                        if idx < 3:
-                                            logging.info(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name_for_record}', using default '{docx_lineage}' for {'classic' if is_classic else 'non-classic'} type")
+                                        docx_lineage = 'HYBRID' if is_classic else 'MIXED'
                                     
-                                    # Extract price with logging (only first 3 for performance)
+                                    # Extract price (no logging for performance)
                                     extracted_price = _extract_price_from_database_product(processed_record)
                                     formatted_price = _format_price_value(extracted_price)
-                                    if idx < 3:
-                                        logging.info(f"💰 PRICE EXTRACTION: Product '{product_name_for_record}' - Raw: '{extracted_price}', Formatted: '{formatted_price}'")
                                     
                                     # CRITICAL FIX: Ensure Price is always set - use fallback if empty
                                     if not formatted_price or str(formatted_price).strip() in ['', 'None', 'nan', 'N/A', '$0', '$0.00']:
@@ -8156,22 +8129,21 @@ def generate_labels():
                             ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
                 
                 # Apply UI lineage values - ALWAYS override database lineage with user's UI changes
+                # PERFORMANCE: Build case-insensitive map once for O(1) lookups
+                ui_lineage_lower_map = {k.lower().strip(): v for k, v in ui_lineage_map.items()}
                 ui_lineage_applied = 0
                 for record in records:
                     product_name = record.get('Product Name*', record.get('ProductName', ''))
                     if not product_name:
                         continue
                     
-                    # Try multiple matching strategies for product name
+                    # Try multiple matching strategies for product name (O(1) lookups)
                     product_name_key = product_name.strip()
                     ui_lineage = ui_lineage_map.get(product_name_key)
                     
-                    # If no exact match, try case-insensitive match
+                    # If no exact match, try case-insensitive match (O(1))
                     if not ui_lineage:
-                        for ui_name, ui_lin in ui_lineage_map.items():
-                            if ui_name.lower().strip() == product_name_key.lower().strip():
-                                ui_lineage = ui_lin
-                                break
+                        ui_lineage = ui_lineage_lower_map.get(product_name_key.lower().strip())
                     
                     if ui_lineage:
                         original_lineage = record.get('Lineage', '')
@@ -8428,16 +8400,12 @@ def generate_labels():
         saved_font_size_mode = template_settings.get('fontSizeMode', 'auto')
         saved_field_font_sizes = template_settings.get('fieldFontSizes', {})
         
-        # CRITICAL DEBUG: Log exact record count before template processing
-        logging.info(f"🔍 GENERATION DEBUG: Processing {len(records)} records for template '{template_type}'")
-        if records:
-            # Log lineage status for all records to detect missing lineage
+        # PERFORMANCE: Reduced logging - only log summary, not detailed breakdowns
+        logging.info(f"🔍 GENERATION: Processing {len(records)} records for template '{template_type}'")
+        if records and len(records) <= 10:  # Only detailed logging for small batches
             missing_lineage_count = sum(1 for r in records if not r.get('Lineage') or r.get('Lineage') in ['', 'MISSING', 'NOT_FOUND', 'None', 'nan'])
             missing_vendor_count = sum(1 for r in records if not r.get('Vendor/Supplier*') or r.get('Vendor/Supplier*') in ['', 'MISSING', 'None'])
             logging.info(f"🔍 GENERATION DEBUG: {missing_lineage_count}/{len(records)} records missing lineage, {missing_vendor_count}/{len(records)} missing vendor")
-            # Log first and last 3 records to verify full batch is processed
-            logging.info(f"🔍 GENERATION DEBUG: First 3 records: {[r.get('Product Name*', 'NO_NAME')[:30] for r in records[:3]]}")
-            logging.info(f"🔍 GENERATION DEBUG: Last 3 records: {[r.get('Product Name*', 'NO_NAME')[:30] for r in records[-3:]]}")
 
         # Use the already imported TemplateProcessor and get_font_scheme
         font_scheme = get_font_scheme(template_type)
@@ -8516,7 +8484,9 @@ def generate_labels():
                     return base
                 
                 applied = 0
-                logging.info(f"🔍 DOH OVERRIDE CHECK: Checking {len(records)} records against {len(overrides)} override(s)")
+                # PERFORMANCE: Only log DOH override check for small batches
+                if len(records) <= 20:
+                    logging.info(f"🔍 DOH OVERRIDE CHECK: Checking {len(records)} records against {len(overrides)} override(s)")
                 for rec in records:
                     name = rec.get('ProductName') or rec.get('Product Name*') or rec.get('product_name') or ''
                     if not name:
@@ -8534,31 +8504,32 @@ def generate_labels():
                     if full_norm in overrides:
                         matched_key = full_norm
                         matched_val = overrides[full_norm]
-                        logging.info(f"✅ DOH OVERRIDE MATCH (full): '{name}' → override key '{matched_key}' = '{matched_val}'")
+                        if len(records) <= 20:  # Only log for small batches
+                            logging.info(f"✅ DOH OVERRIDE MATCH (full): '{name}' → override key '{matched_key}' = '{matched_val}'")
                     # Strategy 2: Base name only (without vendor/weight suffix)
                     elif base_norm in overrides:
                         matched_key = base_norm
                         matched_val = overrides[base_norm]
-                        logging.info(f"✅ DOH OVERRIDE MATCH (base): '{name}' → base '{base_name_only}' → override key '{matched_key}' = '{matched_val}'")
+                        if len(records) <= 20:  # Only log for small batches
+                            logging.info(f"✅ DOH OVERRIDE MATCH (base): '{name}' → base '{base_name_only}' → override key '{matched_key}' = '{matched_val}'")
                     # Strategy 3: Any override key that's a substring of the normalized name
                     else:
                         for ov_key, ov_val in overrides.items():
                             if ov_key in full_norm or full_norm in ov_key:
                                 matched_key = ov_key
                                 matched_val = ov_val
-                                logging.info(f"✅ DOH OVERRIDE MATCH (substring): '{name}' → override key '{matched_key}' = '{matched_val}'")
+                                if len(records) <= 20:  # Only log for small batches
+                                    logging.info(f"✅ DOH OVERRIDE MATCH (substring): '{name}' → override key '{matched_key}' = '{matched_val}'")
                                 break
                     
                     if matched_key and matched_val is not None:
                         # Update all DOH-related fields to ensure consistent downstream behavior
-                        old_doh = rec.get('DOH', 'N/A')
                         rec['DOH'] = matched_val
                         rec['DOH Compliant (Yes/No)'] = matched_val
                         rec['doh'] = matched_val
                         applied += 1
-                        logging.info(f"✅ DOH OVERRIDE APPLIED: '{name}' DOH changed from '{old_doh}' → '{matched_val}'")
-                    else:
-                        logging.debug(f"🔍 DOH OVERRIDE: No match for '{name}' (tried: full='{full_norm}', base='{base_norm}')")
+                        if len(records) <= 20:  # Only log for small batches
+                            logging.info(f"✅ DOH OVERRIDE APPLIED: '{name}' DOH changed to '{matched_val}'")
                 
                 logging.info(f"✅ DOH OVERRIDE SUMMARY: Applied {applied} override(s) to {len(records)} record(s)")
         except Exception as ov_err:
@@ -8647,33 +8618,26 @@ def generate_labels():
                                 logging.warning(f"Batch strain lineage query failed: {strain_err}")
                         
                         # Apply enriched lineage to records - ALWAYS overwrite with database lineage
+                        # PERFORMANCE: Batch update all records at once, minimal logging
                         enriched_count = 0
                         for idx, (product_name, product_strain) in enrichment_map.items():
                             record = records[idx]
                             db_lineage = None
-                            old_lineage = record.get('Lineage') or record.get('lineage') or ''
                             
-                            # Try product-level lineage first (database is source of truth)
+                            # Try product-level lineage first (database is source of truth) - O(1) lookup
                             if product_name in product_lineage_map:
                                 db_lineage = product_lineage_map[product_name]
-                            # Fall back to strain-level lineage
+                            # Fall back to strain-level lineage - O(1) lookup
                             elif product_strain and product_strain in strain_lineage_map:
                                 db_lineage = strain_lineage_map[product_strain]
                             
                             # CRITICAL FIX: ALWAYS overwrite with database lineage if it exists
-                            # This ensures tag output matches UI (which uses canonical_lineage/currentLineage)
-                            # IMPORTANT: Always overwrite even if lineage appears to match, to prevent sativa hybrid override issues
+                            # PERFORMANCE: Skip logging in loop, only log summary
                             if db_lineage:
-                                old_lineage_normalized = str(old_lineage).strip().upper() if old_lineage else ''
-                                db_lineage_normalized = str(db_lineage).strip().upper()
-                                # Always overwrite to ensure database value is used (prevents sativa hybrid override)
                                 record['Lineage'] = db_lineage
                                 record['lineage'] = db_lineage.lower() if db_lineage else ''
                                 record['canonical_lineage'] = db_lineage  # Also set canonical_lineage for consistency
                                 enriched_count += 1
-                                # Only log if lineage changed (reduced logging for speed)
-                                if old_lineage_normalized != db_lineage_normalized:
-                                    logging.debug(f"🔄 ENRICHMENT: Lineage update for '{product_name}': '{old_lineage}' → '{db_lineage}'")
                         
                         if enriched_count > 0:
                             logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
@@ -8681,10 +8645,11 @@ def generate_labels():
             logging.error(f"Lineage enrichment failed: {enrich_err}")
 
         _enrichment_time = time.time() - _enrichment_start
-        if _enrichment_time > 1.0:  # Only log if it takes more than 1 second
+        # PERFORMANCE: Only log if enrichment is slow (threshold increased to reduce noise)
+        if _enrichment_time > 2.0:
+            logging.warning(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records (consider optimizing)")
+        elif _enrichment_time > 0.5:
             logging.info(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
-        else:
-            logging.debug(f"⏱️ PERFORMANCE: Lineage enrichment took {_enrichment_time:.2f}s for {len(records)} records")
 
         # Bail out early if no records made it this far (prevents NoneType errors downstream)
         if not records:
