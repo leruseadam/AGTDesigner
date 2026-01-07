@@ -7933,8 +7933,18 @@ def generate_labels():
                                         for row in cur.fetchall():
                                             pname, lineage = row[0], row[1]
                                             if pname and lineage and str(lineage).strip() not in ['', 'None', 'nan']:
-                                                db_lineage_map[pname] = str(lineage).strip().upper()
-                                        logging.info(f"✅ BATCH LINEAGE: Loaded {len(db_lineage_map)} lineages for {len(product_names_for_batch)} products")
+                                                lineage_upper = str(lineage).strip().upper()
+                                                # Store by multiple keys for better matching
+                                                db_lineage_map[pname] = lineage_upper
+                                                db_lineage_map[pname.lower().strip()] = lineage_upper
+                                                # Also store normalized name if available
+                                                try:
+                                                    norm = product_db._normalize_product_name(pname)
+                                                    if norm:
+                                                        db_lineage_map[norm] = lineage_upper
+                                                except Exception:
+                                                    pass
+                                        logging.info(f"✅ BATCH LINEAGE: Loaded {len(set(db_lineage_map.values()))} unique lineages for {len(product_names_for_batch)} products (map size: {len(db_lineage_map)})")
                                 except Exception as batch_err:
                                     logging.warning(f"Batch lineage query failed: {batch_err}")
                                 
@@ -7948,7 +7958,16 @@ def generate_labels():
                                     processed_record = process_database_product_for_api(db_record)
 
                                     # PERFORMANCE FIX: Use batched lineage lookup instead of individual get_product_lineage() call
+                                    # Try multiple matching strategies (exact, lowercase, normalized)
                                     db_lineage_from_method = db_lineage_map.get(product_name_for_record)
+                                    if not db_lineage_from_method:
+                                        db_lineage_from_method = db_lineage_map.get(product_name_for_record.lower().strip())
+                                    if not db_lineage_from_method:
+                                        try:
+                                            norm = product_db._normalize_product_name(product_name_for_record)
+                                            db_lineage_from_method = db_lineage_map.get(norm)
+                                        except Exception:
+                                            pass
                                     
                                     # CRITICAL FIX: Check UI lineage FIRST, then fall back to database lineage from get_product_lineage()
                                     # This ensures user's lineage changes are respected in the output
@@ -7965,11 +7984,16 @@ def generate_labels():
                                         if not ui_lineage_for_this:
                                             ui_lineage_for_this = generate_labels._ui_lineage_lower_map.get(product_name_key.lower().strip())
                                     
-                                    # PERFORMANCE: No logging in tight loop
+                                    # PERFORMANCE: Minimal logging (only first few mismatches)
                                     if ui_lineage_for_this:
                                         docx_lineage = ui_lineage_for_this
                                     elif db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
                                         docx_lineage = str(db_lineage_from_method).strip().upper()
+                                        # Log if lineage differs from what's in db_record (first 5 only)
+                                        old_lineage = db_record.get('Lineage', '')
+                                        if old_lineage != docx_lineage and forced_count < 5:
+                                            logging.info(f"🔄 BATCH LINEAGE UPDATE: '{product_name_for_record[:50]}' - '{old_lineage}' → '{docx_lineage}'")
+                                            forced_count += 1
                                     else:
                                         # No database lineage found - use defaults based on product type
                                         product_type = processed_record.get('Product Type*', '').lower()

@@ -4158,6 +4158,7 @@ class TemplateProcessor:
         Final marker cleanup to ensure ALL markers are stripped from the final output.
         This method runs after all other processing to catch any remaining markers.
         """
+        self.logger.info("🧹 STARTING MARKER CLEANUP - Processing document...")
         try:
             # Enhanced patterns to catch all marker variations
             marker_patterns = [
@@ -4328,11 +4329,14 @@ class TemplateProcessor:
             
             # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content
             self._final_lineage_cleanup(doc)
-            
+
             # Enhanced final marker cleanup completed
-            
+            self.logger.info("✅ MARKER CLEANUP COMPLETE - All markers processed")
+
         except Exception as e:
-            self.logger.warning(f"Error in enhanced final marker cleanup: {e}")
+            self.logger.error(f"❌ ERROR in marker cleanup: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
 
     def _final_lineage_cleanup(self, doc):
         """
