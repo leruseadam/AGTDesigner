@@ -4412,6 +4412,8 @@ class TemplateProcessor:
             self.logger.info("🔥 NUCLEAR MARKER CLEANUP STARTING")
             
             # All possible marker patterns
+            # CRITICAL FIX: Only remove markers that haven't been extracted yet
+            # PRICE and DESC should have been extracted by _final_marker_cleanup already
             markers = [
                 'ProductStrain', 'PRODUCTSTRAIN', 'DescAndWeight', 'DESCANDWEIGHT',
                 'Description', 'DESCRIPTION', 'DESC', 'Price', 'PRICE', 'RICE',
@@ -4427,10 +4429,23 @@ class TemplateProcessor:
             
             # Process all paragraphs
             for paragraph in doc.paragraphs:
-                original_text = paragraph.text
+                # CRITICAL FIX: Reassemble full text from runs
+                original_text = "".join(run.text for run in paragraph.runs)
                 modified_text = original_text
                 
-                # Remove all marker patterns
+                # CRITICAL FIX: Extract PRICE and DESC content BEFORE removing markers
+                # This ensures content isn't lost when removing markers
+                price_match = re.search(r'PRICE_START(.+?)PRICE_END', modified_text, re.IGNORECASE)
+                if price_match:
+                    price_content = price_match.group(1)
+                    modified_text = re.sub(r'PRICE_START(.+?)PRICE_END', price_content, modified_text, flags=re.IGNORECASE)
+                
+                desc_match = re.search(r'DESC_START(.+?)DESC_END', modified_text, re.IGNORECASE)
+                if desc_match:
+                    desc_content = desc_match.group(1)
+                    modified_text = re.sub(r'DESC_START(.+?)DESC_END', desc_content, modified_text, flags=re.IGNORECASE)
+                
+                # Remove all marker patterns (after extraction)
                 for marker in markers:
                     modified_text = modified_text.replace(f'{marker}_START', '')
                     modified_text = modified_text.replace(f'{marker}_END', '')
@@ -4453,10 +4468,23 @@ class TemplateProcessor:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            original_text = paragraph.text
+                            # CRITICAL FIX: Reassemble full text from runs
+                            original_text = "".join(run.text for run in paragraph.runs)
                             modified_text = original_text
                             
-                            # Remove all marker patterns
+                            # CRITICAL FIX: Extract PRICE and DESC content BEFORE removing markers
+                            # This ensures content isn't lost when removing markers
+                            price_match = re.search(r'PRICE_START(.+?)PRICE_END', modified_text, re.IGNORECASE)
+                            if price_match:
+                                price_content = price_match.group(1)
+                                modified_text = re.sub(r'PRICE_START(.+?)PRICE_END', price_content, modified_text, flags=re.IGNORECASE)
+                            
+                            desc_match = re.search(r'DESC_START(.+?)DESC_END', modified_text, re.IGNORECASE)
+                            if desc_match:
+                                desc_content = desc_match.group(1)
+                                modified_text = re.sub(r'DESC_START(.+?)DESC_END', desc_content, modified_text, flags=re.IGNORECASE)
+                            
+                            # Remove all marker patterns (after extraction)
                             for marker in markers:
                                 modified_text = modified_text.replace(f'{marker}_START', '')
                                 modified_text = modified_text.replace(f'{marker}_END', '')
