@@ -175,17 +175,17 @@ def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
     # Signal-based alarms only work in the main thread on Unix. If unavailable, just load.
     # CRITICAL FIX: Windows doesn't support SIGALRM - check platform first
     import platform
+    import threading
     is_windows = platform.system() == 'Windows'
-    
+
     # On Windows or non-main threads, use timeout with threading instead
     if is_windows or threading.current_thread() is not threading.main_thread():
         if is_windows:
             logging.debug("safe_load_file_with_timeout: Windows detected - using threading timeout instead of SIGALRM")
         else:
             logging.debug("safe_load_file_with_timeout: non-main thread; using threading timeout")
-        
+
         # Use threading-based timeout for Windows compatibility
-        import threading
         result_container = {'result': None, 'done': False, 'error': None}
         
         def load_in_thread():

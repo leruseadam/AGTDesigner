@@ -8168,6 +8168,18 @@
         // CRITICAL FIX: Check if TagManager is loaded and has uploadFile method
         // uploadFile exists on TagManager even before init() is called
         // We just need TagManager to be loaded from main.js
+        // Also check if main.js has an error preventing TagManager from loading
+        if (window.mainJsError) {
+          console.error('❌ CRITICAL: main.js has an error preventing TagManager from loading:', window.mainJsError);
+          console.error('❌ This means TagManager will never be available. Please refresh the page.');
+          // Force hide splash and stop retrying
+          if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+            AppLoadingSplash.stopAutoAdvance();
+            AppLoadingSplash.complete();
+          }
+          return;
+        }
+        
         const tagManagerReady = window.TagManager && 
                                 typeof window.TagManager.uploadFile === 'function';
         
@@ -8175,7 +8187,8 @@
           console.log('✓ TagManager ready and initialized, attaching file upload listener');
           window.fileUploadInitialized = true; // Mark as initialized to prevent retries
           
-          // Remove any existing listeners to prevent duplicates
+          // CRITICAL FIX: Clone fileInput to remove any stale handlers from earlier initialization attempts
+          // enhanced-ui.js handler will check for TagManager and delegate to it, so having both is OK
           const newFileInput = fileInput.cloneNode(true);
           fileInput.parentNode.replaceChild(newFileInput, fileInput);
           
@@ -8207,11 +8220,36 @@
             }
           });
         } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
+          // Check for JavaScript errors that prevent TagManager from loading
+          if (window.mainJsError) {
+            console.error('❌ CRITICAL: main.js error detected:', window.mainJsError);
+            console.error('❌ TagManager cannot load - JavaScript error in main.js. Please refresh the page.');
+            // Force hide splash and stop retrying
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+              AppLoadingSplash.stopAutoAdvance();
+              AppLoadingSplash.complete();
+            }
+            return;
+          }
+          
           // Only log every 10th attempt to reduce console spam
           if (window.fileUploadInitAttempts % 10 === 0 || window.fileUploadInitAttempts <= 5) {
             const reason = !window.TagManager ? 'TagManager not loaded from main.js' :
                           !window.TagManager.uploadFile ? 'uploadFile method not available' : 'unknown';
             console.warn(`⏳ TagManager not ready yet (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS}): ${reason}`);
+            
+            // After 30 attempts, check for specific issues
+            if (window.fileUploadInitAttempts >= 30) {
+              console.error('❌ DIAGNOSTIC: TagManager still not available after 30 attempts');
+              console.error('❌ Checking main.js loading status...');
+              console.error('  - window.mainJsLoaded:', window.mainJsLoaded);
+              console.error('  - window.mainJsError:', window.mainJsError);
+              console.error('  - window.TagManager exists:', !!window.TagManager);
+              console.error('  - window.tagManagerLoaded:', window.tagManagerLoaded);
+              if (!window.mainJsLoaded && !window.mainJsError) {
+                console.error('❌ main.js may not have loaded - check Network tab for 404 or other errors');
+              }
+            }
           }
           // Retry after a short delay
           setTimeout(initializeFileUpload, 100);

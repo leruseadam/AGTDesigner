@@ -16511,15 +16511,26 @@ const TagManager = {
     }
 };
 
-// CRITICAL FIX: Expose TagManager to global scope IMMEDIATELY
-// This must happen as soon as the TagManager object is created, not at the end
-// This allows initializeFileUpload and other scripts to detect TagManager early
+// CRITICAL FIX: Assign TagManager to window IMMEDIATELY after object definition
+// This ensures it's available even if there are errors later in the file
+try {
+    if (typeof window !== 'undefined') {
+        window.TagManager = TagManager;
+        window.tagManagerLoaded = true;
+        console.log('✅ TagManager assigned to window.TagManager (immediate assignment)');
+    }
+} catch (error) {
+    console.error('❌ CRITICAL: Failed to assign TagManager immediately:', error);
+}
+
+// CRITICAL FIX: Expose TagManager to global scope IMMEDIATELY after object creation
+// This MUST happen right after TagManager is defined to ensure it's available early
 try {
     if (typeof window !== 'undefined') {
         window.TagManager = TagManager;
         // Also set a flag to indicate TagManager is loaded
         window.tagManagerLoaded = true;
-        console.log('✅ TagManager assigned to window.TagManager');
+        console.log('✅ TagManager assigned to window.TagManager (early assignment)');
 
         // Note: Cache hydration now happens in the inline script in index.html
         // right after this script loads, to ensure DOM is ready

@@ -73,11 +73,11 @@ IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 
 # PERFORMANCE: Pre-compile regex patterns for marker cleanup (compile once, use many times)
 _MARKER_PATTERNS = {
-    'price_content': re.compile(r'PRICE_START\s*(.+?)\s*PRICE_END', re.IGNORECASE | re.DOTALL),
-    'desc_content': re.compile(r'DESC_START\s*(.+?)\s*DESC_END', re.IGNORECASE | re.DOTALL),
-    'lineage_content': re.compile(r'LINEAGE_START(.+?)LINEAGE_END', re.IGNORECASE),
-    'brand_content': re.compile(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', re.IGNORECASE),
-    'strain_content': re.compile(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', re.IGNORECASE),
+    'price_content': re.compile(r'PRICE_START\s*(.*?)\s*PRICE_END', re.IGNORECASE | re.DOTALL),
+    'desc_content': re.compile(r'DESC_START\s*(.*?)\s*DESC_END', re.IGNORECASE | re.DOTALL),
+    'lineage_content': re.compile(r'LINEAGE_START(.*?)LINEAGE_END', re.IGNORECASE),
+    'brand_content': re.compile(r'PRODUCTBRAND(?:_CENTER)?_START(.*?)PRODUCTBRAND(?:_CENTER)?_END', re.IGNORECASE),
+    'strain_content': re.compile(r'PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END', re.IGNORECASE),
     'all_markers': re.compile(r'\b\w+_(START|END)\b|\b\w+_START\b|\b\w+_END\b', re.IGNORECASE),
     'whitespace': re.compile(r'\s+'),
 }
@@ -89,9 +89,19 @@ _MARKER_REPLACEMENTS = {
         'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END', 'LINEAGE_START', 'LINEAGE_END',
         'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END', 'THC_CBD_START', 'THC_CBD_END',
         'RATIO_START', 'RATIO_END', 'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
-        'PRICE_START', 'PRICE_END', 'RICE_END', 'DESC_START', 'DESC_END'
+        'PRICE_START', 'PRICE_END', 'RICE_END', 'DESC_START', 'DESC_END',
+        'PRODUCTNAME_START', 'PRODUCTNAME_END', 'PRODUCTTYPE_START', 'PRODUCTTYPE_END',
+        'DOH_START', 'DOH_END', 'JOINT_RATIO_START', 'JOINT_RATIO_END',
+        'THC_START', 'THC_END', 'CBD_START', 'CBD_END'
     ]
 }
+
+# Add standalone marker removal pattern
+_STANDALONE_MARKER_PATTERN = re.compile(
+    r'\b(?:PRODUCTBRAND|PRODUCTSTRAIN|PRODUCTNAME|PRODUCTTYPE|PRODUCTVENDOR|'
+    r'LINEAGE|WEIGHTUNITS|PRICE|DESC|THC_CBD|RATIO|JOINT_RATIO|THC|CBD|DOH|RICE)_(?:START|END)\b',
+    re.IGNORECASE
+)
 
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
@@ -4278,7 +4288,10 @@ class TemplateProcessor:
                     if marker in cleaned.upper():
                         # Case-insensitive replacement using regex for better performance
                         cleaned = re.sub(re.escape(marker), '', cleaned, flags=re.IGNORECASE)
-                
+
+                # Remove standalone markers using dedicated pattern
+                cleaned = _STANDALONE_MARKER_PATTERN.sub('', cleaned)
+
                 # Remove other marker patterns using pre-compiled pattern
                 cleaned = _MARKER_PATTERNS['all_markers'].sub('', cleaned)
                 
@@ -4415,18 +4428,21 @@ class TemplateProcessor:
             def clean_text_fast(text):
                 """Fast marker cleanup using pre-compiled patterns."""
                 modified_text = text
-                
+
                 # Extract PRICE and DESC content BEFORE removing markers
                 price_match = _MARKER_PATTERNS['price_content'].search(modified_text)
                 if price_match:
                     price_content = price_match.group(1).strip()
                     modified_text = _MARKER_PATTERNS['price_content'].sub(price_content, modified_text)
-                
+
                 desc_match = _MARKER_PATTERNS['desc_content'].search(modified_text)
                 if desc_match:
                     desc_content = desc_match.group(1).strip()
                     modified_text = _MARKER_PATTERNS['desc_content'].sub(desc_content, modified_text)
-                
+
+                # Remove standalone markers first
+                modified_text = _STANDALONE_MARKER_PATTERN.sub('', modified_text)
+
                 # Remove all marker patterns using single regex pass
                 modified_text = marker_pattern.sub('', modified_text)
                 return modified_text

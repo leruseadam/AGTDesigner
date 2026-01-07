@@ -59,18 +59,28 @@ console.log('📝 File elements found:', {
   }
 
 if (fileInput) {
-  console.log('✅ Attaching change listener to fileInput');
+  console.log('✅ Enhanced UI: Attaching change listener to fileInput');
   fileInput.addEventListener('change', function(e) {
-    console.log('🔄 File input change event fired');
+    console.log('🔄 Enhanced UI: File input change event fired');
     if (e.target.files && e.target.files.length > 0) {
-      console.log('🎬 UPLOAD START: Showing splash immediately');
-      handleFiles(e.target.files);
-      // Prevent any other handlers from running
-      e.stopPropagation();
+      // CRITICAL FIX: Check if TagManager.uploadFile is available and prefer it
+      // This ensures consistency across platforms and prevents conflicts
+      if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+        console.log('✅ Enhanced UI: Using TagManager.uploadFile for upload');
+        const file = e.target.files[0];
+        window.TagManager.uploadFile(file);
+        // Don't stop propagation - let other handlers see the event too
+      } else {
+        console.log('🔄 Enhanced UI: TagManager not available, using handleFiles fallback');
+        console.log('🎬 UPLOAD START: Showing splash immediately');
+        handleFiles(e.target.files);
+        // Only stop propagation if we're using handleFiles (fallback)
+        e.stopPropagation();
+      }
     }
   });
 } else {
-  console.error('❌ fileInput element not found!');
+  console.error('❌ Enhanced UI: fileInput element not found!');
 }
 
 // Note: Removed duplicate TagManager upload handler to prevent conflicts
