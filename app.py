@@ -8494,9 +8494,12 @@ def generate_labels():
                     return base
                 
                 applied = 0
-                # PERFORMANCE: Only log DOH override check for small batches
-                if len(records) <= 20:
-                    logging.info(f"🔍 DOH OVERRIDE CHECK: Checking {len(records)} records against {len(overrides)} override(s)")
+                # PERFORMANCE: Minimal logging (only summary)
+                log_detail = len(records) <= 10  # Only log details for very small batches
+                
+                # PERFORMANCE: Pre-normalize override keys for faster lookup
+                override_norm_map = {_norm(k): v for k, v in overrides.items()}
+                
                 for rec in records:
                     name = rec.get('ProductName') or rec.get('Product Name*') or rec.get('product_name') or ''
                     if not name:
@@ -8507,44 +8510,32 @@ def generate_labels():
                     base_name_only = _base_name(name)
                     base_norm = _norm(base_name_only)
                     
-                    matched_key = None
                     matched_val = None
                     
-                    # Strategy 1: Full normalized name
-                    if full_norm in overrides:
-                        matched_key = full_norm
-                        matched_val = overrides[full_norm]
-                        if len(records) <= 20:  # Only log for small batches
-                            logging.info(f"✅ DOH OVERRIDE MATCH (full): '{name}' → override key '{matched_key}' = '{matched_val}'")
-                    # Strategy 2: Base name only (without vendor/weight suffix)
-                    elif base_norm in overrides:
-                        matched_key = base_norm
-                        matched_val = overrides[base_norm]
-                        if len(records) <= 20:  # Only log for small batches
-                            logging.info(f"✅ DOH OVERRIDE MATCH (base): '{name}' → base '{base_name_only}' → override key '{matched_key}' = '{matched_val}'")
-                    # Strategy 3: Any override key that's a substring of the normalized name
+                    # Strategy 1: Full normalized name (O(1) lookup)
+                    if full_norm in override_norm_map:
+                        matched_val = override_norm_map[full_norm]
+                    # Strategy 2: Base name only (O(1) lookup)
+                    elif base_norm in override_norm_map:
+                        matched_val = override_norm_map[base_norm]
+                    # Strategy 3: Substring match (only if needed)
                     else:
-                        for ov_key, ov_val in overrides.items():
+                        for ov_key, ov_val in override_norm_map.items():
                             if ov_key in full_norm or full_norm in ov_key:
-                                matched_key = ov_key
                                 matched_val = ov_val
-                                if len(records) <= 20:  # Only log for small batches
-                                    logging.info(f"✅ DOH OVERRIDE MATCH (substring): '{name}' → override key '{matched_key}' = '{matched_val}'")
                                 break
                     
-                    if matched_key and matched_val is not None:
+                    if matched_val is not None:
                         # Update all DOH-related fields to ensure consistent downstream behavior
                         rec['DOH'] = matched_val
                         rec['DOH Compliant (Yes/No)'] = matched_val
                         rec['doh'] = matched_val
                         applied += 1
-                        if len(records) <= 20:  # Only log for small batches
-                            logging.info(f"✅ DOH OVERRIDE APPLIED: '{name}' DOH changed to '{matched_val}'")
                 
-                logging.info(f"✅ DOH OVERRIDE SUMMARY: Applied {applied} override(s) to {len(records)} record(s)")
+                if applied > 0 or log_detail:
+                    logging.info(f"✅ DOH OVERRIDE SUMMARY: Applied {applied} override(s) to {len(records)} record(s)")
         except Exception as ov_err:
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
-            logging.error(f"DOH override error details: {traceback.format_exc()}")
 
         # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
         # PERFORMANCE OPTIMIZATION: Batch query all lineages at once instead of N+1 queries
