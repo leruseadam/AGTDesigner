@@ -9442,6 +9442,7 @@ def get_available_tags():
         # Skip cache entirely if prefer_db is set (we want fresh DB data)
         # CRITICAL FIX: Include file path in cache key to prevent stale data from previous uploads
         session_file_path = session.get('file_path', '')
+        logging.info(f"🔍 AVAILABLE-TAGS: session_file_path='{session_file_path}', store='{store_name}'")
 
         # CRITICAL FIX: Cache key should use session file path even if the temp file was cleaned up.
         # Rely on cache/_excel_processor instead of file existence to avoid losing tags after reload.
@@ -9449,6 +9450,7 @@ def get_available_tags():
         if session_file_path:
             try:
                 file_exists = os.path.exists(session_file_path)
+                logging.info(f"🔍 AVAILABLE-TAGS: file_exists={file_exists} for path='{session_file_path}'")
             except Exception as path_err:
                 logging.warning(f"Error checking file path: {path_err}")
                 file_exists = False
@@ -9457,6 +9459,7 @@ def get_available_tags():
         # Only trust file existence and session state to prevent serving wrong user's data
         # The processor is not session-safe and can contain data from other users
         has_excel_data = file_exists and session_file_path
+        logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)})")
 
         # ENABLED: Automatically load default file for the selected store
         # CRITICAL: Only load default file if user has actually selected a store
