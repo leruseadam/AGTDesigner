@@ -99,21 +99,29 @@ class FastGenerationEngine:
         
         if cache_key in _generation_cache:
             self.cache_hits += 1
-            logger.info(f"⚡ CACHE HIT: Returning cached generation for {len(records)} records")
+            logger.warning(f"⚡⚡⚡ CACHE HIT PATH - RETURNING CACHED DOC FOR {len(records)} RECORDS ⚡⚡⚡")
             
             # Return a copy of the cached document
             cached_bytes = _generation_cache[cache_key]
             cached_doc = Document(BytesIO(cached_bytes))
             
             # CRITICAL: Clean markers from cached document too
-            logger.warning("🧹 FastGenerationEngine: Cleaning markers from CACHED document")
-            self.template_processor._final_marker_cleanup(cached_doc)
-            self.template_processor._nuclear_marker_cleanup(cached_doc)
+            logger.warning("🧹🧹🧹 ABOUT TO CALL CLEANUP ON CACHED DOC")
+            try:
+                self.template_processor._final_marker_cleanup(cached_doc)
+                logger.warning("🧹 FIRST CLEANUP DONE")
+                self.template_processor._nuclear_marker_cleanup(cached_doc)
+                logger.warning("🧹 NUCLEAR CLEANUP DONE")
+            except Exception as e:
+                logger.error(f"❌❌❌ CLEANUP FAILED: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
             
+            logger.warning("⚡ RETURNING CACHED DOC AFTER CLEANUP")
             return cached_doc
         
         self.cache_misses += 1
-        logger.info(f"⚡ CACHE MISS: Generating labels for {len(records)} records")
+        logger.warning(f"⚡⚡⚡ CACHE MISS PATH - GENERATING NEW DOC FOR {len(records)} RECORDS ⚡⚡⚡")
         
         # Generate the document
         final_doc = self.template_processor.process_records(records)
