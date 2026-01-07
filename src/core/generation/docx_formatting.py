@@ -251,12 +251,15 @@ def apply_lineage_colors(doc):
                         shd.set(qn('w:fill'), 'FFFFFF')  # White background
                         tcPr.append(shd)
                     
-                    # Remove lineage hint token from actual cell content if present
-                    if lineage_hint_token:
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                if lineage_hint_token in run.text.upper():
-                                    run.text = run.text.replace(lineage_hint_token, "")
+                    # CRITICAL FIX: Remove lineage hint token from actual cell content if present
+                    # Must remove from all runs, case-insensitively
+                    # Also search for any LINEAGE_HINT pattern even if not detected earlier
+                    import re
+                    hint_pattern = re.compile(r'__LINEAGE_HINT_[A-Z\/\s]+__', re.IGNORECASE)
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            if hint_pattern.search(run.text):
+                                run.text = hint_pattern.sub('', run.text)
         # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
         _final_lineage_cleanup_after_coloring(doc)
         
