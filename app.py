@@ -7397,25 +7397,24 @@ def generate_labels():
         # PERFORMANCE FIX: Check if processor already has the file loaded before reloading
         # This prevents the 24-second file read delay when the file is already loaded
         if needs_file_load:
-        
-        if file_path:
-            logging.info(f"🔍 TRACE: Checking if file_path needs loading: {file_path}")
-            # Check if file is already loaded
-            last_loaded = getattr(excel_processor, '_last_loaded_file', None)
-            has_data = excel_processor.df is not None and not excel_processor.df.empty
-            
-            # Normalize paths for comparison (handle different path formats)
-            import os
-            file_path_normalized = os.path.normpath(file_path) if file_path else None
-            last_loaded_normalized = os.path.normpath(last_loaded) if last_loaded else None
-            
-            if file_path_normalized == last_loaded_normalized and has_data:
-                logging.info(f"⚡ PERFORMANCE: File already loaded ({len(excel_processor.df)} rows) - skipping reload")
-                needs_file_load = False
+            if file_path:
+                logging.info(f"🔍 TRACE: Checking if file_path needs loading: {file_path}")
+                # Check if file is already loaded
+                last_loaded = getattr(excel_processor, '_last_loaded_file', None)
+                has_data = excel_processor.df is not None and not excel_processor.df.empty
+                
+                # Normalize paths for comparison (handle different path formats)
+                import os
+                file_path_normalized = os.path.normpath(file_path) if file_path else None
+                last_loaded_normalized = os.path.normpath(last_loaded) if last_loaded else None
+                
+                if file_path_normalized == last_loaded_normalized and has_data:
+                    logging.info(f"⚡ PERFORMANCE: File already loaded ({len(excel_processor.df)} rows) - skipping reload")
+                    needs_file_load = False
+                else:
+                    logging.info(f"📂 File needs loading: last_loaded={last_loaded_normalized}, has_data={has_data}")
+                    needs_file_load = True
             else:
-                logging.info(f"📂 File needs loading: last_loaded={last_loaded_normalized}, has_data={has_data}")
-                needs_file_load = True
-        else:
             # No file_path provided - check if processor has data
             if excel_processor.df is None or excel_processor.df.empty:
                 logging.info("📂 Processor has no data - will try to load default file")
