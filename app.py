@@ -8554,10 +8554,10 @@ def generate_labels():
                 if store_name:
                     product_db = get_product_database(store_name)
                     if product_db:
-                    # Collect all product names and strains that need enrichment
-                    products_to_enrich = []
-                    strains_to_enrich = set()
-                    enrichment_map = {}  # Maps record index to (product_name, strain_name)
+                        # Collect all product names and strains that need enrichment
+                        products_to_enrich = []
+                        strains_to_enrich = set()
+                        enrichment_map = {}  # Maps record index to (product_name, strain_name)
                     
                     for idx, record in enumerate(records):
                         # CRITICAL FIX: ALWAYS enrich ALL records with database lineage to ensure UI matches output
@@ -9547,6 +9547,17 @@ def get_available_tags():
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         # CRITICAL: Always check cache first, even during fast_load, to avoid reloading Excel file
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
+        
+        # PERFORMANCE FIX: Even with nocache=1, check file-based cache if fast_load=1 to prevent slow reloads
+        # This uses the background-processed cache which is faster than reloading the entire file
+        if not cached_tags and fast_load and session_file_path:
+            import hashlib
+            file_cache_key = f"tags_file_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
+            file_cached_tags = cache.get(file_cache_key)
+            if file_cached_tags:
+                logging.info(f"⚡ FILE CACHE HIT: Using background-processed cache even with nocache=1 (fast_load mode)")
+                cached_tags = file_cached_tags
+        
         if cached_tags and fast_load:
             logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
             safe_cached_tags = make_json_safe(cached_tags)

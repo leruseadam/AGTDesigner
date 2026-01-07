@@ -2142,18 +2142,26 @@ class ExcelProcessor:
                 vendor_col_found = "Vendor"
                 self.logger.info(f"Column 'Vendor' found - no renaming needed")
             else:
-                # Search for any column containing vendor-related terms
+                # Search for any column containing vendor-related terms (but avoid Product Brand)
                 for col in self.df.columns:
                     col_lower = col.lower()
+                    # Skip Product Brand column - we want actual vendor/supplier column
+                    if 'product brand' in col_lower or 'productbrand' in col_lower:
+                        continue
                     if any(term in col_lower for term in vendor_search_terms):
                         vendor_col_found = col
-                        self.logger.info(f"✅ Found vendor-related column: '{col}' - mapping to 'Vendor' and 'Vendor/Supplier*'")
+                        self.logger.info(f"✅ Found vendor-related column: '{col}' - mapping to 'Vendor'")
                         rename_mapping[col] = "Vendor"
                         break
                 
                 if not vendor_col_found:
-                    self.logger.warning(f"⚠️ NO VENDOR COLUMN FOUND! Available columns: {self.df.columns.tolist()}")
-                    self.logger.warning(f"   Searched for columns containing: {vendor_search_terms}")
+                    self.logger.warning(f"⚠️ NO VENDOR COLUMN FOUND! Will use Product Brand as fallback")
+                    self.logger.warning(f"   Available columns: {[col for col in self.df.columns if 'vendor' in col.lower() or 'supplier' in col.lower() or 'brand' in col.lower()]}")
+                    # Use Product Brand as fallback vendor
+                    if "Product Brand" in self.df.columns:
+                        self.logger.info(f"   Using 'Product Brand' column as vendor fallback")
+                        rename_mapping["Product Brand"] = "Vendor"
+                        vendor_col_found = "Product Brand"
             
             if "DOH Compliant (Yes/No)" in self.df.columns and "DOH" not in self.df.columns:
                 rename_mapping["DOH Compliant (Yes/No)"] = "DOH"
@@ -2169,11 +2177,17 @@ class ExcelProcessor:
             
             if rename_mapping:
                 self.df.rename(columns=rename_mapping, inplace=True)
+                self.logger.info(f"✅ Applied column renaming: {rename_mapping}")
             
             # CRITICAL FIX: After renaming, create Vendor/Supplier* column if only Vendor exists
             if "Vendor" in self.df.columns and "Vendor/Supplier*" not in self.df.columns:
                 self.df["Vendor/Supplier*"] = self.df["Vendor"]
                 self.logger.info(f"Created 'Vendor/Supplier*' column from 'Vendor' column")
+            elif "Vendor/Supplier*" not in self.df.columns and "Vendor" not in self.df.columns:
+                # No vendor column found - create empty ones to prevent errors
+                self.logger.warning(f"⚠️ Creating empty Vendor and Vendor/Supplier* columns as no vendor data found")
+                self.df["Vendor"] = ""
+                self.df["Vendor/Supplier*"] = ""
 
             # Handle duplicate columns after renaming
             self.df = handle_duplicate_columns(self.df)
