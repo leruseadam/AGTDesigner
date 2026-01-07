@@ -7143,14 +7143,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
             placeholders = ','.join(['?' for _ in chunk])
         # PERFORMANCE: Use normalized_name index instead of LOWER() function
         # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+        # Also handle case where normalized_product_strain is NULL - fall back to name-based join
             cursor.execute(f'''
                 SELECT 
                     p."Product Name*" AS product_name,
                     p.normalized_name AS normalized_name,
-                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
+                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
                 LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
                 WHERE p.normalized_name IN ({placeholders})
             ''', chunk)
             for row in cursor.fetchall():
@@ -10510,13 +10512,15 @@ def get_available_tags():
                         # CRITICAL FIX: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
                         # This ensures user lineage changes persist - products.sovereign_lineage is saved when user updates lineage
                         # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+                        # Also handle case where normalized_product_strain is NULL - fall back to name-based join
                         lineage_query_join_by_name = '''
                             SELECT 
-                                COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS current_lineage,
-                                COALESCE(s1.strain_name, s2.strain_name, p."Product Strain") AS current_strain
+                                COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
+                                COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain
                             FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
                 LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
                 WHERE p."Product Name*" = ? OR p.normalized_name = ?
                             ORDER BY p.id DESC
                             LIMIT 1
@@ -10573,15 +10577,17 @@ def get_available_tags():
                                         try:
                                             placeholders = ','.join(['?'] * len(chunk))
                                             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+                                            # Also handle case where normalized_product_strain is NULL - fall back to name-based join
                                             chunk_query = f'''
                                                 SELECT DISTINCT
-                                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS current_lineage,
-                                                    COALESCE(s1.strain_name, s2.strain_name, p."Product Strain") AS current_strain,
+                                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
+                                                    COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain,
                                                     p."Product Name*" AS product_name,
                                                     p.normalized_name AS normalized_name
                                                 FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
                             WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                                 ORDER BY p.id DESC
                                             '''
@@ -10594,15 +10600,17 @@ def get_available_tags():
                                     # Single batch query for all names
                                     placeholders = ','.join(['?'] * len(all_search_names))
                                     # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+                                    # Also handle case where normalized_product_strain is NULL - fall back to name-based join
                                     batch_query = f'''
                                         SELECT DISTINCT
-                                            COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS current_lineage,
-                                            COALESCE(s1.strain_name, s2.strain_name, p."Product Strain") AS current_strain,
+                                            COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
+                                            COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain,
                                             p."Product Name*" AS product_name,
                                             p.normalized_name AS normalized_name
                                         FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
                             WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                         ORDER BY p.id DESC
                                     '''
