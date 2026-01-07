@@ -71,6 +71,28 @@ from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_alre
 import os
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 
+# PERFORMANCE: Pre-compile regex patterns for marker cleanup (compile once, use many times)
+_MARKER_PATTERNS = {
+    'price_content': re.compile(r'PRICE_START\s*(.+?)\s*PRICE_END', re.IGNORECASE | re.DOTALL),
+    'desc_content': re.compile(r'DESC_START\s*(.+?)\s*DESC_END', re.IGNORECASE | re.DOTALL),
+    'lineage_content': re.compile(r'LINEAGE_START(.+?)LINEAGE_END', re.IGNORECASE),
+    'brand_content': re.compile(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', re.IGNORECASE),
+    'strain_content': re.compile(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', re.IGNORECASE),
+    'all_markers': re.compile(r'\b\w+_(START|END)\b|\b\w+_START\b|\b\w+_END\b', re.IGNORECASE),
+    'whitespace': re.compile(r'\s+'),
+}
+
+# PERFORMANCE: Create marker replacement map for fast lookup
+_MARKER_REPLACEMENTS = {
+    marker: '' for marker in [
+        'PRODUCTBRAND_START', 'PRODUCTBRAND_END', 'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
+        'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END', 'LINEAGE_START', 'LINEAGE_END',
+        'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END', 'THC_CBD_START', 'THC_CBD_END',
+        'RATIO_START', 'RATIO_END', 'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
+        'PRICE_START', 'PRICE_END', 'RICE_END', 'DESC_START', 'DESC_END'
+    ]
+}
+
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
 MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
@@ -1534,10 +1556,21 @@ class TemplateProcessor:
             rendered_doc = remove_all_headers_and_footers(rendered_doc)
             
             # CRITICAL FIX: Always clean markers even when skipping other post-processing
+            self.logger.warning("🧹🧹🧹 TEMPLATE_PROCESSOR: About to call marker cleanup")
             self._final_marker_cleanup(rendered_doc)
+            self.logger.warning("🧹 TEMPLATE_PROCESSOR: _final_marker_cleanup done")
             
             # ULTRA-AGGRESSIVE MARKER CLEANUP: Direct string replacement on XML
             self._nuclear_marker_cleanup(rendered_doc)
+            self.logger.warning("🧹 TEMPLATE_PROCESSOR: _nuclear_marker_cleanup done")
+            
+            # CRITICAL: Save and reload document to ensure changes persist
+            self.logger.warning("💾 TEMPLATE_PROCESSOR: Saving document after cleanup")
+            buffer = BytesIO()
+            rendered_doc.save(buffer)
+            buffer.seek(0)
+            rendered_doc = Document(buffer)
+            self.logger.warning("💾 TEMPLATE_PROCESSOR: Document reloaded after cleanup")
             
             return rendered_doc
             
@@ -4159,10 +4192,10 @@ class TemplateProcessor:
             self.logger.warning(f"Error adding DOH vertical spacer: {e}")
     def _final_marker_cleanup(self, doc):
         """
-        Final marker cleanup to ensure ALL markers are stripped from the final output.
+        Final marker cleanup to ensure ALL markers are stripped from the final output - OPTIMIZED.
         This method runs after all other processing to catch any remaining markers.
         """
-        self.logger.warning("🧹🧹🧹 STARTING MARKER CLEANUP - Processing document...")
+        # PERFORMANCE: Reduce logging verbosity - only log summary
         markers_found = []
         try:
             # Enhanced patterns to catch all marker variations
@@ -4202,85 +4235,52 @@ class TemplateProcessor:
             ]
             
             def clean_text(text):
-                """Clean text by removing all marker patterns while preserving lineage content."""
+                """Clean text by removing all marker patterns while preserving lineage content - OPTIMIZED."""
                 original_text = text
                 cleaned = text
                 
-                # CRITICAL FIX: Extract content for special markers FIRST before removing them
-                # This prevents markers from being removed before content extraction
+                # PERFORMANCE: Use pre-compiled regex patterns for faster matching
+                # Extract content for special markers FIRST before removing them
                 
-                # CRITICAL FIX: Handle PRICE markers specially to preserve content
-                # Extract price content BEFORE removing markers to prevent "PRICE_END" -> "RICE_END"
-                # Use non-greedy matching with whitespace tolerance and DOTALL for multi-line content
-                price_match = re.search(r'PRICE_START\s*(.+?)\s*PRICE_END', cleaned, re.IGNORECASE | re.DOTALL)
+                # Handle PRICE markers specially to preserve content
+                price_match = _MARKER_PATTERNS['price_content'].search(cleaned)
                 if price_match:
                     price_content = price_match.group(1).strip()
-                    # Replace the full price marker pattern with just the content
-                    # Don't escape replacement string - it's treated as literal text
-                    cleaned = re.sub(r'PRICE_START\s*.+?\s*PRICE_END', price_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+                    cleaned = _MARKER_PATTERNS['price_content'].sub(price_content, cleaned)
                 
-                # CRITICAL FIX: Handle DESC markers specially to preserve content
-                # Extract description content BEFORE removing markers
-                # Use non-greedy matching with whitespace tolerance and DOTALL for multi-line content
-                desc_match = re.search(r'DESC_START\s*(.+?)\s*DESC_END', cleaned, re.IGNORECASE | re.DOTALL)
+                # Handle DESC markers specially to preserve content
+                desc_match = _MARKER_PATTERNS['desc_content'].search(cleaned)
                 if desc_match:
                     desc_content = desc_match.group(1).strip()
-                    # Replace the full desc marker pattern with just the content
-                    # Don't escape replacement string - it's treated as literal text
-                    cleaned = re.sub(r'DESC_START\s*.+?\s*DESC_END', desc_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+                    cleaned = _MARKER_PATTERNS['desc_content'].sub(desc_content, cleaned)
                 
-                # CRITICAL FIX: Handle lineage markers specially to preserve content
-                # Extract lineage content before removing markers
-                lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE)
+                # Handle lineage markers specially to preserve content
+                lineage_match = _MARKER_PATTERNS['lineage_content'].search(cleaned)
                 if lineage_match:
                     lineage_content = lineage_match.group(1)
-                    # Replace the full lineage marker pattern with just the content
-                    cleaned = re.sub(r'LINEAGE_START(.+?)LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE)
+                    cleaned = _MARKER_PATTERNS['lineage_content'].sub(lineage_content, cleaned)
                 
-                # CRITICAL FIX: Handle product brand markers specially to preserve content
-                # Extract product brand content before removing markers (handle both PRODUCTBRAND and PRODUCTBRAND_CENTER)
-                brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE)
+                # Handle product brand markers specially to preserve content
+                brand_match = _MARKER_PATTERNS['brand_content'].search(cleaned)
                 if brand_match:
                     brand_content = brand_match.group(1)
-                    # Now that Product Strain is separate, brand content is just the brand name
-                    # No need to extract brand name from combined content
-                    
-                    # Replace the full product brand marker pattern with just the brand content
-                    cleaned = re.sub(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_content, cleaned, flags=re.IGNORECASE)
+                    cleaned = _MARKER_PATTERNS['brand_content'].sub(brand_content, cleaned)
                 
-                # CRITICAL FIX: Handle product strain markers specially to preserve content
-                # Extract product strain content before removing markers
-                strain_match = re.search(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', cleaned, re.IGNORECASE)
+                # Handle product strain markers specially to preserve content
+                strain_match = _MARKER_PATTERNS['strain_content'].search(cleaned)
                 if strain_match:
                     strain_content = strain_match.group(1)
-                    # Replace the full product strain marker pattern with just the content
-                    cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
+                    cleaned = _MARKER_PATTERNS['strain_content'].sub(strain_content, cleaned)
                 
-                # CRITICAL: Now remove exact literal marker strings (but exclude PRICE/DESC since we already extracted them)
-                exact_markers = [
-                    # PRICE and DESC are handled above, so don't remove them again here
-                    'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
-                    'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
-                    'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END',
-                    'LINEAGE_START', 'LINEAGE_END',
-                    'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END',
-                    'THC_CBD_START', 'THC_CBD_END',
-                    'RATIO_START', 'RATIO_END',
-                    'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
-                    # Also remove any remaining PRICE/DESC markers that weren't caught by regex (edge cases)
-                    'PRICE_START', 'PRICE_END', 'RICE_END',  # Include RICE_END in case truncated
-                    'DESC_START', 'DESC_END',
-                ]
+                # PERFORMANCE: Use fast dictionary lookup instead of loop for marker removal
+                # Remove exact literal marker strings using pre-compiled replacements
+                for marker, replacement in _MARKER_REPLACEMENTS.items():
+                    if marker in cleaned.upper():
+                        # Case-insensitive replacement using regex for better performance
+                        cleaned = re.sub(re.escape(marker), '', cleaned, flags=re.IGNORECASE)
                 
-                for marker in exact_markers:
-                    # Case-insensitive replacement
-                    cleaned = cleaned.replace(marker, '')
-                    cleaned = cleaned.replace(marker.lower(), '')
-                    cleaned = cleaned.replace(marker.capitalize(), '')
-                
-                # Remove other marker patterns
-                for pattern in marker_patterns:
-                    cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+                # Remove other marker patterns using pre-compiled pattern
+                cleaned = _MARKER_PATTERNS['all_markers'].sub('', cleaned)
                 
                 # CRITICAL FIX: Remove partial marker remnants like "bis" from "PRODUCTBRAND_END"
                 partial_remnants = [
@@ -4330,54 +4330,38 @@ class TemplateProcessor:
                     if ('PRODUCTBRAND' in original_upper) or (original_text.strip().upper() in {'CENTER', 'CENTER_', '_CENTER'}):
                         cleaned = ''
                 
+                # PERFORMANCE: Use pre-compiled whitespace pattern
                 # Clean up any double spaces, leading/trailing spaces
-                # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning whitespace
-                # First, temporarily replace non-breaking hyphens with a placeholder
+                # Preserve non-breaking hyphens (\u2011) when cleaning whitespace
                 cleaned = cleaned.replace('\u2011', '___NONBREAKING_HYPHEN___')
-                # Then clean up whitespace
-                cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-                # Finally, restore non-breaking hyphens
+                cleaned = _MARKER_PATTERNS['whitespace'].sub(' ', cleaned).strip()
                 cleaned = cleaned.replace('___NONBREAKING_HYPHEN___', '\u2011')
                 return cleaned
             
-            # Clean markers in all tables
-            # CRITICAL FIX: Process entire paragraph text, not individual runs
-            # Markers often span multiple runs, so we must concatenate run text first
+            # PERFORMANCE: Process all tables - reduced logging
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            # DIAGNOSTIC: Log each run's text individually
-                            for idx, run in enumerate(paragraph.runs):
-                                if '_START' in run.text or '_END' in run.text or 'DESC_' in run.text or 'PRICE_' in run.text:
-                                    self.logger.warning(f"🔍 MARKER IN RUN {idx}: '{run.text}'")
-                            
-                            # CRITICAL FIX: Reassemble full text from runs to handle markers split across runs
-                            # paragraph.text might not capture markers split across runs correctly
                             original_para_text = "".join(run.text for run in paragraph.runs)
                             
-                            # Log markers found for debugging
-                            if any(marker in original_para_text.upper() for marker in ['PRICE_START', 'PRICE_END', 'DESC_START', 'DESC_END', 'RICE_END']):
+                            # Only log markers found in first 5 instances for debugging
+                            if len(markers_found) < 5 and any(marker in original_para_text.upper() for marker in ['PRICE_START', 'PRICE_END', 'DESC_START', 'DESC_END', 'RICE_END']):
                                 markers_found.append(original_para_text)
-                                self.logger.warning(f"🔍 MARKER FOUND IN TABLE: '{original_para_text[:100]}'")
                             
                             cleaned_para_text = clean_text(original_para_text)
 
                             if cleaned_para_text != original_para_text:
-                                self.logger.info(f"🧹 CLEANED: '{original_para_text}' -> '{cleaned_para_text}'")
                                 # Clear all runs and set cleaned text in first run
                                 for run in paragraph.runs:
                                     run.text = ''
                                 if paragraph.runs:
                                     paragraph.runs[0].text = cleaned_para_text
                                 elif cleaned_para_text:
-                                    # No runs exist, add one
                                     paragraph.add_run(cleaned_para_text)
 
-            # Clean markers in paragraphs outside tables
+            # PERFORMANCE: Clean markers in paragraphs outside tables
             for paragraph in doc.paragraphs:
-                # CRITICAL FIX: Reassemble full text from runs to handle markers split across runs
-                # paragraph.text might not capture markers split across runs correctly
                 original_para_text = "".join(run.text for run in paragraph.runs)
                 cleaned_para_text = clean_text(original_para_text)
 
@@ -4388,18 +4372,14 @@ class TemplateProcessor:
                     if paragraph.runs:
                         paragraph.runs[0].text = cleaned_para_text
                     elif cleaned_para_text:
-                        # No runs exist, add one
                         paragraph.add_run(cleaned_para_text)
             
             # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content
             self._final_lineage_cleanup(doc)
 
-            # Enhanced final marker cleanup completed
+            # PERFORMANCE: Only log summary if markers were found
             if markers_found:
-                self.logger.warning(f"⚠️ MARKERS FOUND: {len(markers_found)} markers detected and cleaned")
-                for marker in markers_found[:10]:  # Log first 10
-                    self.logger.warning(f"  - '{marker}'")
-            self.logger.info("✅ MARKER CLEANUP COMPLETE - All markers processed")
+                self.logger.info(f"✅ MARKER CLEANUP: {len(markers_found)} marker instances cleaned")
 
         except Exception as e:
             self.logger.error(f"❌ ERROR in marker cleanup: {e}")
@@ -4408,58 +4388,56 @@ class TemplateProcessor:
 
     def _nuclear_marker_cleanup(self, doc):
         """
-        ULTRA-AGGRESSIVE MARKER CLEANUP
-        Uses direct XML manipulation and string replacement to remove markers.
+        ULTRA-AGGRESSIVE MARKER CLEANUP - OPTIMIZED
+        Uses pre-compiled regex patterns for faster processing.
         This is a nuclear option when regex cleanup fails.
         """
         try:
-            self.logger.info("🔥 NUCLEAR MARKER CLEANUP STARTING")
-            
-            # All possible marker patterns
-            # CRITICAL FIX: Only remove markers that haven't been extracted yet
-            # PRICE and DESC should have been extracted by _final_marker_cleanup already
-            markers = [
-                'ProductStrain', 'PRODUCTSTRAIN', 'DescAndWeight', 'DESCANDWEIGHT',
-                'Description', 'DESCRIPTION', 'DESC', 'Price', 'PRICE', 'RICE',
-                'Lineage', 'LINEAGE', 'ProductType', 'PRODUCTTYPE', 'Weight', 'WEIGHT',
-                'THCA', 'THCATOTAL', 'THC', 'CBD', 'CBDTOTAL', 'CBG', 'CBGTOTAL',
-                'CBN', 'CBNTOTAL', 'CANNABINOIDS', 'Cultivator', 'CULTIVATOR',
-                'CULT', 'LotBatch', 'LOTBATCH', 'Harvest', 'HARVEST', 'Package',
-                'PACKAGE', 'TEST', 'Expires', 'EXPIRES', 'NET', 'EQUIV',
-                'NETWEIGHT', 'Warnings', 'WARNINGS'
-            ]
-            
+            # PERFORMANCE: Only log once at start/end, not per paragraph
             replacements_made = 0
+            
+            # PERFORMANCE: Pre-compile marker pattern for bulk replacement
+            marker_pattern = re.compile(
+                r'(' + '|'.join([
+                    'ProductStrain', 'PRODUCTSTRAIN', 'DescAndWeight', 'DESCANDWEIGHT',
+                    'Description', 'DESCRIPTION', 'DESC', 'Price', 'PRICE', 'RICE',
+                    'Lineage', 'LINEAGE', 'ProductType', 'PRODUCTTYPE', 'Weight', 'WEIGHT',
+                    'THCA', 'THCATOTAL', 'THC', 'CBD', 'CBDTOTAL', 'CBG', 'CBGTOTAL',
+                    'CBN', 'CBNTOTAL', 'CANNABINOIDS', 'Cultivator', 'CULTIVATOR',
+                    'CULT', 'LotBatch', 'LOTBATCH', 'Harvest', 'HARVEST', 'Package',
+                    'PACKAGE', 'TEST', 'Expires', 'EXPIRES', 'NET', 'EQUIV',
+                    'NETWEIGHT', 'Warnings', 'WARNINGS'
+                ]) + r')_(START|END)',
+                re.IGNORECASE
+            )
+            
+            # Helper function to clean text efficiently
+            def clean_text_fast(text):
+                """Fast marker cleanup using pre-compiled patterns."""
+                modified_text = text
+                
+                # Extract PRICE and DESC content BEFORE removing markers
+                price_match = _MARKER_PATTERNS['price_content'].search(modified_text)
+                if price_match:
+                    price_content = price_match.group(1).strip()
+                    modified_text = _MARKER_PATTERNS['price_content'].sub(price_content, modified_text)
+                
+                desc_match = _MARKER_PATTERNS['desc_content'].search(modified_text)
+                if desc_match:
+                    desc_content = desc_match.group(1).strip()
+                    modified_text = _MARKER_PATTERNS['desc_content'].sub(desc_content, modified_text)
+                
+                # Remove all marker patterns using single regex pass
+                modified_text = marker_pattern.sub('', modified_text)
+                return modified_text
             
             # Process all paragraphs
             for paragraph in doc.paragraphs:
-                # CRITICAL FIX: Reassemble full text from runs
                 original_text = "".join(run.text for run in paragraph.runs)
-                modified_text = original_text
+                modified_text = clean_text_fast(original_text)
                 
-                # CRITICAL FIX: Extract PRICE and DESC content BEFORE removing markers
-                # This ensures content isn't lost when removing markers
-                # Use non-greedy matching with whitespace tolerance and DOTALL flag
-                price_match = re.search(r'PRICE_START\s*(.+?)\s*PRICE_END', modified_text, re.IGNORECASE | re.DOTALL)
-                if price_match:
-                    price_content = price_match.group(1).strip()
-                    modified_text = re.sub(r'PRICE_START\s*.+?\s*PRICE_END', re.escape(price_content), modified_text, flags=re.IGNORECASE | re.DOTALL)
-                
-                desc_match = re.search(r'DESC_START\s*(.+?)\s*DESC_END', modified_text, re.IGNORECASE | re.DOTALL)
-                if desc_match:
-                    desc_content = desc_match.group(1).strip()
-                    modified_text = re.sub(r'DESC_START\s*.+?\s*DESC_END', re.escape(desc_content), modified_text, flags=re.IGNORECASE | re.DOTALL)
-                
-                # Remove all marker patterns (after extraction)
-                for marker in markers:
-                    modified_text = modified_text.replace(f'{marker}_START', '')
-                    modified_text = modified_text.replace(f'{marker}_END', '')
-                
-                # If text changed, replace the entire paragraph
                 if modified_text != original_text:
-                    self.logger.warning(f"🔥 NUKING: '{original_text[:100]}' -> '{modified_text[:100]}'")
                     replacements_made += 1
-                    
                     # Clear all runs and create new one
                     for run in paragraph.runs:
                         run.text = ''
@@ -4473,35 +4451,11 @@ class TemplateProcessor:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            # CRITICAL FIX: Reassemble full text from runs
                             original_text = "".join(run.text for run in paragraph.runs)
-                            modified_text = original_text
+                            modified_text = clean_text_fast(original_text)
                             
-                            # CRITICAL FIX: Extract PRICE and DESC content BEFORE removing markers
-                            # This ensures content isn't lost when removing markers
-                            # Use non-greedy matching with whitespace tolerance and DOTALL for multi-line content
-                            price_match = re.search(r'PRICE_START\s*(.+?)\s*PRICE_END', modified_text, re.IGNORECASE | re.DOTALL)
-                            if price_match:
-                                price_content = price_match.group(1).strip()
-                                # Don't escape replacement string - it's treated as literal text
-                                modified_text = re.sub(r'PRICE_START\s*.+?\s*PRICE_END', price_content, modified_text, flags=re.IGNORECASE | re.DOTALL)
-                            
-                            desc_match = re.search(r'DESC_START\s*(.+?)\s*DESC_END', modified_text, re.IGNORECASE | re.DOTALL)
-                            if desc_match:
-                                desc_content = desc_match.group(1).strip()
-                                # Don't escape replacement string - it's treated as literal text
-                                modified_text = re.sub(r'DESC_START\s*.+?\s*DESC_END', desc_content, modified_text, flags=re.IGNORECASE | re.DOTALL)
-                            
-                            # Remove all marker patterns (after extraction)
-                            for marker in markers:
-                                modified_text = modified_text.replace(f'{marker}_START', '')
-                                modified_text = modified_text.replace(f'{marker}_END', '')
-                            
-                            # If text changed, replace the entire paragraph
                             if modified_text != original_text:
-                                self.logger.warning(f"🔥 NUKING TABLE: '{original_text[:100]}' -> '{modified_text[:100]}'")
                                 replacements_made += 1
-                                
                                 # Clear all runs and create new one
                                 for run in paragraph.runs:
                                     run.text = ''
@@ -4510,7 +4464,9 @@ class TemplateProcessor:
                                 else:
                                     paragraph.add_run(modified_text)
             
-            self.logger.info(f"🔥 NUCLEAR CLEANUP COMPLETE: {replacements_made} replacements made")
+            # PERFORMANCE: Only log summary, not per replacement
+            if replacements_made > 0:
+                self.logger.info(f"🔥 NUCLEAR CLEANUP COMPLETE: {replacements_made} replacements made")
             
         except Exception as e:
             self.logger.error(f"❌ NUCLEAR CLEANUP ERROR: {e}")
@@ -4519,15 +4475,30 @@ class TemplateProcessor:
 
     def _final_lineage_cleanup(self, doc):
         """
-        Final cleanup to remove any leading spaces from lineage content.
+        Final cleanup to remove any leading spaces from lineage content - OPTIMIZED.
         This runs after all other processing to ensure clean lineage display.
         """
         try:
-            # Define lineage values that should be cleaned
-            lineage_values = [
-                "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
-                "CBD", "CBD BLEND", "MIXED", "PARAPHERNALIA", "PARA"
-            ]
+            # PERFORMANCE: Pre-compile lineage pattern for faster matching
+            lineage_pattern = re.compile(
+                r'\b(SATIVA|INDICA|HYBRID|HYBRID/SATIVA|HYBRID/INDICA|CBD|CBD BLEND|MIXED|PARAPHERNALIA|PARA)\b',
+                re.IGNORECASE
+            )
+            
+            # PERFORMANCE: Pre-compile whitespace pattern
+            whitespace_chars = ' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF'
+            
+            def clean_lineage_text(text):
+                """Fast lineage cleanup preserving non-breaking hyphens."""
+                # Only process if lineage content detected
+                if not lineage_pattern.search(text):
+                    return text
+                
+                # Preserve non-breaking hyphens when cleaning leading spaces
+                temp_text = text.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                cleaned_text = temp_text.lstrip(whitespace_chars)
+                cleaned_text = cleaned_text.replace('___NONBREAKING_HYPHEN___', '\u2011')
+                return cleaned_text
             
             # Clean lineage content in all tables
             for table in doc.tables:
@@ -4536,43 +4507,17 @@ class TemplateProcessor:
                         for paragraph in cell.paragraphs:
                             for run in paragraph.runs:
                                 original_text = run.text
-                                
-                                # Check if this run contains lineage content
-                                for lineage in lineage_values:
-                                    if lineage in original_text.upper():
-                                        # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning leading spaces
-                                        # First, temporarily replace non-breaking hyphens with a placeholder
-                                        temp_text = original_text.replace('\u2011', '___NONBREAKING_HYPHEN___')
-                                        # Then clean leading spaces
-                                        cleaned_text = temp_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
-                                        # Finally, restore non-breaking hyphens
-                                        cleaned_text = cleaned_text.replace('___NONBREAKING_HYPHEN___', '\u2011')
-                                        
-                                        if cleaned_text != original_text:
-                                            run.text = cleaned_text
-                                        break
+                                cleaned_text = clean_lineage_text(original_text)
+                                if cleaned_text != original_text:
+                                    run.text = cleaned_text
             
             # Clean lineage content in paragraphs outside tables
             for paragraph in doc.paragraphs:
                 for run in paragraph.runs:
                     original_text = run.text
-                    
-                    # Check if this run contains lineage content
-                    for lineage in lineage_values:
-                        if lineage in original_text.upper():
-                            # CRITICAL FIX: Preserve non-breaking hyphens (\u2011) when cleaning leading spaces
-                            # First, temporarily replace non-breaking hyphens with a placeholder
-                            temp_text = original_text.replace('\u2011', '___NONBREAKING_HYPHEN___')
-                            # Then clean leading spaces
-                            cleaned_text = temp_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
-                            # Finally, restore non-breaking hyphens
-                            cleaned_text = cleaned_text.replace('___NONBREAKING_HYPHEN___', '\u2011')
-                            
-                            if cleaned_text != original_text:
-                                run.text = cleaned_text
-                            break
-            
-            # Final lineage cleanup completed
+                    cleaned_text = clean_lineage_text(original_text)
+                    if cleaned_text != original_text:
+                        run.text = cleaned_text
             
         except Exception as e:
             self.logger.warning(f"Error in final lineage cleanup: {e}")

@@ -7620,7 +7620,78 @@
       }
     })();
   </script>
-  
+
+  <!-- CRITICAL FIX: Force-populate lineage dropdown on every page load -->
+  <script>
+    (async function forcePopulateLineageDropdown() {
+      console.log('🔧 [LINEAGE FIX] Force-populating lineage dropdown...');
+
+      // Wait for DOM to be ready
+      if (document.readyState === 'loading') {
+        await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
+      }
+
+      try {
+        // Fetch lineages from API with cache busting
+        const timestamp = Date.now();
+        const response = await fetch(`/api/filter-options?refresh=true&nocache=1&t=${timestamp}`);
+        const data = await response.json();
+        const lineages = data.lineage || [];
+
+        if (lineages.length === 0) {
+          console.warn('⚠️ [LINEAGE FIX] No lineages returned from API');
+          return;
+        }
+
+        console.log(`✅ [LINEAGE FIX] Fetched ${lineages.length} lineages from API:`, lineages);
+
+        // Get lineage dropdown element
+        const lineageFilter = document.getElementById('lineageFilter');
+        if (!lineageFilter) {
+          console.error('❌ [LINEAGE FIX] lineageFilter element not found!');
+          return;
+        }
+
+        // Clear existing options
+        lineageFilter.innerHTML = '';
+
+        // Add "All" option
+        const allOption = document.createElement('option');
+        allOption.value = '';
+        allOption.textContent = 'All';
+        lineageFilter.appendChild(allOption);
+
+        // Sort lineages in proper order
+        const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
+        const sortedLineages = lineages.sort((a, b) => {
+          const aIndex = lineageOrder.indexOf(a.toUpperCase());
+          const bIndex = lineageOrder.indexOf(b.toUpperCase());
+          if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+          if (aIndex !== -1) return -1;
+          if (bIndex !== -1) return 1;
+          return a.localeCompare(b);
+        });
+
+        // Add lineage options
+        sortedLineages.forEach(lineage => {
+          const option = document.createElement('option');
+          option.value = lineage;
+          option.textContent = lineage;
+          lineageFilter.appendChild(option);
+        });
+
+        console.log(`✅ [LINEAGE FIX] Successfully populated lineage dropdown with ${lineages.length} options`);
+
+        // Visual confirmation - briefly highlight the dropdown
+        lineageFilter.style.border = '2px solid green';
+        setTimeout(() => { lineageFilter.style.border = ''; }, 2000);
+
+      } catch (error) {
+        console.error('❌ [LINEAGE FIX] Error populating lineage dropdown:', error);
+      }
+    })();
+  </script>
+
   <!-- ⚡ PERFORMANCE: Defer non-critical scripts -->
   <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}?v={{ cache_bust }}" defer></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}" defer></script>
@@ -7833,22 +7904,76 @@
         
         if (window.TagManager && typeof window.TagManager.init === 'function') {
           console.log('🚀 Calling TagManager.init()...');
+          
+          // CRITICAL FIX: Add timeout to prevent app from being stuck
+          const initTimeout = setTimeout(() => {
+            console.warn('⚠️ TagManager.init() taking too long, forcing completion...');
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+              AppLoadingSplash.stopAutoAdvance();
+              AppLoadingSplash.complete();
+            }
+            // Ensure file upload is initialized even if TagManager.init() is slow
+            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+              window.fileUploadInitAttempts = 0;
+              setTimeout(window.initializeFileUpload, 200);
+            }
+          }, 10000); // 10 second timeout
+          
           try {
-            TagManager.init();
-            console.log('✅ TagManager.init() called successfully');
-            
-            // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
-            // Give it a moment for init to complete
-            setTimeout(() => {
-              if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-                console.log('🔄 TagManager initialized - retrying file upload initialization...');
-                window.fileUploadInitAttempts = 0; // Reset counter
-                setTimeout(window.initializeFileUpload, 200);
-              }
-            }, 500);
+            // CRITICAL FIX: TagManager.init() is async - handle it properly
+            const initResult = TagManager.init();
+            if (initResult && typeof initResult.then === 'function') {
+              // It's a Promise - await it with timeout
+              Promise.race([
+                initResult,
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('TagManager.init() timeout')), 10000)
+                )
+              ])
+              .then(() => {
+                clearTimeout(initTimeout);
+                console.log('✅ TagManager.init() completed successfully');
+                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
+                  window.fileUploadInitAttempts = 0;
+                  setTimeout(window.initializeFileUpload, 200);
+                }
+              })
+              .catch((initError) => {
+                clearTimeout(initTimeout);
+                console.error('❌ TagManager.init() failed:', initError);
+                // Force hide splash even on error
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                  AppLoadingSplash.stopAutoAdvance();
+                  AppLoadingSplash.complete();
+                }
+                // Still try to initialize file upload
+                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+                  window.fileUploadInitAttempts = 0;
+                  setTimeout(window.initializeFileUpload, 200);
+                }
+              });
+            } else {
+              // Synchronous init - clear timeout and proceed
+              clearTimeout(initTimeout);
+              console.log('✅ TagManager.init() called successfully (synchronous)');
+              setTimeout(() => {
+                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
+                  window.fileUploadInitAttempts = 0;
+                  setTimeout(window.initializeFileUpload, 200);
+                }
+              }, 500);
+            }
           } catch (initError) {
+            clearTimeout(initTimeout);
             console.error('❌ Error calling TagManager.init():', initError);
             console.error('Stack trace:', initError.stack);
+            // Force hide splash even on error
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+              AppLoadingSplash.stopAutoAdvance();
+              AppLoadingSplash.complete();
+            }
           }
         } else {
           console.error('❌ TagManager.init is not available');
@@ -8092,22 +8217,34 @@
           setTimeout(initializeFileUpload, 100);
         } else {
           // CRITICAL FIX: Stop retrying after max attempts to prevent memory buildup
-          // Set a hard limit of 100 total retries (50 fast + 50 slow)
+          // Set a hard limit of 20 slow retries (5 seconds) instead of 50
           if (!window.fileUploadSlowRetries) {
             window.fileUploadSlowRetries = 0;
           }
           window.fileUploadSlowRetries++;
 
-          if (window.fileUploadSlowRetries < 50) {
-            // Continue retrying with longer intervals for up to 50 more attempts (100 seconds)
-            console.warn(`⚠️ File upload initialization delayed - TagManager not ready yet (slow retry ${window.fileUploadSlowRetries}/50)`);
-            console.warn('⚠️ TagManager available:', !!window.TagManager);
-            console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
+          if (window.fileUploadSlowRetries < 20) {
+            // Continue retrying with longer intervals for up to 20 more attempts (40 seconds total)
+            // Only log every 5th attempt to reduce spam
+            if (window.fileUploadSlowRetries % 5 === 0 || window.fileUploadSlowRetries <= 3) {
+              console.warn(`⚠️ File upload initialization delayed - TagManager not ready yet (slow retry ${window.fileUploadSlowRetries}/20)`);
+              console.warn('⚠️ TagManager available:', !!window.TagManager);
+              console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
+            }
             setTimeout(initializeFileUpload, 2000);
           } else {
-            // Give up after 100 total attempts to prevent infinite loop
-            console.error('❌ File upload initialization failed - TagManager never became ready after 100 attempts');
-            console.error('❌ This may indicate a JavaScript loading error. Please refresh the page.');
+            // Give up after 20 slow retries (50 fast + 20 slow = 70 total attempts)
+            console.error('❌ File upload initialization failed - TagManager never became ready after 70 attempts');
+            console.error('❌ This may indicate a JavaScript loading error. The app will continue, but file upload may not work.');
+            console.error('❌ TagManager exists:', !!window.TagManager);
+            if (window.TagManager) {
+              console.error('❌ TagManager keys:', Object.keys(window.TagManager).slice(0, 10));
+            }
+            // CRITICAL: Hide splash screen even if initialization fails
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+              AppLoadingSplash.stopAutoAdvance();
+              AppLoadingSplash.complete();
+            }
           }
         }
       }
@@ -8133,9 +8270,13 @@
                          navigator.userAgent.toLowerCase().includes('windows');
         console.log('🖥️ Platform detected:', isWindows ? 'Windows' : 'Mac/Other');
 
-        // Try to use File System Access API on Windows (if supported)
-        // This API allows specifying a suggested start directory
-        if (isWindows && 'showOpenFilePicker' in window) {
+        // CRITICAL FIX FOR WINDOWS: For synced Chrome browsers, File System Access API may not work
+        // Always prefer regular file input on Windows for reliability, especially with synced browsers
+        // Skip File System Access API on Windows to avoid issues with synced browsers
+        const useFileSystemAPI = false; // Disabled for Windows reliability - always use regular file input
+        
+        // Try to use File System Access API on Windows (if supported and not synced browser)
+        if (useFileSystemAPI) {
           try {
             const fileHandles = await window.showOpenFilePicker({
               types: [{
@@ -8169,13 +8310,13 @@
 
               // CRITICAL FIX: Use setTimeout to ensure UI updates before processing
               setTimeout(() => {
-                // CRITICAL FIX: Always use handleFiles from enhanced-ui.js for consistent upload handling
-                if (typeof handleFiles === 'function') {
-                  console.log('📤 PC UPLOAD: Calling handleFiles');
-                  handleFiles([file]);
-                } else if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+                // CRITICAL FIX: Always prefer TagManager.uploadFile for consistency
+                if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
                   console.log('📤 PC UPLOAD: Calling TagManager.uploadFile');
                   window.TagManager.uploadFile(file);
+                } else if (typeof handleFiles === 'function') {
+                  console.log('📤 PC UPLOAD: Calling handleFiles');
+                  handleFiles([file]);
                 } else {
                   console.log('📤 PC UPLOAD: Using fileInput change event fallback');
                   // Fallback to regular file input if neither is available
@@ -8192,18 +8333,75 @@
             return;
           } catch (error) {
             // User cancelled or API not fully supported, fall back to regular input
-            if (error.name !== 'AbortError') {
-              console.log('File System Access API not available, using regular file input:', error);
+            if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
+              console.log('File System Access API failed, using regular file input:', error);
+            } else if (error.name === 'NotAllowedError') {
+              console.log('File System Access API not allowed (likely synced browser), using regular file input');
             }
+            // Continue to fallback below
           }
         }
         
-        // Fallback to regular file input (works on Mac and Windows without API support)
-        console.log('📂 Using fallback: Regular file input dialog');
+        // CRITICAL FIX FOR WINDOWS: Always use regular file input as reliable fallback
+        // This works on both Mac and Windows, including synced Chrome browsers
+        console.log('📂 Using regular file input dialog (works on all platforms including synced browsers)');
         const fileInput = document.getElementById('fileInput');
         if (fileInput) {
           console.log('✅ fileInput element found, triggering click');
-          fileInput.click();
+          
+          // CRITICAL FIX: Ensure file input is properly initialized before clicking
+          fileInput.disabled = false;
+          fileInput.style.display = 'none'; // Keep hidden but functional
+          
+          // CRITICAL FIX: Force re-initialization of file upload handler if not ready
+          // This ensures the change event handler is attached even if TagManager wasn't ready earlier
+          if (!window.fileUploadInitialized && window.initializeFileUpload) {
+            console.log('⚠️ File upload not initialized yet, initializing now...');
+            window.initializeFileUpload();
+            // Wait a tiny bit for handler to attach
+            setTimeout(() => {
+              fileInput.click();
+            }, 50);
+            return;
+          }
+          
+          // CRITICAL FIX: Clear any previous file selection to ensure change event fires
+          // On Windows, this is important to trigger the change event
+          fileInput.value = '';
+          
+          // CRITICAL FIX: Add a direct fallback handler if TagManager still isn't ready
+          // This ensures upload works even if initialization failed
+          const fallbackHandler = function(e) {
+            const file = e.target.files[0];
+            if (file) {
+              console.log('🔵 Fallback handler: File selected:', file.name);
+              // Remove this handler to prevent duplicates
+              fileInput.removeEventListener('change', fallbackHandler);
+              // Try TagManager first, then handleFiles
+              if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+                console.log('✅ Fallback: Using TagManager.uploadFile');
+                window.TagManager.uploadFile(file);
+              } else if (typeof handleFiles === 'function') {
+                console.log('✅ Fallback: Using handleFiles');
+                handleFiles([file]);
+              } else {
+                alert('Error: Upload functionality not available. Please refresh the page.');
+              }
+            }
+          };
+          
+          // Add fallback handler temporarily
+          fileInput.addEventListener('change', fallbackHandler, { once: true });
+          
+          // Trigger click
+          try {
+            fileInput.click();
+            console.log('✅ File input click triggered successfully');
+          } catch (clickError) {
+            console.error('❌ Error triggering file input click:', clickError);
+            fileInput.removeEventListener('change', fallbackHandler);
+            alert('Error: Could not open file dialog. Please try refreshing the page.');
+          }
         } else {
           console.error('❌ fileInput element not found!');
           alert('Error: File input element not found. Please refresh the page.');
