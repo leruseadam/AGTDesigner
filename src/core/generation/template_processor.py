@@ -1308,6 +1308,7 @@ class TemplateProcessor:
             # OPTIMIZATION: Pre-load all brand, vendor, lineage, strain, and DOH data in batch to avoid N+1 queries
             # PERFORMANCE FIX: Added DOH to batch query to eliminate 5-10 minute delays
             # This reduces 200+ queries for 100 products to just 3-4 queries total
+            batch_start = time.time()
             product_brand_cache = {}
             product_vendor_cache = {}
             product_lineage_cache = {}
@@ -1334,6 +1335,7 @@ class TemplateProcessor:
                             cursor = conn.cursor()
                             placeholders = ','.join(['?'] * len(product_names))
                             
+                            query_start = time.time()
                             # OPTIMIZATION: Combine all product queries into a single query for better performance
                             # CRITICAL: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
                             # PERFORMANCE FIX: Include DOH in batch query to eliminate N+1 queries (was causing 5-10 minute delays)
@@ -1355,6 +1357,8 @@ class TemplateProcessor:
                                 WHERE p."Product Name*" IN ({placeholders})
                             '''
                             cursor.execute(combined_query, product_names)
+                            query_time = time.time() - query_start
+                            self.logger.info(f"⏱️ BATCH QUERY: {query_time:.2f}s for {len(product_names)} products")
                             
                             # PERFORMANCE FIX: Add DOH cache to store pre-loaded DOH values
                             product_doh_cache = {}
@@ -1408,7 +1412,11 @@ class TemplateProcessor:
             except Exception as e:
                 self.logger.warning(f"Failed to pre-load batch data: {e}")
             
+            batch_time = time.time() - batch_start
+            self.logger.info(f"⏱️ BATCH LOAD TOTAL: {batch_time:.2f}s")
+            
             # Build context for each record in the chunk
+            context_start = time.time()
             context = {}
             
             # Determine required label count based on template type
@@ -1458,6 +1466,9 @@ class TemplateProcessor:
                 # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
                 # This saves printer ink by not generating empty cells
                 self.logger.debug(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
+
+            context_time = time.time() - context_start
+            self.logger.info(f"⏱️ CONTEXT BUILD: {context_time:.2f}s for {len(chunk)} labels")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
