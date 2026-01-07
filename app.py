@@ -7415,13 +7415,13 @@ def generate_labels():
                     logging.info(f"📂 File needs loading: last_loaded={last_loaded_normalized}, has_data={has_data}")
                     needs_file_load = True
             else:
-            # No file_path provided - check if processor has data
-            if excel_processor.df is None or excel_processor.df.empty:
-                logging.info("📂 Processor has no data - will try to load default file")
-                needs_file_load = True
-            else:
-                logging.info(f"⚡ PERFORMANCE: Processor already has data ({len(excel_processor.df)} rows) - skipping reload")
-                needs_file_load = False
+                # No file_path provided - check if processor has data
+                if excel_processor.df is None or excel_processor.df.empty:
+                    logging.info("📂 Processor has no data - will try to load default file")
+                    needs_file_load = True
+                else:
+                    logging.info(f"⚡ PERFORMANCE: Processor already has data ({len(excel_processor.df)} rows) - skipping reload")
+                    needs_file_load = False
         
         # Only load file if needed
         if needs_file_load:
