@@ -2856,6 +2856,14 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
+            
+            // If search bar is active, re-apply the search with the cleared filter results
+            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
+            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
+                setTimeout(() => {
+                    this.handleSearch('availableTags', 'availableTagsSearch');
+                }, 50);
+            }
             return;
         }
         
@@ -2885,6 +2893,14 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
+            
+            // If search bar is active, re-apply the search with the cached filter results
+            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
+            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
+                setTimeout(() => {
+                    this.handleSearch('availableTags', 'availableTagsSearch');
+                }, 50);
+            }
             return;
         }
         
@@ -3109,15 +3125,26 @@ const TagManager = {
         requestAnimationFrame(() => {
             this._scrollAvailableTagsToTop();
         });
+        
+        // If search bar is active, re-apply the search with the new filter results
+        const availableTagsSearchInput = document.getElementById('availableTagsSearch');
+        if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
+            setTimeout(() => {
+                this.handleSearch('availableTags', 'availableTagsSearch');
+            }, 50);
+        }
     },
 
     handleSearch(listId, searchInputId) {
-        // PERFORMANCE FIX: Use requestAnimationFrame for smoother updates
-        return requestAnimationFrame(() => {
+        try {
             const searchInput = document.getElementById(searchInputId);
-            if (!searchInput) return false;
+            if (!searchInput) {
+                console.warn(`⚠️ Search input not found: ${searchInputId}`);
+                return false;
+            }
             
             const searchTerm = searchInput.value.toLowerCase().trim();
+            verboseLog(`🔍 Search triggered for ${listId}: "${searchTerm}"`);
 
             // Choose which tags to filter
             let tags = [];
@@ -3157,6 +3184,8 @@ const TagManager = {
                 return tagName.toLowerCase().includes(searchTerm);
             });
 
+            verboseLog(`🔍 Found ${filteredTags.length} matching tags out of ${tags.length} total`);
+
             // Update the list with only matching tags
             if (listId === 'availableTags') {
                 this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
@@ -3186,7 +3215,37 @@ const TagManager = {
 
             // Return boolean indicating whether any tags match the search
             return filteredTags.length > 0;
-        });
+        } catch (error) {
+            console.error(`❌ Error in handleSearch for ${listId}:`, error);
+            return false;
+        }
+    },
+
+    expandAllTagGroups() {
+        try {
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (!availableTagsContainer) {
+                return;
+            }
+
+            // Find all collapsed content elements (vendor-content, brand-content, product-type-content, weight-content, price-content)
+            const collapsedElements = availableTagsContainer.querySelectorAll('.vendor-content.collapsed, .brand-content.collapsed, .product-type-content.collapsed, .weight-content.collapsed, .price-content.collapsed');
+            
+            // Expand all collapsed groups
+            collapsedElements.forEach(element => {
+                element.classList.remove('collapsed');
+            });
+
+            // Update all collapse icons to show expanded state (▼)
+            const collapseIcons = availableTagsContainer.querySelectorAll('.collapse-icon');
+            collapseIcons.forEach(icon => {
+                icon.textContent = '▼';
+            });
+
+            verboseLog(`✅ Expanded all tag groups (${collapsedElements.length} groups expanded)`);
+        } catch (error) {
+            console.error('❌ Error expanding tag groups:', error);
+        }
     },
 
     handleAvailableTagsSearch(event) {
@@ -9745,7 +9804,9 @@ const TagManager = {
         
         // CRITICAL FIX: Set flag EARLY to prevent upload prompt from showing while fetching
         // This must be set before any UI updates to ensure loading state is shown
+        console.log('🚩 Setting _fetchingAvailableTags = true');
         this._fetchingAvailableTags = true;
+        this._fetchingAvailableTagsStartTime = Date.now();
         this._fetchingAvailableTagsStartTime = Date.now();
         
         // CRITICAL FIX: Set a safety timeout to reset flag if it gets stuck
@@ -9898,6 +9959,8 @@ const TagManager = {
             // Increased to 1000ms to prevent restarts from multiple rapid calls
             const now = Date.now();
             if (this._lastFetchTime && (now - this._lastFetchTime) < 1000) {
+                const timeSinceLastFetch = now - this._lastFetchTime;
+                console.warn(`⏸️ Rate limiting: skipping fetch (${timeSinceLastFetch}ms since last fetch, need 1000ms)`);
                 verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
                 // Hide splash if we're skipping
                 if (this.hideActionSplash) {
@@ -9906,6 +9969,7 @@ const TagManager = {
                 return false;
             }
             this._lastFetchTime = now;
+            console.log(`✅ Rate limit check passed, proceeding with fetch`);
             
             // Check if we're in JSON matching mode and have JSON matched tags
             const hasJsonMatchedTags = this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0;
@@ -9940,6 +10004,7 @@ const TagManager = {
                 // DO NOT return; continue to fetch to pull DB-aligned lineage for regular tags
             }
             
+            console.log('🔍 Starting fetch process...');
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
@@ -9958,10 +10023,15 @@ const TagManager = {
             let processingRetryCount = 0;
             let lastError;
             
+            console.log(`🔄 Entering retry loop (maxRetries: ${maxRetries}, maxProcessingRetries: ${maxProcessingRetries})`);
+            console.log(`📊 Current state: retryCount=${retryCount}, processingRetryCount=${processingRetryCount}`);
+            
             // CRITICAL: Continue retrying as long as EITHER condition is met (not both)
             // This allows 202 retries to continue even after error retries are exhausted
             while (retryCount < maxRetries || processingRetryCount < maxProcessingRetries) {
+                console.log(`🔄 Loop iteration: retryCount=${retryCount}/${maxRetries}, processingRetryCount=${processingRetryCount}/${maxProcessingRetries}`);
                 try {
+                    console.log(`🔄 Retry attempt ${retryCount + 1} (processing retries: ${processingRetryCount})`);
                     const controller = new AbortController();
                     // PERFORMANCE: Reduced timeout to 30 seconds for faster failure/retry
                     // Tags should load much faster with all the optimizations
@@ -9977,10 +10047,17 @@ const TagManager = {
                     const cacheParam = useCache ? '' : '&nocache=1';
                     // Only use prefer_db when forcing database lineage (after upload), otherwise let fast_load optimize
                     const preferDbParam = forceDbLineage ? '&prefer_db=1' : '';
-                    response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`, {
+                    
+                    const fetchUrl = `/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
+                    console.log(`🌐 Fetching tags from: ${fetchUrl}`);
+                    console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
+                    
+                    response = await fetch(fetchUrl, {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
+                    
+                    console.log(`✅ Fetch completed with status: ${response.status} at ${new Date().toISOString()}`);
 
                     verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}, processing retries: ${processingRetryCount + 1}/${maxProcessingRetries}):`, response.status);
 
@@ -10028,31 +10105,40 @@ const TagManager = {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
                     
+                    console.log(`📥 Reading response text...`);
                     const responseText = await response.text();
+                    console.log(`✅ Response text received (length: ${responseText ? responseText.length : 0})`);
                     try {
                         responseData = responseText ? JSON.parse(responseText) : null;
+                        console.log(`✅ JSON parsed successfully, responseData type:`, responseData ? (Array.isArray(responseData) ? 'array' : typeof responseData) : 'null');
                     } catch (parseError) {
-                        console.error('Failed to parse available tags JSON response:', {
+                        console.error('❌ Failed to parse available tags JSON response:', {
                             parseError,
                             snippet: responseText ? responseText.slice(0, 500) : ''
                         });
                         throw parseError;
                     }
+                    console.log(`✅ Breaking from retry loop - fetch successful`);
                     break; // Success - exit retry loop
                     
                 } catch (error) {
                     lastError = error;
+                    console.error(`❌ Fetch error (attempt ${retryCount + 1}/${maxRetries}):`, error);
                     if (error.name === 'AbortError') {
+                        console.warn(`⏱️ Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
                         verboseLog(`Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
                     } else {
+                        console.error(`❌ Request error (attempt ${retryCount + 1}/${maxRetries}):`, error.message || error);
                         verboseLog(`Request error (attempt ${retryCount + 1}/${maxRetries}):`, error);
                     }
                     
                     if (retryCount < maxRetries - 1) {
                         retryCount++;
+                        console.log(`🔄 Retrying immediately... (${retryCount}/${maxRetries})`);
                         verboseLog(`Retrying immediately...`);
                         // PERFORMANCE: No delay - retry immediately for faster response
                     } else {
+                        console.error(`❌ Max retries reached, throwing error:`, error);
                         throw error;
                     }
                 }
