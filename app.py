@@ -9478,16 +9478,8 @@ def get_available_tags():
             except Exception as default_err:
                 logging.warning(f"Default file fallback failed: {default_err}")
 
-        # CRITICAL: If file doesn't exist but session says it should, clear the stale session
-        if not file_exists and session_file_path:
-            logging.warning(f"⚠️ Session file path exists but file missing: {session_file_path}")
-            logging.info("🧹 Clearing stale session file path")
-            session.pop('file_path', None)
-            session.pop('uploaded_filename', None)
-            session.modified = True
-            has_excel_data = False
-
-        # FALLBACK: If no file but request-scoped processor already loaded, use it
+        # FALLBACK: If no file but request-scoped processor already loaded, use it FIRST
+        # This handles cases where file was uploaded but path check fails
         if not has_excel_data and getattr(g, 'excel_processor', None):
             try:
                 proc = g.excel_processor
@@ -9495,8 +9487,19 @@ def get_available_tags():
                     has_excel_data = True
                     session_file_path = getattr(proc, '_last_loaded_file', session_file_path)
                     logging.info("ℹ️ Using in-memory Excel processor data as fallback for available-tags")
+                    file_exists = True  # Mark as existing since we have the data
             except Exception as mem_fallback_err:
                 logging.warning(f"In-memory processor fallback failed: {mem_fallback_err}")
+
+        # CRITICAL: Only clear stale session if we don't have processor data
+        # If file doesn't exist but session says it should, clear the stale session
+        if not file_exists and session_file_path and not has_excel_data:
+            logging.warning(f"⚠️ Session file path exists but file missing: {session_file_path}")
+            logging.info("🧹 Clearing stale session file path")
+            session.pop('file_path', None)
+            session.pop('uploaded_filename', None)
+            session.modified = True
+            has_excel_data = False
         
         # CRITICAL FIX: If processor was cleared after lineage update, try to reload from session file path
         # This prevents tags from disappearing after lineage updates
