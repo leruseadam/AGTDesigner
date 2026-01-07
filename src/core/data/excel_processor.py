@@ -3412,6 +3412,24 @@ class ExcelProcessor:
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
         
+        # CRITICAL FIX: Filter out database tags and non-Excel sources BEFORE processing
+        # Only show tags that come from Excel files, not from database or JSON matching
+        if 'Source' in filtered_df.columns and not filtered_df.empty:
+            initial_count = len(filtered_df)
+            source_series = filtered_df['Source'].astype(str).str.lower()
+            # Exclude tags with Source containing Database, JSON Match, Educated Guess, etc.
+            excel_mask = (
+                filtered_df['Source'].isna() | 
+                (source_series.str.strip() == '') |
+                (source_series.str.strip() == 'nan') |
+                (~source_series.str.contains('database|json match|json|educated guess|database priority|ai match|generated|faux tag|novel product', case=False, na=False, regex=True))
+            )
+            filtered_df = filtered_df[excel_mask].copy()
+            excluded_count = initial_count - len(filtered_df)
+            if excluded_count > 0:
+                logger.info(f"🔄 FILTERING: Excluded {excluded_count} non-Excel tags (Database/JSON sources)")
+            logger.info(f"✅ After filtering: {len(filtered_df)} Excel-only tags remaining")
+        
         tags = []
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
 
@@ -7695,110 +7713,146 @@ class ExcelProcessor:
             return self._clone_tag_results(cached_copy)
 
         if self.df is None:
-            logger.warning("DataFrame is None in get_available_tags, attempting to use database")
-            try:
-                from src.core.data.product_database import ProductDatabase
-                # Use default store name if not available
-                store_name = getattr(self, 'store_name', 'AGT_Bothell')
-                db = ProductDatabase(store_name)
-                products = db.get_all_products()
-                
-                logger.info(f"Retrieved {len(products)} products from database")
-                
-                # Convert database products to tag format
-                tags = []
-                for product in products:
-                    # Create combined weight from Weight* and Units if available
-                    weight_value = product.get('Weight*', '')
-                    units_value = product.get('Units', '')
-                    combined_weight = ''
+            # CRITICAL FIX: Don't fall back to database - only return Excel tags
+            # Database tags should not appear in available tags list
+            logger.warning("DataFrame is None in get_available_tags - returning empty list (Excel file required)")
+            return []
+            
+            # DISABLED: Database fallback removed - tags must come from Excel files only
+            # This prevents old database products from appearing when Excel file is missing
+            if False:  # Never execute this block
+                try:
+                    from src.core.data.product_database import ProductDatabase
+                    # Use default store name if not available
+                    store_name = getattr(self, 'store_name', 'AGT_Bothell')
+                    db = ProductDatabase(store_name)
+                    products = db.get_all_products()
                     
-                    if weight_value and units_value and str(units_value) != 'None' and str(units_value) != '':
-                        try:
-                            if float(weight_value) == int(float(weight_value)):
-                                combined_weight = f"{int(float(weight_value))}{units_value}"
-                            else:
+                    logger.info(f"Retrieved {len(products)} products from database")
+                    
+                    # Convert database products to tag format
+                    tags = []
+                    for product in products:
+                        # Create combined weight from Weight* and Units if available
+                        weight_value = product.get('Weight*', '')
+                        units_value = product.get('Units', '')
+                        combined_weight = ''
+                        
+                        if weight_value and units_value and str(units_value) != 'None' and str(units_value) != '':
+                            try:
+                                if float(weight_value) == int(float(weight_value)):
+                                    combined_weight = f"{int(float(weight_value))}{units_value}"
+                                else:
+                                    combined_weight = f"{weight_value}{units_value}"
+                            except (ValueError, TypeError):
                                 combined_weight = f"{weight_value}{units_value}"
-                        except (ValueError, TypeError):
-                            combined_weight = f"{weight_value}{units_value}"
-                    elif weight_value:
-                        combined_weight = str(weight_value)
+                        elif weight_value:
+                            combined_weight = str(weight_value)
+                        
+                        tag = {
+                            'Product Name*': product.get('Product Name*', ''),
+                            'Product Type*': product.get('Product Type*', ''),
+                            'Vendor/Supplier*': product.get('Vendor/Supplier*', ''),
+                            'Product Brand': product.get('Product Brand', ''),
+                            'Weight*': product.get('Weight*', ''),
+                            'Units': product.get('Units', ''),  # Add Units field
+                            'CombinedWeight': combined_weight,  # Create combined weight
+                            'Price*': product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),
+                            'Lineage': product.get('Lineage', ''),
+                            'Product Strain': product.get('Product Strain', ''),
+                            'DOH': product.get('DOH', ''),
+                            'DOH Compliant (Yes/No)': product.get('DOH Compliant (Yes/No)', ''),
+                            'Ratio': product.get('Ratio', ''),
+                            'THC test result': product.get('THC test result', ''),
+                            'CBD test result': product.get('CBD test result', ''),
+                            'Source': 'Database'
+                        }
+                        tags.append(tag)
                     
-                    tag = {
-                        'Product Name*': product.get('Product Name*', ''),
-                        'Product Type*': product.get('Product Type*', ''),
-                        'Vendor/Supplier*': product.get('Vendor/Supplier*', ''),
-                        'Product Brand': product.get('Product Brand', ''),
-                        'Weight*': product.get('Weight*', ''),
-                        'Units': product.get('Units', ''),  # Add Units field
-                        'CombinedWeight': combined_weight,  # Create combined weight
-                        'Price*': product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),
-                        'Lineage': product.get('Lineage', ''),
-                        'Product Strain': product.get('Product Strain', ''),
-                        'DOH': product.get('DOH', ''),
-                        'DOH Compliant (Yes/No)': product.get('DOH Compliant (Yes/No)', ''),
-                        'Ratio': product.get('Ratio', ''),
-                        'THC test result': product.get('THC test result', ''),
-                        'CBD test result': product.get('CBD test result', ''),
-                        'Source': 'Database'
-                    }
-                    tags.append(tag)
-                
-                logger.info(f"Converted {len(tags)} database products to tags")
-                
-                # Apply filters if provided
-                if filters:
-                    filtered_tags = []
+                    logger.info(f"Converted {len(tags)} database products to tags")
+                    
+                    # Apply filters if provided
+                    if filters:
+                        filtered_tags = []
+                        for tag in tags:
+                            # Apply same filtering logic as Excel processor
+                            if filters.get('productType'):
+                                tag_product_type = str(tag.get('Product Type*', '')).strip().lower()
+                                filter_product_type = str(filters['productType']).strip().lower()
+                                if tag_product_type != filter_product_type:
+                                    continue
+                            
+                            if filters.get('vendor'):
+                                tag_vendor = str(tag.get('Vendor/Supplier*', '')).strip().lower()
+                                filter_vendor = str(filters['vendor']).strip().lower()
+                                if tag_vendor != filter_vendor:
+                                    continue
+                            
+                            if filters.get('brand'):
+                                tag_brand = str(tag.get('Product Brand', '')).strip().lower()
+                                filter_brand = str(filters['brand']).strip().lower()
+                                if tag_brand != filter_brand:
+                                    continue
+                            
+                            filtered_tags.append(tag)
+                        
+                        logger.info(f"Applied filters, returning {len(filtered_tags)} tags")
+                        return _return_with_cache(filtered_tags)
+                    
+                    # CRITICAL FIX: Final deduplication to catch any remaining duplicates
+                    final_tags = []
+                    seen_final_names = set()
+                    duplicate_count = 0
+                    
                     for tag in tags:
-                        # Apply same filtering logic as Excel processor
-                        if filters.get('productType'):
-                            tag_product_type = str(tag.get('Product Type*', '')).strip().lower()
-                            filter_product_type = str(filters['productType']).strip().lower()
-                            if tag_product_type != filter_product_type:
-                                continue
-                        
-                        if filters.get('vendor'):
-                            tag_vendor = str(tag.get('Vendor/Supplier*', '')).strip().lower()
-                            filter_vendor = str(filters['vendor']).strip().lower()
-                            if tag_vendor != filter_vendor:
-                                continue
-                        
-                        if filters.get('brand'):
-                            tag_brand = str(tag.get('Product Brand', '')).strip().lower()
-                            filter_brand = str(filters['brand']).strip().lower()
-                            if tag_brand != filter_brand:
-                                continue
-                        
-                        filtered_tags.append(tag)
+                        product_name = tag.get('Product Name*', '')
+                        if product_name and product_name not in seen_final_names:
+                            seen_final_names.add(product_name)
+                            final_tags.append(tag)
+                        else:
+                            duplicate_count += 1
+                            logger.info(f"🔄 FINAL DEDUPLICATION: Skipping duplicate '{product_name}'")
                     
-                    logger.info(f"Applied filters, returning {len(filtered_tags)} tags")
-                    return _return_with_cache(filtered_tags)
-                
-                # CRITICAL FIX: Final deduplication to catch any remaining duplicates
-                final_tags = []
-                seen_final_names = set()
-                duplicate_count = 0
-                
-                for tag in tags:
-                    product_name = tag.get('Product Name*', '')
-                    if product_name and product_name not in seen_final_names:
-                        seen_final_names.add(product_name)
-                        final_tags.append(tag)
-                    else:
-                        duplicate_count += 1
-                        logger.info(f"🔄 FINAL DEDUPLICATION: Skipping duplicate '{product_name}'")
-                
-                if duplicate_count > 0:
-                    logger.info(f"🔄 FINAL DEDUPLICATION: Removed {duplicate_count} duplicates, returning {len(final_tags)} unique products")
-                
-                return _return_with_cache(final_tags)
-                
-            except Exception as e:
-                logger.error(f"Failed to get products from database: {e}")
-                return []
+                    if duplicate_count > 0:
+                        logger.info(f"🔄 FINAL DEDUPLICATION: Removed {duplicate_count} duplicates, returning {len(final_tags)} unique products")
+                    
+                    return _return_with_cache(final_tags)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to get products from database: {e}")
+                    return []
         
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
+        
+        # CRITICAL FIX: Filter out non-Excel tags - only show tags from Excel file
+        # Exclude tags with Source='Database', 'JSON Match', or any non-Excel source
+        try:
+            if 'Source' in filtered_df.columns and not filtered_df.empty:
+                initial_count = len(filtered_df)
+                # Keep only tags that don't have Source field or have empty Source (Excel tags)
+                # Also exclude any tags with Source containing 'Database', 'JSON', 'Match', etc.
+                # Use safe string conversion to handle NaN/None values
+                source_series = filtered_df['Source'].astype(str)
+                excel_mask = (
+                    filtered_df['Source'].isna() | 
+                    (source_series.str.strip() == '') |
+                    (source_series.str.strip() == 'nan') |
+                    (~source_series.str.contains('Database|JSON|Match|AI|Generated', case=False, na=False, regex=True))
+                )
+                filtered_df = filtered_df[excel_mask].copy()
+                excluded_count = initial_count - len(filtered_df)
+                if excluded_count > 0:
+                    logger.info(f"🔍 FILTERED OUT {excluded_count} non-Excel tags (Database/JSON/Match sources)")
+                if len(filtered_df) == 0:
+                    logger.warning(f"⚠️ All tags were filtered out! Initial count: {initial_count}")
+                else:
+                    logger.info(f"✅ Returning {len(filtered_df)} Excel-only tags")
+        except Exception as filter_err:
+            logger.warning(f"⚠️ Error filtering by Source column: {filter_err}")
+            # Continue without filtering if there's an error - better to show tags than fail completely
+            import traceback
+            logger.debug(traceback.format_exc())
         
         tags = []
         seen_product_names = set()  # Track seen product names to prevent duplicates
