@@ -2471,7 +2471,8 @@ class ExcelProcessor:
                     # Debug: Log which products got CBD Blend from ratio
                     cbd_products = self.df[mask_cbd_ratio]
                     for idx, row in cbd_products.iterrows():
-                        self.logger.info(f"Assigned CBD Blend from ratio: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
+                        # Reduced to debug to avoid excessive logging in production
+                        self.logger.debug(f"Assigned CBD Blend from ratio: {row.get('Product Name*', 'NO NAME')} (Type: {row.get('Product Type*', 'NO TYPE')})")
                 
                 # If Description, Product Name, or Ratio contains ":" or "CBD", set Product Strain to 'CBD Blend' 
                 # Excluding most edibles but including tinctures (since tinctures are nonclassic types that should get CBD Blend designations)
@@ -2603,7 +2604,8 @@ class ExcelProcessor:
                 rso_co2_mask = self.df["Product Type*"].str.strip().str.lower() == "rso/co2 tankers"
                 if rso_co2_mask.any():
                     rso_co2_products = self.df[rso_co2_mask]
-                    self.logger.info(f"=== RSO/CO2 Tankers Product Strain Debug ===")
+                    # Reduced to debug to avoid log spam in production
+                    self.logger.debug(f"=== RSO/CO2 Tankers Product Strain Debug ===")
                     for idx, row in rso_co2_products.iterrows():
                         self.logger.info(f"RSO/CO2 Tanker: {row.get('Product Name*', 'NO NAME')} -> Product Strain: '{row.get('Product Strain', 'NO STRAIN')}'")
                     self.logger.info(f"=== End RSO/CO2 Tankers Debug ===")

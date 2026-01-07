@@ -2748,7 +2748,8 @@ class ProductDatabase:
                 
                 # CRITICAL FIX: Override lineage for known sativa hybrids if database has just "HYBRID"
                 if is_known_sativa_hybrid and display_lineage and str(display_lineage).strip().upper() == 'HYBRID':
-                    logger.info(f"🌿 SATIVA HYBRID OVERRIDE: '{strain_name}' - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                    # Downgrade to debug to reduce log volume in production
+                    logger.debug(f"🌿 SATIVA HYBRID OVERRIDE: '{strain_name}' - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
                     display_lineage = 'HYBRID/SATIVA'
                     # Also update canonical_lineage for consistency
                     if not canonical_lineage or str(canonical_lineage).strip().upper() == 'HYBRID':
@@ -5015,7 +5016,8 @@ class ProductDatabase:
                 
                 if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
                     strain_display = product_strain or 'N/A'
-                    logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{strain_display}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                    # Downgrade to debug to avoid excessive log spam
+                    logger.debug(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{strain_display}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
                     _set_cached_lineage(product_name, 'HYBRID/SATIVA')
                     return 'HYBRID/SATIVA'
 
@@ -5049,7 +5051,8 @@ class ProductDatabase:
                         known in normalized_strain for known in KNOWN_SATIVA_HYBRIDS
                     )
                     if is_known_sativa_hybrid and str(lineage).strip().upper() == 'HYBRID':
-                        logger.info(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{product_strain}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
+                        # Downgrade to debug to reduce noise in logs
+                        logger.debug(f"🌿 SATIVA HYBRID OVERRIDE (product): '{product_name}' (strain: '{product_strain}') - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
                         _set_cached_lineage(product_name, 'HYBRID/SATIVA')
                         return 'HYBRID/SATIVA'
 
