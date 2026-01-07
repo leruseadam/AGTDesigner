@@ -10590,10 +10590,13 @@ def get_available_tags():
                                 # Use optimized batch query to keep it fast
                                 # PERFORMANCE: In fast_load mode, limit batch size for speed
                                 if len(all_search_names) > MAX_BATCH_SIZE_FAST:
-                                    # Process in chunks but use larger chunks for speed
-                                    MAX_BATCH_SIZE = 50000
-                                    all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
-                                    # Process all chunks, not just the first one, to ensure complete coverage
+                                    # Process in chunks - use smaller chunks in fast_load mode for speed
+                                    all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE_FAST] for i in range(0, len(all_search_names), MAX_BATCH_SIZE_FAST)]
+                                    # PERFORMANCE: In fast_load mode, only process first chunk for speed
+                                    if fast_load and len(all_search_names_chunks) > 1:
+                                        logging.info(f"⚡ FAST MODE: Processing first chunk only ({len(all_search_names_chunks[0])} products) for speed")
+                                        all_search_names_chunks = all_search_names_chunks[:1]
+                                    # Process chunks (all chunks in normal mode, first chunk only in fast mode)
                                     all_batch_results = []
                                     for chunk in all_search_names_chunks:
                                         try:
