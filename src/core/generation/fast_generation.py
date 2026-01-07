@@ -99,7 +99,14 @@ class FastGenerationEngine:
             
             # Return a copy of the cached document
             cached_bytes = _generation_cache[cache_key]
-            return Document(BytesIO(cached_bytes))
+            cached_doc = Document(BytesIO(cached_bytes))
+            
+            # CRITICAL: Clean markers from cached document too
+            logger.warning("🧹 FastGenerationEngine: Cleaning markers from CACHED document")
+            self.template_processor._final_marker_cleanup(cached_doc)
+            self.template_processor._nuclear_marker_cleanup(cached_doc)
+            
+            return cached_doc
         
         self.cache_misses += 1
         logger.info(f"⚡ CACHE MISS: Generating labels for {len(records)} records")
