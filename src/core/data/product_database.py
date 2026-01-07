@@ -3,6 +3,7 @@ import sqlite3
 import json
 import logging
 import time
+import re
 from typing import Dict, List, Optional, Tuple, Any, Set
 from datetime import datetime
 import pandas as pd
@@ -2465,6 +2466,8 @@ class ProductDatabase:
                     deleted_count += len(ids_to_delete)
             
             conn.commit()
+            if deleted_count > 0:
+                self._invalidate_all_products_cache()  # Invalidate cache after deleting products
             
             # Get final product count
             cursor.execute("SELECT COUNT(*) FROM products")
@@ -4952,6 +4955,7 @@ class ProductDatabase:
                 logger.warning(f"No product found in database to update: '{product_name}' (vendor={vendor}, brand={brand})")
             else:
                 logger.info(f"Successfully updated {rows_updated} row(s) for product '{product_name}'")
+                self._invalidate_all_products_cache()  # Invalidate cache after updating lineage
 
                 # CRITICAL FIX: Clear lineage cache for this product to force fresh lookup
                 # Without this, get_product_lineage() will return the old cached value
@@ -5289,6 +5293,8 @@ class ProductDatabase:
             
             if rows_updated == 0:
                 logger.warning(f"⚠️ DOH UPDATE: No product found in database to update DOH: '{product_name}' (vendor={vendor}, brand={brand})")
+            else:
+                self._invalidate_all_products_cache()  # Invalidate cache after updating DOH
             
             return rows_updated > 0
         except Exception as e:
@@ -7274,6 +7280,7 @@ class ProductDatabase:
             cursor.execute("DELETE FROM sqlite_sequence WHERE name='strains'")
             
             conn.commit()
+            self._invalidate_all_products_cache()  # Invalidate cache after clearing all products
             logging.info("All database data cleared successfully")
             
         except Exception as e:

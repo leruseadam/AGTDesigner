@@ -7386,6 +7386,7 @@ def generate_labels():
                         excel_processor.load_file(default_file)
                     else:
                         # Fallback to get_default_upload_file which searches for store-specific file
+                        pass
                         from src.core.data.excel_processor import get_default_upload_file
                         selected_store = get_current_store_name() if has_store_selection() else None
                         default_file = get_default_upload_file(selected_store)
@@ -10964,105 +10965,105 @@ def get_available_tags():
             if has_excel_data and len(all_tags) > 0:
                 logging.info(f"⚡ Excel data exists ({len(all_tags)} tags) - SKIPPING database merge to prevent wrong data")
             else:
-            logging.info(f"📦 No Excel data - will load from database")
-            try:
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                logging.info(f"Got product database: {product_db}")
-                if product_db:
-                    logging.info(f"📦 FRESH DB QUERY: path={product_db.db_path} store={getattr(product_db, '_store_name', 'unknown')}")
-                
-                    # SIMPLIFIED: Use the existing get_all_products() method instead of raw SQL
-                    # But skip it for now and use raw SQL directly - get_all_products() may be too slow
-                    logging.info("🔄 Using direct SQL query (skipping get_all_products() for performance)")
-                    # Fall back to raw SQL query directly
-                    import sqlite3
-                    # Note: os is already imported at top of file, don't re-import here
-                    if os.path.exists(product_db.db_path):
-                        logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
-                        with db_connection(product_db.db_path) as conn:
-                            cursor = conn.cursor()
-                        
-                            # First check if products table exists
-                            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                            if not cursor.fetchone():
-                                logging.error(f"Products table not found in database at {product_db.db_path}")
-                                # If store-specific database doesn't have products table, fall back to main database
-                                logging.info(f"Falling back to main database")
-                                # Use main database path
-                                current_dir = os.path.dirname(os.path.abspath(__file__))
-                                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                                logging.info(f"Using main database path: {main_db_path}")
-                                if os.path.exists(main_db_path):
-                                    with db_connection(main_db_path) as main_conn:
-                                        main_cursor = main_conn.cursor()
-                                        main_cursor.execute('SELECT COUNT(*) FROM products')
-                                        total_count = main_cursor.fetchone()[0]
-                                        logging.info(f"Main database has {total_count} products")
-                                    
-                                        # Get available columns dynamically
-                                        main_cursor.execute("PRAGMA table_info(products)")
-                                        available_columns = [row[1] for row in main_cursor.fetchall()]
-                                    
-                                        # Filter to only columns we want, excluding internal ones
-                                        columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
-                                    
-                                        # CRITICAL FIX: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
-                                        # This ensures user lineage changes persist - products.sovereign_lineage is saved when user updates lineage
-                                        quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
-                                        query = f'''
-                                            SELECT {quoted_columns}, COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
-                                            FROM products p
-                                            LEFT JOIN strains s ON p.strain_id = s.id
-                                    ORDER BY p.id DESC
-                                    LIMIT 2000
-                                        '''
-                                        try:
-                                            main_cursor.execute(query)
-                                            rows = main_cursor.fetchall()
-                                            columns = columns_to_query + ['preferred_lineage']
-                                            logging.info(f"Main database query with strain join returned {len(rows)} rows")
-                                        except Exception as join_err:
-                                            logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
-                                            # REMOVED LIMIT: Allow all products to be fetched (was limiting to 20000)
-                                            query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC'
-                                            main_cursor.execute(query)
-                                            rows = main_cursor.fetchall()
-                                            columns = columns_to_query + ['preferred_lineage']
-                                            logging.info(f"Main database query (fallback) returned {len(rows)} rows")
-                                    
-                                        for row in rows:
-                                            product_dict = dict(zip(columns, row))
-                                            # CRITICAL: Use preferred_lineage (same pipeline as other queries)
-                                            # Set all lineage fields to the same DB value for consistency
-                                            pref_lin = product_dict.pop('preferred_lineage', None)
-                                            if pref_lin:
-                                                db_lin_clean = str(pref_lin).strip().upper()
-                                                product_dict['currentLineage'] = db_lin_clean
-                                                product_dict['canonical_lineage'] = db_lin_clean
-                                                product_dict['Lineage'] = db_lin_clean
-                                            else:
-                                                # Fallback to product's Lineage if no preferred_lineage
-                                                lin = str(product_dict.get('Lineage', '')).strip().upper()
-                                                if lin:
-                                                    product_dict['currentLineage'] = lin
-                                                    product_dict['canonical_lineage'] = lin
-                                            # Convert to the format expected by the frontend
-                                            database_tags.append(product_dict)
-                                    
-                                        logging.info(f"Main database returned {len(database_tags)} products")
-                                else:
-                                    logging.error(f"Main database file does not exist: {main_db_path}")
-                            else:
-                                # Products table exists, proceed with normal query
-                                cursor.execute('SELECT COUNT(*) FROM products')
-                                total_count = cursor.fetchone()[0]
-                                logging.info(f"Total products in database: {total_count}")
+                logging.info(f"📦 No Excel data - will load from database")
+                try:
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    logging.info(f"Got product database: {product_db}")
+                    if product_db:
+                        logging.info(f"📦 FRESH DB QUERY: path={product_db.db_path} store={getattr(product_db, '_store_name', 'unknown')}")
+                    
+                        # SIMPLIFIED: Use the existing get_all_products() method instead of raw SQL
+                        # But skip it for now and use raw SQL directly - get_all_products() may be too slow
+                        logging.info("🔄 Using direct SQL query (skipping get_all_products() for performance)")
+                        # Fall back to raw SQL query directly
+                        import sqlite3
+                        # Note: os is already imported at top of file, don't re-import here
+                        if os.path.exists(product_db.db_path):
+                            logging.info(f"Database file exists, size: {os.path.getsize(product_db.db_path)} bytes")
+                            with db_connection(product_db.db_path) as conn:
+                                cursor = conn.cursor()
                             
-                                # Get available columns dynamically to avoid SQL errors
-                                logging.info("Getting column info...")
-                                cursor.execute("PRAGMA table_info(products)")
-                                available_columns = [row[1] for row in cursor.fetchall()]
+                                # First check if products table exists
+                                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                                if not cursor.fetchone():
+                                    logging.error(f"Products table not found in database at {product_db.db_path}")
+                                    # If store-specific database doesn't have products table, fall back to main database
+                                    logging.info(f"Falling back to main database")
+                                    # Use main database path
+                                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                                    main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+                                    logging.info(f"Using main database path: {main_db_path}")
+                                    if os.path.exists(main_db_path):
+                                        with db_connection(main_db_path) as main_conn:
+                                            main_cursor = main_conn.cursor()
+                                            main_cursor.execute('SELECT COUNT(*) FROM products')
+                                            total_count = main_cursor.fetchone()[0]
+                                            logging.info(f"Main database has {total_count} products")
+                                        
+                                            # Get available columns dynamically
+                                            main_cursor.execute("PRAGMA table_info(products)")
+                                            available_columns = [row[1] for row in main_cursor.fetchall()]
+                                        
+                                            # Filter to only columns we want, excluding internal ones
+                                            columns_to_query = [col for col in available_columns if col not in ['id', 'normalized_name', 'strain_id']]
+                                        
+                                            # CRITICAL FIX: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
+                                            # This ensures user lineage changes persist - products.sovereign_lineage is saved when user updates lineage
+                                            quoted_columns = ', '.join([f'p."{col}"' for col in columns_to_query])
+                                            query = f'''
+                                                SELECT {quoted_columns}, COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS preferred_lineage
+                                                FROM products p
+                                                LEFT JOIN strains s ON p.strain_id = s.id
+                                                ORDER BY p.id DESC
+                                                LIMIT 2000
+                                            '''
+                                            try:
+                                                main_cursor.execute(query)
+                                                rows = main_cursor.fetchall()
+                                                columns = columns_to_query + ['preferred_lineage']
+                                                logging.info(f"Main database query with strain join returned {len(rows)} rows")
+                                            except Exception as join_err:
+                                                logging.warning(f"Main DB strain join failed, using fallback: {join_err}")
+                                                # REMOVED LIMIT: Allow all products to be fetched (was limiting to 20000)
+                                                query = f'SELECT {quoted_columns}, p."Lineage" AS preferred_lineage FROM products p ORDER BY p.id DESC'
+                                                main_cursor.execute(query)
+                                                rows = main_cursor.fetchall()
+                                                columns = columns_to_query + ['preferred_lineage']
+                                                logging.info(f"Main database query (fallback) returned {len(rows)} rows")
+                                        
+                                            for row in rows:
+                                                product_dict = dict(zip(columns, row))
+                                                # CRITICAL: Use preferred_lineage (same pipeline as other queries)
+                                                # Set all lineage fields to the same DB value for consistency
+                                                pref_lin = product_dict.pop('preferred_lineage', None)
+                                                if pref_lin:
+                                                    db_lin_clean = str(pref_lin).strip().upper()
+                                                    product_dict['currentLineage'] = db_lin_clean
+                                                    product_dict['canonical_lineage'] = db_lin_clean
+                                                    product_dict['Lineage'] = db_lin_clean
+                                                else:
+                                                    # Fallback to product's Lineage if no preferred_lineage
+                                                    lin = str(product_dict.get('Lineage', '')).strip().upper()
+                                                    if lin:
+                                                        product_dict['currentLineage'] = lin
+                                                        product_dict['canonical_lineage'] = lin
+                                                # Convert to the format expected by the frontend
+                                                database_tags.append(product_dict)
+                                        
+                                            logging.info(f"Main database returned {len(database_tags)} products")
+                                    else:
+                                        logging.error(f"Main database file does not exist: {main_db_path}")
+                                else:
+                                    # Products table exists, proceed with normal query
+                                    cursor.execute('SELECT COUNT(*) FROM products')
+                                    total_count = cursor.fetchone()[0]
+                                    logging.info(f"Total products in database: {total_count}")
+                                
+                                    # Get available columns dynamically to avoid SQL errors
+                                    logging.info("Getting column info...")
+                                    cursor.execute("PRAGMA table_info(products)")
+                                    available_columns = [row[1] for row in cursor.fetchall()]
                                 logging.info(f"Found {len(available_columns)} columns in products table")
                             
                                 # Filter to only columns we want, excluding internal ones
@@ -11223,14 +11224,14 @@ def get_available_tags():
                                 ray_count = sum(1 for tag in database_tags if 'Ray' in tag.get('Product Name*', ''))
                                 hustler_count = sum(1 for tag in database_tags if 'Hustler' in tag.get('Product Name*', ''))
                                 logging.info(f"Database products - Ray: {ray_count}, Hustler: {hustler_count}")
+                        else:
+                            logging.error(f"Database file does not exist: {product_db.db_path}")
                     else:
-                        logging.error(f"Database file does not exist: {product_db.db_path}")
-                else:
-                    logging.error(f"product_db is None or False - cannot query database")
-            except Exception as e:
-                logging.error(f"Error getting database products: {e}")
-                logging.error(traceback.format_exc())
-                database_tags = []
+                        logging.error(f"product_db is None or False - cannot query database")
+                except Exception as e:
+                    logging.error(f"Error getting database products: {e}")
+                    logging.error(traceback.format_exc())
+                    database_tags = []
         
             # CRITICAL: If prefer_db is True but database_tags is empty, log a warning
             if prefer_db and len(database_tags) == 0:
@@ -11259,15 +11260,15 @@ def get_available_tags():
             logging.info(f"Tag combination decision: prefer_db={prefer_db}, all_tags={len(all_tags)}, database_tags={len(database_tags)}, use_database_only={use_database_only}")
         
             if use_database_only:
-            # When prefer_db=1 or no Excel tags, use ONLY database tags
-            logging.info(f"Using database tags exclusively (prefer_db={prefer_db}, all_tags={len(all_tags)}, database_tags={len(database_tags)})")
-            if len(database_tags) == 0:
-                logging.error("❌ CRITICAL ERROR: PREFER_DB mode but database_tags is empty! Check database query above.")
-                logging.error(f"   Store name: {store_name if 'store_name' in locals() else 'unknown'}")
-                logging.error(f"   Product DB: {product_db if 'product_db' in locals() else 'unknown'}")
-            else:
-                logging.info(f"✅ Processing {len(database_tags)} database tags...")
-            process_start = time.time()
+                # When prefer_db=1 or no Excel tags, use ONLY database tags
+                logging.info(f"Using database tags exclusively (prefer_db={prefer_db}, all_tags={len(all_tags)}, database_tags={len(database_tags)})")
+                if len(database_tags) == 0:
+                    logging.error("❌ CRITICAL ERROR: PREFER_DB mode but database_tags is empty! Check database query above.")
+                    logging.error(f"   Store name: {store_name if 'store_name' in locals() else 'unknown'}")
+                    logging.error(f"   Product DB: {product_db if 'product_db' in locals() else 'unknown'}")
+                else:
+                    logging.info(f"✅ Processing {len(database_tags)} database tags...")
+                    process_start = time.time()
             # PERFORMANCE: Pre-allocate list and batch process
             processed_tags = [None] * len(database_tags)
         
