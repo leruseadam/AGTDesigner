@@ -9538,16 +9538,45 @@ def get_available_tags():
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
         # CRITICAL: Always check cache first, even during fast_load, to avoid reloading Excel file
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
-        if cached_tags and fast_load:
-            logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
-            safe_cached_tags = make_json_safe(cached_tags)
-            elapsed = (time.time() - start_time) * 1000
-            return jsonify({
-                'tags': safe_cached_tags,
-                'total_count': len(safe_cached_tags),
-                'source': 'cache-fast-load',
-                'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
-            })
+        if cached_tags:
+            # Fast path: for fast_load we just return the cached tags immediately
+            if fast_load:
+                logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
+                safe_cached_tags = make_json_safe(cached_tags)
+                elapsed = (time.time() - start_time) * 1000
+                return jsonify({
+                    'tags': safe_cached_tags,
+                    'total_count': len(safe_cached_tags),
+                    'source': 'cache-fast-load',
+                    'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
+                })
+
+            # Non-fast-load path: reuse cached tags but make sure lineage is aligned with the database.
+            # This prevents repeated Excel/lineage processing while still guaranteeing DB lineage correctness.
+            try:
+                logging.info(f"⚡ CACHE HIT: Reusing {len(cached_tags)} cached tags for available-tags (non-fast-load)")
+                aligned_cached_tags = _align_tags_with_db_lineage(
+                    cached_tags,
+                    store_name,
+                    skip_if_aligned=True  # cheap no-op when tags are already aligned
+                )
+                safe_cached_tags = make_json_safe(aligned_cached_tags)
+                # Refresh cache with the aligned version to speed up future calls
+                try:
+                    cache.set(cache_key, safe_cached_tags, timeout=300)
+                except Exception as cache_err:
+                    logging.debug(f"Could not refresh available-tags cache: {cache_err}")
+
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"⚡ PERFORMANCE: Served available-tags from cache in {elapsed:.1f}ms")
+                return jsonify({
+                    'tags': safe_cached_tags,
+                    'total_count': len(safe_cached_tags),
+                    'source': 'cache-aligned'
+                })
+            except Exception as cache_align_err:
+                # If anything goes wrong with cached path, fall back to full pipeline
+                logging.warning(f"Available-tags cache alignment failed, falling back to Excel path: {cache_align_err}")
 
         # CRITICAL: Tags ONLY come from Excel files - never from database alone
         # If no Excel file, return empty tags with message to upload Excel file
@@ -9648,6 +9677,15 @@ def get_available_tags():
                 
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
+
+                # PERFORMANCE: Cache the computed tags so subsequent /api/available-tags calls
+                # don't need to re-run Excel/lineage logic for the same upload.
+                try:
+                    if not nocache and not prefer_db:
+                        cache.set(cache_key, make_json_safe(simple_tags), timeout=300)
+                        logging.info(f"💾 Cached {len(simple_tags)} available tags for key {cache_key[:40]}...")
+                except Exception as cache_err:
+                    logging.warning(f"⚠️ Failed to cache available tags from simple path: {cache_err}")
                 
                 # Reset enrichment flag
                 if fast_load:

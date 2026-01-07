@@ -69,11 +69,19 @@ from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_alre
 
 # Performance settings - check if running on PythonAnywhere
 import os
-IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
+IS_PYTHONANYWHERE = (
+    'pythonanywhere.com' in os.environ.get('HTTP_HOST', '') or
+    os.environ.get('PYTHONANYWHERE_SITE') == 'True' or
+    os.environ.get('PYTHONANYWHERE_DOMAIN') == 'pythonanywhere.com'
+)
 
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
 MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
+
+# PERFORMANCE: Reduce logging overhead on PythonAnywhere
+if IS_PYTHONANYWHERE:
+    logging.getLogger(__name__).setLevel(logging.WARNING)
 CHUNK_SIZE_LIMIT = 100              # PERFORMANCE: Increased from 50 to 100 for faster generation of large batches
 
 def get_font_scheme(template_type, base_size=12):
@@ -2777,6 +2785,9 @@ class TemplateProcessor:
                         lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
                     
                     lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+                    
+                    # CRITICAL FIX: For non-classic types, Lineage field shows brand text (not lineage value)
+                    # The lineage hint token is only used for color coding and will be removed during post-processing
                     lineage_content = (
                         f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     )
@@ -2791,7 +2802,7 @@ class TemplateProcessor:
                         f"(product_type='{product_type}')"
                     )
                     
-                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' for double template (with markers)")
+                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to brand '{final_brand_text}' for non-classic type in double template")
                 else:
                     # For other templates (horizontal, etc.), use marker-based formatting
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption
@@ -4227,6 +4238,10 @@ class TemplateProcessor:
                 """Clean text by removing all marker patterns while preserving lineage content."""
                 original_text = text
                 cleaned = text
+                
+                # CRITICAL FIX: Remove LINEAGE_HINT tokens first (used for color coding, not display)
+                # These tokens appear before brand markers for non-classic types in double templates
+                cleaned = re.sub(r'__LINEAGE_HINT_[A-Z\/\s]+__', '', cleaned, flags=re.IGNORECASE)
                 
                 # CRITICAL FIX: Handle lineage markers specially to preserve content
                 # Extract lineage content before removing markers

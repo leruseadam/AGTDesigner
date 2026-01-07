@@ -2135,7 +2135,16 @@ class ExcelProcessor:
             elif "Vendor" in self.df.columns:
                 self.logger.info(f"Column 'Vendor' found - no renaming needed")
             else:
-                self.logger.warning(f"No vendor column found in DataFrame. Available columns: {[col for col in self.df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
+                vendor_cols = [col for col in self.df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]
+                if vendor_cols:
+                    self.logger.warning(f"⚠️ Vendor columns found but may be empty: {vendor_cols}")
+                    # Check if vendor columns have any non-empty values
+                    for vcol in vendor_cols:
+                        non_empty_count = self.df[vcol].notna().sum() - (self.df[vcol].astype(str).str.strip() == '').sum()
+                        self.logger.info(f"   Column '{vcol}': {non_empty_count} non-empty values out of {len(self.df)} rows")
+                else:
+                    self.logger.warning(f"⚠️ No vendor column found in DataFrame. Available columns: {list(self.df.columns)[:20]}...")
+                    self.logger.warning(f"   Total columns: {len(self.df.columns)}")
             if "DOH Compliant (Yes/No)" in self.df.columns and "DOH" not in self.df.columns:
                 rename_mapping["DOH Compliant (Yes/No)"] = "DOH"
             if "Concentrate Type" in self.df.columns and "Ratio" not in self.df.columns:
@@ -3456,6 +3465,18 @@ class ExcelProcessor:
                 safe_get_value(row.get('Vendor', '')) or           # Alternative column name
                 safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
             )
+            
+            # DIAGNOSTIC: Log if vendor is missing (only first few times to avoid spam)
+            if not vendor_value or vendor_value.strip() == '':
+                if not hasattr(self, '_vendor_missing_logged'):
+                    self._vendor_missing_logged = set()
+                product_name_for_log = safe_get_value(row.get(product_name_col, '')) or 'Unknown Product'
+                if product_name_for_log not in self._vendor_missing_logged and len(self._vendor_missing_logged) < 5:
+                    # Check what vendor columns actually exist
+                    vendor_cols_found = [col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]
+                    logger.warning(f"⚠️ Missing vendor for product '{product_name_for_log[:50]}'. Vendor columns checked: {vendor_cols_found}")
+                    logger.warning(f"   Available columns: {list(row.index)[:10]}...")
+                    self._vendor_missing_logged.add(product_name_for_log)
             brand_value = safe_get_value(row.get('Product Brand', ''))
             weight_value = safe_get_value(raw_weight)
             
@@ -3576,10 +3597,13 @@ class ExcelProcessor:
             # Get price value - use the actual column name from Excel file
             price_value = safe_get_value(row.get('Price*', '')) or safe_get_value(row.get('Price', '')) or safe_get_value(row.get('Price* (Tier Name for Bulk)', ''))
             
+            # CRITICAL FIX: Ensure vendor is never empty - use 'Unknown Vendor' as fallback
+            final_vendor_value = vendor_value if vendor_value and vendor_value.strip() else 'Unknown Vendor'
+            
             tag = {
                 'Product Name*': product_name,
-                'Vendor': vendor_value,
-                'Vendor/Supplier*': vendor_value,
+                'Vendor': final_vendor_value,
+                'Vendor/Supplier*': final_vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
                 'Lineage': safe_get_value(row.get('Lineage', '')),

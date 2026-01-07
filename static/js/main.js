@@ -1045,7 +1045,7 @@ const TagManager = {
         // Redo stack for snapshot-based redo
         redoSnapshotStack: []
     },
-    SIMPLIFIED_RENDER_THRESHOLD: 900,
+    SIMPLIFIED_RENDER_THRESHOLD: 200,
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
@@ -3297,8 +3297,7 @@ const TagManager = {
     },
 
     organizeBrandCategories(tags) {
-        console.log('🔧 organizeBrandCategories() called with', tags.length, 'tags');
-        console.log('📍 Call stack:', new Error().stack);
+        // Removed verbose logging for performance on PythonAnywhere
 
         const vendorGroups = new Map();
         let skippedTags = 0;
@@ -3554,22 +3553,7 @@ const TagManager = {
             console.info(`Skipped ${skippedTags} tags due to missing vendor information`);
         }
         
-        // CRITICAL DEBUG: Log vendor statistics
-        console.log(`📊 Vendor extraction stats: ${vendorSet.size} unique vendors found from ${uniqueTags.length} tags`);
-        if (vendorSet.size < 10) {
-            console.log('📋 All vendors:', Array.from(vendorSet).sort());
-            console.log('📊 Vendor counts:', Array.from(vendorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20));
-        } else {
-            console.log('📋 First 20 vendors:', Array.from(vendorSet).sort().slice(0, 20));
-            console.log('📊 Top 20 vendor counts:', Array.from(vendorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20));
-        }
-        
-        // CRITICAL DEBUG: Check if most products are going to Unknown Vendor
-        const unknownVendorCount = vendorCounts.get('Unknown Vendor') || 0;
-        if (unknownVendorCount > uniqueTags.length * 0.5) {
-            console.warn(`⚠️ WARNING: ${unknownVendorCount} out of ${uniqueTags.length} products (${Math.round(unknownVendorCount/uniqueTags.length*100)}%) have no vendor data!`);
-            console.warn('⚠️ This suggests the Excel file is missing vendor information for most products.');
-        }
+        // Vendor stats logging removed for performance
 
         return vendorGroups;
     },
@@ -4650,8 +4634,6 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
-        console.log('🔄 _updateAvailableTags() called with', originalTags?.length || 0, 'tags');
-        console.log('📍 Call stack:', new Error().stack);
         // CRITICAL FIX: Render immediately instead of using requestAnimationFrame to prevent delays
         // Tags need to appear immediately after upload, not on next frame
         this._performUpdateAvailableTags(originalTags, filteredTags);
