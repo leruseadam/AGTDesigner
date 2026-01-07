@@ -11,21 +11,14 @@ from io import BytesIO
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
 from docx import Document
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 
 logger = logging.getLogger(__name__)
-
-# Thread-safe lock for cache operations
-_cache_lock = threading.Lock()
-
-# Thread pool for parallel operations (reused across requests)
-_thread_pool = ThreadPoolExecutor(max_workers=4)
 
 # Try to import cachetools, fall back to simple dict if not available
 try:
     from cachetools import TTLCache
-    _generation_cache = TTLCache(maxsize=100, ttl=300)  # 5-minute cache
+    # PERFORMANCE: Increased cache from 100 to 500 entries for better hit rate
+    _generation_cache = TTLCache(maxsize=500, ttl=300)  # 5-minute cache
     HAS_CACHETOOLS = True
 except ImportError:
     logger.warning("cachetools not available, using simple dict cache (install with: pip install cachetools)")
@@ -78,65 +71,57 @@ class FastGenerationEngine:
     ) -> Document:
         """
         Generate labels with caching support
-
+        
         Args:
             records: List of product records
             template_type: Type of template ('horizontal', 'vertical', etc.)
             scale_factor: Scale factor for the template
-
+        
         Returns:
             Generated Document
         """
         start_time = time.time()
-
-        # Check cache first (thread-safe)
+        
+        # Check cache first
         cache_key = self._get_cache_key(records, template_type, scale_factor)
-
-        with _cache_lock:
-            # Handle manual TTL for simple dict cache
-            if not HAS_CACHETOOLS and cache_key in _generation_cache:
-                cache_age = time.time() - _cache_timestamps.get(cache_key, 0)
-                if cache_age > 300:  # 5 minute TTL
-                    logger.info(f"⚡ CACHE EXPIRED: Removing stale entry (age: {cache_age:.1f}s)")
-                    del _generation_cache[cache_key]
-                    del _cache_timestamps[cache_key]
-
-            if cache_key in _generation_cache:
-                self.cache_hits += 1
-                logger.info(f"⚡ CACHE HIT: Returning cached generation for {len(records)} records")
-
-                # Return a copy of the cached document
-                cached_bytes = _generation_cache[cache_key]
-                return Document(BytesIO(cached_bytes))
-
+        
+        # Handle manual TTL for simple dict cache
+        if not HAS_CACHETOOLS and cache_key in _generation_cache:
+            cache_age = time.time() - _cache_timestamps.get(cache_key, 0)
+            if cache_age > 300:  # 5 minute TTL
+                logger.info(f"⚡ CACHE EXPIRED: Removing stale entry (age: {cache_age:.1f}s)")
+                del _generation_cache[cache_key]
+                del _cache_timestamps[cache_key]
+        
+        if cache_key in _generation_cache:
+            self.cache_hits += 1
+            logger.info(f"⚡ CACHE HIT: Returning cached generation for {len(records)} records")
+            
+            # Return a copy of the cached document
+            cached_bytes = _generation_cache[cache_key]
+            return Document(BytesIO(cached_bytes))
+        
         self.cache_misses += 1
         logger.info(f"⚡ CACHE MISS: Generating labels for {len(records)} records")
-
-        # Use parallel processing for large batches
-        if len(records) > 20:
-            logger.info(f"⚡ PARALLEL MODE: Processing {len(records)} records in parallel")
-            final_doc = self._generate_parallel(records)
-        else:
-            # Generate the document normally for small batches
-            final_doc = self.template_processor.process_records(records)
-
+        
+        # Generate the document
+        final_doc = self.template_processor.process_records(records)
         if final_doc is None:
             logger.error("❌ FastGenerationEngine: process_records returned None (no document generated)")
             raise RuntimeError("Failed to generate document: no valid records or template error.")
 
-        # Cache the result (thread-safe)
-        with _cache_lock:
-            buffer = BytesIO()
-            final_doc.save(buffer)
-            buffer.seek(0)
-            _generation_cache[cache_key] = buffer.getvalue()
+        # Cache the result
+        buffer = BytesIO()
+        final_doc.save(buffer)
+        buffer.seek(0)
+        _generation_cache[cache_key] = buffer.getvalue()
 
-            # Track timestamp for manual TTL
-            if not HAS_CACHETOOLS:
-                _cache_timestamps[cache_key] = time.time()
-                # Clean up old entries if cache is too large
-                if len(_generation_cache) > 100:
-                    self._cleanup_cache()
+        # Track timestamp for manual TTL
+        if not HAS_CACHETOOLS:
+            _cache_timestamps[cache_key] = time.time()
+            # PERFORMANCE: Increased cache limit from 100 to 500 for better hit rate
+            if len(_generation_cache) > 500:
+                self._cleanup_cache()
 
         generation_time = time.time() - start_time
         logger.info(f"⚡ Generation completed in {generation_time:.2f}s (cache hit rate: {self._get_hit_rate():.1f}%)")
@@ -144,26 +129,6 @@ class FastGenerationEngine:
         # Return the document
         buffer.seek(0)
         return Document(buffer)
-
-    def _generate_parallel(self, records: List[Dict]) -> Document:
-        """
-        Generate document using parallel processing for speed
-
-        Args:
-            records: List of product records
-
-        Returns:
-            Generated Document
-        """
-        # Note: Python docx isn't thread-safe for document modification
-        # So we optimize by parallelizing the data preparation phase only
-        logger.info(f"⚡ Optimizing {len(records)} records for parallel generation")
-
-        # Optimize records in parallel (data preparation)
-        optimized_records = optimize_records_for_generation(records)
-
-        # Generate document with optimized records (faster due to preprocessed data)
-        return self.template_processor.process_records(optimized_records)
     
     def _cleanup_cache(self):
         """Clean up old cache entries when using simple dict"""
@@ -199,84 +164,58 @@ class FastGenerationEngine:
 
 class BatchedDatabaseQuerier:
     """
-    Optimizes database queries by batching requests and using connection pooling
+    Optimizes database queries by batching requests
     """
-
+    
     def __init__(self, product_db):
         """
         Initialize batched querier
-
+        
         Args:
             product_db: ProductDatabase instance
         """
         self.product_db = product_db
         self.query_count = 0
         self.batch_count = 0
-        self._result_cache = {}  # Cache results within the same request
-
-    def get_products_batch(self, product_names: List[str], batch_size: int = 100) -> List[Dict]:
+    
+    def get_products_batch(self, product_names: List[str], batch_size: int = 50) -> List[Dict]:
         """
-        Get products in batches for better performance (increased default batch size)
-
+        Get products in batches for better performance
+        
         Args:
             product_names: List of product names to query
-            batch_size: Number of products per batch (default: 100, increased from 50)
-
+            batch_size: Number of products per batch
+        
         Returns:
             List of product records
         """
         if not product_names:
             return []
-
+        
         start_time = time.time()
         logger.info(f"⚡ Batched query: Fetching {len(product_names)} products in batches of {batch_size}")
-
+        
         all_records = []
-        uncached_names = []
-
-        # Check cache first
-        for name in product_names:
-            if name in self._result_cache:
-                all_records.append(self._result_cache[name])
-            else:
-                uncached_names.append(name)
-
-        if uncached_names:
-            logger.info(f"⚡ Cache miss: Need to query {len(uncached_names)} products ({len(product_names) - len(uncached_names)} cached)")
-
-            # Split into batches
-            for i in range(0, len(uncached_names), batch_size):
-                batch = uncached_names[i:i + batch_size]
-
-                # Query this batch
-                try:
-                    records = self.product_db.get_products_by_names(batch)
-                    all_records.extend(records)
-
-                    # Cache the results
-                    for record in records:
-                        product_name = record.get('Product Name*', record.get('ProductName', ''))
-                        if product_name:
-                            self._result_cache[product_name] = record
-
-                    self.batch_count += 1
-                except Exception as e:
-                    logger.error(f"Error querying batch {i // batch_size + 1}: {e}")
-        else:
-            logger.info(f"⚡ Cache hit: All {len(product_names)} products retrieved from cache")
-
+        
+        # Split into batches
+        for i in range(0, len(product_names), batch_size):
+            batch = product_names[i:i + batch_size]
+            
+            # Query this batch
+            try:
+                records = self.product_db.get_products_by_names(batch)
+                all_records.extend(records)
+                self.batch_count += 1
+            except Exception as e:
+                logger.error(f"Error querying batch {i // batch_size + 1}: {e}")
+        
         self.query_count += len(product_names)
         query_time = time.time() - start_time
-
+        
         logger.info(f"⚡ Batched query completed: {len(all_records)} records in {query_time:.2f}s")
-        logger.info(f"⚡ Query stats: {self.query_count} total products, {self.batch_count} batches, {len(self._result_cache)} cached")
-
+        logger.info(f"⚡ Query stats: {self.query_count} total products, {self.batch_count} batches")
+        
         return all_records
-
-    def clear_cache(self):
-        """Clear the result cache"""
-        self._result_cache.clear()
-        logger.info("⚡ BatchedDatabaseQuerier cache cleared")
 
 
 class ProgressTracker:

@@ -31,16 +31,17 @@ def build_context(record, doc, template_type='vertical'):
     context['lineage'] = record.get('Lineage', '')
     context['doh'] = record.get('DOH', '')
     
-    # Vendor information - only include for classic types
-    product_type = record.get('Product Type*', '').lower()
-    classic_types = ["flower", "pre-roll", "infused pre-roll", "concentrate", 
-                    "solventless concentrate", "vape cartridge", "rso/co2 tankers"]
-    
-    if product_type in classic_types:
-        context['vendor'] = record.get('Vendor', '')
-    else:
-        context['vendor'] = ''  # No vendor for non-classic types
-    
+    # Vendor/brand: always include the first non-empty value from all possible fields
+    vendor_fields = [
+        'Vendor/Supplier*', 'Vendor', 'vendor', 'Product Brand', 'Brand', 'brand'
+    ]
+    vendor = ''
+    for field in vendor_fields:
+        val = record.get(field, '')
+        if val and str(val).strip().lower() not in ['nan', 'none', 'null', '']:
+            vendor = val
+            break
+    context['vendor'] = vendor
     return context
 
 def build_label_context(record):

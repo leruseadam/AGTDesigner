@@ -144,16 +144,24 @@ class DragAndDropManager {
         // Add handles to all tag rows (the actual draggable containers)
         const allTagRows = container.querySelectorAll('.tag-row');
         const tagRows = Array.from(allTagRows).filter(row => row.querySelector('.tag-checkbox'));
-        console.log(`Found ${allTagRows.length} total tag rows, ${tagRows.length} with checkboxes`);
+        // Only log during debug mode to reduce console noise
+        if (window.DEBUG_DRAG_DROP) {
+            console.log(`Found ${allTagRows.length} total tag rows, ${tagRows.length} with checkboxes`);
+        }
         
         if (tagRows.length === 0) {
-            console.warn('No tag rows with checkboxes found in container');
-            console.log('Available tag rows:', Array.from(allTagRows).map(row => ({
-                text: row.textContent.trim().substring(0, 50),
-                hasCheckbox: !!row.querySelector('.tag-checkbox'),
-                classes: row.className,
-                children: Array.from(row.children).map(child => child.className)
-            })));
+            // Only warn if container has some tag rows but none with checkboxes (actual error)
+            // Don't warn during initial page load when tags haven't loaded yet
+            if (allTagRows.length > 0) {
+                console.warn('No tag rows with checkboxes found in container');
+                console.log('Available tag rows:', Array.from(allTagRows).map(row => ({
+                    text: row.textContent.trim().substring(0, 50),
+                    hasCheckbox: !!row.querySelector('.tag-checkbox'),
+                    classes: row.className,
+                    children: Array.from(row.children).map(child => child.className)
+                })));
+            }
+            // Silently return if no tags loaded yet (expected during initialization)
             return;
         }
         

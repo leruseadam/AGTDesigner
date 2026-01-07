@@ -2507,7 +2507,7 @@ class JSONMatcher:
                                     
                                     # If both have identifiers, they MUST overlap significantly
                                     identifier_overlap = len(json_identifiers & excel_identifiers) / max(len(json_identifiers), len(excel_identifiers))
-                                    if identifier_overlap < 0.5:  # Less than 50% overlap of product identifiers
+                                    if identifier_overlap < 0.3:  # Less than 30% overlap of product identifiers (lowered from 50%)
                                         score = 0  # Not a match - different products
                                         logging.debug(f"🚫 REJECTED: Low identifier overlap ({identifier_overlap:.1%})")
                                         continue
@@ -2528,11 +2528,13 @@ class JSONMatcher:
                                     # Use token_sort_ratio for better word-order-independent matching
                                     token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
                                     
-                                    # Only use fuzzy if above threshold
+                                    # Only use fuzzy if above threshold (more lenient)
                                     if token_sort_score >= 50:  # Reduced threshold from 70 to find more matches
-                                        score += token_sort_score * 0.5  # Reduced weight for fuzzy
-                                    elif token_sort_score >= 40:
-                                        score += token_sort_score * 0.3  # Very low weight for marginal matches
+                                        score += token_sort_score * 0.7  # Increased weight from 0.5
+                                    elif token_sort_score >= 40:  # Lowered from 50
+                                        score += token_sort_score * 0.5  # Increased weight for marginal matches
+                                    elif token_sort_score >= 30:  # New threshold for very lenient matching
+                                        score += token_sort_score * 0.3  # Small bonus for weak matches
                                         
                                 except ImportError:
                                     pass
@@ -2597,8 +2599,8 @@ class JSONMatcher:
                         # - "Wedding Cake Cartridge" → "Wedding Cake Live Resin" (75%+)
                         # - "Jet Fuel Gelato" → "Jet Fuel Gelato Live Resin" (60%+) - now allowed
                         # But prevents wrong matches like:
-                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (40% - still rejected)
-                        if name_similarity < 50:
+                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (below 40%)
+                        if name_similarity < 40:
                             logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
                             best_match = None
                             best_score = 0
@@ -2641,23 +2643,51 @@ class JSONMatcher:
                         if term in db_lower:
                             core_terms_db.append(term)
                     
-                    # CRITICAL: If both have core terms, at least ONE must match
+                    # Check for clear contradictions between product types
+                    # Only reject if there's a known contradiction (jar+dragon vs bath+salt, ball vs chew, etc.)
                     if core_terms_json and core_terms_db:
-                        has_common_term = any(jterm in core_terms_db for jterm in core_terms_json)
-                        if not has_common_term:
-                            logging.warning(f"🚫 VALIDATION FAILED: No common product type - JSON:{core_terms_json} vs DB:{core_terms_db}")
-                            logging.warning(f"   '{json_name_str}' ≠ '{db_name_str}'")
+                        # Contradiction groups - products that should never match
+                        contradictions = [
+                            ({'jar', 'dragon'}, {'bath', 'salt', 'salts'}),
+                            ({'ball', 'balls'}, {'chew', 'chews'}),
+                            ({'capsule', 'capsules'}, {'tincture'}),
+                            ({'squeeze'}, {'roll'}),
+                        ]
+                        
+                        json_terms_set = set(core_terms_json)
+                        db_terms_set = set(core_terms_db)
+                        
+                        # Check for contradictions
+                        has_contradiction = False
+                        for group1, group2 in contradictions:
+                            if (json_terms_set & group1 and db_terms_set & group2) or \
+                               (json_terms_set & group2 and db_terms_set & group1):
+                                has_contradiction = True
+                                logging.warning(f"🚫 VALIDATION FAILED: Product type contradiction - JSON:{core_terms_json} vs DB:{core_terms_db}")
+                                logging.warning(f"   '{json_name_str}' ≠ '{db_name_str}'")
+                                break
+                        
+                        if has_contradiction:
                             best_match = None  # Reject this match
                         else:
-                            validated = True
-                            logging.info(f"✅ VALIDATED: Common terms {set(core_terms_json) & set(core_terms_db)}")
+                            # No contradiction - validate if there's a common term OR if score is high enough
+                            has_common_term = any(jterm in core_terms_db for jterm in core_terms_json)
+                            if has_common_term:
+                                validated = True
+                                logging.info(f"✅ VALIDATED: Common terms {set(core_terms_json) & set(core_terms_db)}")
+                            elif best_score >= 60.0:  # Allow matches with high enough score even without common terms (lowered from 70)
+                                validated = True
+                                logging.info(f"✅ VALIDATED: High score ({best_score:.1f}) despite no common product type terms")
+                            else:
+                                logging.warning(f"🚫 VALIDATION FAILED: No common product type and score too low - JSON:{core_terms_json} vs DB:{core_terms_db}, score:{best_score:.1f}")
+                                best_match = None
                     else:
-                        # No clear product type terms - use score threshold (reduced from 85 to 70 to find more matches)
-                        validated = (best_score >= 70.0)
+                        # No clear product type terms - use score threshold (reduced from 70 to 60 to find more matches)
+                        validated = (best_score >= 60.0)
                         if validated:
-                            logging.info(f"✅ SCORE VALIDATED: {best_score:.1f} >= 70.0")
+                            logging.info(f"✅ SCORE VALIDATED: {best_score:.1f} >= 60.0")
                         else:
-                            logging.warning(f"🚫 SCORE TOO LOW: {best_score:.1f} < 70.0")
+                            logging.warning(f"🚫 SCORE TOO LOW: {best_score:.1f} < 60.0")
                             best_match = None
                 
                 if best_match is not None and validated:  # Only use validated matches

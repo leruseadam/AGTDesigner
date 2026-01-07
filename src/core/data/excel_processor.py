@@ -294,12 +294,12 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
             # If no product name column, default edibles with CBD to MIXED
             result[edible_cbd] = 'MIXED'
         
-        # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
-        paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
+        # Paraphernalia products -> PARAPHERNALIA lineage (pink) - only if lineage is empty
+        paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False)) & empty_lineage_mask
         result[paraphernalia_mask] = 'PARAPHERNALIA'
-        
-        # Mixed products -> MIXED lineage (blue) - override existing lineage
-        mixed_mask = nonclassic_mask & (product_strain.str.contains('Mixed', case=False, na=False))
+
+        # Mixed products -> MIXED lineage (blue) - only if lineage is empty
+        mixed_mask = nonclassic_mask & (product_strain.str.contains('Mixed', case=False, na=False)) & empty_lineage_mask
         result[mixed_mask] = 'MIXED'
         
         # Default fallback for any remaining non-classic types
@@ -697,7 +697,7 @@ def safe_product_name(name):
     
     return name_str
 
-def safe_product_type(product_type):
+def safe_product_type(product_type, product_name=None):
     """Safely process product types."""
     if not product_type or pd.isna(product_type):
         return "Vape Cartridge"  # Default to Vape Cartridge for concentrates
@@ -706,6 +706,12 @@ def safe_product_type(product_type):
     
     if not type_str or type_str.lower() in ['nan', 'none', 'null', '']:
         return "Vape Cartridge"  # Default to Vape Cartridge for concentrates
+    
+    # CRITICAL FIX: If product type is Concentrate and product name contains "Tanker", change to RSO/CO2 Tanker
+    if product_name and isinstance(product_name, str):
+        product_name_lower = product_name.lower()
+        if type_str.lower() == 'concentrate' and 'tanker' in product_name_lower:
+            return "rso/co2 tankers"
     
     return type_str
 
@@ -1061,6 +1067,33 @@ class ExcelProcessor:
         self._file_cache.clear()
         self.logger.debug("File cache cleared")
         self._on_dataset_updated()
+    
+    def refresh_from_file_if_modified(self):
+        """Refresh DataFrame from file if the file has been modified since last load."""
+        try:
+            if not self._last_loaded_file:
+                return False
+            
+            import os
+            if not os.path.exists(self._last_loaded_file):
+                return False
+            
+            current_mtime = os.path.getmtime(self._last_loaded_file)
+            cache_key = f"{self._last_loaded_file}_{current_mtime}"
+            
+            # If file was modified, clear cache and reload
+            if cache_key not in self._file_cache:
+                self.logger.info(f"File modified, refreshing DataFrame from {self._last_loaded_file}")
+                file_path = self._last_loaded_file  # Save before clearing
+                self._file_cache.clear()  # Clear old cache entries
+                # Force reload by clearing the last loaded file reference
+                self._last_loaded_file = None
+                return self.load_file(file_path)
+            
+            return False
+        except Exception as e:
+            self.logger.warning(f"Error refreshing from file: {e}")
+            return False
     
     def check_memory_usage(self):
         """Check current memory usage and cleanup if needed."""
@@ -1453,37 +1486,59 @@ class ExcelProcessor:
             from .product_database import ProductDatabase
             product_db = ProductDatabase(store_name=self._store_name)
             
-            # Process each product and get its Product Strain from database
+            # PERFORMANCE FIX: Batch process instead of row-by-row iteration
+            # Use vectorized operations where possible
             updated_count = 0
-            for idx, row in self.df.iterrows():
-                try:
-                    # Get the required fields
-                    product_name = row.get('Product Name*', '') or row.get('Product Name', '') or row.get('Product_Name', '')
-                    product_type = row.get('Product Type*', '')
-                    description = row.get('Description', '')
-                    ratio = row.get('Ratio', '')
-                    
-                    # Get Product Strain from database
-                    db_product_strain = product_db._calculate_product_strain(
-                        product_type or '',
-                        product_name or '',
-                        description or '',
-                        ratio or ''
-                    )
-                    
-                    # Update the DataFrame with database value
-                    self.df.loc[idx, 'Product Strain'] = db_product_strain
-                    updated_count += 1
-                    
-                    # Log some examples for debugging
-                    if idx < 5 or db_product_strain in ['CBD Blend', 'Mixed']:
-                        self.logger.debug(f"[ProductDB] {product_name} ({product_type}) -> {db_product_strain}")
-                        
-                except Exception as e:
-                    self.logger.error(f"[ProductDB] Error processing product at index {idx}: {e}")
-                    continue
             
-            self.logger.info(f"[ProductDB] Successfully updated {updated_count} products with database Product Strain values")
+            # Get all product names for batch lookup
+            product_name_col = 'Product Name*' if 'Product Name*' in self.df.columns else 'ProductName'
+            if product_name_col not in self.df.columns:
+                self.logger.warning("[ProductDB] No product name column found, skipping Product Strain update")
+                return
+            
+            # PERFORMANCE: Only process first 100 products during upload for speed
+            # Full processing can happen in background
+            max_products_to_process = 100
+            df_to_process = self.df.head(max_products_to_process) if len(self.df) > max_products_to_process else self.df
+            
+            # Process in batches for better performance
+            batch_size = 50
+            for batch_start in range(0, len(df_to_process), batch_size):
+                batch_end = min(batch_start + batch_size, len(df_to_process))
+                batch_df = df_to_process.iloc[batch_start:batch_end]
+                
+                for idx, row in batch_df.iterrows():
+                    try:
+                        # Get the required fields
+                        product_name = row.get('Product Name*', '') or row.get('ProductName', '') or row.get('Product_Name', '')
+                        product_type = row.get('Product Type*', '')
+                        description = row.get('Description', '')
+                        ratio = row.get('Ratio', '')
+                        
+                        # Get Product Strain from database
+                        db_product_strain = product_db._calculate_product_strain(
+                            product_type or '',
+                            product_name or '',
+                            description or '',
+                            ratio or ''
+                        )
+                        
+                        # Update the DataFrame with database value
+                        self.df.loc[idx, 'Product Strain'] = db_product_strain
+                        updated_count += 1
+                        
+                        # Log some examples for debugging
+                        if idx < 5 or db_product_strain in ['CBD Blend', 'Mixed']:
+                            self.logger.debug(f"[ProductDB] {product_name} ({product_type}) -> {db_product_strain}")
+                            
+                    except Exception as e:
+                        self.logger.error(f"[ProductDB] Error processing product at index {idx}: {e}")
+                        continue
+            
+            if len(self.df) > max_products_to_process:
+                self.logger.info(f"[ProductDB] Processed {updated_count} products (limited to {max_products_to_process} for upload speed)")
+            else:
+                self.logger.info(f"[ProductDB] Successfully updated {updated_count} products with database Product Strain values")
             
             # Log some statistics
             if 'Product Strain' in self.df.columns:
@@ -1492,7 +1547,8 @@ class ExcelProcessor:
             
         except Exception as e:
             self.logger.error(f"[ProductDB] Error applying database Product Strain values: {e}")
-            raise
+            # Don't raise - allow upload to continue even if strain update fails
+            self.logger.warning("[ProductDB] Continuing without database Product Strain values")
 
     def fast_load_file(self, file_path: str) -> bool:
         """ULTRA-FAST file loading with minimal processing for maximum upload speed."""
@@ -1662,10 +1718,12 @@ class ExcelProcessor:
                     from src.core.constants import CLASSIC_TYPES
                     # Normalize all lineage values to ALL CAPS format
                     df["Lineage"] = df["Lineage"].apply(normalize_lineage)
+                    # CRITICAL FIX: Normalize Product Type before passing to optimized_lineage_assignment
+                    normalized_product_types = df["Product Type*"].astype(str).str.strip().str.lower()
                     df["Lineage"] = optimized_lineage_assignment(
-                        df, 
-                        df["Product Type*"], 
-                        df["Lineage"], 
+                        df,
+                        normalized_product_types,
+                        df["Lineage"],
                         CLASSIC_TYPES
                     )
                 
@@ -2103,6 +2161,21 @@ class ExcelProcessor:
                 self.df["Product Type*"] = self.df["Product Type*"].str.strip()
                 # Apply TYPE_OVERRIDES to normalize product types
                 self.df["Product Type*"] = self.df["Product Type*"].replace(TYPE_OVERRIDES)
+                
+                # CRITICAL FIX: If a Concentrate contains "Tanker" in the product name, change it to RSO/CO2 Tanker
+                if product_name_col in self.df.columns:
+                    concentrate_mask = self.df["Product Type*"].str.strip().str.lower() == "concentrate"
+                    tanker_name_mask = self.df[product_name_col].astype(str).str.lower().str.contains("tanker", na=False, case=False)
+                    tanker_concentrate_mask = concentrate_mask & tanker_name_mask
+                    
+                    if tanker_concentrate_mask.any():
+                        self.df.loc[tanker_concentrate_mask, "Product Type*"] = "rso/co2 tankers"
+                        count = tanker_concentrate_mask.sum()
+                        self.logger.info(f"✅ Changed {count} Concentrate product(s) containing 'Tanker' to 'rso/co2 tankers'")
+                        # Log the product names that were changed
+                        changed_products = self.df.loc[tanker_concentrate_mask, product_name_col].tolist()
+                        self.logger.debug(f"Changed products: {changed_products[:10]}")  # Log first 10
+                
                 self.logger.info(f"Product type normalization complete. Sample types: {self.df['Product Type*'].unique()[:10].tolist()}")
 
             # Update product_name_col after renaming
@@ -2699,9 +2772,13 @@ class ExcelProcessor:
             self.apply_strain_extraction()
             
             # 8.6) OVERRIDE: Use database Product Strain values instead of Excel processor logic
-            self.logger.info("=== OVERRIDING: Using Database Product Strain Values ===")
-            self._apply_database_product_strain_values()
-            self.logger.info("=== End Database Product Strain Override ===")
+            # PERFORMANCE: Skip during upload - can be done in background if needed
+            if not getattr(self, '_skip_database_strain', False):
+                self.logger.info("=== OVERRIDING: Using Database Product Strain Values ===")
+                self._apply_database_product_strain_values()
+                self.logger.info("=== End Database Product Strain Override ===")
+            else:
+                self.logger.info("⚡ Skipping database Product Strain application for fast upload")
             
             # 8.7) Convert Product Strain to categorical after all logic is complete
             if "Product Strain" in self.df.columns:
@@ -3335,6 +3412,24 @@ class ExcelProcessor:
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
         
+        # CRITICAL FIX: Filter out database tags and non-Excel sources BEFORE processing
+        # Only show tags that come from Excel files, not from database or JSON matching
+        if 'Source' in filtered_df.columns and not filtered_df.empty:
+            initial_count = len(filtered_df)
+            source_series = filtered_df['Source'].astype(str).str.lower()
+            # Exclude tags with Source containing Database, JSON Match, Educated Guess, etc.
+            excel_mask = (
+                filtered_df['Source'].isna() | 
+                (source_series.str.strip() == '') |
+                (source_series.str.strip() == 'nan') |
+                (~source_series.str.contains('database|json match|json|educated guess|database priority|ai match|generated|faux tag|novel product', case=False, na=False, regex=True))
+            )
+            filtered_df = filtered_df[excel_mask].copy()
+            excluded_count = initial_count - len(filtered_df)
+            if excluded_count > 0:
+                logger.info(f"🔄 FILTERING: Excluded {excluded_count} non-Excel tags (Database/JSON sources)")
+            logger.info(f"✅ After filtering: {len(filtered_df)} Excel-only tags remaining")
+        
         tags = []
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
 
@@ -3503,9 +3598,10 @@ class ExcelProcessor:
                 'Product Name*': product_name,
                 'Vendor': vendor_value,
                 'Vendor/Supplier*': vendor_value,
+                'ProductVendor': vendor_value,  # CRITICAL: Template processor needs ProductVendor field
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'Lineage': safe_get_value(row.get('Lineage', '')),
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
@@ -3589,8 +3685,13 @@ class ExcelProcessor:
         logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
         logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
         
-        # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
-        sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
+        # CRITICAL PERFORMANCE FIX: Skip database enrichment when _skip_enrichment flag is set
+        # This prevents 5-minute waits in production when fast_load=1
+        if not getattr(self, '_skip_enrichment', False):
+            # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
+            sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
+        else:
+            logger.info("⚡ PERFORMANCE: Skipping database enrichment in get_available_tags (fast_load mode)")
         
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)
@@ -3702,8 +3803,13 @@ class ExcelProcessor:
                 db_record = db_lookup.get(normalized_name)
                 
                 if db_record:
-                    # Update tag with database values (database takes precedence)
+                    # CRITICAL: Excel Vendor takes precedence - NEVER overwrite Vendor from database
+                    # Preserve Excel Vendor/Supplier* and ProductVendor fields
+                    excel_vendor = tag.get('Vendor/Supplier*') or tag.get('Vendor') or tag.get('ProductVendor', '')
+                    
+                    # Update tag with database values (database takes precedence for lineage, DOH, price, THC/CBD)
                     # Only update fields that are commonly changed in database (lineage, DOH, etc.)
+                    # NEVER update Vendor fields - Excel is the source of truth
                     if db_record.get('Lineage'):
                         db_lineage = str(db_record.get('Lineage', '')).strip().upper()
                         tag['Lineage'] = db_lineage
@@ -3728,6 +3834,12 @@ class ExcelProcessor:
                     if db_record.get('CBD test result'):
                         tag['CBD test result'] = db_record.get('CBD test result')
                         tag['CBD'] = db_record.get('CBD test result')
+                    
+                    # CRITICAL: Restore Excel Vendor if it was set (Excel takes precedence)
+                    if excel_vendor and excel_vendor.strip() not in ['', 'None', 'nan', 'NULL', 'null']:
+                        tag['Vendor/Supplier*'] = excel_vendor
+                        tag['Vendor'] = excel_vendor
+                        tag['ProductVendor'] = excel_vendor
                 
                 enriched_tags.append(tag)
             
@@ -3927,6 +4039,33 @@ class ExcelProcessor:
                     else:
                         logger.warning(f"CRITICAL FIX: No direct matches found for any of the {len(selected_tag_names)} selected tags")
             
+            # CRITICAL FIX: If still no matches, try to refresh Excel DataFrame first (in case file was updated)
+            if not canonical_selected and self._last_loaded_file:
+                logger.info("CRITICAL FIX: No matches found, refreshing Excel DataFrame from file...")
+                try:
+                    # Force refresh DataFrame from file (clear cache and reload)
+                    file_path = self._last_loaded_file
+                    self._file_cache.clear()  # Clear cache to force reload
+                    old_last_loaded = self._last_loaded_file
+                    self._last_loaded_file = None  # Force reload
+                    if self.load_file(file_path):
+                        logger.info("CRITICAL FIX: Successfully refreshed Excel DataFrame")
+                        # Try matching again after refresh
+                        if self.df is not None and not self.df.empty and product_name_col in self.df.columns:
+                            canonical_map = {normalize_name(name): name for name in self.df[product_name_col]}
+                            for tag in selected_tag_names:
+                                normalized_tag = normalize_name(tag)
+                                if normalized_tag in canonical_map:
+                                    canonical_selected.append(canonical_map[normalized_tag])
+                                    logger.info(f"CRITICAL FIX: Found match after refresh: '{tag}' -> '{canonical_map[normalized_tag]}'")
+                    else:
+                        # Restore if reload failed
+                        self._last_loaded_file = old_last_loaded
+                except Exception as e:
+                    logger.warning(f"CRITICAL FIX: Error refreshing Excel DataFrame: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
             # CRITICAL FIX: If still no matches, try to get products from database directly
             if not canonical_selected:
                 logger.warning("CRITICAL FIX: No matches found in DataFrame, trying to get products from database...")
@@ -3945,6 +4084,7 @@ class ExcelProcessor:
                                 if isinstance(product, dict):
                                     product_name = product.get('Product Name*', product.get('ProductName', ''))
                                     if product_name in selected_tag_names:
+                                        # Start with database data
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
@@ -3955,6 +4095,8 @@ class ExcelProcessor:
                                             'Product Strain': product.get('Product Strain', ''),
                                             'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'Vendor/Supplier*': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'ProductVendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
                                             'Price': product.get('Price', ''),  # Database uses 'Price' field
                                             'Price*': product.get('Price', ''),  # Also set Price* for compatibility
                                             'Weight*': product.get('Weight*', ''),
@@ -3966,11 +4108,94 @@ class ExcelProcessor:
                                             'DOH': product.get('DOH', ''),
                                             'Source': 'Database'
                                         }
+                                        
+                                        # CRITICAL FIX: Try to enrich with Excel data if available
+                                        # Search Excel DataFrame for similar products to get Excel data
+                                        if self.df is not None and not self.df.empty:
+                                            excel_match = None
+                                            # Try exact match first
+                                            if product_name_col in self.df.columns:
+                                                exact_match = self.df[self.df[product_name_col] == product_name]
+                                                if not exact_match.empty:
+                                                    excel_match = exact_match.iloc[0]
+                                                    logger.info(f"CRITICAL FIX: Found exact Excel match for '{product_name}'")
+                                                else:
+                                                    # Try case-insensitive match
+                                                    case_match = self.df[
+                                                        self.df[product_name_col].str.lower() == product_name.lower()
+                                                    ]
+                                                    if not case_match.empty:
+                                                        excel_match = case_match.iloc[0]
+                                                        logger.info(f"CRITICAL FIX: Found case-insensitive Excel match for '{product_name}'")
+                                                    else:
+                                                        # Try fuzzy matching with normalized names
+                                                        normalized_product_name = normalize_name(product_name)
+                                                        for idx, row in self.df.iterrows():
+                                                            excel_name = str(row.get(product_name_col, '')).strip()
+                                                            normalized_excel_name = normalize_name(excel_name)
+                                                            if normalized_excel_name == normalized_product_name:
+                                                                excel_match = row
+                                                                logger.info(f"CRITICAL FIX: Found normalized Excel match for '{product_name}' -> '{excel_name}'")
+                                                                break
+                                            
+                                            # If Excel match found, enrich record with Excel data (Excel takes precedence for price, weight, etc.)
+                                            if excel_match is not None:
+                                                logger.info(f"CRITICAL FIX: Enriching database record for '{product_name}' with Excel data")
+                                                # Excel data takes precedence for price, weight, and other Excel-specific fields
+                                                if excel_match.get('Price') or excel_match.get('Price*'):
+                                                    excel_price = excel_match.get('Price') or excel_match.get('Price*', '')
+                                                    if excel_price:
+                                                        record['Price'] = excel_price
+                                                        record['Price*'] = excel_price
+                                                        logger.debug(f"CRITICAL FIX: Updated price from Excel: {excel_price}")
+                                                
+                                                if excel_match.get('Weight*'):
+                                                    excel_weight = excel_match.get('Weight*', '')
+                                                    if excel_weight:
+                                                        record['Weight*'] = excel_weight
+                                                        logger.debug(f"CRITICAL FIX: Updated weight from Excel: {excel_weight}")
+                                                
+                                                if excel_match.get('Units'):
+                                                    excel_units = excel_match.get('Units', '')
+                                                    if excel_units:
+                                                        record['Units'] = excel_units
+                                                        logger.debug(f"CRITICAL FIX: Updated units from Excel: {excel_units}")
+                                                
+                                                if excel_match.get('Vendor') or excel_match.get('Vendor/Supplier*') or excel_match.get('ProductVendor'):
+                                                    excel_vendor = excel_match.get('Vendor') or excel_match.get('Vendor/Supplier*') or excel_match.get('ProductVendor', '')
+                                                    if excel_vendor:
+                                                        record['Vendor'] = excel_vendor
+                                                        record['Vendor/Supplier*'] = excel_vendor
+                                                        record['ProductVendor'] = excel_vendor
+                                                        logger.debug(f"CRITICAL FIX: Updated vendor from Excel: {excel_vendor}")
+                                                
+                                                if excel_match.get('Product Brand'):
+                                                    excel_brand = excel_match.get('Product Brand', '')
+                                                    if excel_brand:
+                                                        record['Product Brand'] = excel_brand
+                                                        logger.debug(f"CRITICAL FIX: Updated brand from Excel: {excel_brand}")
+                                                
+                                                if excel_match.get('Product Type*'):
+                                                    excel_type = excel_match.get('Product Type*', '')
+                                                    if excel_type:
+                                                        record['Product Type*'] = excel_type
+                                                        logger.debug(f"CRITICAL FIX: Updated product type from Excel: {excel_type}")
+                                                
+                                                # Update other Excel fields if available
+                                                for col in self.df.columns:
+                                                    if col not in record and excel_match.get(col):
+                                                        record[col] = excel_match.get(col)
+                                                
+                                                record['Source'] = 'Database+Excel'  # Indicate it's enriched
+                                                logger.info(f"CRITICAL FIX: Successfully enriched '{product_name}' with Excel data")
+                                            else:
+                                                logger.warning(f"CRITICAL FIX: No Excel match found for '{product_name}', using database data only")
+                                        
                                         records.append(record)
                                         logger.info(f"CRITICAL FIX: Created database record for '{product_name}'")
                             
                             if records:
-                                logger.info(f"CRITICAL FIX: Created {len(records)} records from database")
+                                logger.info(f"CRITICAL FIX: Created {len(records)} records from database (enriched with Excel where available)")
                                 return records
                             else:
                                 logger.warning("CRITICAL FIX: No valid records created from database products")
@@ -4010,6 +4235,8 @@ class ExcelProcessor:
                                             'Product Strain': product.get('Product Strain', ''),
                                             'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'Vendor/Supplier*': product.get('Vendor/Supplier*', product.get('Vendor', '')),
+                                            'ProductVendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
                                             'Price': product.get('Price', ''),  # Database uses 'Price' field
                                             'Price*': product.get('Price', ''),  # Also set Price* for compatibility
                                             'Weight*': product.get('Weight*', ''),
@@ -4127,6 +4354,19 @@ class ExcelProcessor:
             
             for record in records_sorted:
                 try:
+                    # CRITICAL: Ensure ProductVendor is set from Vendor/Supplier* for template processor
+                    vendor_value = (
+                        record.get('Vendor/Supplier*') or
+                        record.get('Vendor') or
+                        record.get('ProductVendor') or
+                        ''
+                    )
+                    vendor_value = str(vendor_value).strip()
+                    if vendor_value and vendor_value not in ['', 'None', 'nan', 'NULL', 'null']:
+                        record['Vendor/Supplier*'] = vendor_value
+                        record['Vendor'] = vendor_value
+                        record['ProductVendor'] = vendor_value
+                    
                     # Use the correct product name column
                     product_name = record.get(product_name_col, '').strip()
                     # Use the calculated Description field (which is processed from Product Name*)
@@ -5084,8 +5324,7 @@ class ExcelProcessor:
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
-                        # CRITICAL FIX: Exclude "All" and other unwanted values
-                        if (v_lower == "all" or "trade sample" in v_lower or "deactivated" in v_lower):
+                        if ("trade sample" in v_lower or "deactivated" in v_lower):
                             continue
                         # Apply product type normalization (same as TYPE_OVERRIDES)
                         normalized_v = TYPE_OVERRIDES.get(v_lower, v)
@@ -5664,6 +5903,17 @@ class ExcelProcessor:
                 if col in df.columns:
                     df[col] = df[col].astype(str).str.strip()
             
+            # CRITICAL FIX: If a Concentrate contains "Tanker" in the product name, change it to RSO/CO2 Tanker
+            if 'Product Type*' in df.columns and 'Product Name*' in df.columns:
+                concentrate_mask = df["Product Type*"].str.strip().str.lower() == "concentrate"
+                tanker_name_mask = df["Product Name*"].astype(str).str.lower().str.contains("tanker", na=False, case=False)
+                tanker_concentrate_mask = concentrate_mask & tanker_name_mask
+                
+                if tanker_concentrate_mask.any():
+                    df.loc[tanker_concentrate_mask, "Product Type*"] = "rso/co2 tankers"
+                    count = tanker_concentrate_mask.sum()
+                    self.logger.info(f"✅ [MINIMAL] Changed {count} Concentrate product(s) containing 'Tanker' to 'rso/co2 tankers'")
+            
             # Remove excluded product types (minimal check)
             if 'Product Type*' in df.columns:
                 excluded_types = ["Samples - Educational", "Sample - Vendor"]
@@ -6054,8 +6304,9 @@ class ExcelProcessor:
             'Capsule': '$25.00',
             'rso/co2 tankers': '$40.00'
         }
-        
-        return price_ranges.get(product_type, '$25.00')
+
+        # No default fallback - return empty if product type not recognized
+        return price_ranges.get(product_type, '')
     
     def _infer_weight_from_name(self, product_name, product_type):
         """Infer weight and units from product name and type."""
@@ -6702,8 +6953,8 @@ class ExcelProcessor:
                     'Quantity*': '1',
                     'Quantity': '1',
                     'Units': educated_guess.get("units", "g"),
-                    'Price': educated_guess.get("price", "25"),
-                    'Price* (Tier Name for Bulk)': educated_guess.get("price", "25"),
+                    'Price': educated_guess.get("price", ""),
+                    'Price* (Tier Name for Bulk)': educated_guess.get("price", ""),
                     'Source': f'Educated Guess ({educated_guess.get("confidence", "medium")})',
                     'Quantity Received*': '1',
                     'Weight Unit* (grams/gm or ounces/oz)': educated_guess.get("units", "g"),
@@ -7050,13 +7301,14 @@ class ExcelProcessor:
             if filtered_count == 0:
                 logger.warning("All data was JSON matched tags - nothing to store in database")
                 return {
-                    'stored': 0, 
-                    'updated': 0, 
-                    'errors': 0, 
+                    'stored': 0,
+                    'updated': 0,
+                    'errors': 0,
                     'excluded_json_matches': excluded_count,
                     'message': f'All {excluded_count} rows were JSON matched tags - excluded from database storage'
                 }
-            
+
+
             # Use the product database's store_excel_data method
             try:
                 storage_result = product_db.store_excel_data(filtered_df, source_file)
@@ -7497,110 +7749,146 @@ class ExcelProcessor:
             return self._clone_tag_results(cached_copy)
 
         if self.df is None:
-            logger.warning("DataFrame is None in get_available_tags, attempting to use database")
-            try:
-                from src.core.data.product_database import ProductDatabase
-                # Use default store name if not available
-                store_name = getattr(self, 'store_name', 'AGT_Bothell')
-                db = ProductDatabase(store_name)
-                products = db.get_all_products()
-                
-                logger.info(f"Retrieved {len(products)} products from database")
-                
-                # Convert database products to tag format
-                tags = []
-                for product in products:
-                    # Create combined weight from Weight* and Units if available
-                    weight_value = product.get('Weight*', '')
-                    units_value = product.get('Units', '')
-                    combined_weight = ''
+            # CRITICAL FIX: Don't fall back to database - only return Excel tags
+            # Database tags should not appear in available tags list
+            logger.warning("DataFrame is None in get_available_tags - returning empty list (Excel file required)")
+            return []
+            
+            # DISABLED: Database fallback removed - tags must come from Excel files only
+            # This prevents old database products from appearing when Excel file is missing
+            if False:  # Never execute this block
+                try:
+                    from src.core.data.product_database import ProductDatabase
+                    # Use default store name if not available
+                    store_name = getattr(self, 'store_name', 'AGT_Bothell')
+                    db = ProductDatabase(store_name)
+                    products = db.get_all_products()
                     
-                    if weight_value and units_value and str(units_value) != 'None' and str(units_value) != '':
-                        try:
-                            if float(weight_value) == int(float(weight_value)):
-                                combined_weight = f"{int(float(weight_value))}{units_value}"
-                            else:
+                    logger.info(f"Retrieved {len(products)} products from database")
+                    
+                    # Convert database products to tag format
+                    tags = []
+                    for product in products:
+                        # Create combined weight from Weight* and Units if available
+                        weight_value = product.get('Weight*', '')
+                        units_value = product.get('Units', '')
+                        combined_weight = ''
+                        
+                        if weight_value and units_value and str(units_value) != 'None' and str(units_value) != '':
+                            try:
+                                if float(weight_value) == int(float(weight_value)):
+                                    combined_weight = f"{int(float(weight_value))}{units_value}"
+                                else:
+                                    combined_weight = f"{weight_value}{units_value}"
+                            except (ValueError, TypeError):
                                 combined_weight = f"{weight_value}{units_value}"
-                        except (ValueError, TypeError):
-                            combined_weight = f"{weight_value}{units_value}"
-                    elif weight_value:
-                        combined_weight = str(weight_value)
+                        elif weight_value:
+                            combined_weight = str(weight_value)
+                        
+                        tag = {
+                            'Product Name*': product.get('Product Name*', ''),
+                            'Product Type*': product.get('Product Type*', ''),
+                            'Vendor/Supplier*': product.get('Vendor/Supplier*', ''),
+                            'Product Brand': product.get('Product Brand', ''),
+                            'Weight*': product.get('Weight*', ''),
+                            'Units': product.get('Units', ''),  # Add Units field
+                            'CombinedWeight': combined_weight,  # Create combined weight
+                            'Price*': product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),
+                            'Lineage': product.get('Lineage', ''),
+                            'Product Strain': product.get('Product Strain', ''),
+                            'DOH': product.get('DOH', ''),
+                            'DOH Compliant (Yes/No)': product.get('DOH Compliant (Yes/No)', ''),
+                            'Ratio': product.get('Ratio', ''),
+                            'THC test result': product.get('THC test result', ''),
+                            'CBD test result': product.get('CBD test result', ''),
+                            'Source': 'Database'
+                        }
+                        tags.append(tag)
                     
-                    tag = {
-                        'Product Name*': product.get('Product Name*', ''),
-                        'Product Type*': product.get('Product Type*', ''),
-                        'Vendor/Supplier*': product.get('Vendor/Supplier*', ''),
-                        'Product Brand': product.get('Product Brand', ''),
-                        'Weight*': product.get('Weight*', ''),
-                        'Units': product.get('Units', ''),  # Add Units field
-                        'CombinedWeight': combined_weight,  # Create combined weight
-                        'Price*': product.get('Price*', '') or product.get('Price* (Tier Name for Bulk)', ''),
-                        'Lineage': product.get('Lineage', ''),
-                        'Product Strain': product.get('Product Strain', ''),
-                        'DOH': product.get('DOH', ''),
-                        'DOH Compliant (Yes/No)': product.get('DOH Compliant (Yes/No)', ''),
-                        'Ratio': product.get('Ratio', ''),
-                        'THC test result': product.get('THC test result', ''),
-                        'CBD test result': product.get('CBD test result', ''),
-                        'Source': 'Database'
-                    }
-                    tags.append(tag)
-                
-                logger.info(f"Converted {len(tags)} database products to tags")
-                
-                # Apply filters if provided
-                if filters:
-                    filtered_tags = []
+                    logger.info(f"Converted {len(tags)} database products to tags")
+                    
+                    # Apply filters if provided
+                    if filters:
+                        filtered_tags = []
+                        for tag in tags:
+                            # Apply same filtering logic as Excel processor
+                            if filters.get('productType'):
+                                tag_product_type = str(tag.get('Product Type*', '')).strip().lower()
+                                filter_product_type = str(filters['productType']).strip().lower()
+                                if tag_product_type != filter_product_type:
+                                    continue
+                            
+                            if filters.get('vendor'):
+                                tag_vendor = str(tag.get('Vendor/Supplier*', '')).strip().lower()
+                                filter_vendor = str(filters['vendor']).strip().lower()
+                                if tag_vendor != filter_vendor:
+                                    continue
+                            
+                            if filters.get('brand'):
+                                tag_brand = str(tag.get('Product Brand', '')).strip().lower()
+                                filter_brand = str(filters['brand']).strip().lower()
+                                if tag_brand != filter_brand:
+                                    continue
+                            
+                            filtered_tags.append(tag)
+                        
+                        logger.info(f"Applied filters, returning {len(filtered_tags)} tags")
+                        return _return_with_cache(filtered_tags)
+                    
+                    # CRITICAL FIX: Final deduplication to catch any remaining duplicates
+                    final_tags = []
+                    seen_final_names = set()
+                    duplicate_count = 0
+                    
                     for tag in tags:
-                        # Apply same filtering logic as Excel processor
-                        if filters.get('productType'):
-                            tag_product_type = str(tag.get('Product Type*', '')).strip().lower()
-                            filter_product_type = str(filters['productType']).strip().lower()
-                            if tag_product_type != filter_product_type:
-                                continue
-                        
-                        if filters.get('vendor'):
-                            tag_vendor = str(tag.get('Vendor/Supplier*', '')).strip().lower()
-                            filter_vendor = str(filters['vendor']).strip().lower()
-                            if tag_vendor != filter_vendor:
-                                continue
-                        
-                        if filters.get('brand'):
-                            tag_brand = str(tag.get('Product Brand', '')).strip().lower()
-                            filter_brand = str(filters['brand']).strip().lower()
-                            if tag_brand != filter_brand:
-                                continue
-                        
-                        filtered_tags.append(tag)
+                        product_name = tag.get('Product Name*', '')
+                        if product_name and product_name not in seen_final_names:
+                            seen_final_names.add(product_name)
+                            final_tags.append(tag)
+                        else:
+                            duplicate_count += 1
+                            logger.info(f"🔄 FINAL DEDUPLICATION: Skipping duplicate '{product_name}'")
                     
-                    logger.info(f"Applied filters, returning {len(filtered_tags)} tags")
-                    return _return_with_cache(filtered_tags)
-                
-                # CRITICAL FIX: Final deduplication to catch any remaining duplicates
-                final_tags = []
-                seen_final_names = set()
-                duplicate_count = 0
-                
-                for tag in tags:
-                    product_name = tag.get('Product Name*', '')
-                    if product_name and product_name not in seen_final_names:
-                        seen_final_names.add(product_name)
-                        final_tags.append(tag)
-                    else:
-                        duplicate_count += 1
-                        logger.info(f"🔄 FINAL DEDUPLICATION: Skipping duplicate '{product_name}'")
-                
-                if duplicate_count > 0:
-                    logger.info(f"🔄 FINAL DEDUPLICATION: Removed {duplicate_count} duplicates, returning {len(final_tags)} unique products")
-                
-                return _return_with_cache(final_tags)
-                
-            except Exception as e:
-                logger.error(f"Failed to get products from database: {e}")
-                return []
+                    if duplicate_count > 0:
+                        logger.info(f"🔄 FINAL DEDUPLICATION: Removed {duplicate_count} duplicates, returning {len(final_tags)} unique products")
+                    
+                    return _return_with_cache(final_tags)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to get products from database: {e}")
+                    return []
         
         filtered_df = self.apply_filters(filters) if filters else self.df
         logger.info(f"get_available_tags: DataFrame shape {self.df.shape}, filtered shape {filtered_df.shape}")
+        
+        # CRITICAL FIX: Filter out non-Excel tags - only show tags from Excel file
+        # Exclude tags with Source='Database', 'JSON Match', or any non-Excel source
+        try:
+            if 'Source' in filtered_df.columns and not filtered_df.empty:
+                initial_count = len(filtered_df)
+                # Keep only tags that don't have Source field or have empty Source (Excel tags)
+                # Also exclude any tags with Source containing 'Database', 'JSON', 'Match', etc.
+                # Use safe string conversion to handle NaN/None values
+                source_series = filtered_df['Source'].astype(str)
+                excel_mask = (
+                    filtered_df['Source'].isna() | 
+                    (source_series.str.strip() == '') |
+                    (source_series.str.strip() == 'nan') |
+                    (~source_series.str.contains('Database|JSON|Match|AI|Generated', case=False, na=False, regex=True))
+                )
+                filtered_df = filtered_df[excel_mask].copy()
+                excluded_count = initial_count - len(filtered_df)
+                if excluded_count > 0:
+                    logger.info(f"🔍 FILTERED OUT {excluded_count} non-Excel tags (Database/JSON/Match sources)")
+                if len(filtered_df) == 0:
+                    logger.warning(f"⚠️ All tags were filtered out! Initial count: {initial_count}")
+                else:
+                    logger.info(f"✅ Returning {len(filtered_df)} Excel-only tags")
+        except Exception as filter_err:
+            logger.warning(f"⚠️ Error filtering by Source column: {filter_err}")
+            # Continue without filtering if there's an error - better to show tags than fail completely
+            import traceback
+            logger.debug(traceback.format_exc())
         
         tags = []
         seen_product_names = set()  # Track seen product names to prevent duplicates

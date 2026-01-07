@@ -104,6 +104,9 @@ class GenerationSplash {
                             <div class="loading-progress"></div>
                         </div>
                         <div class="loading-text">Processing your request...</div>
+                        <div class="countdown-timer" style="margin-top: 12px; font-size: 18px; font-weight: 600; color: rgba(255,255,255,0.9); text-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                            Estimated time: <span id="countdown-value">calculating...</span>
+                        </div>
                     </div>
                     
                     <div class="loading-dots">
@@ -618,6 +621,11 @@ class GenerationSplash {
     // Method to hide splash screen
     hide() {
         this.stop();
+        // Clear countdown interval
+        if (this.countdownInterval) {
+            clearInterval(this.countdownInterval);
+            this.countdownInterval = null;
+        }
         if (this.container) {
             this.container.style.display = 'none';
         }
@@ -630,6 +638,49 @@ class GenerationSplash {
         }
         if (!this.isRunning) {
             this.start();
+        }
+        // Start countdown timer
+        this.startCountdown();
+    }
+
+    // Countdown timer based on label count
+    startCountdown() {
+        // Estimate time based on label count (roughly 0.5 seconds per label, min 5s, max 60s)
+        const labelCount = this.options.labelCount || 10;
+        const estimatedSeconds = Math.min(Math.max(Math.ceil(labelCount * 0.5), 5), 60);
+
+        let remainingSeconds = estimatedSeconds;
+        const countdownElement = document.getElementById('countdown-value');
+
+        if (!countdownElement) return;
+
+        // Update immediately
+        this.updateCountdownDisplay(countdownElement, remainingSeconds);
+
+        // Update every second
+        this.countdownInterval = setInterval(() => {
+            remainingSeconds--;
+
+            if (remainingSeconds <= 0) {
+                countdownElement.textContent = 'almost done...';
+                if (this.countdownInterval) {
+                    clearInterval(this.countdownInterval);
+                    this.countdownInterval = null;
+                }
+            } else {
+                this.updateCountdownDisplay(countdownElement, remainingSeconds);
+            }
+        }, 1000);
+    }
+
+    // Helper to format countdown display
+    updateCountdownDisplay(element, seconds) {
+        if (seconds >= 60) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            element.textContent = `${minutes}m ${secs}s`;
+        } else {
+            element.textContent = `${seconds}s`;
         }
     }
     

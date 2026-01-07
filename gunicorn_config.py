@@ -39,7 +39,7 @@ if IS_PYTHONANYWHERE:
     # PythonAnywhere limitations
     workers = 1
     worker_connections = 100
-    timeout = 60
+    timeout = 300  # Increased to 5 minutes to handle slow tag generation requests
     max_requests = 500
     print("🐍 PythonAnywhere Gunicorn configuration applied")
 else:
