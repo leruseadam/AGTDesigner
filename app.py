@@ -8548,26 +8548,26 @@ def generate_labels():
                 if store_name:
                     product_db = get_product_database(store_name)
                     if product_db:
-                    # Collect all product names and strains that need enrichment
-                    products_to_enrich = []
-                    strains_to_enrich = set()
-                    enrichment_map = {}  # Maps record index to (product_name, strain_name)
-                    
-                    for idx, record in enumerate(records):
-                        # CRITICAL FIX: ALWAYS enrich ALL records with database lineage to ensure UI matches output
-                        # Database lineage (canonical_lineage/sovereign_lineage) is the source of truth
-                        product_name = record.get('ProductName') or record.get('Product Name*', '')
-                        product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
-                        if product_name:
-                            products_to_enrich.append(product_name)
-                            enrichment_map[idx] = (product_name, product_strain)
-                            if product_strain:
-                                strains_to_enrich.add(product_strain)
-                    
-                    if products_to_enrich or strains_to_enrich:
-                        # Batch query product lineages
-                        product_lineage_map = {}
-                        if products_to_enrich:
+                        # Collect all product names and strains that need enrichment
+                        products_to_enrich = []
+                        strains_to_enrich = set()
+                        enrichment_map = {}  # Maps record index to (product_name, strain_name)
+                        
+                        for idx, record in enumerate(records):
+                            # CRITICAL FIX: ALWAYS enrich ALL records with database lineage to ensure UI matches output
+                            # Database lineage (canonical_lineage/sovereign_lineage) is the source of truth
+                            product_name = record.get('ProductName') or record.get('Product Name*', '')
+                            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+                            if product_name:
+                                products_to_enrich.append(product_name)
+                                enrichment_map[idx] = (product_name, product_strain)
+                                if product_strain:
+                                    strains_to_enrich.add(product_strain)
+                        
+                        if products_to_enrich or strains_to_enrich:
+                            # Batch query product lineages
+                            product_lineage_map = {}
+                            if products_to_enrich:
                             try:
                                 conn = product_db._get_connection()
                                 cursor = conn.cursor()
@@ -8598,10 +8598,10 @@ def generate_labels():
                                             product_lineage_map[original_name] = str(lineage).strip().upper()
                             except Exception as batch_err:
                                 logging.warning(f"Batch product lineage query failed: {batch_err}")
-                        
-                        # Batch query strain lineages
-                        strain_lineage_map = {}
-                        if strains_to_enrich:
+                            
+                            # Batch query strain lineages
+                            strain_lineage_map = {}
+                            if strains_to_enrich:
                             try:
                                 conn = product_db._get_connection()
                                 cursor = conn.cursor()
@@ -8620,31 +8620,31 @@ def generate_labels():
                                         strain_lineage_map[strain_name] = str(lineage).strip().upper()
                             except Exception as strain_err:
                                 logging.warning(f"Batch strain lineage query failed: {strain_err}")
-                        
-                        # Apply enriched lineage to records - ALWAYS overwrite with database lineage
-                        # PERFORMANCE: Batch update all records at once, minimal logging
-                        enriched_count = 0
-                        for idx, (product_name, product_strain) in enrichment_map.items():
-                            record = records[idx]
-                            db_lineage = None
                             
-                            # Try product-level lineage first (database is source of truth) - O(1) lookup
-                            if product_name in product_lineage_map:
-                                db_lineage = product_lineage_map[product_name]
-                            # Fall back to strain-level lineage - O(1) lookup
-                            elif product_strain and product_strain in strain_lineage_map:
-                                db_lineage = strain_lineage_map[product_strain]
+                            # Apply enriched lineage to records - ALWAYS overwrite with database lineage
+                            # PERFORMANCE: Batch update all records at once, minimal logging
+                            enriched_count = 0
+                            for idx, (product_name, product_strain) in enrichment_map.items():
+                                record = records[idx]
+                                db_lineage = None
+                                
+                                # Try product-level lineage first (database is source of truth) - O(1) lookup
+                                if product_name in product_lineage_map:
+                                    db_lineage = product_lineage_map[product_name]
+                                # Fall back to strain-level lineage - O(1) lookup
+                                elif product_strain and product_strain in strain_lineage_map:
+                                    db_lineage = strain_lineage_map[product_strain]
+                                
+                                # CRITICAL FIX: ALWAYS overwrite with database lineage if it exists
+                                # PERFORMANCE: Skip logging in loop, only log summary
+                                if db_lineage:
+                                    record['Lineage'] = db_lineage
+                                    record['lineage'] = db_lineage.lower() if db_lineage else ''
+                                    record['canonical_lineage'] = db_lineage  # Also set canonical_lineage for consistency
+                                    enriched_count += 1
                             
-                            # CRITICAL FIX: ALWAYS overwrite with database lineage if it exists
-                            # PERFORMANCE: Skip logging in loop, only log summary
-                            if db_lineage:
-                                record['Lineage'] = db_lineage
-                                record['lineage'] = db_lineage.lower() if db_lineage else ''
-                                record['canonical_lineage'] = db_lineage  # Also set canonical_lineage for consistency
-                                enriched_count += 1
-                        
-                        if enriched_count > 0:
-                            logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
+                            if enriched_count > 0:
+                                logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
             except Exception as enrich_err:
                 logging.error(f"Lineage enrichment failed: {enrich_err}")
 
