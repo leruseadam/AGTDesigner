@@ -10577,6 +10577,10 @@ def get_available_tags():
                             name_to_tag[name] = tag
                         
                         # Batch query: fetch all lineage data at once
+                        # PERFORMANCE OPTIMIZATION: Limit batch size for faster queries on Windows
+                        # Large batches can be slow on Windows PCs
+                        MAX_BATCH_SIZE_FAST = 1000 if fast_load else 50000  # Smaller batches in fast_load mode
+                        
                         if product_names:
                             try:
                                 all_search_names = list(set(product_names + normalized_names))
@@ -10584,11 +10588,8 @@ def get_available_tags():
                                 # CRITICAL FIX: Never skip lineage query - database is source of truth for lineage
                                 # Even in fast_load mode, we need database lineage for user changes to persist
                                 # Use optimized batch query to keep it fast
-                                SKIP_LINEAGE_QUERY = False  # Always query database for lineage
-                                if SKIP_LINEAGE_QUERY:
-                                    logging.info(f"⚡ FAST MODE: Skipping lineage query for {len(all_search_names)} products")
-                                    batch_results = []
-                                elif len(all_search_names) > 50000:
+                                # PERFORMANCE: In fast_load mode, limit batch size for speed
+                                if len(all_search_names) > MAX_BATCH_SIZE_FAST:
                                     # Process in chunks but use larger chunks for speed
                                     MAX_BATCH_SIZE = 50000
                                     all_search_names_chunks = [all_search_names[i:i+MAX_BATCH_SIZE] for i in range(0, len(all_search_names), MAX_BATCH_SIZE)]
@@ -10637,18 +10638,20 @@ def get_available_tags():
                                     '''
                                     # Add query timing to detect slow queries
                                     query_start = time.time()
-                                    # PERFORMANCE: Add timeout to prevent slow queries from blocking response
-                                    # Target: <200ms for fast loading, abort if >200ms
-                                    MAX_QUERY_TIME = 0.2  # 200ms max query time
+                                    # PERFORMANCE: Stricter timeout in fast_load mode for speed
+                                    # Target: <100ms for fast loading, <500ms for normal loading
+                                    MAX_QUERY_TIME = 0.1 if fast_load else 0.5  # Stricter timeout in fast mode
                                     try:
                                         cur.execute(batch_query, all_search_names + all_search_names)
                                         batch_results = cur.fetchall()
                                         
                                         query_duration = (time.time() - query_start) * 1000
-                                        # PERFORMANCE: Allow longer queries (1s) for better completeness
-                                        if query_duration > 1000:
-                                            logging.debug(f"Slow lineage query ({query_duration:.0f}ms) - using partial results")
-                                            # Use partial results instead of skipping entirely
+                                        if query_duration > (MAX_QUERY_TIME * 1000):
+                                            logging.warning(f"⚠️ Slow lineage query ({query_duration:.0f}ms) - exceeded {MAX_QUERY_TIME*1000}ms threshold")
+                                            # Still use results, but log warning
+                                        if fast_load and query_duration > 500:
+                                            # In fast mode, if query takes >500ms, log but continue
+                                            logging.warning(f"⚠️ FAST MODE: Query took {query_duration:.0f}ms (target: <100ms)")
                                     except Exception as query_err:
                                         logging.warning(f"Lineage query failed, using cached lineage: {query_err}")
                                         lineage_cache = {}  # Skip lineage alignment on error

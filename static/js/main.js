@@ -10091,17 +10091,10 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // CRITICAL FIX: Check if we're in database-only mode - if so, don't use fast_load
-            // fast_load might skip database lineage alignment, which we need for correct lineage
-            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-            const isDatabaseMode = (!file || file === 'nofile' || file === '' || file === 'database');
-            const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
-            const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
-            
-            // PERFORMANCE: Use fast_load=1 by default for fast tag loading (but not in database mode)
-            // Background refresh will enrich with database lineage later if needed
-            // This dramatically speeds up initial tag loading
-            const fastLoadParam = (isDatabaseMode || hasRecentLineageUpdate) ? '' : '&fast_load=1';
+            // PERFORMANCE: Always use fast_load=1 for fast tag loading
+            // Backend will do lightweight lineage alignment even in fast_load mode
+            // This dramatically speeds up initial tag loading while still getting correct lineage
+            const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
@@ -16405,6 +16398,55 @@ const TagManager = {
                 console.log('✅ Filter event listeners setup complete in init()');
             } else {
                 console.error('❌ setupFilterEventListeners method not found!');
+            }
+
+            // CRITICAL FIX: Force-populate lineage dropdown from filter-options API
+            // This ensures lineages always appear even if updateFilters isn't called with them
+            console.log('🔧 Force-populating lineage dropdown from API...');
+            try {
+                const filterResp = await fetch('/api/filter-options?refresh=true&nocache=1&t=' + Date.now());
+                const filterData = await filterResp.json();
+                const lineages = filterData.lineage || [];
+
+                if (lineages.length > 0) {
+                    const lineageFilter = document.getElementById('lineageFilter');
+                    if (lineageFilter) {
+                        // Clear existing options
+                        lineageFilter.innerHTML = '';
+
+                        // Add "All" option
+                        const allOpt = document.createElement('option');
+                        allOpt.value = '';
+                        allOpt.textContent = 'All';
+                        lineageFilter.appendChild(allOpt);
+
+                        // Add lineage options in proper order
+                        const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED'];
+                        const sortedLineages = lineages.sort((a, b) => {
+                            const aIndex = lineageOrder.indexOf(a);
+                            const bIndex = lineageOrder.indexOf(b);
+                            if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+                            if (aIndex !== -1) return -1;
+                            if (bIndex !== -1) return 1;
+                            return a.localeCompare(b);
+                        });
+
+                        sortedLineages.forEach(lineage => {
+                            const opt = document.createElement('option');
+                            opt.value = lineage;
+                            opt.textContent = lineage;
+                            lineageFilter.appendChild(opt);
+                        });
+
+                        console.log(`✅ Populated lineage dropdown with ${lineages.length} options:`, lineages);
+                    } else {
+                        console.warn('⚠️ lineageFilter element not found');
+                    }
+                } else {
+                    console.warn('⚠️ No lineages returned from API');
+                }
+            } catch (error) {
+                console.error('❌ Error populating lineage dropdown:', error);
             }
 
             // CRITICAL FIX: Always fetch fresh data from server, skip cache
