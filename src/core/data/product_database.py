@@ -206,6 +206,7 @@ class ProductDatabase:
         self._corruption_recovery_lock = threading.Lock()
         
         # Cache for get_all_products() to avoid repeated expensive queries (especially slow on PythonAnywhere)
+        # Cache is instance-level and thread-safe via locks
         self._cached_all_products = None
         self._cached_all_products_timestamp = None
         self._all_products_cache_ttl = 300  # Cache for 5 minutes
@@ -1664,6 +1665,7 @@ class ProductDatabase:
                         cursor.execute(insert_query, values_to_insert)
                         product_id = cursor.lastrowid
                         conn.commit()
+                        self._invalidate_all_products_cache()  # Invalidate cache after adding product
                         logger.info(f"✅ ADDED NEW product '{product_name}' (ID: {product_id}, Vendor: {vendor_value}, Brand: {brand_value})")
                         return product_id
                     except sqlite3.IntegrityError as e:
@@ -2338,11 +2340,6 @@ class ProductDatabase:
             # Calculate excluded counts
             excluded_count = len(df) - len(filtered_df)
             blank_entries_skipped = len(df) - len(filtered_df) - excluded_count
-            
-            # Invalidate cache if products were stored or updated
-            if stored_count > 0 or updated_count > 0:
-                self._invalidate_all_products_cache()
-                logger.info(f"Invalidated all_products cache after storing {stored_count} new and updating {updated_count} products")
             
             result = {
                 'stored': stored_count,
@@ -7278,24 +7275,26 @@ class ProductDatabase:
             raise
 
     def get_all_products(self) -> List[Dict[str, Any]]:
-        """Get all products from the database for export."""
+        """Get all products from the database for export. Results are cached for 5 minutes."""
         try:
             import time
             current_time = time.time()
             
             # PERFORMANCE FIX: Check cache first to avoid expensive database queries
             # This is especially important on PythonAnywhere where database access is slower
-            if (self._cached_all_products is not None and 
-                self._cached_all_products_timestamp is not None and
-                (current_time - self._cached_all_products_timestamp) < self._all_products_cache_ttl):
-                cache_age = current_time - self._cached_all_products_timestamp
-                logger.debug(f"Using cached all_products ({len(self._cached_all_products)} products, cached {cache_age:.1f}s ago)")
-                self._timing_stats['cache_hits'] += 1
-                return self._cached_all_products
+            with self._cache_lock:
+                if (self._cached_all_products is not None and 
+                    self._cached_all_products_timestamp is not None and
+                    (current_time - self._cached_all_products_timestamp) < self._all_products_cache_ttl):
+                    cache_age = current_time - self._cached_all_products_timestamp
+                    logger.debug(f"Using cached all_products ({len(self._cached_all_products)} products, cached {cache_age:.1f}s ago)")
+                    self._timing_stats['cache_hits'] += 1
+                    # Return a copy to avoid mutation issues
+                    return list(self._cached_all_products)
             
             # Cache miss - query database
             self._timing_stats['cache_misses'] += 1
-            logger.info("Loading all products from database (cache miss)")
+            logger.debug("Loading all products from database (cache miss)")
             
             self.init_database()
             
@@ -7335,10 +7334,12 @@ class ProductDatabase:
                 
                 products.append(product)
             
-            # Cache the results
-            self._cached_all_products = products
-            self._cached_all_products_timestamp = current_time
-            logger.info(f"Cached {len(products)} products for {self._all_products_cache_ttl}s")
+            # Cache the results (thread-safe)
+            with self._cache_lock:
+                self._cached_all_products = products
+                self._cached_all_products_timestamp = current_time
+            
+            logger.debug(f"Cached {len(products)} products for {self._all_products_cache_ttl}s")
             
             return products
             
@@ -7348,9 +7349,10 @@ class ProductDatabase:
     
     def _invalidate_all_products_cache(self):
         """Invalidate the cached all_products result. Call this when products are added/updated/deleted."""
-        self._cached_all_products = None
-        self._cached_all_products_timestamp = None
-        logger.debug("Invalidated all_products cache")
+        with self._cache_lock:
+            self._cached_all_products = None
+            self._cached_all_products_timestamp = None
+            logger.debug("Invalidated all_products cache")
     
     def update_all_product_strains(self) -> Dict[str, Any]:
         """Update all existing Product Strain column values using the _calculate_product_strain logic."""

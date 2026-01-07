@@ -754,8 +754,6 @@ class JSONMatcher:
         self._product_db_instance = None
         self._cached_store_name = None
         self._product_table_columns = None
-        self._cached_db_products = None  # Cache database products to avoid repeated queries
-        self._db_products_cache_timestamp = None  # Track when cache was built
 
     def _determine_store_name(self) -> str:
         """Determine the best store name to use for ProductDatabase operations."""
@@ -7153,36 +7151,18 @@ class JSONMatcher:
                     logging.debug(f"Excel candidates unavailable: {xl_err}")
 
             # PRIORITY 2: Database products (fallback source)
-            # PERFORMANCE FIX: Cache database products to avoid repeated queries (especially slow on PythonAnywhere)
             try:
-                import time
-                current_time = time.time()
-                cache_valid = (
-                    self._cached_db_products is not None and 
-                    self._db_products_cache_timestamp is not None and
-                    (current_time - self._db_products_cache_timestamp) < 300  # Cache for 5 minutes
-                )
+                # Try to use the app's global database instance first
+                try:
+                    from app import get_product_database
+                    product_db = get_product_database()
+                    logging.info("Using global product database instance supplied by app")
+                except ImportError:
+                    # Fallback to JSON matcher managed instance
+                    product_db = self._get_product_database()
+                    logging.info("Using JSON matcher managed ProductDatabase instance")
                 
-                if cache_valid:
-                    db_products = self._cached_db_products
-                    logging.debug(f"Using cached database products ({len(db_products)} products, cached {current_time - self._db_products_cache_timestamp:.1f}s ago)")
-                else:
-                    # Try to use the app's global database instance first
-                    try:
-                        from app import get_product_database
-                        product_db = get_product_database()
-                        logging.info("Using global product database instance supplied by app")
-                    except ImportError:
-                        # Fallback to JSON matcher managed instance
-                        product_db = self._get_product_database()
-                        logging.info("Using JSON matcher managed ProductDatabase instance")
-                    
-                    db_products = product_db.get_all_products()
-                    # Cache the results
-                    self._cached_db_products = db_products
-                    self._db_products_cache_timestamp = current_time
-                    logging.info(f"Loaded and cached {len(db_products)} products from DATABASE")
-                
+                db_products = product_db.get_all_products()
                 if db_products:
                     # Mark database products with lower priority
                     for product in db_products:
