@@ -13458,28 +13458,33 @@ def get_filter_options():
                 logging.info("Web client detected - applying performance optimizations")
         
         cache_key = get_session_cache_key('filter_options')
-        
-        # WEB OPTIMIZATION: Aggressive caching for web clients
-        if is_web_client:
+
+        # Check if refresh or nocache parameter is set to bypass cache
+        force_refresh = (request.args.get('refresh') in ('true', '1', 'True') or
+                        request.args.get('nocache') in ('true', '1', 'True'))
+
+        # WEB OPTIMIZATION: Aggressive caching for web clients (unless refresh is requested)
+        if is_web_client and not force_refresh:
             # Use longer cache timeout for web clients (5 minutes)
             cached_options = cache.get(cache_key)
             if cached_options:
                 elapsed = (time.time() - start_time) * 1000
                 if ENHANCED_LOGGING_AVAILABLE:
-                    enhanced_logger.log_success(f"Using cached filter options ({elapsed:.1f}ms)", 
+                    enhanced_logger.log_success(f"Using cached filter options ({elapsed:.1f}ms)",
                                               {'cache_hit': True, 'options_count': len(cached_options)})
                 else:
                     logging.info(f"✅ Using cached filter options ({elapsed:.1f}ms)")
-                
+
                 # Apply compression for web clients
                 response = make_response(jsonify(cached_options))
                 response = compress_response(response)
                 return response
-        # CRITICAL FIX: Don't clear cache for web clients - this was causing slowness!
-        # Only clear cache for non-web clients to ensure updated formatting
-        elif not is_web_client:
+        # CRITICAL FIX: Clear cache if refresh is requested or for non-web clients
+        if force_refresh or not is_web_client:
             # Always clear cache for weight filter to ensure updated formatting (non-web only)
             cache.delete(cache_key)
+            if force_refresh:
+                logging.info("🔄 Cache cleared due to refresh=true parameter")
         
         excel_processor = get_session_excel_processor()
         

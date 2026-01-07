@@ -25,6 +25,10 @@ except ImportError:
     _generation_cache = {}  # Simple dict fallback
     HAS_CACHETOOLS = False
 
+# CRITICAL FIX: Clear cache on module load to remove documents with markers
+logger.warning("🧹 CLEARING GENERATION CACHE - Removing old cached documents with markers")
+_generation_cache.clear()
+
 _template_buffer_cache = {}  # Persistent cache for template buffers
 _cache_timestamps = {}  # Track cache entry times for manual TTL
 
