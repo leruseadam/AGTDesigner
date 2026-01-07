@@ -9282,6 +9282,19 @@ def process_database_product_for_api(db_product):
     else:
         processed_product['DescAndWeight'] = 'N/A'
 
+    # CRITICAL: Ensure ProductVendor is set from Vendor/Supplier* for template processor
+    vendor_value = (
+        processed_product.get('Vendor/Supplier*') or
+        processed_product.get('Vendor') or
+        processed_product.get('ProductVendor') or
+        ''
+    )
+    vendor_value = str(vendor_value).strip()
+    if vendor_value and vendor_value not in ['', 'None', 'nan', 'NULL', 'null']:
+        processed_product['Vendor/Supplier*'] = vendor_value
+        processed_product['Vendor'] = vendor_value
+        processed_product['ProductVendor'] = vendor_value
+    
     # Ensure Product Name* and ProductName fields exist for frontend compatibility
     product_name_value = (
         processed_product.get('Product Name*') or
@@ -9564,7 +9577,7 @@ def get_available_tags():
 
         # CRITICAL: SIMPLE PATH - When Excel exists, load ONLY from Excel, skip ALL other logic
         # PERFORMANCE: Check fast_load parameter to skip expensive database queries
-        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        # Note: fast_load check already done above - if fast_load=1 and no cache, we return 202
         logging.info(f"✅ Excel file exists: {session_file_path} - using SIMPLE Excel-only path (fast_load={fast_load})")
         try:
             from src.core.data.excel_processor import ExcelProcessor
@@ -9794,11 +9807,12 @@ def get_available_tags():
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags")
 
-                # CRITICAL PERFORMANCE FIX: Cache the processed tags to avoid reloading Excel (10+ seconds) on every request
-                # This is the main fix for the 30-second tag loading timeout
+                # CRITICAL PERFORMANCE FIX: ALWAYS cache the processed tags to avoid reloading Excel (10+ seconds) on every request
+                # This is the main fix for the 5-minute tag loading timeout in production
+                # Cache even with fast_load=1 so subsequent requests are instant
                 try:
                     cache.set(cache_key, safe_simple_tags, timeout=3600)  # Cache for 1 hour
-                    logging.info(f"💾 SIMPLE PATH: Cached {len(safe_simple_tags)} tags with key: {cache_key[:50]}...")
+                    logging.info(f"💾 SIMPLE PATH: Cached {len(safe_simple_tags)} tags with key: {cache_key[:50]}... (fast_load={fast_load})")
                 except Exception as cache_set_err:
                     logging.warning(f"Failed to cache tags: {cache_set_err}")
 
@@ -9931,87 +9945,12 @@ def get_available_tags():
                 'message': 'File is being processed. Tags will load momentarily.'
             }), 202
 
-        # CRITICAL FIX: If file exists but no cached tags yet, try in-memory processor before returning processing
-        # Create NEW processor instance to completely avoid shared global state
+        # CRITICAL PERFORMANCE FIX: With fast_load=1, NEVER load Excel or do database queries synchronously
+        # This prevents 5-minute waits in production. Return 202 immediately and let background processing handle it.
         if fast_load and session_file_path and file_exists and not cached_tags:
-            try:
-                # CRITICAL: Create BRAND NEW processor instance to avoid ANY shared state
-                # This completely bypasses the global _excel_processor
-                from src.core.data.excel_processor import ExcelProcessor
-                logging.info(f"🆕 Creating NEW processor instance for session file: {session_file_path}")
-                logging.info(f"📂 Session: store={store_name}, file_exists={os.path.exists(session_file_path) if session_file_path else False}")
-                session_processor = ExcelProcessor(store_name=store_name)
-
-                # Load THIS session's file directly
-                load_success = session_processor.load_file(session_file_path)
-                logging.info(f"📥 Load result: success={load_success}, df_shape={session_processor.df.shape if session_processor.df is not None else 'None'}")
-                session_processor._last_loaded_file = session_file_path
-
-                if session_processor is not None and getattr(session_processor, 'df', None) is not None and not session_processor.df.empty:
-                    logging.info(f"⚡ FAST: Serving {len(session_processor.df)} tags from NEW session processor (no cache)")
-                    excel_tags = session_processor.get_available_tags(filters=None)
-                    logging.info(f"📊 Got {len(excel_tags) if excel_tags else 0} tags from processor")
-
-                    # CRITICAL: Enrich with database lineage BEFORE returning
-                    # This ensures UI shows current lineage from database, not stale Excel lineage
-                    try:
-                        product_db = get_product_database(store_name)
-                        if product_db and excel_tags:
-                            logging.info(f"🔄 Enriching {len(excel_tags)} tags with database lineage (BATCH)...")
-
-                            # BATCH QUERY: Get all product names and query database once
-                            product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
-
-                            if product_names:
-                                # Use batch query to get all lineages at once
-                                db_products = product_db.get_products_by_names(product_names)
-
-                                # Create lookup map: product_name -> lineage
-                                lineage_map = {}
-                                if db_products:
-                                    for db_product in db_products:
-                                        db_name = db_product.get('Product Name*')
-                                        db_lineage = (
-                                            db_product.get('currentLineage') or
-                                            db_product.get('canonical_lineage') or
-                                            db_product.get('Lineage')
-                                        )
-                                        if db_name and db_lineage:
-                                            lineage_map[db_name] = str(db_lineage).strip().upper()
-
-                                # Apply lineage to all tags
-                                for tag in excel_tags:
-                                    product_name = tag.get('Product Name*')
-                                    if product_name and product_name in lineage_map:
-                                        db_lineage_clean = lineage_map[product_name]
-                                        tag['currentLineage'] = db_lineage_clean
-                                        tag['canonical_lineage'] = db_lineage_clean
-                                        tag['Lineage'] = db_lineage_clean
-                                        tag['lineage'] = db_lineage_clean.lower()
-
-                                logging.info(f"✅ Database lineage enrichment complete ({len(lineage_map)} products enriched)")
-                    except Exception as enrich_err:
-                        logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
-                        import traceback
-                        logging.warning(traceback.format_exc())
-
-                    # CRITICAL FIX: Always align tags with database lineage before returning
-                    # This ensures UI shows current database lineage, not stale Excel lineage
-                    aligned_excel_tags = _align_tags_with_db_lineage(excel_tags, store_name) if excel_tags else []
-                    safe_excel_tags = make_json_safe(aligned_excel_tags)
-                    # Log first few product names for debugging
-                    if safe_excel_tags:
-                        sample_products = [tag.get('Product Name*', 'NO_NAME') for tag in safe_excel_tags[:5]]
-                        logging.info(f"🏷️ Sample products being returned: {sample_products}")
-                    # NO CACHING - always load fresh to prevent stale data
-                    return jsonify({
-                        'tags': safe_excel_tags,
-                        'total_count': len(safe_excel_tags),
-                        'source': 'excel-fresh'
-                    })
-            except Exception as mem_err:
-                logging.warning(f"Failed to serve in-memory tags fallback (fast_load): {mem_err}")
-            logging.info(f"⚡ FAST: File uploaded but tags not cached yet - returning processing status")
+            # PERFORMANCE: Skip all expensive operations - just return processing status
+            # Background thread or next request (with cache) will handle the actual loading
+            logging.info(f"⚡ FAST-LOAD: Skipping expensive Excel/DB operations - returning 202 immediately")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
