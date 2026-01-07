@@ -2078,34 +2078,20 @@ def initialize_excel_processor():
         if default_file and os.path.exists(default_file):
             logging.info(f"Loading default file on startup: {default_file}")
             try:
-                # Add timeout protection for corrupted files
-                import signal
+                # CRITICAL FIX: Use safe_load_file_with_timeout for Windows compatibility
+                success = safe_load_file_with_timeout(excel_processor, default_file, timeout_seconds=30)
                 
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("Excel file loading timed out - file may be corrupted")
-                
-                # Set 30 second timeout for file loading
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(30)
-                
-                try:
-                    success = excel_processor.load_file(default_file)
-                    signal.alarm(0)  # Cancel the alarm
-                    
-                    if success:
-                        excel_processor._last_loaded_file = default_file
-                        logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
-                    else:
-                        logging.warning("Failed to load default file")
-                except TimeoutError as timeout_err:
-                    signal.alarm(0)  # Cancel the alarm
-                    logging.error(f"Excel file loading timed out: {timeout_err}")
-                    logging.error(f"File may be corrupted: {default_file}")
-                    # Try to move corrupted file
+                if success:
+                    excel_processor._last_loaded_file = default_file
+                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
+                else:
+                    logging.warning("Failed to load default file")
+                    # Try to move corrupted file if timeout occurred
                     try:
                         corrupted_path = default_file + '.corrupted'
-                        os.rename(default_file, corrupted_path)
-                        logging.info(f"Moved corrupted file to: {corrupted_path}")
+                        if os.path.exists(default_file):
+                            os.rename(default_file, corrupted_path)
+                            logging.info(f"Moved potentially corrupted file to: {corrupted_path}")
                     except Exception as move_err:
                         logging.error(f"Could not move corrupted file: {move_err}")
                         
@@ -23530,22 +23516,37 @@ if __name__ == '__main__':
     except (ValueError, AttributeError) as e:
         logging.warning(f"Some signal handlers unavailable on this platform: {e}")
     
-    # CRITICAL FIX: Use cross-platform temp directory instead of Unix-only /tmp
-    import tempfile
-    lock_file = os.path.join(tempfile.gettempdir(), 'labelmaker_app.lock')
+    # CRITICAL FIX: Cross-platform lock file check (lock_file already defined above)
     if os.path.exists(lock_file):
         try:
             with open(lock_file, 'r') as f:
                 pid = int(f.read().strip())
-            # Check if the process is still running
+            # Check if the process is still running (Windows-compatible)
             try:
-                os.kill(pid, 0)  # This will raise an exception if process doesn't exist
-                print(f"⚠️  App already running with PID {pid}")
-                print("💡 To force start, run: rm -f /tmp/labelmaker_app.lock && python app.py")
-                sys.exit(0)
-            except (OSError, ProcessLookupError):
-                # Process doesn't exist, remove stale lock file
-                os.remove(lock_file)
+                if is_windows:
+                    # Windows: use tasklist to check if process exists
+                    import subprocess
+                    result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], 
+                                          capture_output=True, text=True, timeout=2)
+                    if str(pid) in result.stdout:
+                        print(f"⚠️  App already running with PID {pid}")
+                        print(f"💡 To force start, delete lock file: {lock_file}")
+                        sys.exit(0)
+                    else:
+                        # Process doesn't exist, remove stale lock file
+                        os.remove(lock_file)
+                else:
+                    # Unix: use os.kill
+                    os.kill(pid, 0)  # This will raise an exception if process doesn't exist
+                    print(f"⚠️  App already running with PID {pid}")
+                    print(f"💡 To force start, run: rm -f {lock_file} && python app.py")
+                    sys.exit(0)
+            except (OSError, ProcessLookupError, subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+                # Process doesn't exist or tasklist failed, remove stale lock file
+                try:
+                    os.remove(lock_file)
+                except FileNotFoundError:
+                    pass
         except (ValueError, FileNotFoundError):
             # Invalid lock file, remove it
             try:
