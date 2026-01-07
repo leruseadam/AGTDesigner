@@ -4348,13 +4348,14 @@ class TemplateProcessor:
                                 if '_START' in run.text or '_END' in run.text or 'DESC_' in run.text or 'PRICE_' in run.text:
                                     self.logger.warning(f"🔍 MARKER IN RUN {idx}: '{run.text}'")
                             
-                            # Get full paragraph text
-                            original_para_text = paragraph.text
+                            # CRITICAL FIX: Reassemble full text from runs to handle markers split across runs
+                            # paragraph.text might not capture markers split across runs correctly
+                            original_para_text = "".join(run.text for run in paragraph.runs)
                             
                             # Log markers found for debugging
-                            if any(marker in original_para_text.upper() for marker in ['_START', '_END', 'DESC_', 'PRICE_']):
+                            if any(marker in original_para_text.upper() for marker in ['PRICE_START', 'PRICE_END', 'DESC_START', 'DESC_END', 'RICE_END']):
                                 markers_found.append(original_para_text)
-                                self.logger.warning(f"🔍 MARKER FOUND IN TABLE: '{original_para_text}'")
+                                self.logger.warning(f"🔍 MARKER FOUND IN TABLE: '{original_para_text[:100]}'")
                             
                             cleaned_para_text = clean_text(original_para_text)
 
@@ -4371,8 +4372,9 @@ class TemplateProcessor:
 
             # Clean markers in paragraphs outside tables
             for paragraph in doc.paragraphs:
-                # Get full paragraph text
-                original_para_text = paragraph.text
+                # CRITICAL FIX: Reassemble full text from runs to handle markers split across runs
+                # paragraph.text might not capture markers split across runs correctly
+                original_para_text = "".join(run.text for run in paragraph.runs)
                 cleaned_para_text = clean_text(original_para_text)
 
                 if cleaned_para_text != original_para_text:
