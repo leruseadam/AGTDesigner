@@ -10444,7 +10444,8 @@ def get_available_tags():
             if fast_load and not prefer_db:
                 # CRITICAL FIX: Always align cached tags with database lineage before returning
                 # This ensures UI shows current database lineage, not stale cached lineage
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
+                # Use force_overwrite=True to ensure database lineage always wins over Excel lineage
+                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
                 safe_all_tags = make_json_safe(aligned_cached_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(
@@ -11608,6 +11609,17 @@ def get_available_tags():
             
                 if final_lineage_check_count > 0:
                     logging.info(f"✅ FINAL CHECK: Set database lineage on {final_lineage_check_count} tags that were missing it")
+        
+        # CRITICAL FIX: Always force-align tags with database lineage before returning to UI
+        # This ensures UI always shows database sovereign_lineage, not Excel lineage
+        try:
+            store_name = get_current_store_name()
+            if store_name and all_tags:
+                logging.info(f"🔄 FINAL ALIGNMENT: Force-aligning {len(all_tags)} tags with database lineage before returning to UI")
+                all_tags = _align_tags_with_db_lineage(all_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                logging.info(f"✅ FINAL ALIGNMENT: Completed force-alignment of tags with database lineage")
+        except Exception as final_align_err:
+            logging.warning(f"Final lineage alignment failed: {final_align_err}")
     
         safe_all_tags = make_json_safe(all_tags)
         # CRITICAL: NO CACHING - always return fresh data to prevent stale data issues
