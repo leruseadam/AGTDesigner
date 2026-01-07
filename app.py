@@ -173,11 +173,45 @@ def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
             return False
     
     # Signal-based alarms only work in the main thread on Unix. If unavailable, just load.
-    try:
-        if threading.current_thread() is not threading.main_thread():
-            logging.debug("safe_load_file_with_timeout: non-main thread; skipping SIGALRM timeout")
-            return _load_without_timeout()
+    # CRITICAL FIX: Windows doesn't support SIGALRM - check platform first
+    import platform
+    is_windows = platform.system() == 'Windows'
+    
+    # On Windows or non-main threads, use timeout with threading instead
+    if is_windows or threading.current_thread() is not threading.main_thread():
+        if is_windows:
+            logging.debug("safe_load_file_with_timeout: Windows detected - using threading timeout instead of SIGALRM")
+        else:
+            logging.debug("safe_load_file_with_timeout: non-main thread; using threading timeout")
         
+        # Use threading-based timeout for Windows compatibility
+        import threading
+        result_container = {'result': None, 'done': False, 'error': None}
+        
+        def load_in_thread():
+            try:
+                result_container['result'] = processor.load_file(file_path)
+                result_container['done'] = True
+            except Exception as e:
+                result_container['error'] = e
+                result_container['done'] = True
+        
+        thread = threading.Thread(target=load_in_thread, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_seconds)
+        
+        if not result_container['done']:
+            logging.error(f"File loading timed out after {timeout_seconds} seconds")
+            return False
+        
+        if result_container['error']:
+            logging.error(f"Error in safe file loading: {result_container['error']}")
+            return False
+        
+        return result_container['result']
+    
+    # Unix systems: use signal-based timeout
+    try:
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(timeout_seconds)
         try:
@@ -192,9 +226,9 @@ def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
             return False
         finally:
             signal.alarm(0)
-    except ValueError as ve:
-        # Raised when signal.signal or alarm not permitted (e.g., worker threads on hosting)
-        logging.warning(f"SIGALRM unavailable on this thread/environment ({ve}); loading file without timeout")
+    except (ValueError, AttributeError) as ve:
+        # Raised when signal.signal or alarm not permitted (e.g., Windows, worker threads)
+        logging.warning(f"SIGALRM unavailable on this platform/thread ({ve}); loading file without timeout")
         return _load_without_timeout()
 LAZY_LOADING_ENABLED = True  # Enable lazy loading for better performance
 
@@ -23467,25 +23501,38 @@ if __name__ == '__main__':
     import os
     import signal
     
+    # CRITICAL FIX: Windows-compatible signal handlers
+    import platform
+    is_windows = platform.system() == 'Windows'
+    import tempfile
+    
+    # Get cross-platform temp directory
+    temp_dir = tempfile.gettempdir()
+    lock_file = os.path.join(temp_dir, 'labelmaker_app.lock')
+    
     # Set up signal handlers for clean shutdown
     def signal_handler(signum, frame):
         print(f"\n🛑 Received signal {signum} - shutting down gracefully...")
         # Clean up lock file if it exists
         try:
-            lock_file = '/tmp/labelmaker_app.lock'
             if os.path.exists(lock_file):
                 os.remove(lock_file)
         except Exception:
             pass
         sys.exit(0)
     
-    # Register signal handlers for clean shutdown
-    signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
-    signal.signal(signal.SIGTERM, signal_handler)  # kill command
-    signal.signal(signal.SIGHUP, signal_handler)   # hangup
+    # Register signal handlers for clean shutdown (Windows-compatible)
+    try:
+        signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C (works on Windows)
+        signal.signal(signal.SIGTERM, signal_handler)  # kill command (Unix)
+        if not is_windows:
+            signal.signal(signal.SIGHUP, signal_handler)   # hangup (Unix only)
+    except (ValueError, AttributeError) as e:
+        logging.warning(f"Some signal handlers unavailable on this platform: {e}")
     
-    # Simple lock file check (but allow override)
-    lock_file = '/tmp/labelmaker_app.lock'
+    # CRITICAL FIX: Use cross-platform temp directory instead of Unix-only /tmp
+    import tempfile
+    lock_file = os.path.join(tempfile.gettempdir(), 'labelmaker_app.lock')
     if os.path.exists(lock_file):
         try:
             with open(lock_file, 'r') as f:
