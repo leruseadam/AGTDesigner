@@ -2313,50 +2313,45 @@ class TemplateProcessor:
             # For classic types, Lineage should show strain lineage and ProductVendor should show brand
             self.logger.debug(f"Processing classic type '{product_type}' for Lineage and ProductVendor")
             
-            # PRIORITY FIX: Use record lineage first (from database updates), then fallback to database
+            # CRITICAL FIX: ALWAYS use database lineage first (sovereign_lineage/canonical_lineage)
+            # DO NOT use Excel Lineage column - it may be outdated/incorrect
             lineage_val = ""
+            db_lineage = None
             
-            # PRIORITY 1: Use lineage from record (includes manual dropdown changes and database updates)
-            # CRITICAL: Always use uppercase to ensure consistency
-            if lineage_text and lineage_text.strip():
-                lineage_val = str(lineage_text).strip().upper()
-                self.logger.info(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
-            else:
-                # PRIORITY 2: Fallback to cache lookup if record lineage is empty
-                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking cache...")
-                db_lineage = None
-                # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-                record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-                if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
-                    # Use record lineage (already set correctly by enrichment)
-                    db_lineage = str(record_lineage).strip()
-                    if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                        self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
-                elif product_name and product_lineage_cache:
-                    # Use pre-loaded cache instead of individual query
-                    db_lineage = product_lineage_cache.get(product_name)
-                    if db_lineage:
-                        self.logger.info(f"✅ Using cached lineage '{db_lineage}' for '{product_name}'")
-                
-                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+            # PRIORITY 1: Database lineage fields (sovereign_lineage > canonical_lineage)
+            record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage')
+            if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                db_lineage = str(record_lineage).strip()
+                lineage_val = db_lineage.upper()
+                self.logger.info(f"✅ FORCING DB LINEAGE: Using sovereign/canonical lineage '{lineage_val}' from database for '{product_name}'")
+            # PRIORITY 2: Pre-loaded lineage cache
+            elif product_name and product_lineage_cache:
+                db_lineage = product_lineage_cache.get(product_name)
+                if db_lineage:
                     lineage_val = str(db_lineage).strip().upper()
-                    self.logger.info(f"✅ Using product lineage: '{lineage_val}' for '{product_name}'")
+                    self.logger.info(f"✅ Using cached database lineage '{lineage_val}' for '{product_name}'")
+            
+            # PRIORITY 3: If no product-level lineage, try strain-level from cache
+            if not lineage_val and product_strain and strain_info_cache:
+                strain_info = strain_info_cache.get(product_strain)
+                if strain_info:
+                    preferred = (
+                        strain_info.get('display_lineage') or
+                        strain_info.get('sovereign_lineage') or
+                        strain_info.get('canonical_lineage')
+                    )
+                    if preferred:
+                        lineage_val = str(preferred).strip().upper()
+                        self.logger.info(f"✅ Using cached strain lineage: '{lineage_val}' for strain '{product_strain}'")
+            
+            # PRIORITY 4: Last resort - fallback to Excel Lineage column (may be outdated)
+            if not lineage_val and lineage_text and lineage_text.strip():
+                lineage_val = str(lineage_text).strip().upper()
+                self.logger.warning(f"⚠️ Using Excel lineage (may be outdated): '{lineage_val}' for '{product_name}' - consider updating database")
                 
-                # If no product-level lineage, try strain-level from cache
-                if not lineage_val and product_strain and strain_info_cache:
-                    strain_info = strain_info_cache.get(product_strain)
-                    if strain_info:
-                        preferred = (
-                            strain_info.get('display_lineage') or
-                            strain_info.get('sovereign_lineage') or
-                            strain_info.get('canonical_lineage')
-                        )
-                        if preferred:
-                            lineage_val = str(preferred).strip().upper()
-                            self.logger.info(f"✅ Using cached strain lineage: '{lineage_val}' for strain '{product_strain}'")
-                
-                if not lineage_val:
-                    self.logger.debug(f"No lineage found in record or cache")
+            if not lineage_val:
+                self.logger.warning(f"⚠️ No lineage found in database or cache for '{product_name}'")
+
             
             # CRITICAL FIX: Ensure classic types always have lineage data
             if not lineage_val or lineage_val.strip() == "":

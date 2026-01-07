@@ -8317,8 +8317,8 @@
         try {
           var data = JSON.parse(initialData.getAttribute('data-initial'));
           if (data && data.filepath) {
-            // Show only the file name, not the full path
-            var fileName = data.filepath.split(/[\\/]/).pop();
+            // Prefer showing the full file path so the user knows what's loaded
+            var fileName = data.filepath;
             
             // Update the unified upload container
             if (window.TagManager) {
@@ -8336,6 +8336,19 @@
           }
         } catch (e) {}
       }
+      
+      // Also sync file path from hidden input if present
+      (function syncFilePathFromHidden() {
+        try {
+          var hiddenPathEl = document.getElementById('current-filepath');
+          var fileInfoText = document.getElementById('fileInfoText');
+          if (hiddenPathEl && hiddenPathEl.value && fileInfoText) {
+            fileInfoText.textContent = hiddenPathEl.value;
+          }
+        } catch (e) {
+          console.warn('Could not sync file path from hidden input:', e);
+        }
+      })();
     });
 
     // CRITICAL FIX: Disabled fallback morphing background - lava background placeholder handles it now
