@@ -1259,12 +1259,33 @@ def update_processing_status(filename, status):
         logging.info(f"Updated processing status for {filename}: {status}")
         logging.debug(f"Current processing statuses: {dict(processing_status)}")
 
+# Global processor cache - keyed by session ID
+_processor_cache = {}
+
 def get_excel_processor():
     """Return a fresh ExcelProcessor for the current store/session.
 
     Avoids sharing processors across requests while keeping callers intact.
     """
     from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
+    from flask import has_request_context, session
+
+    # PERFORMANCE: Reuse processor from cache if available
+    if has_request_context():
+        # Use session ID + file path as cache key
+        session_id = session.get('session_id') or id(session)
+        file_path = session.get('file_path')
+        cache_key = f"{session_id}_{file_path}"
+        
+        if cache_key in _processor_cache:
+            cached_processor = _processor_cache[cache_key]
+            # Verify cached processor still has data
+            if cached_processor.df is not None and not cached_processor.df.empty:
+                logging.info(f"⚡ PERFORMANCE: Reusing cached processor ({len(cached_processor.df)} rows)")
+                return cached_processor
+            else:
+                # Cache invalid, remove it
+                del _processor_cache[cache_key]
 
     # Resolve store context
     store_name = None
@@ -1283,7 +1304,6 @@ def get_excel_processor():
             pass
 
     # PERFORMANCE FIX: Check if caller wants to skip file loading (for tag-based generation)
-    from flask import has_request_context, session
     skip_file_load = False
     if has_request_context():
         skip_file_load = session.get('_skip_file_load_for_generation', False)
@@ -1311,6 +1331,21 @@ def get_excel_processor():
                     processor._last_loaded_file = default_file
         except Exception:
             pass
+
+    # Cache processor for reuse (keyed by session + file)
+    if has_request_context():
+        session_id = session.get('session_id') or id(session)
+        file_path = session.get('file_path')
+        cache_key = f"{session_id}_{file_path}"
+        _processor_cache[cache_key] = processor
+        logging.info(f"⚡ PERFORMANCE: Cached processor for session {session_id}")
+        
+        # Clean old cache entries (keep only last 10)
+        if len(_processor_cache) > 10:
+            # Remove oldest entries
+            keys_to_remove = list(_processor_cache.keys())[:-10]
+            for key in keys_to_remove:
+                del _processor_cache[key]
 
     return processor
 
@@ -7381,7 +7416,8 @@ def generate_labels():
         # CRITICAL PERFORMANCE FIX: Set bypass flag BEFORE get_excel_processor to skip file loading
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
             logging.info(f"⚡ PERFORMANCE: {len(selected_tags_from_request)} tags in request - setting bypass flag")
-            session['_skip_file_load_for_generation'] = True
+            # DON'T SET BYPASS FLAG - we need the file data for filtering
+            # The processor will check if file is already loaded and skip reload
         else:
             session['_skip_file_load_for_generation'] = False
         
@@ -7399,44 +7435,11 @@ def generate_labels():
         # TRACE: Check store after getting excel_processor
         logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
-        # CRITICAL PERFORMANCE FIX: If tags provided, set them directly
-        if selected_tags_from_request and len(selected_tags_from_request) > 0:
-            logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly without file I/O")
-            import pandas as pd
-            import re
-            
-            # Clean markers from tag data before loading
-            cleaned_tags = []
-            for tag in selected_tags_from_request:
-                cleaned_tag = tag.copy()
-                # Remove all START/END markers from fields
-                for key, value in cleaned_tag.items():
-                    if isinstance(value, str):
-                        # Remove START/END markers - match them without requiring spaces
-                        value = re.sub(r'DESC_START', '', value)
-                        value = re.sub(r'DESC_END', '', value)
-                        value = re.sub(r'PRICE_START', '', value)
-                        value = re.sub(r'PRICE_END', '', value)
-                        value = re.sub(r'LINEAGE_START', '', value)
-                        value = re.sub(r'LINEAGE_END', '', value)
-                        value = re.sub(r'RATIO_START', '', value)
-                        value = re.sub(r'RATIO_END', '', value)
-                        value = re.sub(r'WEIGHTUNITS_START', '', value)
-                        value = re.sub(r'WEIGHTUNITS_END', '', value)
-                        value = re.sub(r'INCL_START', '', value)
-                        value = re.sub(r'INCL_END', '', value)
-                        cleaned_tag[key] = value.strip()
-                cleaned_tags.append(cleaned_tag)
-            
-            excel_processor.df = pd.DataFrame(cleaned_tags)
-            excel_processor._last_loaded_file = file_path
-            logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time, markers cleaned)")
-            needs_file_load = False
-        else:
-            logging.info("📂 No tags in request - using normal file loading")
-            # TRACE: Check store before file loading
-            logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
-            needs_file_load = True
+        # TRACE: Check store before file loading
+        logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
+        
+        # Determine if file loading is needed
+        needs_file_load = True
         
         # PERFORMANCE FIX: Check if processor already has the file loaded before reloading
         # This prevents the 24-second file read delay when the file is already loaded
@@ -9453,6 +9456,17 @@ def process_database_product_for_api(db_product):
     return processed_product
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
+    
+    def clean_markers_from_tags(tags):
+        """Remove all START/END markers from tag fields"""
+        import re
+        for tag in tags:
+            for key, value in list(tag.items()):
+                if isinstance(value, str):
+                    value = re.sub(r'DESC_START|DESC_END|PRICE_START|PRICE_END|LINEAGE_START|LINEAGE_END|RATIO_START|RATIO_END|WEIGHTUNITS_START|WEIGHTUNITS_END|INCL_START|INCL_END', '', value)
+                    tag[key] = value.strip()
+        return tags
+    
     store_name = None
     cache_store_name = 'global'
     try:
@@ -9940,8 +9954,12 @@ def get_available_tags():
                             tag['lineage'] = excel_lineage_clean.lower()
 
                 safe_simple_tags = make_json_safe(simple_tags)
+                
+                # CRITICAL: Clean all markers before returning
+                safe_simple_tags = clean_markers_from_tags(safe_simple_tags)
+                
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags")
+                logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags (markers cleaned)")
 
                 # CRITICAL PERFORMANCE FIX: ALWAYS cache the processed tags to avoid reloading Excel (10+ seconds) on every request
                 # This is the main fix for the 5-minute tag loading timeout in production
@@ -11499,24 +11517,7 @@ def get_available_tags():
                     logging.info(f"✅ FINAL CHECK: Set database lineage on {final_lineage_check_count} tags that were missing it")
     
         # CRITICAL: Clean all markers from tags before returning to frontend
-        import re
-        for tag in all_tags:
-            for key, value in list(tag.items()):
-                if isinstance(value, str):
-                    # Remove all START/END markers
-                    value = re.sub(r'DESC_START', '', value)
-                    value = re.sub(r'DESC_END', '', value)
-                    value = re.sub(r'PRICE_START', '', value)
-                    value = re.sub(r'PRICE_END', '', value)
-                    value = re.sub(r'LINEAGE_START', '', value)
-                    value = re.sub(r'LINEAGE_END', '', value)
-                    value = re.sub(r'RATIO_START', '', value)
-                    value = re.sub(r'RATIO_END', '', value)
-                    value = re.sub(r'WEIGHTUNITS_START', '', value)
-                    value = re.sub(r'WEIGHTUNITS_END', '', value)
-                    value = re.sub(r'INCL_START', '', value)
-                    value = re.sub(r'INCL_END', '', value)
-                    tag[key] = value.strip()
+        all_tags = clean_markers_from_tags(all_tags)
         logging.info(f"🧹 Cleaned markers from {len(all_tags)} tags before returning to frontend")
     
         safe_all_tags = make_json_safe(all_tags)
