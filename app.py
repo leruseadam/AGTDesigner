@@ -9339,6 +9339,19 @@ def get_available_tags():
     store_name = None
     cache_store_name = 'global'
     try:
+        # PERFORMANCE: PythonAnywhere fast path - try cache first
+        if IS_PYTHONANYWHERE:
+            cache_key = get_session_cache_key('available_tags')
+            cached_tags = cache.get(cache_key)
+            if cached_tags and isinstance(cached_tags, list) and len(cached_tags) > 0:
+                logging.info(f"⚡ PYTHONANYWHERE FAST PATH: Returning {len(cached_tags)} cached tags")
+                safe_cached_tags = make_json_safe(cached_tags)
+                return jsonify({
+                    'tags': safe_cached_tags,
+                    'total_count': len(safe_cached_tags),
+                    'source': 'pythonanywhere-cache'
+                })
+        
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')

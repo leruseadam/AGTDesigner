@@ -9929,7 +9929,9 @@ const TagManager = {
             // We disabled the background lineage refresh (was causing 18s page loads)
             // So we MUST get lineage on initial load, otherwise large batches missing lineage
             // Small performance trade-off, but lineage is essential for labels
-            const fastLoadParam = '&fast_load=0';
+            // PERFORMANCE: On web/PythonAnywhere, use fast_load=1 for instant response
+            const isWebVersion = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+            const fastLoadParam = isWebVersion ? '&fast_load=1' : '&fast_load=0';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries

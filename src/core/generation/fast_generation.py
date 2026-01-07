@@ -7,12 +7,21 @@ import logging
 import time
 import hashlib
 import json
+import os
 from io import BytesIO
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
 from docx import Document
 
 logger = logging.getLogger(__name__)
+
+# PERFORMANCE: Reduce logging on PythonAnywhere
+IS_PYTHONANYWHERE = (
+    'pythonanywhere.com' in os.environ.get('HTTP_HOST', '') or
+    os.environ.get('PYTHONANYWHERE_SITE') == 'True'
+)
+if IS_PYTHONANYWHERE:
+    logger.setLevel(logging.WARNING)
 
 # Try to import cachetools, fall back to simple dict if not available
 try:
