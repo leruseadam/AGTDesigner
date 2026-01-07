@@ -7592,25 +7592,35 @@ def generate_labels():
                     from src.core.generation.fast_generation import BatchedDatabaseQuerier
                     batched_querier = BatchedDatabaseQuerier(product_db)
                     
-                    # Use fuzzy matching for JSON matched sessions
+                    # PERFORMANCE OPTIMIZATION: Try exact matching first (much faster), then fuzzy only for unmatched
                     if is_json_matched_session:
                         # PERFORMANCE: Only log for small batches
                         if len(normalized_tags) <= 20:
-                            logging.debug(f"🔍 JSON SESSION: Using fuzzy matching for better JSON abbreviation handling")
-                        # For fuzzy matching, still use direct query but with batching if possible
-                        if len(normalized_tags) > 50:  # PERFORMANCE: Increased batch threshold
-                            # Split into larger batches for fuzzy matching
-                            db_records = []
-                            batch_size = 100  # PERFORMANCE: Increased batch size
-                            for i in range(0, len(normalized_tags), batch_size):
-                                batch = normalized_tags[i:i + batch_size]
-                                batch_records = product_db.get_products_by_names_with_fuzzy(batch)
-                                db_records.extend(batch_records)
-                        else:
-                            db_records = product_db.get_products_by_names_with_fuzzy(normalized_tags)
+                            logging.debug(f"🔍 JSON SESSION: Using optimized matching (exact first, then fuzzy)")
+                        # PERFORMANCE: First try exact matching (fast)
+                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=200)
+                        matched_names = {r.get('Product Name*', r.get('ProductName', '')) for r in db_records if r.get('id')}
+                        unmatched_tags = [tag for tag in normalized_tags if tag not in matched_names]
+                        
+                        # PERFORMANCE: Only do fuzzy matching for unmatched items (much smaller set)
+                        if unmatched_tags and len(unmatched_tags) <= 100:  # Limit fuzzy matching to prevent slowdown
+                            if len(unmatched_tags) > 50:
+                                # Batch fuzzy matching
+                                fuzzy_records = []
+                                batch_size = 50
+                                for i in range(0, len(unmatched_tags), batch_size):
+                                    batch = unmatched_tags[i:i + batch_size]
+                                    batch_fuzzy = product_db.get_products_by_names_with_fuzzy(batch)
+                                    fuzzy_records.extend(batch_fuzzy)
+                                db_records.extend(fuzzy_records)
+                            else:
+                                fuzzy_records = product_db.get_products_by_names_with_fuzzy(unmatched_tags)
+                                db_records.extend(fuzzy_records)
+                        elif len(unmatched_tags) > 100:
+                            logging.warning(f"⚠️ PERFORMANCE: Skipping fuzzy matching for {len(unmatched_tags)} unmatched tags (too many, would be slow)")
                     else:
                         # PERFORMANCE: Use larger batch size for better performance
-                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=100)
+                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=200)
                     
                     # PERFORMANCE: Reduced logging - only log summary
                     valid_count = sum(1 for r in db_records if r.get('id') is not None)

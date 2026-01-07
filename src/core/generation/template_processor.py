@@ -1305,13 +1305,15 @@ class TemplateProcessor:
             else:
                 self.logger.debug(f"Processing chunk with {len(chunk)} records")
             
-            # OPTIMIZATION: Pre-load all brand, vendor, lineage, and strain data in batch to avoid N+1 queries
+            # OPTIMIZATION: Pre-load all brand, vendor, lineage, strain, and DOH data in batch to avoid N+1 queries
+            # PERFORMANCE FIX: Added DOH to batch query to eliminate 5-10 minute delays
             # This reduces 200+ queries for 100 products to just 3-4 queries total
             product_brand_cache = {}
             product_vendor_cache = {}
             product_lineage_cache = {}
             strain_info_cache = {}
             joint_ratio_cache = {}
+            product_doh_cache = {}  # PERFORMANCE FIX: Cache DOH values to eliminate N+1 queries
             try:
                 from src.core.data.product_database import get_product_database
                 product_db = get_product_database()
@@ -1334,6 +1336,7 @@ class TemplateProcessor:
                             
                             # OPTIMIZATION: Combine all product queries into a single query for better performance
                             # CRITICAL: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
+                            # PERFORMANCE FIX: Include DOH in batch query to eliminate N+1 queries (was causing 5-10 minute delays)
                             combined_query = f'''
                                 SELECT 
                                     p."Product Name*",
@@ -1345,14 +1348,19 @@ class TemplateProcessor:
                                         ELSE NULL
                                     END as vendor,
                                     COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                                    p.JointRatio
+                                    p.JointRatio,
+                                    p."DOH"
                                 FROM products p
                                 LEFT JOIN strains s ON p.strain_id = s.id
                                 WHERE p."Product Name*" IN ({placeholders})
                             '''
                             cursor.execute(combined_query, product_names)
+                            
+                            # PERFORMANCE FIX: Add DOH cache to store pre-loaded DOH values
+                            product_doh_cache = {}
+                            
                             for row_result in cursor.fetchall():
-                                pname, brand, vendor, lineage, joint_ratio = row_result
+                                pname, brand, vendor, lineage, joint_ratio, doh = row_result
                                 
                                 # Cache brand
                                 if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
@@ -1369,6 +1377,10 @@ class TemplateProcessor:
                                 # Cache JointRatio
                                 if joint_ratio and str(joint_ratio).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     joint_ratio_cache[pname] = str(joint_ratio).strip()
+                                
+                                # PERFORMANCE FIX: Cache DOH to eliminate N+1 queries
+                                if doh and str(doh).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                    product_doh_cache[pname] = str(doh).strip()
                             
                             # Batch load strain info
                             if strain_names:
@@ -1418,9 +1430,9 @@ class TemplateProcessor:
                 if self.template_type == 'inventory':
                     label_context = self._build_inventory_context(record)
                 else:
-                    # Pass all caches to avoid N+1 queries
+                    # Pass all caches to avoid N+1 queries (including DOH cache for 5-10 minute speedup)
                     label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
-                                                               product_lineage_cache, strain_info_cache, joint_ratio_cache)
+                                                               product_lineage_cache, strain_info_cache, joint_ratio_cache, product_doh_cache)
                 context[f'Label{i+1}'] = label_context
                 # Debug logging to check field values and order (only for first label to reduce overhead)
                 if i == 0:
@@ -1621,13 +1633,14 @@ class TemplateProcessor:
         }
     
     def _build_label_context(self, record, doc, product_brand_cache=None, product_vendor_cache=None, 
-                             product_lineage_cache=None, strain_info_cache=None, joint_ratio_cache=None):
+                             product_lineage_cache=None, strain_info_cache=None, joint_ratio_cache=None, product_doh_cache=None):
         # Initialize caches to empty dicts if None
         product_brand_cache = product_brand_cache or {}
         product_vendor_cache = product_vendor_cache or {}
         product_lineage_cache = product_lineage_cache or {}
         strain_info_cache = strain_info_cache or {}
         joint_ratio_cache = joint_ratio_cache or {}
+        product_doh_cache = product_doh_cache or {}  # PERFORMANCE FIX: Add DOH cache
         """Ultra-optimized label context building for maximum performance."""
         # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
@@ -2175,28 +2188,14 @@ class TemplateProcessor:
         doh_value = label_context.get('DOH', '') or record.get('DOH', '')
         product_name = label_context.get('ProductName', 'Unknown')
         
-        # CRITICAL FIX: If DOH is missing from record, query database directly
+        # PERFORMANCE FIX: Use pre-loaded DOH cache instead of individual database queries
+        # This eliminates the N+1 query problem that was causing 5-10 minute delays
         if not doh_value or str(doh_value).strip() in ['', 'None', 'nan']:
-            try:
-                from app import get_product_database, get_current_store_name
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    conn = product_db._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        SELECT "DOH" FROM products
-                        WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                        ORDER BY id DESC
-                        LIMIT 1
-                    ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
-                    result = cursor.fetchone()
-                    if result and result[0] and str(result[0]).strip() not in ['', 'None', 'nan']:
-                        doh_value = str(result[0]).strip()
-                        label_context['DOH'] = doh_value
-                        self.logger.info(f"🔍 DOH RETRIEVED FROM DB: '{product_name}' - DOH: '{doh_value}'")
-            except Exception as db_err:
-                self.logger.warning(f"Could not retrieve DOH from database: {db_err}")
+            # Check cache first (pre-loaded in batch query)
+            if product_doh_cache and product_name in product_doh_cache:
+                doh_value = product_doh_cache[product_name]
+                label_context['DOH'] = doh_value
+                self.logger.debug(f"⚡ DOH CACHE HIT: Using cached DOH '{doh_value}' for '{product_name}'")
 
         # CRITICAL DEBUG: Log DOH field processing with all possible sources
         self.logger.info(f"🔍 DOH DOCX GENERATION: Product '{product_name}' - DOH field: '{doh_value}' from record")
