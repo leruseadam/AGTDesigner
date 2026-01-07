@@ -13307,19 +13307,21 @@ def _get_filter_options_from_database(store_name=None):
         
         # CRITICAL FIX: Fetch lineage directly from database using COALESCE logic
         # This ensures we get the same values as get_product_lineage (sovereign_lineage > canonical_lineage > products.Lineage)
+        # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
         try:
             conn = product_db._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT DISTINCT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
                 FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL
-                  AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
+                LEFT JOIN strains s1 ON p.strain_id = s1.id
+                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") IS NOT NULL
+                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") != ''
             ''')
             db_lineages = [str(row[0]).strip() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
             lineages = set(db_lineages)
-            logging.info(f"✅ Loaded {len(lineages)} unique lineage values from database using COALESCE logic")
+            logging.info(f"✅ Loaded {len(lineages)} unique lineage values from database using COALESCE logic (with dual strain join)")
         except Exception as lineage_err:
             logging.warning(f"⚠️ Error fetching lineages from database, using product data: {lineage_err}")
             lineages = set()

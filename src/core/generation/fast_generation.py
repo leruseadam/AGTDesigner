@@ -110,6 +110,11 @@ class FastGenerationEngine:
             logger.error("❌ FastGenerationEngine: process_records returned None (no document generated)")
             raise RuntimeError("Failed to generate document: no valid records or template error.")
 
+        # CRITICAL: Remove markers before caching
+        logger.warning("🧹 FastGenerationEngine: Calling marker cleanup before caching")
+        self.template_processor._final_marker_cleanup(final_doc)
+        self.template_processor._nuclear_marker_cleanup(final_doc)
+
         # Cache the result
         buffer = BytesIO()
         final_doc.save(buffer)
