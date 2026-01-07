@@ -37,15 +37,21 @@ os.environ['CACHE_SIZE_LIMIT'] = '100'  # Increase cache size for better hit rat
 os.environ['BATCH_SIZE_LIMIT'] = '500'  # Larger batches for faster processing
 
 # Configure logging to prevent verbose output and "Message too long" errors
+# CRITICAL: Set to CRITICAL level to prevent recursion errors from excessive logging
 logging.basicConfig(
-    level=logging.ERROR,
+    level=logging.CRITICAL,
     format='%(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
 
-# Suppress verbose logging from libraries
-for logger_name in ['werkzeug', 'urllib3', 'requests', 'pandas', 'openpyxl', 'xlrd']:
-    logging.getLogger(logger_name).setLevel(logging.ERROR)
+# Suppress verbose logging from all loggers to prevent recursion errors
+for logger_name in ['werkzeug', 'urllib3', 'requests', 'pandas', 'openpyxl', 'xlrd', 
+                    'src.core.data.excel_processor', 'src.core.data.product_database',
+                    'src.core.generation.template_processor', 'src.core.generation.fast_generation']:
+    logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+
+# Set root logger to CRITICAL to catch everything
+logging.getLogger().setLevel(logging.CRITICAL)
 
 try:
     # Import the Flask application
