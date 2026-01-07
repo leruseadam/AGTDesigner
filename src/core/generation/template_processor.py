@@ -4159,6 +4159,7 @@ class TemplateProcessor:
         This method runs after all other processing to catch any remaining markers.
         """
         self.logger.info("🧹 STARTING MARKER CLEANUP - Processing document...")
+        markers_found = []
         try:
             # Enhanced patterns to catch all marker variations
             marker_patterns = [
@@ -4200,6 +4201,26 @@ class TemplateProcessor:
                 """Clean text by removing all marker patterns while preserving lineage content."""
                 original_text = text
                 cleaned = text
+                
+                # CRITICAL: Remove exact literal marker strings FIRST before regex patterns
+                exact_markers = [
+                    'DESC_START', 'DESC_END',
+                    'PRICE_START', 'PRICE_END', 'RICE_END',  # Include RICE_END in case truncated
+                    'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
+                    'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
+                    'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END',
+                    'LINEAGE_START', 'LINEAGE_END',
+                    'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END',
+                    'THC_CBD_START', 'THC_CBD_END',
+                    'RATIO_START', 'RATIO_END',
+                    'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
+                ]
+                
+                for marker in exact_markers:
+                    # Case-insensitive replacement
+                    cleaned = cleaned.replace(marker, '')
+                    cleaned = cleaned.replace(marker.lower(), '')
+                    cleaned = cleaned.replace(marker.capitalize(), '')
                 
                 # CRITICAL FIX: Handle lineage markers specially to preserve content
                 # Extract lineage content before removing markers
@@ -4299,9 +4320,16 @@ class TemplateProcessor:
                         for paragraph in cell.paragraphs:
                             # Get full paragraph text
                             original_para_text = paragraph.text
+                            
+                            # Log markers found for debugging
+                            if any(marker in original_para_text.upper() for marker in ['_START', '_END', 'DESC_', 'PRICE_']):
+                                markers_found.append(original_para_text)
+                                self.logger.warning(f"🔍 MARKER FOUND IN TABLE: '{original_para_text}'")
+                            
                             cleaned_para_text = clean_text(original_para_text)
 
                             if cleaned_para_text != original_para_text:
+                                self.logger.info(f"🧹 CLEANED: '{original_para_text}' -> '{cleaned_para_text}'")
                                 # Clear all runs and set cleaned text in first run
                                 for run in paragraph.runs:
                                     run.text = ''
@@ -4331,6 +4359,10 @@ class TemplateProcessor:
             self._final_lineage_cleanup(doc)
 
             # Enhanced final marker cleanup completed
+            if markers_found:
+                self.logger.warning(f"⚠️ MARKERS FOUND: {len(markers_found)} markers detected and cleaned")
+                for marker in markers_found[:10]:  # Log first 10
+                    self.logger.warning(f"  - '{marker}'")
             self.logger.info("✅ MARKER CLEANUP COMPLETE - All markers processed")
 
         except Exception as e:
