@@ -2801,29 +2801,15 @@ class TemplateProcessor:
                         lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
                     lineage_for_color = str(lineage_for_color_source).strip().upper()
                     
-                    if not lineage_for_color:
-                        # Fall back to CBD lineage when we have CBD signal, otherwise treat as MIXED (blue)
-                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
-                    
-                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
-                    
-                    # CRITICAL FIX: For non-classic types, Lineage field shows brand text (not lineage value)
-                    # The lineage hint token is only used for color coding and will be removed during post-processing
-                    lineage_content = (
-                        f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
-                    )
-                    
-                    label_context['Lineage'] = lineage_content
+                    # CRITICAL FIX: Use same logic as horizontal template - just set brand with markers, no LINEAGE_HINT token
+                    # Colors will be determined by apply_lineage_colors based on content (same as horizontal template)
+                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = (
                         f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     )
-                    self.logger.debug(
-                        f"DOUBLE TEMPLATE LINEAGE COLOR: Brand '{final_brand_text}' -> lineage '{lineage_for_color}' "
-                        f"(product_type='{product_type}')"
-                    )
                     
-                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to brand '{final_brand_text}' for non-classic type in double template")
+                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to brand '{final_brand_text}' for non-classic type (same as horizontal template)")
                 else:
                     # For other templates (horizontal, etc.), use marker-based formatting
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption

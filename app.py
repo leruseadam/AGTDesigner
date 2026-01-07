@@ -8538,12 +8538,16 @@ def generate_labels():
 
         # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
         # PERFORMANCE OPTIMIZATION: Batch query all lineages at once instead of N+1 queries
+        # PYTHONANYWHERE FIX: Skip database enrichment on PythonAnywhere for speed
         _enrichment_start = time.time()
-        try:
-            store_name = session.get('current_store')
-            if store_name:
-                product_db = get_product_database(store_name)
-                if product_db:
+        if IS_PYTHONANYWHERE:
+            logging.info("⚡ PYTHONANYWHERE: Skipping database enrichment for speed")
+        else:
+            try:
+                store_name = session.get('current_store')
+                if store_name:
+                    product_db = get_product_database(store_name)
+                    if product_db:
                     # Collect all product names and strains that need enrichment
                     products_to_enrich = []
                     strains_to_enrich = set()
@@ -8641,8 +8645,8 @@ def generate_labels():
                         
                         if enriched_count > 0:
                             logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
-        except Exception as enrich_err:
-            logging.error(f"Lineage enrichment failed: {enrich_err}")
+            except Exception as enrich_err:
+                logging.error(f"Lineage enrichment failed: {enrich_err}")
 
         _enrichment_time = time.time() - _enrichment_start
         # PERFORMANCE: Only log if enrichment is slow (threshold increased to reduce noise)
