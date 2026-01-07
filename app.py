@@ -2326,28 +2326,26 @@ def get_session_excel_processor():
                     logging.error(traceback.format_exc())
 
             if session_file_path and os.path.exists(session_file_path):
-                # CRITICAL PERFORMANCE: Skip file load if tags already in request
-                skip_load = session.get('_skip_file_load_for_generation', False)
-                if skip_load:
-                    logging.info(f"⚡ SKIPPING file load - tags provided in request")
-                    # Just mark as loaded without actually loading
-                    g.excel_processor._last_loaded_file = session_file_path
+                # CRITICAL PERFORMANCE: Set flag to skip processing if tags in request
+                skip_processing = session.get('_skip_file_load_for_generation', False)
+                if skip_processing:
+                    logging.info(f"⚡ Setting flag to skip processing pipeline (will still load file for full data)")
                     g.excel_processor._skip_processing_pipeline = True
-                else:
-                    # CRITICAL: Load the session file into the new processor instance
-                    logging.info(f"📂 Loading session file: {session_file_path}")
-                    try:
-                        success = g.excel_processor.load_file(session_file_path)
-                        if success and g.excel_processor.df is not None and not g.excel_processor.df.empty:
-                            row_count = len(g.excel_processor.df)
-                            logging.info(f"✅ Loaded session file: {session_file_path} ({row_count} rows)")
-                            g.excel_processor._last_loaded_file = session_file_path
-                        else:
-                            logging.warning(f"⚠️ Failed to load session file or file is empty: {session_file_path}")
-                    except Exception as load_err:
-                        logging.error(f"❌ Error loading session file: {load_err}")
-                        import traceback
-                        logging.error(traceback.format_exc())
+                
+                # CRITICAL: Load the session file into the new processor instance
+                logging.info(f"📂 Loading session file: {session_file_path}")
+                try:
+                    success = g.excel_processor.load_file(session_file_path)
+                    if success and g.excel_processor.df is not None and not g.excel_processor.df.empty:
+                        row_count = len(g.excel_processor.df)
+                        logging.info(f"✅ Loaded session file: {session_file_path} ({row_count} rows)")
+                        g.excel_processor._last_loaded_file = session_file_path
+                    else:
+                        logging.warning(f"⚠️ Failed to load session file or file is empty: {session_file_path}")
+                except Exception as load_err:
+                    logging.error(f"❌ Error loading session file: {load_err}")
+                    import traceback
+                    logging.error(traceback.format_exc())
             elif session_file_path:
                 logging.warning(f"Session uploaded file does not exist: {session_file_path}")
                 # CRITICAL FIX: Don't clear session data immediately - try persistent file first
@@ -7400,13 +7398,13 @@ def generate_labels():
         # TRACE: Check store before file loading
         logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
         
-        # PERFORMANCE FIX: If selected_tags are provided in request, create DataFrame directly
+        # PERFORMANCE FIX: If selected_tags are provided, use them for generation
+        # Full DataFrame was already loaded (with processing skipped), now filter to selected tags
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
-            logging.info(f"⚡ PERFORMANCE: Creating DataFrame from {len(selected_tags_from_request)} tags in request")
-            # Create DataFrame directly from provided tags
+            logging.info(f"⚡ PERFORMANCE: Using {len(selected_tags_from_request)} selected tags for generation (full data already loaded with processing skipped)")
+            # Replace DataFrame with just the selected tags for generation
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
-            excel_processor._last_loaded_file = file_path  # Mark as loaded
             needs_file_load = False
         else:
             # No tags provided - need to load file
