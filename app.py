@@ -9604,8 +9604,44 @@ def get_available_tags():
 
             if needs_load or simple_processor is None:
                 simple_processor = ExcelProcessor(store_name=store_name)
-                simple_processor.load_file(session_file_path)
+                # PERFORMANCE: Use fast loading methods when fast_load is enabled
+                if fast_load:
+                    # Try fast loading methods first
+                    load_success = False
+                    if hasattr(simple_processor, 'pythonanywhere_fast_load'):
+                        try:
+                            load_success = simple_processor.pythonanywhere_fast_load(session_file_path)
+                            if load_success:
+                                logging.info(f"⚡ FAST: Used pythonanywhere_fast_load for {session_file_path}")
+                        except Exception as e:
+                            logging.warning(f"pythonanywhere_fast_load failed: {e}")
+                    
+                    if not load_success and hasattr(simple_processor, 'ultra_fast_load'):
+                        try:
+                            load_success = simple_processor.ultra_fast_load(session_file_path)
+                            if load_success:
+                                logging.info(f"⚡ FAST: Used ultra_fast_load for {session_file_path}")
+                        except Exception as e:
+                            logging.warning(f"ultra_fast_load failed: {e}")
+                    
+                    if not load_success and hasattr(simple_processor, 'fast_load_file'):
+                        try:
+                            load_success = simple_processor.fast_load_file(session_file_path)
+                            if load_success:
+                                logging.info(f"⚡ FAST: Used fast_load_file for {session_file_path}")
+                        except Exception as e:
+                            logging.warning(f"fast_load_file failed: {e}")
+                    
+                    # Fallback to regular load if fast methods fail
+                    if not load_success:
+                        logging.info(f"⚠️ Fast load methods failed, using regular load_file")
+                        simple_processor.load_file(session_file_path)
+                else:
+                    # Regular load when not using fast_load
+                    simple_processor.load_file(session_file_path)
+                
                 g.excel_processor = simple_processor
+                simple_processor._last_loaded_file = session_file_path
                 logging.info(f"📂 Loaded Excel file: {session_file_path}")
 
             if simple_processor.df is not None and not simple_processor.df.empty:
