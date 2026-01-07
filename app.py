@@ -8458,13 +8458,19 @@ def generate_labels():
         # Log the number of records passed to the template processor
         logging.info(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
 
-        # For horizontal/vertical/double templates, ensure all records are processed (no chunking)
+        # For horizontal/vertical/double templates, NEVER force "all-at-once" processing on PythonAnywhere.
+        # That is a major performance killer on shared CPU/I/O and can lead to very long generation times.
         if template_type in ['horizontal', 'vertical', 'double']:
-            if hasattr(processor, 'CHUNK_SIZE_LIMIT'):
-                processor.CHUNK_SIZE_LIMIT = max(len(records), 1000)  # Remove chunking limit
-            if hasattr(processor, 'chunk_size'):
-                processor.chunk_size = max(len(records), 1000)
-            logging.info(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
+            if IS_PYTHONANYWHERE:
+                # Keep TemplateProcessor's own chunking strategy (it already chooses smaller chunks on PA)
+                logging.info(f"⚡ PYTHONANYWHERE: Keeping chunking enabled for template '{template_type}'")
+            else:
+                # Local: allow all-at-once for highest fidelity if desired
+                if hasattr(processor, 'CHUNK_SIZE_LIMIT'):
+                    processor.CHUNK_SIZE_LIMIT = max(len(records), 1000)  # Remove chunking limit
+                if hasattr(processor, 'chunk_size'):
+                    processor.chunk_size = max(len(records), 1000)
+                logging.info(f"🔍 LABEL RENDER: Disabled chunking for template '{template_type}'")
 
         # Apply DOH session overrides just before generation to guarantee latest UI choice wins
         try:
@@ -8568,58 +8574,58 @@ def generate_labels():
                             # Batch query product lineages
                             product_lineage_map = {}
                             if products_to_enrich:
-                            try:
-                                conn = product_db._get_connection()
-                                cursor = conn.cursor()
-                                # Use batch query with placeholders and case-insensitive matching
-                                placeholders = ','.join(['?'] * len(products_to_enrich))
-                                # Normalize product names for matching (lowercase, trimmed)
-                                normalized_products = [str(p).strip().lower() for p in products_to_enrich]
-                                # Create reverse lookup: normalized -> original
-                                normalized_to_original = {str(p).strip().lower(): p for p in products_to_enrich}
-                                
-                                batch_query = f'''
-                                    SELECT "Product Name*", 
-                                           COALESCE("canonical_lineage", "Lineage") as lineage
-                                    FROM products
-                                    WHERE LOWER(TRIM("Product Name*")) IN ({placeholders})
-                                    ORDER BY id DESC
-                                '''
-                                cursor.execute(batch_query, normalized_products)
-                                # Build a map with original product names as keys
-                                for row in cursor.fetchall():
-                                    pname, lineage = row
-                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
-                                        # Match back to original product name (case-preserved)
-                                        pname_normalized = str(pname).strip().lower()
-                                        if pname_normalized in normalized_to_original:
-                                            original_name = normalized_to_original[pname_normalized]
-                                            # Use canonical_lineage if available, otherwise fall back to Lineage
-                                            product_lineage_map[original_name] = str(lineage).strip().upper()
-                            except Exception as batch_err:
-                                logging.warning(f"Batch product lineage query failed: {batch_err}")
+                                try:
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
+                                    # Use batch query with placeholders and case-insensitive matching
+                                    placeholders = ','.join(['?'] * len(products_to_enrich))
+                                    # Normalize product names for matching (lowercase, trimmed)
+                                    normalized_products = [str(p).strip().lower() for p in products_to_enrich]
+                                    # Create reverse lookup: normalized -> original
+                                    normalized_to_original = {str(p).strip().lower(): p for p in products_to_enrich}
+                                    
+                                    batch_query = f'''
+                                        SELECT "Product Name*", 
+                                               COALESCE("canonical_lineage", "Lineage") as lineage
+                                        FROM products
+                                        WHERE LOWER(TRIM("Product Name*")) IN ({placeholders})
+                                        ORDER BY id DESC
+                                    '''
+                                    cursor.execute(batch_query, normalized_products)
+                                    # Build a map with original product names as keys
+                                    for row in cursor.fetchall():
+                                        pname, lineage = row
+                                        if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                                            # Match back to original product name (case-preserved)
+                                            pname_normalized = str(pname).strip().lower()
+                                            if pname_normalized in normalized_to_original:
+                                                original_name = normalized_to_original[pname_normalized]
+                                                # Use canonical_lineage if available, otherwise fall back to Lineage
+                                                product_lineage_map[original_name] = str(lineage).strip().upper()
+                                except Exception as batch_err:
+                                    logging.warning(f"Batch product lineage query failed: {batch_err}")
                             
                             # Batch query strain lineages
                             strain_lineage_map = {}
                             if strains_to_enrich:
-                            try:
-                                conn = product_db._get_connection()
-                                cursor = conn.cursor()
-                                strain_list = list(strains_to_enrich)
-                                placeholders = ','.join(['?'] * len(strain_list))
-                                batch_query = f'''
-                                    SELECT "Strain Name", "display_lineage", "sovereign_lineage", "canonical_lineage"
-                                    FROM strains
-                                    WHERE "Strain Name" IN ({placeholders})
-                                '''
-                                cursor.execute(batch_query, strain_list)
-                                for row in cursor.fetchall():
-                                    strain_name = row[0]
-                                    lineage = row[1] or row[2] or row[3]
-                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
-                                        strain_lineage_map[strain_name] = str(lineage).strip().upper()
-                            except Exception as strain_err:
-                                logging.warning(f"Batch strain lineage query failed: {strain_err}")
+                                try:
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
+                                    strain_list = list(strains_to_enrich)
+                                    placeholders = ','.join(['?'] * len(strain_list))
+                                    batch_query = f'''
+                                        SELECT "Strain Name", "display_lineage", "sovereign_lineage", "canonical_lineage"
+                                        FROM strains
+                                        WHERE "Strain Name" IN ({placeholders})
+                                    '''
+                                    cursor.execute(batch_query, strain_list)
+                                    for row in cursor.fetchall():
+                                        strain_name = row[0]
+                                        lineage = row[1] or row[2] or row[3]
+                                        if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                                            strain_lineage_map[strain_name] = str(lineage).strip().upper()
+                                except Exception as strain_err:
+                                    logging.warning(f"Batch strain lineage query failed: {strain_err}")
                             
                             # Apply enriched lineage to records - ALWAYS overwrite with database lineage
                             # PERFORMANCE: Batch update all records at once, minimal logging
