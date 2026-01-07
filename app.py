@@ -11373,54 +11373,27 @@ def get_available_tags():
                         logging.info("🔍 Building complete database lineage lookup for Excel tag updates...")
                         conn = product_db._get_connection()
                         cur = conn.cursor()
-                
-                    # Query ALL products for lineage (not just the limited 2000)
-                    # CRITICAL: Query both Product Name* and normalized_name to match products correctly
-                    try:
-                        # Try with strain join first - get both product name and normalized name for matching
-                        lineage_query = '''
-                            SELECT 
-                                p."Product Name*" AS product_name,
-                                p.normalized_name AS normalized_name,
-                                COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
-                            FROM products p
-                            LEFT JOIN strains s ON p.strain_id = s.id
-                            WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL 
-                              AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
-                        '''
-                        cur.execute(lineage_query)
-                        rows = cur.fetchall()
-                        for row in rows:
-                            product_name = row[0]
-                            normalized_name = row[1] if len(row) > 1 else None
-                            lineage = row[2] if len(row) > 2 else row[1]  # Handle case where normalized_name is missing
-                            if product_name and lineage:
-                                lineage_clean = str(lineage).strip().upper()
-                                lineage_data = {
-                                    'currentLineage': lineage_clean,
-                                    'canonical_lineage': lineage_clean,
-                                    'Lineage': lineage_clean
-                                }
-                                # Store by both product name and normalized name for better matching
-                                db_lineage_lookup[product_name] = lineage_data
-                                if normalized_name:
-                                    db_lineage_lookup[normalized_name] = lineage_data
-                        logging.info(f"✅ Built lineage lookup with {len(set([k for k in db_lineage_lookup.keys() if not k or not isinstance(k, str) or not k.startswith('normalized:')]))} products from database (with normalized names)")
-                    except Exception as query_err:
-                        # Fallback: query without strain join
-                        logging.warning(f"Lineage query with strain join failed, using fallback: {query_err}")
+                    
+                        # Query ALL products for lineage (not just the limited 2000)
+                        # CRITICAL: Query both Product Name* and normalized_name to match products correctly
                         try:
-                            fallback_query = '''
-                                SELECT "Product Name*", normalized_name, "Lineage" 
-                                FROM products 
-                                WHERE "Lineage" IS NOT NULL AND "Lineage" != ''
+                            # Try with strain join first - get both product name and normalized name for matching
+                            lineage_query = '''
+                                SELECT 
+                                    p."Product Name*" AS product_name,
+                                    p.normalized_name AS normalized_name,
+                                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                                FROM products p
+                                LEFT JOIN strains s ON p.strain_id = s.id
+                                WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL 
+                                  AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
                             '''
-                            cur.execute(fallback_query)
+                            cur.execute(lineage_query)
                             rows = cur.fetchall()
                             for row in rows:
                                 product_name = row[0]
                                 normalized_name = row[1] if len(row) > 1 else None
-                                lineage = row[2] if len(row) > 2 else (row[1] if len(row) > 1 else None)
+                                lineage = row[2] if len(row) > 2 else row[1]  # Handle case where normalized_name is missing
                                 if product_name and lineage:
                                     lineage_clean = str(lineage).strip().upper()
                                     lineage_data = {
@@ -11432,22 +11405,49 @@ def get_available_tags():
                                     db_lineage_lookup[product_name] = lineage_data
                                     if normalized_name:
                                         db_lineage_lookup[normalized_name] = lineage_data
-                            logging.info(f"✅ Built lineage lookup (fallback) with {len(set([k for k in db_lineage_lookup.keys() if not k or not isinstance(k, str) or not k.startswith('normalized:')]))} products from database")
-                        except Exception as fallback_err:
-                            logging.error(f"Failed to build lineage lookup: {fallback_err}")
-            except Exception as lookup_err:
-                logging.warning(f"Could not build database lineage lookup: {lookup_err}")
-                # Fallback: use database_tags for lookup
-                for db_tag in database_tags:
-                    product_name = db_tag.get('Product Name*', '')
-                    if product_name:
-                        db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
-                        if db_lineage:
-                            db_lineage_lookup[product_name] = {
-                                'currentLineage': db_tag.get('currentLineage'),
-                                'canonical_lineage': db_tag.get('canonical_lineage'),
-                                'Lineage': str(db_lineage).strip().upper()
-                            }
+                            logging.info(f"✅ Built lineage lookup with {len(set([k for k in db_lineage_lookup.keys() if not k or not isinstance(k, str) or not k.startswith('normalized:')]))} products from database (with normalized names)")
+                        except Exception as query_err:
+                            # Fallback: query without strain join
+                            logging.warning(f"Lineage query with strain join failed, using fallback: {query_err}")
+                            try:
+                                fallback_query = '''
+                                    SELECT "Product Name*", normalized_name, "Lineage" 
+                                    FROM products 
+                                    WHERE "Lineage" IS NOT NULL AND "Lineage" != ''
+                                '''
+                                cur.execute(fallback_query)
+                                rows = cur.fetchall()
+                                for row in rows:
+                                    product_name = row[0]
+                                    normalized_name = row[1] if len(row) > 1 else None
+                                    lineage = row[2] if len(row) > 2 else (row[1] if len(row) > 1 else None)
+                                    if product_name and lineage:
+                                        lineage_clean = str(lineage).strip().upper()
+                                        lineage_data = {
+                                            'currentLineage': lineage_clean,
+                                            'canonical_lineage': lineage_clean,
+                                            'Lineage': lineage_clean
+                                        }
+                                        # Store by both product name and normalized name for better matching
+                                        db_lineage_lookup[product_name] = lineage_data
+                                        if normalized_name:
+                                            db_lineage_lookup[normalized_name] = lineage_data
+                                logging.info(f"✅ Built lineage lookup (fallback) with {len(set([k for k in db_lineage_lookup.keys() if not k or not isinstance(k, str) or not k.startswith('normalized:')]))} products from database")
+                            except Exception as fallback_err:
+                                logging.error(f"Failed to build lineage lookup: {fallback_err}")
+                except Exception as lookup_err:
+                    logging.warning(f"Could not build database lineage lookup: {lookup_err}")
+                    # Fallback: use database_tags for lookup
+                    for db_tag in database_tags:
+                        product_name = db_tag.get('Product Name*', '')
+                        if product_name:
+                            db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
+                            if db_lineage:
+                                db_lineage_lookup[product_name] = {
+                                    'currentLineage': db_tag.get('currentLineage'),
+                                    'canonical_lineage': db_tag.get('canonical_lineage'),
+                                    'Lineage': str(db_lineage).strip().upper()
+                                }
         
             # CRITICAL FIX: Update ALL Excel tags with database lineage if database product exists
             # Use fuzzy matching to find products even if names don't match exactly
