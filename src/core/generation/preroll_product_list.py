@@ -6,10 +6,9 @@ It creates a separate document listing all preroll items grouped by category.
 """
 
 import logging
-import os
 from typing import List, Dict, Any, Optional
 from docx import Document
-from docx.shared import Pt, Inches
+from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from flask import session
 from flask_caching import Cache
@@ -76,22 +75,16 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                 display_name = group_info.get('display_name', f'Group {group_id}')
                 
                 # Filter items by allowed brands if configured
-                # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
                 filtered_items = group_items
-                if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
+                if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
                     allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
-                    if allowed_brands_lower:  # Only filter if we have valid brands after normalization
-                        original_item_count = len(filtered_items)
-                        filtered_items = [
-                            item for item in group_items
-                            if str(item.get('brand', '')).strip().lower() in allowed_brands_lower
-                        ]
-                        if len(filtered_items) < original_item_count:
-                            logging.info(f"PREROLL LIST: Filtered {original_item_count} items to {len(filtered_items)} items for group '{display_name}' based on allowed brands")
-                    else:
-                        logging.info(f"PREROLL LIST: PREROLL_ALLOWED_BRANDS is set but contains no valid brands, skipping filter for group '{display_name}'")
-                else:
-                    logging.debug(f"PREROLL LIST: PREROLL_ALLOWED_BRANDS is empty or None, including all items for group '{display_name}'")
+                    original_item_count = len(filtered_items)
+                    filtered_items = [
+                        item for item in group_items
+                        if str(item.get('brand', '')).strip().lower() in allowed_brands_lower
+                    ]
+                    if len(filtered_items) < original_item_count:
+                        logging.info(f"PREROLL LIST: Filtered {original_item_count} items to {len(filtered_items)} items for group '{display_name}' based on allowed brands")
                 
                 # Group items by brand within this category
                 items_by_brand = {}
@@ -119,39 +112,14 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                     header_cells[2].text = 'Price'
                     header_cells[3].text = 'Weight'
                     header_cells[4].text = 'Lineage'
-
-                    # Add DOH logo to the last header cell instead of text
-                    doh_header_cell = header_cells[5]
-                    doh_logo_path = os.path.join(os.path.dirname(__file__), 'templates', 'DOH.png')
-
-                    # Clear any existing text in the DOH cell
-                    doh_header_cell.text = ''
-
-                    # Add the DOH logo image if it exists
-                    if os.path.exists(doh_logo_path):
-                        try:
-                            # Get the paragraph in the cell and add the image
-                            doh_paragraph = doh_header_cell.paragraphs[0]
-                            doh_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            run = doh_paragraph.add_run()
-                            run.add_picture(doh_logo_path, width=Inches(0.3))  # Tiny logo - 0.3 inches wide
-                            logging.info("PREROLL LIST: Added tiny DOH logo to header")
-                        except Exception as img_error:
-                            # Fallback to text if image fails
-                            doh_header_cell.text = 'DOH'
-                            logging.warning(f"PREROLL LIST: Failed to add DOH logo, using text: {img_error}")
-                    else:
-                        # Fallback to text if image doesn't exist
-                        doh_header_cell.text = 'DOH'
-                        logging.warning(f"PREROLL LIST: DOH logo not found at {doh_logo_path}, using text")
-
-                    # Make header row bold (except DOH cell which has image)
-                    for i, cell in enumerate(header_cells):
-                        if i != 5:  # Skip DOH cell since it has an image
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    run.font.bold = True
-                                    run.font.size = Pt(11)
+                    header_cells[5].text = 'DOH'
+                    
+                    # Make header row bold
+                    for cell in header_cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.bold = True
+                                run.font.size = Pt(11)
                     
                     # Add items to table
                     for item in brand_items:

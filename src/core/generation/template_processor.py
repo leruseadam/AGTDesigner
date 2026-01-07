@@ -69,19 +69,11 @@ from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_alre
 
 # Performance settings - check if running on PythonAnywhere
 import os
-IS_PYTHONANYWHERE = (
-    'pythonanywhere.com' in os.environ.get('HTTP_HOST', '') or
-    os.environ.get('PYTHONANYWHERE_SITE') == 'True' or
-    os.environ.get('PYTHONANYWHERE_DOMAIN') == 'pythonanywhere.com'
-)
+IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
 MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
-
-# PERFORMANCE: Reduce logging overhead on PythonAnywhere
-if IS_PYTHONANYWHERE:
-    logging.getLogger(__name__).setLevel(logging.WARNING)
 CHUNK_SIZE_LIMIT = 100              # PERFORMANCE: Increased from 50 to 100 for faster generation of large batches
 
 def get_font_scheme(template_type, base_size=12):
@@ -148,10 +140,6 @@ class TemplateProcessor:
         self.font_scheme = font_scheme
         self.logger = logging.getLogger(__name__)  # Initialize logger first
         
-        # PERFORMANCE: Reduce logging on PythonAnywhere for speed
-        if IS_PYTHONANYWHERE:
-            self.logger.setLevel(logging.ERROR)  # Only show errors, skip all debug/info/warning
-        
         # CRITICAL FIX: Adjust scale factor for double template 12-label expansion
         # When the double template expands to 12 labels, cells become smaller, so we need to adjust the scale factor
         if template_type == 'double':
@@ -197,12 +185,6 @@ class TemplateProcessor:
         # Performance tracking
         self.start_time = time.time()
         self.chunk_count = 0
-        
-        # Template expansion cache - avoid re-expanding templates with same size
-        # Use class-level cache for better performance across instances
-        if not hasattr(TemplateProcessor, '_class_template_cache'):
-            TemplateProcessor._class_template_cache = {}
-        self._template_expansion_cache = TemplateProcessor._class_template_cache
 
         # CRITICAL FIX: Disable chunking only for templates that support dynamic grids
         if self.template_type in ['horizontal', 'vertical', 'double']:
@@ -936,9 +918,7 @@ class TemplateProcessor:
         max_cells = num_rows * num_cols
         total_products = num_products if num_products is not None else 49
         pages = (total_products + max_cells - 1) // max_cells
-        # PERFORMANCE: Only log for large expansions
-        if pages > 5 or total_products > 50:
-            self.logger.debug(f"🔍 TEMPLATE EXPANSION: Creating {pages} pages of 3x3 grids for {total_products} products.")
+        self.logger.info(f"🔍 TEMPLATE EXPANSION: Creating {pages} pages of 3x3 grids for {total_products} products.")
         product_idx = 0
         for page in range(pages):
             tbl = doc.add_table(rows=num_rows, cols=num_cols)
@@ -1073,9 +1053,7 @@ class TemplateProcessor:
                 page_break_para = doc.add_paragraph()
                 page_break_run = page_break_para.add_run()
                 page_break_run.add_break(WD_BREAK.PAGE)
-                # PERFORMANCE: Only log for first few pages
-                if page < 3:
-                    self.logger.debug(f"🔍 PAGE BREAK: Added page break after page {page + 1} of {pages}")
+                self.logger.info(f"🔍 PAGE BREAK: Added page break after page {page + 1} of {pages}")
 
         from src.core.generation.docx_formatting import remove_all_headers_and_footers
         doc = remove_all_headers_and_footers(doc)
@@ -1088,33 +1066,14 @@ class TemplateProcessor:
         documents = []
         # FULLY DISABLE CHUNKING for horizontal, vertical, and double templates
         try:
-            # PERFORMANCE FIX: Re-enable chunking for large batches to improve performance
-            # Only disable chunking for small batches (< 30 records) to maintain quality
             if self.template_type in ['horizontal', 'vertical', 'double']:
-                if len(records) <= 30:
-                    # Small batches: process all at once for better quality
-                    self.chunk_size = len(records)
-                    self.logger.debug(f"🔍 LABEL RENDER: For template '{self.template_type}', processing {len(records)} records in one pass (small batch).")
-                else:
-                    # Large batches: use chunking for better performance
-                    # Use reasonable chunk size based on template type
-                    # PERFORMANCE: On PythonAnywhere, use smaller chunks for faster processing
-                    if IS_PYTHONANYWHERE:
-                        if self.template_type == 'double':
-                            self.chunk_size = 8  # Smaller chunks on PythonAnywhere
-                        else:
-                            self.chunk_size = 20  # Much smaller chunks for speed
-                        self.logger.info(f"⚡ PYTHONANYWHERE: Large batch ({len(records)} records) - using smaller chunk size {self.chunk_size} for speed")
-                    else:
-                        if self.template_type == 'double':
-                            self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # 4x3 grid = 12 labels per page
-                        else:
-                            self.chunk_size = min(50, CHUNK_SIZE_LIMIT)  # 3x3 grid = 9 labels per page, but allow up to 50 for performance
-                        self.logger.info(f"⚡ PERFORMANCE: Large batch ({len(records)} records) - using chunking with size {self.chunk_size} for '{self.template_type}' template")
+                self.chunk_size = len(records)
+                self.logger.info(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
+                self.logger.info(f"🔍 LABEL RENDER: Chunking is fully disabled. All {len(records)} records will be processed in one pass.")
                 self.start_time = time.time()
                 self.chunk_count = 1
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
-                self.logger.debug(f"Processing {len(records)} records in overall order: {overall_order[:5] if len(overall_order) > 5 else overall_order}...")
+                self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
                 
                 # DEDUPLICATION FIX: Remove exact duplicates even for JSON matched products
@@ -1137,10 +1096,10 @@ class TemplateProcessor:
                         unique_records.append(record)
                     else:
                         duplicate_count += 1
-                        self.logger.debug(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
                 
                 if duplicate_count > 0:
-                    self.logger.debug(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
+                    self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
                     records = unique_records
                 
                 # Process all records in a single chunk
@@ -1151,11 +1110,11 @@ class TemplateProcessor:
             else:
                 # Ensure chunk size respects fixed page capacity for templates like mini/inventory
                 self.chunk_size = self.chunk_size or len(records)
-                self.logger.debug(f"🔍 LABEL RENDER: Processing {len(records)} records for template '{self.template_type}' with chunk_size {self.chunk_size}.")
+                self.logger.info(f"🔍 LABEL RENDER: Processing {len(records)} records for template '{self.template_type}' with chunk_size {self.chunk_size}.")
                 self.start_time = time.time()
                 self.chunk_count = 0
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
-                self.logger.debug(f"Processing {len(records)} records in overall order: {overall_order[:5] if len(overall_order) > 5 else overall_order}...")
+                self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
 
                 # Apply the same deduplication logic for consistency across templates
@@ -1176,10 +1135,10 @@ class TemplateProcessor:
                         unique_records.append(record)
                     else:
                         duplicate_count += 1
-                        self.logger.debug(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
 
                 if duplicate_count > 0:
-                    self.logger.debug(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
+                    self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
                     records = unique_records
 
                 if not records:
@@ -1196,7 +1155,7 @@ class TemplateProcessor:
                 if len(chunks) > 1:
                     from concurrent.futures import ThreadPoolExecutor, as_completed
                     
-                    self.logger.debug(f"⚡ PARALLEL PROCESSING: Processing {len(chunks)} chunks concurrently")
+                    self.logger.info(f"⚡ PARALLEL PROCESSING: Processing {len(chunks)} chunks concurrently")
                     chunk_docs = [None] * len(chunks)  # Preserve order
                     
                     with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
@@ -1213,7 +1172,7 @@ class TemplateProcessor:
                                 chunk_doc = future.result()
                                 chunk_docs[idx] = chunk_doc
                                 self.chunk_count += 1
-                                self.logger.debug(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
+                                self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
                             except Exception as e:
                                 self.logger.error(f"Error processing chunk {idx + 1}: {e}")
                                 chunk_docs[idx] = None
@@ -1223,7 +1182,7 @@ class TemplateProcessor:
                 else:
                     # Single chunk - process normally
                     self.chunk_count = 1
-                    self.logger.debug(f"🔍 LABEL RENDER: Processing single chunk containing {len(records)} record(s)")
+                    self.logger.info(f"🔍 LABEL RENDER: Processing single chunk containing {len(records)} record(s)")
                     try:
                         chunk_doc = self._process_chunk(records)
                         if chunk_doc is not None:
@@ -1241,7 +1200,7 @@ class TemplateProcessor:
                 return documents[0]
             
             # Combine documents
-            self.logger.debug(f"Combining {len(documents)} documents")
+            self.logger.info(f"Combining {len(documents)} documents")
             composer = Composer(documents[0])
             for doc in documents[1:]:
                 composer.append(doc)
@@ -1269,152 +1228,68 @@ class TemplateProcessor:
         from docx import Document
         from io import BytesIO
         
-        # DEBUG_CHUNK_SIZE_TRACKING: Log actual chunk sizes (reduced to debug for performance)
-        self.logger.debug(f"🔍 CHUNK SIZE DEBUG: Processing chunk with {len(chunk)} records")
-        self.logger.debug(f"🔍 CHUNK SIZE DEBUG: Expected all {len(chunk)} records in this chunk for template '{self.template_type}'")
+        # DEBUG_CHUNK_SIZE_TRACKING: Log actual chunk sizes
+        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Processing chunk with {len(chunk)} records")
+        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Expected all {len(chunk)} records in this chunk for template '{self.template_type}'")
         # After rendering, log the number of labels actually created
-        self.logger.debug(f"🔍 LABEL RENDER: Actually rendered {len(chunk)} labels in this chunk.")
+        self.logger.info(f"🔍 LABEL RENDER: Actually rendered {len(chunk)} labels in this chunk.")
         
         chunk_start_time = time.time()
         
         try:
             # CRITICAL FIX: Re-expand template with correct number of products to prevent blank labels
-            # OPTIMIZATION: Cache template expansions to avoid re-expanding for same size
             num_products = len(chunk)
-            cache_key = f"{self.template_type}_{num_products}"
             
-            # PERFORMANCE: Use class-level cache (shared across instances) for better hit rate
-            if not hasattr(TemplateProcessor, '_template_expansion_cache'):
-                TemplateProcessor._template_expansion_cache = {}
+            # For all templates, re-expand with correct number of products
+            if self.template_type in ['horizontal', 'vertical']:
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
+            elif self.template_type == 'double':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
+            elif self.template_type == 'mini':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
             
-            if cache_key in TemplateProcessor._template_expansion_cache:
-                # Use cached template expansion (create a copy since BytesIO is consumed)
-                cached_buffer = TemplateProcessor._template_expansion_cache[cache_key]
-                if hasattr(cached_buffer, 'getvalue'):
-                    self._expanded_template_buffer = BytesIO(cached_buffer.getvalue())
-                else:
-                    self._expanded_template_buffer = cached_buffer
-                if hasattr(self._expanded_template_buffer, 'seek'):
-                    self._expanded_template_buffer.seek(0)
-                self.logger.debug(f"⚡ TEMPLATE CACHE HIT: Using cached expansion for {cache_key}")
-            else:
-                # For all templates, re-expand with correct number of products
-                if self.template_type in ['horizontal', 'vertical']:
-                    self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
-                elif self.template_type == 'double':
-                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                elif self.template_type == 'mini':
-                    self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
-                
-                # Cache the expansion (create a copy since BytesIO is consumed)
-                # PERFORMANCE: Use class-level cache for better sharing across instances
-                if hasattr(self._expanded_template_buffer, 'getvalue'):
-                    cached_buffer = BytesIO(self._expanded_template_buffer.getvalue())
-                    TemplateProcessor._template_expansion_cache[cache_key] = cached_buffer
-                    self._expanded_template_buffer.seek(0)
-                    self.logger.debug(f"⚡ TEMPLATE CACHE MISS: Cached expansion for {cache_key}")
-                elif hasattr(self._expanded_template_buffer, 'seek'):
-                    self._expanded_template_buffer.seek(0)
+            if hasattr(self._expanded_template_buffer, 'seek'):
+                self._expanded_template_buffer.seek(0)
             
             doc = DocxTemplate(self._expanded_template_buffer)
             
-            # Debug: Log the order of records in this chunk (reduced to debug for performance)
-            if len(chunk) <= 5:  # Only log for very small chunks
-                chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
-                self.logger.debug(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
-            else:
-                self.logger.debug(f"Processing chunk with {len(chunk)} records")
+            # Debug: Log the order of records in this chunk
+            chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
+            self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
             
-            # OPTIMIZATION: Pre-load all brand, vendor, lineage, and strain data in batch to avoid N+1 queries
-            # This reduces 200+ queries for 100 products to just 3-4 queries total
+            # OPTIMIZATION: Pre-load all brand data in batch to avoid N+1 queries
+            # This reduces 100+ queries for 100 products to just 1 query total
             product_brand_cache = {}
-            product_vendor_cache = {}
-            product_lineage_cache = {}
-            strain_info_cache = {}
-            joint_ratio_cache = {}
             try:
                 from src.core.data.product_database import get_product_database
                 product_db = get_product_database()
                 if product_db:
                     product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
                     product_names = [n for n in product_names if n]
-                    
-                    # Collect unique strain names for batch loading
-                    strain_names = set()
-                    for r in chunk:
-                        strain = r.get('ProductStrain', '') or r.get('Product Strain', '')
-                        if strain:
-                            strain_names.add(strain)
-                    
                     if product_names:
                         try:
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
                             placeholders = ','.join(['?'] * len(product_names))
-                            
-                            # OPTIMIZATION: Combine all product queries into a single query for better performance
-                            # CRITICAL: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
-                            combined_query = f'''
-                                SELECT 
-                                    p."Product Name*",
-                                    p."Product Brand",
-                                    CASE 
-                                        WHEN p."Vendor/Supplier*" IS NOT NULL AND p."Vendor/Supplier*" != '' THEN p."Vendor/Supplier*"
-                                        WHEN p."Vendor" IS NOT NULL AND p."Vendor" != '' THEN p."Vendor"
-                                        WHEN p."ProductVendor" IS NOT NULL AND p."ProductVendor" != '' THEN p."ProductVendor"
-                                        ELSE NULL
-                                    END as vendor,
-                                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                                    p.JointRatio
-                                FROM products p
-                                LEFT JOIN strains s ON p.strain_id = s.id
-                                WHERE p."Product Name*" IN ({placeholders})
+                            batch_brand_query = f'''
+                                SELECT "Product Name*", "Product Brand"
+                                FROM products
+                                WHERE "Product Name*" IN ({placeholders})
+                                AND "Product Brand" IS NOT NULL
+                                AND "Product Brand" != ""
                             '''
-                            cursor.execute(combined_query, product_names)
+                            cursor.execute(batch_brand_query, product_names)
                             for row_result in cursor.fetchall():
-                                pname, brand, vendor, lineage, joint_ratio = row_result
-                                
-                                # Cache brand
+                                pname, brand = row_result
                                 if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_brand_cache[pname] = str(brand).strip()
-                                
-                                # Cache vendor
-                                if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_vendor_cache[pname] = str(vendor).strip()
-                                
-                                # Cache lineage (priority already handled by COALESCE)
-                                if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(lineage).strip()
-                                
-                                # Cache JointRatio
-                                if joint_ratio and str(joint_ratio).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    joint_ratio_cache[pname] = str(joint_ratio).strip()
-                            
-                            # Batch load strain info
-                            if strain_names:
-                                strain_placeholders = ','.join(['?'] * len(strain_names))
-                                batch_strain_query = f'''
-                                    SELECT strain_name, display_lineage, sovereign_lineage, canonical_lineage
-                                    FROM strains
-                                    WHERE strain_name IN ({strain_placeholders})
-                                '''
-                                cursor.execute(batch_strain_query, list(strain_names))
-                                for row_result in cursor.fetchall():
-                                    strain_name, display_lineage, sov_lineage, canon_lineage = row_result
-                                    strain_info = {}
-                                    # Priority: display_lineage > sovereign_lineage > canonical_lineage
-                                    if display_lineage and str(display_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['display_lineage'] = str(display_lineage).strip()
-                                    elif sov_lineage and str(sov_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['sovereign_lineage'] = str(sov_lineage).strip()
-                                    elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['canonical_lineage'] = str(canon_lineage).strip()
-                                    if strain_info:
-                                        strain_info_cache[strain_name] = strain_info
-                        except Exception as batch_err:
-                            self.logger.warning(f"Batch data query failed: {batch_err}")
+                        except Exception as batch_brand_err:
+                            self.logger.warning(f"Batch brand query failed: {batch_brand_err}")
             except Exception as e:
-                self.logger.warning(f"Failed to pre-load batch data: {e}")
+                self.logger.warning(f"Failed to pre-load brand data: {e}")
             
             # Build context for each record in the chunk
             context = {}
@@ -1438,14 +1313,12 @@ class TemplateProcessor:
                 if self.template_type == 'inventory':
                     label_context = self._build_inventory_context(record)
                 else:
-                    # Pass all caches to avoid N+1 queries
-                    label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
-                                                               product_lineage_cache, strain_info_cache, joint_ratio_cache)
+                    # Pass brand cache to avoid N+1 queries
+                    label_context = self._build_label_context(record, doc, product_brand_cache)
                 context[f'Label{i+1}'] = label_context
-                # Debug logging to check field values and order (only for first label to reduce overhead)
-                if i == 0:
-                    product_name = record.get('ProductName', 'Unknown')
-                    self.logger.debug(f"Label1 -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}'")
+                # Debug logging to check field values and order
+                product_name = record.get('ProductName', 'Unknown')
+                self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
             
             # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
             # to prevent Jinja template errors when template references missing labels
@@ -1453,20 +1326,20 @@ class TemplateProcessor:
                 empty_label_context = self._get_empty_label_context()
                 for i in range(len(chunk) + 1, required_labels + 1):
                     context[f'Label{i}'] = empty_label_context
-                self.logger.debug(f"🔧 FIXED GRID: Created {len(chunk)} product labels + {required_labels - len(chunk)} empty labels = {required_labels} total for {self.template_type} template")
+                self.logger.info(f"🔧 FIXED GRID: Created {len(chunk)} product labels + {required_labels - len(chunk)} empty labels = {required_labels} total for {self.template_type} template")
             else:
                 # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
                 # This saves printer ink by not generating empty cells
-                self.logger.debug(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
+                self.logger.info(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
             # QR code functionality enabled
-            # Debug: Log QR code presence in context before rendering (reduced to debug for performance)
+            # Debug: Log QR code presence in context before rendering
             qr_count = sum(1 for label_key, label_data in context.items() 
                           if isinstance(label_data, dict) and label_data.get('QR') and 
                           not (isinstance(label_data.get('QR'), str) and label_data.get('QR').strip() == ''))
-            self.logger.debug(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
+            self.logger.info(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
             
             try:
                 doc.render(context)
@@ -1478,7 +1351,10 @@ class TemplateProcessor:
                 buffer.seek(0)
                 rendered_doc = Document(buffer)
                 self._remove_unmerged_placeholders(rendered_doc, len(chunk))
-                
+
+                # CRITICAL: Hide ProductVendor for non-classic types
+                self._hide_productvendor_for_nonclassic_types(rendered_doc, chunk)
+
             except Exception as render_error:
                 self.logger.error(f"DocxTemplate render failed: {render_error}")
                 self.logger.error(f"Context keys: {list(context.keys())}")
@@ -1489,42 +1365,25 @@ class TemplateProcessor:
             # CRITICAL FIX: Ensure all tables have proper tblGrid elements before processing
             self._ensure_table_grids_exist(rendered_doc)
             
-            # PERFORMANCE OPTIMIZATION: Check timeout early to avoid expensive operations
-            if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK * 0.7:
-                self.logger.warning(f"Chunk processing taking too long, skipping expensive post-processing")
-                # Only do minimal required processing
-                from src.core.generation.docx_formatting import remove_all_headers_and_footers
-                rendered_doc = remove_all_headers_and_footers(rendered_doc)
-                return rendered_doc
-            
             # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
-            # PERFORMANCE: Skip post-processing for large chunks to save time
-            # PERFORMANCE: On PythonAnywhere, skip all post-processing for speed
-            if IS_PYTHONANYWHERE:
-                self.logger.info(f"⚡ PYTHONANYWHERE: Skipping post-processing for speed")
-                # Apply lineage colors only (fast operation)
-                try:
-                    apply_lineage_colors(rendered_doc)
-                except Exception as e:
-                    self.logger.warning(f"Lineage color error: {e}")
-            else:
-                num_tables = len(rendered_doc.tables)
-                if num_tables <= 10:  # Only post-process smaller documents
-                    try:
-                        # Post-process the document to apply dynamic font sizing first
-                        self._post_process_and_replace_content(rendered_doc)
-                        
-                        # Check timeout before lineage colors
-                        if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                            self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                            return rendered_doc
-                        
-                        # Apply lineage colors last to ensure they are not overwritten
-                        apply_lineage_colors(rendered_doc)
-                    except Exception as processing_error:
-                        self.logger.warning(f"Skipping post-processing due to error: {processing_error}")
-                else:
-                    self.logger.warning(f"PERFORMANCE: Skipping post-processing for large chunk with {num_tables} tables")
+            try:
+                # Post-process the document to apply dynamic font sizing first
+                self._post_process_and_replace_content(rendered_doc)
+                
+                # Check timeout before lineage colors
+                if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
+                    self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
+                    return rendered_doc
+                
+                # Apply lineage colors last to ensure they are not overwritten
+                apply_lineage_colors(rendered_doc)
+                
+                # Apply final marker cleanup for all templates
+                self._final_marker_cleanup(rendered_doc)
+                
+            except Exception as processing_error:
+                self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
+                # Continue processing without post-processing features
             
             # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
             # Cell widths already standardized
@@ -1545,11 +1404,83 @@ class TemplateProcessor:
             chunk_time = time.time() - chunk_start_time
             # Chunk processed
             
-            # PERFORMANCE OPTIMIZATION: Skip redundant marker cleanup - already done in _post_process_and_replace_content
-            # The _post_process_and_replace_content method already handles marker cleanup, so this is redundant
-            # Only do final cleanup steps that are truly needed
+            # FINAL MARKER CLEANUP: Remove any lingering *_START and *_END markers AFTER font sizing has been applied
+            # This cleanup should only remove markers that weren't processed by the font sizing system
+            marker_pattern = re.compile(r'\b\w+_(START|END)\b')
+            prefix_pattern = re.compile(r'^(?:[A-Z0-9_]+_)+')
+            
+            # Clean in tables
             try:
-                # FINAL STEP: Clean up any remaining concatenated lineage+brand content for classic types
+                for table in rendered_doc.tables:
+                    try:
+                        # Use safe table iteration to validate and repair if needed
+                        if not self._safe_table_iteration(table, "marker cleanup"):
+                            self.logger.warning(f"Skipping table with invalid structure during marker cleanup")
+                            continue
+                        
+                        for row in table.rows:
+                            try:
+                                # Validate row structure before processing
+                                if not hasattr(row, 'cells') or not row.cells:
+                                    self.logger.warning(f"Skipping row with invalid structure during marker cleanup")
+                                    continue
+                                    
+                                for cell in row.cells:
+                                    try:
+                                        for para in cell.paragraphs:
+                                            # Check if this paragraph was processed by font sizing system
+                                            # If it has non-default font sizes, it was processed
+                                            was_processed = False
+                                            for run in para.runs:
+                                                if hasattr(run, 'font') and hasattr(run.font, 'size') and run.font.size:
+                                                    # Check if font size is not the default (12pt)
+                                                    if hasattr(run.font.size, 'pt') and run.font.size.pt != 12:
+                                                        was_processed = True
+                                                        break
+                                            
+                                            # CRITICAL FIX: Always clean markers regardless of font sizing processing
+                                            # This ensures DESC_START, DESC_END, PRICE_START, PRICE_END are always removed
+                                            for run in para.runs:
+                                                if marker_pattern.search(run.text):
+                                                    run.text = marker_pattern.sub('', run.text)
+                                                if prefix_pattern.search(run.text):
+                                                    run.text = prefix_pattern.sub('', run.text)
+                                    except Exception as cell_error:
+                                        self.logger.warning(f"Skipping cell due to error during marker cleanup: {cell_error}")
+                                        continue
+                            except Exception as row_error:
+                                self.logger.warning(f"Skipping row due to error during marker cleanup: {row_error}")
+                                continue
+                    except Exception as e:
+                        self.logger.warning(f"Skipping table due to error during marker cleanup: {e}")
+                        continue
+            except Exception as overall_error:
+                self.logger.error(f"Critical error during marker cleanup: {overall_error}")
+                # Continue processing other parts of the document
+            
+            # Clean in paragraphs outside tables
+            for para in rendered_doc.paragraphs:
+                # Check if this paragraph was processed by font sizing system
+                was_processed = False
+                for run in para.runs:
+                    if hasattr(run, 'font') and hasattr(run.font, 'size') and run.font.size:
+                        # Check if font size is not the default (12pt)
+                        if hasattr(run.font.size, 'pt') and run.font.size.pt != 12:
+                            was_processed = True
+                            break
+                
+                # CRITICAL FIX: Always clean markers regardless of font sizing processing
+                # This ensures DESC_START, DESC_END, PRICE_START, PRICE_END are always removed
+                # (Removed was_processed check)
+                if True:
+                    for run in para.runs:
+                        if marker_pattern.search(run.text):
+                            run.text = marker_pattern.sub('', run.text)
+                        if prefix_pattern.search(run.text):
+                            run.text = prefix_pattern.sub('', run.text)
+            
+            # FINAL STEP: Clean up any remaining concatenated lineage+brand content for classic types
+            try:
                 self._clean_up_lineage_brand_concatenation(rendered_doc)
             except Exception as e:
                 self.logger.warning(f"Lineage brand concatenation cleanup failed: {e}")
@@ -1649,77 +1580,18 @@ class TemplateProcessor:
             'QR': '',
         }
     
-    def _build_label_context(self, record, doc, product_brand_cache=None, product_vendor_cache=None, 
-                             product_lineage_cache=None, strain_info_cache=None, joint_ratio_cache=None):
-        # Initialize caches to empty dicts if None
-        product_brand_cache = product_brand_cache or {}
-        product_vendor_cache = product_vendor_cache or {}
-        product_lineage_cache = product_lineage_cache or {}
-        strain_info_cache = strain_info_cache or {}
-        joint_ratio_cache = joint_ratio_cache or {}
+    def _build_label_context(self, record, doc, product_brand_cache=None):
         """Ultra-optimized label context building for maximum performance."""
         # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
             product_brand_cache = {}
-        if product_vendor_cache is None:
-            product_vendor_cache = {}
         # CRITICAL FIX: Log lineage value received in template processor
         lineage_value = record.get('Lineage', 'NOT_FOUND')
         product_name = record.get('ProductName', 'Unknown')
-        self.logger.debug(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
+        self.logger.info(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
         
         # Fast dictionary copy
         label_context = dict(record)
-        
-        # CRITICAL FIX: Read vendor directly from record first - it should already be in the Excel column
-        # Check ALL possible vendor field variations, including case-insensitive matching
-        vendor_from_record = None
-        
-        # First, get all vendor-related keys from the record (case-insensitive search)
-        vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-        
-        # Standard vendor field names to check (in priority order)
-        vendor_field_names = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'ProductVendor', 'vendor']
-        
-        # Try standard field names first - check label_context FIRST (it's a dict copy of record)
-        for field_name in vendor_field_names:
-            # Check label_context first (already copied from record via dict(record))
-            val = label_context.get(field_name)
-            if val is None or pd.isna(val):
-                # Fallback to record if not in label_context
-                val = record.get(field_name)
-            
-            if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                vendor_from_record = str(val).strip()
-                self.logger.debug(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
-                break
-        
-        # If not found in standard fields, check ALL vendor-related keys from BOTH label_context and record
-        if not vendor_from_record and vendor_related_keys:
-            for key in vendor_related_keys:
-                # Check label_context first, then record
-                val = label_context.get(key)
-                if val is None or pd.isna(val):
-                    val = record.get(key)
-                
-                if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                    vendor_from_record = str(val).strip()
-                    self.logger.debug(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
-                    break
-        
-        # Store vendor early so it's available throughout processing
-        if vendor_from_record:
-            label_context['_vendor_from_record'] = vendor_from_record
-            # Also set ProductVendor directly in label_context so it's available immediately
-            # This ensures vendor is preserved even if later logic tries to clear it
-            if self.template_type == 'vertical':
-                label_context['ProductVendor'] = vendor_from_record
-            else:
-                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{vendor_from_record}PRODUCTVENDOR_END"
-        else:
-            # Log warning with all available keys for debugging
-            all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
-            self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Sample record keys: {all_keys_sample}")
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
@@ -1733,7 +1605,7 @@ class TemplateProcessor:
                         label_context['ProductName'] = group_display_name
                         label_context['Product Name*'] = group_display_name
                         label_context['Description'] = group_display_name
-                        self.logger.debug(f"PREROLL GROUP OVERRIDE: Set ProductName/Description to '{group_display_name}' (group_id: {group_id})")
+                        self.logger.info(f"PREROLL GROUP OVERRIDE: Set ProductName/Description to '{group_display_name}' (group_id: {group_id})")
         
         has_cbd_blend_strain = False
         cbd_signal_tokens = ['CBD', 'CBG', 'CBN', 'CBC']
@@ -1783,7 +1655,7 @@ class TemplateProcessor:
                 label_context['Product Strain'] = cbd_blend_value
                 record['ProductStrain'] = cbd_blend_value
                 record['Product Strain'] = cbd_blend_value
-                self.logger.debug(f"CBD BLEND STRAIN ENFORCEMENT: Set ProductStrain to '{cbd_blend_value}' for '{product_name}'")
+                self.logger.info(f"CBD BLEND STRAIN ENFORCEMENT: Set ProductStrain to '{cbd_blend_value}' for '{product_name}'")
             elif current_strain_clean.upper() == 'CBD BLEND':
                 # Normalize capitalization
                 cbd_blend_value = 'CBD Blend'
@@ -1799,33 +1671,60 @@ class TemplateProcessor:
             product_name = record.get('ProductName', record.get('Product Name*', ''))
             excel_lineage = label_context.get('Lineage', '') or record.get('Lineage', '')
             
-            # PERFORMANCE FIX: Use pre-loaded cache FIRST to avoid N+1 queries
-            # Check cache before doing any database queries
+            # CRITICAL: Use record lineage first (already enriched with database value, no sativa hybrid override)
+            # Only query database if record lineage is missing
             db_lineage = None
-            if product_lineage_cache and product_name in product_lineage_cache:
-                db_lineage = product_lineage_cache[product_name]
-                self.logger.debug(f"⚡ CACHE HIT: Using cached lineage '{db_lineage}' for '{product_name}'")
-            else:
-                # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-                record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-                if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
-                    # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
-                    db_lineage = str(record_lineage).strip()
-                elif product_name and strain_info_cache:
-                    # Check strain cache if available
-                    product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
-                    if product_strain and product_strain in strain_info_cache:
-                        strain_info = strain_info_cache[product_strain]
-                        db_lineage = (
-                            strain_info.get('display_lineage') or
-                            strain_info.get('sovereign_lineage') or
-                            strain_info.get('canonical_lineage') or
-                            None
-                        )
-                # PERFORMANCE: Skip individual database queries - rely on batch-loaded cache
-                # If cache doesn't have it, use defaults instead of querying database
-                if not db_lineage:
-                    self.logger.debug(f"⚡ CACHE MISS: No lineage in cache for '{product_name}', using defaults")
+            # Priority: sovereign_lineage > Lineage > canonical_lineage > lineage
+            record_lineage = record.get('sovereign_lineage') or record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
+            if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
+                db_lineage = str(record_lineage).strip()
+                if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
+                    self.logger.info(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
+            elif product_name:
+                # Record lineage missing - query database directly (avoid get_product_lineage which applies override)
+                from app import get_product_database, get_current_store_name
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                if product_db:
+                    # Query database directly to avoid sativa hybrid override in get_product_lineage()
+                    try:
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
+                        cursor.execute('''
+                            SELECT sovereign_lineage, "Lineage", "canonical_lineage"
+                            FROM products
+                            WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                            ORDER BY id DESC
+                            LIMIT 1
+                        ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
+                        result = cursor.fetchone()
+                        # Priority: sovereign_lineage > Lineage > canonical_lineage
+                        if result and result[0]:
+                            db_lineage = str(result[0]).strip()
+                            self.logger.info(f"🔒 DOCX: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
+                        elif result and result[1]:
+                            db_lineage = str(result[1]).strip()
+                        elif result and result[2]:
+                            db_lineage = str(result[2]).strip()
+                    except Exception as db_err:
+                        self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
+                        # Fallback to get_product_lineage if direct query fails
+                        db_lineage = product_db.get_product_lineage(product_name)
+                    
+                    # If no product-level lineage, check strain-level lineage
+                    if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
+                        product_strain = record.get('Product Strain', '')
+                        if product_strain:
+                            strain_info = product_db.get_strain_info(product_strain)
+                            if strain_info:
+                                db_lineage = (
+                                    strain_info.get('display_lineage') or
+                                    strain_info.get('sovereign_lineage') or
+                                    strain_info.get('canonical_lineage') or
+                                    None
+                                )
                     
                     # CRITICAL: Always use database lineage if available, never Excel
                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
@@ -1833,7 +1732,7 @@ class TemplateProcessor:
                         # Always override Excel lineage with database lineage
                         if excel_lineage and str(excel_lineage).strip().upper() != db_lineage_upper:
                             # Database lineage differs from Excel - use database
-                            self.logger.debug(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
+                            self.logger.info(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
                         label_context['Lineage'] = db_lineage_upper
                     else:
                         # No DB lineage - use defaults based on product type (never Excel)
@@ -1846,7 +1745,7 @@ class TemplateProcessor:
                         else:
                             default_lineage = 'MIXED'
                         
-                        self.logger.debug(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+                        self.logger.info(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
                         label_context['Lineage'] = default_lineage
         except Exception as e:
             self.logger.warning(f"Could not check database lineage for DOCX output: {e}")
@@ -1860,7 +1759,7 @@ class TemplateProcessor:
             else:
                 default_lineage = 'MIXED'
             
-            self.logger.debug(f"⚠️ LINEAGE DEFAULT (DOCX ERROR): '{product_name}' - Error checking DB, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
+            self.logger.info(f"⚠️ LINEAGE DEFAULT (DOCX ERROR): '{product_name}' - Error checking DB, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
             label_context['Lineage'] = default_lineage
         
         # CRITICAL FIX: Force DOH to be read from the actual data source, not defaults
@@ -1891,36 +1790,18 @@ class TemplateProcessor:
         else:
             # CRITICAL FIX: For new products without proper type, infer from product name
             product_name = record.get('ProductName', '')
-            name_lower = product_name.lower()
-
-            # 1) High‑signal concentrate patterns
-            if any(keyword in name_lower for keyword in ['live rosin', 'hash rosin', 'solventless', 'rosin']):
-                product_type = 'solventless concentrate'
-                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'solventless concentrate' (from name)")
-
-            # 2) Vape / disposable patterns
-            elif any(keyword in name_lower for keyword in ['disposable vape', 'disposable cart', 'vape cart', 'cartridge', 'vape pen']):
-                product_type = 'vape cartridge'
-                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'vape cartridge' (from name)")
-
-            # 3) Classic flower keywords
-            elif any(keyword in name_lower for keyword in ['flower', 'bud', 'nug', 'herb']):
+            if any(keyword in product_name.lower() for keyword in ['flower', 'bud', 'nug', 'herb']):
                 product_type = 'flower'
-                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
-
-            # 4) Pre‑roll patterns
-            elif any(keyword in name_lower for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
+                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
+            elif any(keyword in product_name.lower() for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
                 product_type = 'pre-roll'
-                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
-
-            # 5) Fallback – keep previous behaviour
+                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
             else:
                 product_type = 'flower'  # Default to flower for new products
-                self.logger.debug(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
+                self.logger.info(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
         
-        # Reduced logging for performance - only log for first few products
-        if self.chunk_count == 1 and len([r for r in [record] if r == record]) <= 3:
-            self.logger.debug(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{raw_product_type}', Processed: '{product_type}'")
+        # ALWAYS LOG TO SEE WHAT PRODUCT TYPES ARE PROCESSED
+        self.logger.info(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{raw_product_type}', Processed: '{product_type}'")
         
         # CRITICAL FIX: Store the processed product type in the context
         label_context['ProductType'] = product_type
@@ -1937,17 +1818,21 @@ class TemplateProcessor:
                 product_name = record.get('ProductName') or record.get('Product Name*', '')
                 if product_name:
                     try:
-                        # Use pre-loaded cache instead of individual query
-                        if joint_ratio_cache and product_name:
-                            joint_ratio = joint_ratio_cache.get(product_name)
-                            if joint_ratio:
-                                self.logger.debug(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
-                            else:
-                                self.logger.debug(f"No JointRatio in cache for '{product_name}'")
+                        # Get JointRatio directly from database
+                        from src.core.data.product_database import get_product_database
+                        product_db = get_product_database()
+                        if product_db:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute('SELECT JointRatio FROM products WHERE "Product Name*" = ?', (product_name,))
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                joint_ratio = result[0]
+                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from database for '{product_name}'")
                     except Exception as e:
-                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from cache: {e}")
+                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from database: {e}")
             
-            self.logger.debug(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
+            self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 # Format JointRatio with soft hyphen and nonbreaking space, then prefix with newline for prerolls
                 formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
@@ -2030,7 +1915,7 @@ class TemplateProcessor:
                         if has_weight_in_name:
                             # Group name already includes weight, use it as-is
                             desc_and_weight = group_display_name
-                            self.logger.debug(f"PREROLL GROUP: Using group name as-is (already contains weight): '{desc_and_weight}' (group_id: {group_id})")
+                            self.logger.info(f"PREROLL GROUP: Using group name as-is (already contains weight): '{desc_and_weight}' (group_id: {group_id})")
                         else:
                             # Group name doesn't include weight, add it from JointRatio/WeightUnits
                             # Get JointRatio-derived weight from WeightUnits (set earlier for preroll products)
@@ -2049,11 +1934,11 @@ class TemplateProcessor:
                                 else:
                                     # Add hyphen and space before weight
                                     desc_and_weight = f"{group_display_name} - {clean_weight}"
-                                self.logger.debug(f"PREROLL GROUP: Added weight to group name: '{desc_and_weight}' (group: '{group_display_name}', weight: '{clean_weight}', group_id: {group_id})")
+                                self.logger.info(f"PREROLL GROUP: Added weight to group name: '{desc_and_weight}' (group: '{group_display_name}', weight: '{clean_weight}', group_id: {group_id})")
                             else:
                                 # No weight available, use group name only
                                 desc_and_weight = group_display_name
-                                self.logger.debug(f"PREROLL GROUP: Using group name only (no weight available): '{group_display_name}' (group_id: {group_id})")
+                                self.logger.info(f"PREROLL GROUP: Using group name only (no weight available): '{group_display_name}' (group_id: {group_id})")
 
                         label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
                         # Skip all DescAndWeight construction below - we're done
@@ -2154,21 +2039,21 @@ class TemplateProcessor:
                         match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
                         if match1:
                             clean_weight = f"{match1.group(1)}{match1.group(2)}"
-                            self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         else:
                             # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
                             integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
                             match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
                             if match2:
                                 clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
-                                self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                             else:
                                 # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
                                 mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
                                 match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
                                 if match3:
                                     clean_weight = f"{match3.group(1)}{match3.group(2)}"
-                                    self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                                    self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         
                         # Keep weight on the same line as description with non-breaking space
                         # Use consistent space-hyphen-space pattern for all templates
@@ -2201,31 +2086,8 @@ class TemplateProcessor:
         # Fast DOH image processing - only if needed
         # IMPORTANT: Only use the canonical DOH field for image decisions
         # Ignore legacy "DOH Compliant (Yes/No)" and any other variants
-        doh_value = label_context.get('DOH', '') or record.get('DOH', '')
+        doh_value = label_context.get('DOH', '')
         product_name = label_context.get('ProductName', 'Unknown')
-        
-        # CRITICAL FIX: If DOH is missing from record, query database directly
-        if not doh_value or str(doh_value).strip() in ['', 'None', 'nan']:
-            try:
-                from app import get_product_database, get_current_store_name
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    conn = product_db._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        SELECT "DOH" FROM products
-                        WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                        ORDER BY id DESC
-                        LIMIT 1
-                    ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
-                    result = cursor.fetchone()
-                    if result and result[0] and str(result[0]).strip() not in ['', 'None', 'nan']:
-                        doh_value = str(result[0]).strip()
-                        label_context['DOH'] = doh_value
-                        self.logger.info(f"🔍 DOH RETRIEVED FROM DB: '{product_name}' - DOH: '{doh_value}'")
-            except Exception as db_err:
-                self.logger.warning(f"Could not retrieve DOH from database: {db_err}")
 
         # CRITICAL DEBUG: Log DOH field processing with all possible sources
         self.logger.info(f"🔍 DOH DOCX GENERATION: Product '{product_name}' - DOH field: '{doh_value}' from record")
@@ -2280,12 +2142,8 @@ class TemplateProcessor:
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
         
-        # CRITICAL DEBUG: Log brand field processing (only for first few products)
-        if not hasattr(self, '_brand_debug_count'):
-            self._brand_debug_count = 0
-        self._brand_debug_count += 1
-        if self._brand_debug_count <= 3:
-            self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
+        # CRITICAL DEBUG: Log brand field processing
+        self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
         
         # CRITICAL FIX: Check if brand is missing and apply fallback logic FIRST
         if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
@@ -2368,41 +2226,73 @@ class TemplateProcessor:
                 lineage_val = str(lineage_text).strip().upper()
                 self.logger.info(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
             else:
-                # PRIORITY 2: Fallback to cache lookup if record lineage is empty
-                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking cache...")
-                db_lineage = None
-                # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-                record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-                if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
-                    # Use record lineage (already set correctly by enrichment)
-                    db_lineage = str(record_lineage).strip()
-                    if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                        self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
-                elif product_name and product_lineage_cache:
-                    # Use pre-loaded cache instead of individual query
-                    db_lineage = product_lineage_cache.get(product_name)
-                    if db_lineage:
-                        self.logger.info(f"✅ Using cached lineage '{db_lineage}' for '{product_name}'")
-                
-                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                    lineage_val = str(db_lineage).strip().upper()
-                    self.logger.info(f"✅ Using product lineage: '{lineage_val}' for '{product_name}'")
-                
-                # If no product-level lineage, try strain-level from cache
-                if not lineage_val and product_strain and strain_info_cache:
-                    strain_info = strain_info_cache.get(product_strain)
-                    if strain_info:
-                        preferred = (
-                            strain_info.get('display_lineage') or
-                            strain_info.get('sovereign_lineage') or
-                            strain_info.get('canonical_lineage')
-                        )
-                        if preferred:
-                            lineage_val = str(preferred).strip().upper()
-                            self.logger.info(f"✅ Using cached strain lineage: '{lineage_val}' for strain '{product_strain}'")
-                
-                if not lineage_val:
-                    self.logger.debug(f"No lineage found in record or cache")
+                # PRIORITY 2: Fallback to database lookup if record lineage is empty
+                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking database...")
+                try:
+                    from app import get_product_database, get_current_store_name
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    
+                    # CRITICAL: Use record lineage first (already enriched, avoids sativa hybrid override)
+                    # Only query database if record lineage is missing
+                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                    db_lineage = None
+                    # Priority: sovereign_lineage > Lineage > canonical_lineage > lineage
+                    record_lineage = record.get('sovereign_lineage') or record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
+                    if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                        # Use record lineage (already set correctly by enrichment)
+                        db_lineage = str(record_lineage).strip()
+                        if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
+                            self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
+                    elif product_name:
+                        # Query database directly to avoid sativa hybrid override
+                        try:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
+                            cursor.execute('''
+                                SELECT sovereign_lineage, "Lineage", "canonical_lineage"
+                                FROM products
+                                WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                                ORDER BY id DESC
+                                LIMIT 1
+                            ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
+                            result = cursor.fetchone()
+                            # Priority: sovereign_lineage > Lineage > canonical_lineage
+                            if result and result[0]:
+                                db_lineage = str(result[0]).strip()
+                                self.logger.info(f"🔒 PREROLL: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
+                            elif result and result[1]:
+                                db_lineage = str(result[1]).strip()
+                            elif result and result[2]:
+                                db_lineage = str(result[2]).strip()
+                        except Exception as db_err:
+                            self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
+                            # Fallback to get_product_lineage if direct query fails
+                            db_lineage = product_db.get_product_lineage(product_name)
+                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                        lineage_val = str(db_lineage).strip().upper()
+                        self.logger.info(f"✅ Using database product lineage fallback: '{lineage_val}' for '{product_name}'")
+                    
+                    # If no product-level lineage, try strain-level
+                    if not lineage_val and product_strain:
+                        strain_info = product_db.get_strain_info(product_strain)
+                        if strain_info:
+                            preferred = (
+                                strain_info.get('display_lineage') or
+                                strain_info.get('sovereign_lineage') or
+                                strain_info.get('canonical_lineage')
+                            )
+                            if preferred:
+                                lineage_val = str(preferred).strip().upper()
+                                self.logger.info(f"✅ Using database strain lineage fallback: '{lineage_val}' for strain '{product_strain}'")
+                    
+                    if not lineage_val:
+                        self.logger.debug(f"No lineage found in record or database")
+                except Exception as e:
+                    # Default fallback if database lookup fails
+                    lineage_val = ""
+                    self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
             
             # CRITICAL FIX: Ensure classic types always have lineage data
             if not lineage_val or lineage_val.strip() == "":
@@ -2440,97 +2330,18 @@ class TemplateProcessor:
                 self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
             
             # Set ProductVendor to actual vendor/supplier for classic types
-            # CRITICAL: Use vendor from record FIRST (it's already in the Excel column)
-            vendor_val = label_context.get('_vendor_from_record')
-            
-            # If _vendor_from_record wasn't set, try reading directly from record again
-            # This handles cases where vendor reading at the start might have failed
-            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
-                # Try ALL possible vendor field variations directly from record
-                vendor_fields = [
-                    'Vendor/Supplier*',
-                    'Vendor/Supplier',
-                    'Vendor',
-                    'ProductVendor',
-                    'vendor',
-                    'Vendor/Supplier *',  # Handle space variations
-                    'Vendor/Supplier* ',  # Handle trailing space
-                ]
-                
-                # Also check label_context (from dict copy) in case field name doesn't match exactly
-                for field in vendor_fields:
-                    val = label_context.get(field) or record.get(field)
-                    if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                        vendor_val = str(val).strip()
-                        self.logger.info(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}' (direct read)")
-                        # Store it for later use
-                        label_context['_vendor_from_record'] = vendor_val
-                        break
-                
-                # If still not found, check ALL vendor-related keys (case-insensitive)
-                if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
-                    vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                    for key in vendor_related_keys:
-                        val = record.get(key)
-                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                            vendor_val = str(val).strip()
-                            self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_val}' for '{product_name}' (case-insensitive match)")
-                            label_context['_vendor_from_record'] = vendor_val
-                            break
-            
-            # PRIORITY 2: Try database cache as fallback ONLY if record doesn't have it
-            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
-                try:
-                    cached_vendor = product_vendor_cache.get(product_name, "")
-                    if cached_vendor and str(cached_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                        vendor_val = cached_vendor
-                        self.logger.info(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
-                except Exception as e:
-                    self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-            
-            # If still no vendor, log all available fields for debugging
-            if not vendor_val or not str(vendor_val).strip():
-                available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                self.logger.warning(f"⚠️ INITIAL EXTRACTION: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-                # Log actual values from vendor fields for debugging
-                for field in vendor_fields:
-                    val = record.get(field)
-                    if val is not None:
-                        self.logger.warning(f"⚠️ INITIAL EXTRACTION: Field '{field}' has value: '{val}' (type: {type(val).__name__})")
-                self.logger.warning(f"⚠️ INITIAL EXTRACTION: Will try fallback logic later. All record keys: {list(record.keys())[:20]}...")  # First 20 keys for debugging
-            
-            # Handle NaN values and empty strings
-            if vendor_val is None or pd.isna(vendor_val) or str(vendor_val).lower() in ['nan', 'none', 'null', '']:
-                vendor_val = ''
-            
-            # CRITICAL: Check if ProductVendor was already set at the start (from _vendor_from_record)
-            # If so, preserve it - don't overwrite with empty
-            existing_vendor = label_context.get('ProductVendor', '')
-            if existing_vendor and str(existing_vendor).strip() and 'PRODUCTVENDOR_START' not in str(existing_vendor):
-                # ProductVendor was set at the start, keep it
-                self.logger.info(f"✅ Preserving ProductVendor set at start: '{existing_vendor}' for '{product_name}'")
-            elif vendor_val and str(vendor_val).strip():
+            # Get vendor from record, not from product_brand
+            vendor_val = record.get('Vendor') or record.get('Vendor/Supplier*') or record.get('ProductVendor', '')
+            if vendor_val and str(vendor_val).lower() != 'nan':
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 if self.template_type == 'vertical':
-                    label_context['ProductVendor'] = str(vendor_val).strip()
+                    label_context['ProductVendor'] = str(vendor_val)
                 else:
-                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val).strip()}PRODUCTVENDOR_END"
-                self.logger.info(f"✅ Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
+                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val)}PRODUCTVENDOR_END"
+                self.logger.debug(f"Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}'")
             else:
-                # CRITICAL: Even if vendor_val is empty, check _vendor_from_record one more time
-                # This catches cases where vendor reading at the start found it but it wasn't used above
-                final_vendor = label_context.get('_vendor_from_record', '')
-                if final_vendor and str(final_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                    if self.template_type == 'vertical':
-                        label_context['ProductVendor'] = str(final_vendor).strip()
-                    else:
-                        label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(final_vendor).strip()}PRODUCTVENDOR_END"
-                    self.logger.info(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
-                else:
-                    # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
-                    if not existing_vendor or not str(existing_vendor).strip():
-                        label_context['ProductVendor'] = ""
-                        self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
+                label_context['ProductVendor'] = ""
+                self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
             product_strain_value = record.get('ProductStrain') or record.get('Product Strain', '')
@@ -2801,15 +2612,26 @@ class TemplateProcessor:
                         lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
                     lineage_for_color = str(lineage_for_color_source).strip().upper()
                     
-                    # CRITICAL FIX: Use same logic as horizontal template - just set brand with markers, no LINEAGE_HINT token
-                    # Colors will be determined by apply_lineage_colors based on content (same as horizontal template)
-                    label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    if not lineage_for_color:
+                        # Fall back to CBD lineage when we have CBD signal, otherwise treat as MIXED (blue)
+                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
+                    
+                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+                    lineage_content = (
+                        f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    )
+                    
+                    label_context['Lineage'] = lineage_content
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = (
                         f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     )
+                    self.logger.debug(
+                        f"DOUBLE TEMPLATE LINEAGE COLOR: Brand '{final_brand_text}' -> lineage '{lineage_for_color}' "
+                        f"(product_type='{product_type}')"
+                    )
                     
-                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to brand '{final_brand_text}' for non-classic type (same as horizontal template)")
+                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' for double template (with markers)")
                 else:
                     # For other templates (horizontal, etc.), use marker-based formatting
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption
@@ -3133,103 +2955,18 @@ class TemplateProcessor:
             val = ' '.join(val.split())
             label_context['JointRatio'] = val
         
-        # Fast vendor handling - set ProductVendor if it's missing or empty (ONLY for classic types)
-        # This ensures vendor is populated even if earlier logic didn't set it or set it to empty
-        # Non-classic types should NOT have ProductVendor
-        product_type_check = (label_context.get('ProductType', '').lower() or 
-                             label_context.get('Product Type*', '').lower())
-        from src.core.constants import CLASSIC_TYPES
-        is_classic_type_for_vendor = product_type_check in [t.lower() for t in CLASSIC_TYPES]
-
-        # Initialize vendor_is_empty before conditional (CRITICAL: prevents UnboundLocalError)
-        vendor_is_empty = False
-
-        # Only process vendor for classic types
-        if is_classic_type_for_vendor:
-            current_vendor = label_context.get('ProductVendor', '')
+        # Fast vendor handling - only override if ProductVendor wasn't already set by our logic
+        # This preserves the ProductVendor logic for classic types
+        if 'ProductVendor' not in label_context:
+            product_type = (label_context.get('ProductType', '').lower() or 
+                           label_context.get('Product Type*', '').lower())
             
-            # Check if ProductVendor is missing or empty
-            if not current_vendor or not str(current_vendor).strip():
-                vendor_is_empty = True
-            else:
-                # Unwrap markers to check if actual content is empty
-                try:
-                    unwrapped = unwrap_marker(str(current_vendor), 'PRODUCTVENDOR')
-                    if not unwrapped or not unwrapped.strip():
-                        vendor_is_empty = True
-                except:
-                    # If unwrapping fails, check if it's just empty markers
-                    if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
-                        match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))
-                        if not match or not match.group(1).strip():
-                            vendor_is_empty = True
-                    elif str(current_vendor).strip() == '':
-                        vendor_is_empty = True
-            
-        if vendor_is_empty:
-            # PRIORITY 1: Use vendor we already read from record at the start
-            enriched_vendor = label_context.get('_vendor_from_record', '')
-            if enriched_vendor:
-                self.logger.debug(f"✅ Using vendor from record: '{enriched_vendor}' for '{product_name}'")
-            
-            # PRIORITY 2: Try to enrich vendor from pre-loaded cache if not in record
-            if not enriched_vendor:
-                try:
-                    # Use cached vendor data (loaded in batch before loop)
-                    enriched_vendor = product_vendor_cache.get(product_name, "")
-                    if enriched_vendor:
-                        self.logger.info(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
-                except Exception as e:
-                    self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-            
-            # PRIORITY 3: Fallback to record fields directly if still not found
-            if not enriched_vendor:
-                    product_type = (label_context.get('ProductType', '').lower() or 
-                                   label_context.get('Product Type*', '').lower())
-                    
-                    # CRITICAL: Check all possible vendor field names with comprehensive fallback
-                    product_vendor = None
-                    vendor_fields = [
-                        'Vendor/Supplier*',
-                        'Vendor/Supplier',
-                        'Vendor',
-                        'ProductVendor',
-                        'vendor',
-                        'Vendor/Supplier *',  # Handle space variations
-                        'Vendor/Supplier* ',  # Handle trailing space
-                    ]
-                    
-                    # Try each field name
-                    for field in vendor_fields:
-                        val = record.get(field)
-                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                            product_vendor = val
-                            self.logger.debug(f"✅ FALLBACK: Found vendor in field '{field}': '{product_vendor}' for '{product_name}'")
-                            break
-                    
-                    # If still no vendor, log all available fields for debugging
-                    if not product_vendor or not str(product_vendor).strip():
-                        available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                        self.logger.warning(f"⚠️ FALLBACK: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-                    
-                    # Handle NaN values in vendor data
-                    if product_vendor is None or pd.isna(product_vendor) or str(product_vendor).lower() in ['nan', 'none', 'null', '']:
-                        product_vendor = ''
-                    enriched_vendor = product_vendor
-
-                    # Set vendor if we found one
-                    if enriched_vendor and str(enriched_vendor).strip():
-                        # For vertical template, don't wrap with markers since it uses simple placeholders
-                        if self.template_type == 'vertical':
-                            label_context['ProductVendor'] = str(enriched_vendor).strip()
-                        else:
-                            label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
-                        self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}' (product_type: '{product_type}')")
-                    else:
-                        # No vendor found anywhere, set to empty
-                        label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
-                        self.logger.warning(f"⚠️ VENDOR MISSING: No vendor data found for '{product_name}'")
-        # End of classic type vendor handling - non-classic types already have ProductVendor set to empty above
+            # Only set vendor from record if ProductVendor wasn't already set by our logic
+            product_vendor = record.get('Vendor') or record.get('Vendor/Supplier*', '') or record.get('ProductVendor', '')
+            # Handle NaN values in vendor data
+            if pd.isna(product_vendor) or str(product_vendor).lower() == 'nan':
+                product_vendor = ''
+            label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
 
         # Generate QR code - special handling for preroll template
         product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
@@ -3352,29 +3089,6 @@ class TemplateProcessor:
             # Clean the product name or URL
             clean_name = str(product_name).strip()
             
-            # PERFORMANCE: Cache QR codes to avoid regenerating same codes
-            if not hasattr(TemplateProcessor, '_qr_code_cache'):
-                TemplateProcessor._qr_code_cache = {}
-            
-            cache_key = f"{clean_name}_{self.template_type}_{getattr(self, 'scale_factor', 1.0)}"
-            if cache_key in TemplateProcessor._qr_code_cache:
-                cached_qr = TemplateProcessor._qr_code_cache[cache_key]
-                # Create a new InlineImage from cached data
-                img_buffer = BytesIO(cached_qr['image_data'])
-                img_buffer.seek(0)
-                qr_size = cached_qr['size']
-                if hasattr(doc, 'docx'):
-                    qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
-                else:
-                    qr_inline_image = InlineImage(None, img_buffer, width=qr_size)
-                    qr_inline_image._doc = doc
-                img_buffer.seek(0)
-                qr_inline_image._raw_image_data = img_buffer.read()
-                qr_inline_image._raw_image_width = qr_size
-                qr_inline_image._product_name = clean_name
-                self.logger.debug(f"⚡ QR CACHE HIT: Using cached QR code for '{clean_name[:50]}'")
-                return qr_inline_image
-            
             # For preroll URLs, ensure it's an absolute URL if possible, without hardcoding any domain.
             if is_url and not clean_name.startswith('http'):
                 try:
@@ -3446,18 +3160,6 @@ class TemplateProcessor:
             qr_inline_image._raw_image_width = qr_size
             qr_inline_image._product_name = clean_name  # Store product name for reference
             
-            # PERFORMANCE: Cache QR code for reuse
-            img_buffer.seek(0)
-            TemplateProcessor._qr_code_cache[cache_key] = {
-                'image_data': img_buffer.read(),
-                'size': qr_size
-            }
-            # Limit cache size to prevent memory issues
-            if len(TemplateProcessor._qr_code_cache) > 1000:
-                # Remove oldest entries (simple FIFO)
-                oldest_key = next(iter(TemplateProcessor._qr_code_cache))
-                del TemplateProcessor._qr_code_cache[oldest_key]
-            
             self.logger.debug(f"Generated QR code for product: '{clean_name}' with font size: {font_size_pt.pt}pt, converted to {qr_size_mm:.1f}mm")
             return qr_inline_image
             
@@ -3504,24 +3206,11 @@ class TemplateProcessor:
         """Post-process the document after template rendering."""
         # Skip unnecessary processing for inventory templates
         if self.template_type == 'inventory':
-            self.logger.debug("Skipping post-processing for inventory template - just filling placeholders")
-            return doc
-        
-        # PERFORMANCE OPTIMIZATION: Skip expensive processing for large documents
-        num_tables = len(doc.tables)
-        if num_tables > 10:  # More than 10 pages - skip most post-processing
-            self.logger.warning(f"PERFORMANCE: Skipping expensive post-processing for large document with {num_tables} tables")
-            # Only do essential marker cleanup
-            try:
-                self._final_marker_cleanup(doc)
-            except Exception:
-                pass
+            self.logger.info("Skipping post-processing for inventory template - just filling placeholders")
             return doc
         
         # CRITICAL FIX: Preserve apostrophes and following letters before any processing
-        # PERFORMANCE: Skip for medium/large documents
-        if num_tables <= 5:
-            self._preserve_apostrophes_in_document(doc)
+        self._preserve_apostrophes_in_document(doc)
         """
         Ultra-optimized post-processing for maximum performance.
         """
@@ -3550,9 +3239,14 @@ class TemplateProcessor:
                 # The dynamic template creation already handles empty cells properly
                 self.logger.info("Skipping blank cell clearing for dynamic mini template")
                 
-                # OPTIMIZATION: Skip expensive dimension enforcement here - will be done once at the end
-                # This avoids processing every cell/paragraph/run twice
-                self.logger.info("Skipping early dimension enforcement for mini template (will be done at end)")
+                # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells
+                for table in doc.tables:
+                    enforce_fixed_cell_dimensions(table, 'mini')
+                    self.logger.info("Applied fixed cell dimensions to mini template table")
+                
+                # CRITICAL: Enhanced table expansion prevention for mini template
+                doc = prevent_table_expansion_enhanced(doc, 'mini')
+                self.logger.info("Applied enhanced table expansion prevention to mini template")
                 
                 # Apply mini template specific font sizing
                 self._apply_mini_template_font_sizing(doc)
@@ -3577,9 +3271,14 @@ class TemplateProcessor:
                 # The dynamic template creation already handles empty cells properly
                 self.logger.info("Skipping blank cell clearing for dynamic preroll template")
                 
-                # OPTIMIZATION: Skip expensive dimension enforcement here - will be done once at the end
-                # This avoids processing every cell/paragraph/run twice
-                self.logger.info("Skipping early dimension enforcement for preroll template (will be done at end)")
+                # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells (same as mini)
+                for table in doc.tables:
+                    enforce_fixed_cell_dimensions(table, 'preroll')
+                    self.logger.info("Applied fixed cell dimensions to preroll template table")
+                
+                # CRITICAL: Enhanced table expansion prevention for preroll template (same as mini)
+                doc = prevent_table_expansion_enhanced(doc, 'preroll')
+                self.logger.info("Applied enhanced table expansion prevention to preroll template")
                 
                 # Apply preroll template specific font sizing (uses preroll config, not mini)
                 self._apply_mini_template_font_sizing(doc)  # This method now uses self.template_type
@@ -3609,87 +3308,75 @@ class TemplateProcessor:
             self.logger.warning(f"Font sizing failed: {e}")
 
         # Fast BR marker conversion - only process if needed
-        # PERFORMANCE: Skip for large documents
-        if num_tables <= 15:
-            try:
-                br_found = False
-                for table in doc.tables:
-                    # Validate table structure before processing
-                    if not self._validate_and_repair_table_structure(table):
-                        self.logger.warning(f"Skipping table with invalid structure during BR marker conversion")
-                        continue
-                    
-                    for row in table.rows:
-                        for cell in row.cells:
-                            for paragraph in cell.paragraphs:
-                                if '|BR|' in paragraph.text:
-                                    self._convert_br_markers_to_line_breaks(paragraph)
-                                    br_found = True
+        try:
+            br_found = False
+            for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during BR marker conversion")
+                    continue
                 
-                # Only process paragraphs outside tables if BR markers were found
-                if br_found:
-                    for paragraph in doc.paragraphs:
-                        if '|BR|' in paragraph.text:
-                            self._convert_br_markers_to_line_breaks(paragraph)
-            except Exception as e:
-                self.logger.warning(f"BR marker conversion failed: {e}")
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            if '|BR|' in paragraph.text:
+                                self._convert_br_markers_to_line_breaks(paragraph)
+                                br_found = True
+            
+            # Only process paragraphs outside tables if BR markers were found
+            if br_found:
+                for paragraph in doc.paragraphs:
+                    if '|BR|' in paragraph.text:
+                        self._convert_br_markers_to_line_breaks(paragraph)
+        except Exception as e:
+            self.logger.warning(f"BR marker conversion failed: {e}")
         
         # Fast ratio spacing fix
-        # PERFORMANCE: Skip for large documents
-        if num_tables <= 15:
-            try:
-                self._fix_ratio_paragraph_spacing(doc)
-            except Exception as e:
-                self.logger.warning(f"Ratio spacing failed: {e}")
+        try:
+            self._fix_ratio_paragraph_spacing(doc)
+        except Exception as e:
+            self.logger.warning(f"Ratio spacing failed: {e}")
 
         # Ensure consistent spacing above lineage/brand section for equal margins
-        # PERFORMANCE: Skip for large documents
-        if num_tables <= 15:
-            try:
-                self._ensure_consistent_lineage_spacing(doc)
-            except Exception as e:
-                self.logger.warning(f"Lineage spacing consistency failed: {e}")
+        try:
+            self._ensure_consistent_lineage_spacing(doc)
+        except Exception as e:
+            self.logger.warning(f"Lineage spacing consistency failed: {e}")
 
         # Add consistent spacing above main content sections for better visual balance
-        # PERFORMANCE: Skip for large documents
-        if num_tables <= 15:
-            try:
-                self._add_consistent_content_spacing(doc)
-            except Exception as e:
-                self.logger.warning(f"Content spacing consistency failed: {e}")
+        try:
+            self._add_consistent_content_spacing(doc)
+        except Exception as e:
+            self.logger.warning(f"Content spacing consistency failed: {e}")
 
         # Arial Bold enforcement moved to the very end to prevent override
 
         # Fast DOH image centering
-        # PERFORMANCE: Skip for large documents
-        if num_tables <= 15:
-            try:
-                for table in doc.tables:
-                    # Validate table structure before processing
-                    if not self._validate_and_repair_table_structure(table):
-                        self.logger.warning(f"Skipping table with invalid structure during DOH centering")
-                        continue
-                    
-                    for row in table.rows:
-                        for cell in row.cells:
-                            # Fast check for image-only cells
-                            if len(cell.paragraphs) > 0 and all(len(paragraph.runs) == 1 and not paragraph.text.strip() for paragraph in cell.paragraphs):
-                                for paragraph in cell.paragraphs:
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            # Fast inner table centering
-                            for inner_table in cell.tables:
-                                inner_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                            # Explicit DOH image centering - check for InlineImage objects
+        try:
+            for table in doc.tables:
+                # Validate table structure before processing
+                if not self._validate_and_repair_table_structure(table):
+                    self.logger.warning(f"Skipping table with invalid structure during DOH centering")
+                    continue
+                
+                for row in table.rows:
+                    for cell in row.cells:
+                        # Fast check for image-only cells
+                        if len(cell.paragraphs) > 0 and all(len(paragraph.runs) == 1 and not paragraph.text.strip() for paragraph in cell.paragraphs):
                             for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    # Check if this run contains an InlineImage (DOH image)
-                                    if hasattr(run, '_element') and run._element.find(qn('w:drawing')) is not None:
-                                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                        # Also center the cell content
-                                        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-            except Exception as e:
-                self.logger.warning(f"Error during DOH centering: {e}")
-            
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        # Fast inner table centering
+                        for inner_table in cell.tables:
+                            inner_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                        # Explicit DOH image centering - check for InlineImage objects
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                # Check if this run contains an InlineImage (DOH image)
+                                if hasattr(run, '_element') and run._element.find(qn('w:drawing')) is not None:
+                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    # Also center the cell content
+                                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                                    
             # Additional comprehensive DOH centering pass
             self._ensure_doh_image_centering(doc)
             
@@ -3708,9 +3395,19 @@ class TemplateProcessor:
             # PREROLL TEMPLATE: Center QR codes
             if self.template_type == 'preroll':
                 self._ensure_preroll_qr_centering(doc)
+        except Exception as e:
+            self.logger.warning(f"DOH centering failed: {e}")
         
-        # OPTIMIZATION: Only call prevent_table_expansion_enhanced once - it already does everything
-        # enforce_fixed_cell_dimensions does, plus more, so we don't need both
+        # CRITICAL: Final cell dimension enforcement to prevent any expansion
+        try:
+            for table in doc.tables:
+                enforce_fixed_cell_dimensions(table, self.template_type)
+                self.logger.info(f"Applied final fixed cell dimensions to {self.template_type} template table")
+        except Exception as e:
+            self.logger.warning(f"Final cell dimension enforcement failed: {e}")
+
+        
+        # CRITICAL: Enhanced table expansion prevention - additional layer of protection
         try:
             doc = prevent_table_expansion_enhanced(doc, self.template_type)
             self.logger.info(f"Applied enhanced table expansion prevention to {self.template_type} template")
@@ -3741,19 +3438,14 @@ class TemplateProcessor:
             self.logger.warning(f"DescAndWeight bold enforcement failed: {e}")
         
         # FINAL STEP: Enforce bold formatting on ALL text - this must be the very last operation
-        # PERFORMANCE: Skip for very large documents to save time
-        num_tables = len(doc.tables)
-        if num_tables <= 25:  # Only do for documents with <= 25 pages
-            try:
-                from src.core.generation.docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
-                enforce_arial_bold_all_text(doc)
-                enforce_ratio_formatting(doc)
-                enforce_thc_cbd_bold_formatting(doc)
-                self.logger.debug("✅ FINAL BOLD ENFORCEMENT: Applied bold formatting to all text")
-            except Exception as e:
-                self.logger.warning(f"Final bold enforcement failed: {e}")
-        else:
-            self.logger.warning(f"PERFORMANCE: Skipping font enforcement for large document with {num_tables} tables")
+        try:
+            from src.core.generation.docx_formatting import enforce_arial_bold_all_text, enforce_ratio_formatting, enforce_thc_cbd_bold_formatting
+            enforce_arial_bold_all_text(doc)
+            enforce_ratio_formatting(doc)
+            enforce_thc_cbd_bold_formatting(doc)
+            self.logger.info("✅ FINAL BOLD ENFORCEMENT: Applied bold formatting to all text")
+        except Exception as e:
+            self.logger.warning(f"Final bold enforcement failed: {e}")
             
         return doc
 
@@ -4245,10 +3937,6 @@ class TemplateProcessor:
                 """Clean text by removing all marker patterns while preserving lineage content."""
                 original_text = text
                 cleaned = text
-                
-                # CRITICAL FIX: Remove LINEAGE_HINT tokens first (used for color coding, not display)
-                # These tokens appear before brand markers for non-classic types in double templates
-                cleaned = re.sub(r'__LINEAGE_HINT_[A-Z\/\s]+__', '', cleaned, flags=re.IGNORECASE)
                 
                 # CRITICAL FIX: Handle lineage markers specially to preserve content
                 # Extract lineage content before removing markers
@@ -5105,32 +4793,19 @@ class TemplateProcessor:
                         from src.core.generation.unified_font_sizing import get_font_size
                         vendor_font_size = get_font_size(marker_data['content'], 'vendor', self.template_type, self.scale_factor)
                         set_run_font_size(run, vendor_font_size)
-                        # Set vendor text to italic and gray color
+                        # Set vendor text to italic and light gray color
                         run.font.italic = True
                         from docx.shared import RGBColor
-                        # Set gray color at both run level and XML level for consistency
-                        run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+                        run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
                         run.font.color.theme_color = None  # Clear any theme color
-                        # Also set color at XML level to ensure it sticks
-                        rPr = run._element.get_or_add_rPr()
-                        color = rPr.find(qn('w:color'))
-                        if color is None:
-                            color = OxmlElement('w:color')
-                            rPr.append(color)
-                        color.set(qn('w:val'), '808080')  # Gray color in hex without #
                     continue
                 elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                     product_type = self.label_context['ProductType']
                 else:
                     product_type = None
                 
-                # Special handling for ProductStrain marker - use unified font sizing system and left alignment
+                # Special handling for ProductStrain marker - use unified font sizing system
                 if marker_name in ('PRODUCTSTRAIN', 'STRAIN'):
-                    # Left-align PRODUCTSTRAIN markers
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                    # Ensure consistent spacing above strain section for equal margins
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
                     strain_content = str(marker_data.get('content') or '').strip()
                     for run in paragraph.runs:
                         run_text = run.text or ''
@@ -6029,6 +5704,85 @@ class TemplateProcessor:
                             
         except Exception as e:
             self.logger.warning(f"Error removing unmerged placeholders: {e}")
+
+    def _hide_productvendor_for_nonclassic_types(self, doc, chunk):
+        """
+        Hide ProductVendor content for non-classic product types.
+        For classic types (flower, pre-roll, concentrate, etc.), ProductVendor is shown.
+        For non-classic types (edibles, tinctures, gummies, etc.), ProductVendor is hidden by removing the paragraph containing it.
+        """
+        try:
+            from src.core.generation.unified_font_sizing import CLASSIC_TYPES
+
+            # Build a map of label number to product type
+            label_product_types = {}
+            for i, record in enumerate(chunk):
+                product_type = (record.get('ProductType', '').lower() or
+                               record.get('Product Type*', '').lower())
+                label_num = i + 1
+                label_product_types[label_num] = product_type
+                if product_type not in CLASSIC_TYPES:
+                    self.logger.info(f"🔒 HIDE PRODUCTVENDOR: Label{label_num} is non-classic type '{product_type}' - will hide ProductVendor")
+
+            # Process each table in the document
+            for table in doc.tables:
+                cell_count = 0
+                for row in table.rows:
+                    for cell in row.cells:
+                        cell_count += 1
+
+                        # Determine which label this cell represents
+                        if cell_count > len(chunk):
+                            continue  # Skip empty cells
+
+                        product_type = label_product_types.get(cell_count, '')
+                        is_classic = product_type in CLASSIC_TYPES
+
+                        # For non-classic types, remove ProductVendor content
+                        if not is_classic and product_type:
+                            paragraphs_removed = self._remove_productvendor_from_cell(cell, cell_count)
+                            if paragraphs_removed > 0:
+                                self.logger.info(f"✅ HIDDEN: Removed {paragraphs_removed} ProductVendor paragraph(s) from Label{cell_count} ({product_type})")
+
+        except Exception as e:
+            self.logger.warning(f"Error hiding ProductVendor for non-classic types: {e}")
+
+    def _remove_productvendor_from_cell(self, cell, label_num):
+        """
+        Remove paragraphs containing ProductVendor from a cell for non-classic types.
+        Returns the number of paragraphs removed.
+        """
+        try:
+            paragraphs_removed = 0
+
+            # Look for paragraphs that contain the Lineage text followed by empty content
+            # (which would be where ProductVendor was supposed to go)
+            # In the vertical template, Lineage and ProductVendor are typically on the same line
+
+            for paragraph in list(cell.paragraphs):  # Create a copy to iterate safely
+                paragraph_text = paragraph.text
+
+                # Check if this paragraph previously had ProductVendor (now empty)
+                # Look for patterns like "Lineage     " where there's trailing whitespace
+                # or a paragraph that's completely empty after Lineage
+
+                # For vertical templates specifically, check if paragraph has Lineage and extra spacing
+                if 'LINEAGE_END' in paragraph_text or 'PRODUCTVENDOR' in paragraph_text:
+                    # This paragraph has marker remnants - check if we should clean it
+                    # Since ProductVendor was already set to empty, we just need to clean up spacing
+
+                    # Remove runs that are empty or contain only ProductVendor markers
+                    for run in list(paragraph.runs):
+                        if run.text and ('PRODUCTVENDOR' in run.text or
+                                        (run.text.strip() == '' and 'LINEAGE_END' not in run.text)):
+                            # Remove this run
+                            run.text = ''
+
+            return paragraphs_removed
+
+        except Exception as e:
+            self.logger.warning(f"Error removing ProductVendor from cell {label_num}: {e}")
+            return 0
 
     def _ensure_table_grids_exist(self, doc):
         """Ensure all tables have proper tblGrid elements."""
@@ -7262,8 +7016,8 @@ class TemplateProcessor:
                 return
             
             # Original single-line processing
-            # Set paragraph to right alignment for proper vendor right-alignment
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            # Set paragraph to left alignment so lineage stays on left and vendor goes to right via tab stop
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
             
             # Add lineage with larger font size (left-aligned)
             if lineage_content and lineage_content.strip():
@@ -7300,26 +7054,21 @@ class TemplateProcessor:
             if vendor_content and vendor_content.strip():
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
+                vendor_run.font.bold = True
+                vendor_run.font.italic = True  # Make vendor text italic
+                
+                # Set vendor color to light gray (#CCCCCC)
+                from docx.shared import RGBColor
+                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                
+                # Ensure the color is applied by setting it explicitly
+                vendor_run.font.color.theme_color = None  # Clear any theme color
+                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
-
-                # CRITICAL: Set vendor styling AFTER set_run_font_size to prevent it from being overridden
-                vendor_run.font.bold = True
-                vendor_run.font.italic = True  # Make vendor text italic
-
-                # Set vendor color to gray (#808080) at both run level and XML level
-                from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-                vendor_run.font.color.theme_color = None  # Clear any theme color
-                # Also set color at XML level to ensure it sticks
-                rPr = vendor_run._element.get_or_add_rPr()
-                color = rPr.find(qn('w:color'))
-                if color is None:
-                    color = OxmlElement('w:color')
-                    rPr.append(color)
-                color.set(qn('w:val'), '808080')  # Gray color in hex without #
             
             # Set tab stops to position vendor on the right (only if vendor content exists)
             if vendor_content:
@@ -7427,26 +7176,21 @@ class TemplateProcessor:
                 
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
+                vendor_run.font.bold = True
+                vendor_run.font.italic = True  # Make vendor text italic
+                
+                # Set vendor color to light gray (#CCCCCC)
+                from docx.shared import RGBColor
+                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                
+                # Ensure the color is applied by setting it explicitly
+                vendor_run.font.color.theme_color = None  # Clear any theme color
+                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
-
-                # CRITICAL: Set vendor styling AFTER set_run_font_size to prevent it from being overridden
-                vendor_run.font.bold = True
-                vendor_run.font.italic = True  # Make vendor text italic
-
-                # Set vendor color to gray (#808080) at both run level and XML level
-                from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-                vendor_run.font.color.theme_color = None  # Clear any theme color
-                # Also set color at XML level to ensure it sticks
-                rPr = vendor_run._element.get_or_add_rPr()
-                color = rPr.find(qn('w:color'))
-                if color is None:
-                    color = OxmlElement('w:color')
-                    rPr.append(color)
-                color.set(qn('w:val'), '808080')  # Gray color in hex without #
                 
                 # Set tab stops to position vendor on the right
                 paragraph.paragraph_format.tab_stops.clear_all()
@@ -7516,7 +7260,7 @@ class TemplateProcessor:
                 # Extract vendor content
                 vendor_start_idx = full_text.find(vendor_start) + len(vendor_start)
                 vendor_end_idx = full_text.find(vendor_end)
-                vendor_content = full_text[vendor_start_idx:vendor_end_idx]
+                vendor_content = full_text[vendor_start_idx:vendor_end_idx].strip()
                 
                 # CRITICAL FIX: For classic types, don't combine lineage and vendor
                 # The lineage should only contain actual lineage content (SATIVA, INDICA, HYBRID)
