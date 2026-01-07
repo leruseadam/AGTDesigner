@@ -2326,20 +2326,28 @@ def get_session_excel_processor():
                     logging.error(traceback.format_exc())
 
             if session_file_path and os.path.exists(session_file_path):
-                # CRITICAL: Load the session file into the new processor instance
-                logging.info(f"📂 Loading session file: {session_file_path}")
-                try:
-                    success = g.excel_processor.load_file(session_file_path)
-                    if success and g.excel_processor.df is not None and not g.excel_processor.df.empty:
-                        row_count = len(g.excel_processor.df)
-                        logging.info(f"✅ Loaded session file: {session_file_path} ({row_count} rows)")
-                        g.excel_processor._last_loaded_file = session_file_path
-                    else:
-                        logging.warning(f"⚠️ Failed to load session file or file is empty: {session_file_path}")
-                except Exception as load_err:
-                    logging.error(f"❌ Error loading session file: {load_err}")
-                    import traceback
-                    logging.error(traceback.format_exc())
+                # CRITICAL PERFORMANCE: Skip file load if tags already in request
+                skip_load = session.get('_skip_file_load_for_generation', False)
+                if skip_load:
+                    logging.info(f"⚡ SKIPPING file load - tags provided in request")
+                    # Just mark as loaded without actually loading
+                    g.excel_processor._last_loaded_file = session_file_path
+                    g.excel_processor._skip_processing_pipeline = True
+                else:
+                    # CRITICAL: Load the session file into the new processor instance
+                    logging.info(f"📂 Loading session file: {session_file_path}")
+                    try:
+                        success = g.excel_processor.load_file(session_file_path)
+                        if success and g.excel_processor.df is not None and not g.excel_processor.df.empty:
+                            row_count = len(g.excel_processor.df)
+                            logging.info(f"✅ Loaded session file: {session_file_path} ({row_count} rows)")
+                            g.excel_processor._last_loaded_file = session_file_path
+                        else:
+                            logging.warning(f"⚠️ Failed to load session file or file is empty: {session_file_path}")
+                    except Exception as load_err:
+                        logging.error(f"❌ Error loading session file: {load_err}")
+                        import traceback
+                        logging.error(traceback.format_exc())
             elif session_file_path:
                 logging.warning(f"Session uploaded file does not exist: {session_file_path}")
                 # CRITICAL FIX: Don't clear session data immediately - try persistent file first
@@ -7363,6 +7371,14 @@ def generate_labels():
             logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
         
+        # CRITICAL PERFORMANCE FIX: Set flag BEFORE getting excel_processor
+        # This prevents get_excel_processor() from loading the file unnecessarily
+        if selected_tags_from_request and len(selected_tags_from_request) > 0:
+            logging.info(f"⚡ PERFORMANCE: {len(selected_tags_from_request)} tags in request - will skip file processing")
+            session['_skip_file_load_for_generation'] = True
+        else:
+            session['_skip_file_load_for_generation'] = False
+        
         # TRACE: Check store before getting excel_processor
         logging.debug(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
         
@@ -7373,6 +7389,10 @@ def generate_labels():
         logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
         excel_processor.enable_product_db_integration(True)
+        
+        # Clear the skip flag now that get_excel_processor() has been called
+        if '_skip_file_load_for_generation' in session:
+            del session['_skip_file_load_for_generation']
 
         # CRITICAL FIX: JSON tags work exactly like Excel tags - no special preservation needed
         # They're already in the DataFrame and will be handled the same way as Excel tags
@@ -7380,16 +7400,13 @@ def generate_labels():
         # TRACE: Check store before file loading
         logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
         
-        # PERFORMANCE FIX: If selected_tags are provided in request, skip file loading entirely
-        # Tags contain all data needed for generation - no need for 24-second file read
+        # PERFORMANCE FIX: If selected_tags are provided in request, create DataFrame directly
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
-            logging.info(f"⚡ PERFORMANCE: {len(selected_tags_from_request)} tags provided in request - SKIPPING file load (saves ~24s on PythonAnywhere)")
+            logging.info(f"⚡ PERFORMANCE: Creating DataFrame from {len(selected_tags_from_request)} tags in request")
             # Create DataFrame directly from provided tags
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
             excel_processor._last_loaded_file = file_path  # Mark as loaded
-            excel_processor._skip_processing_pipeline = True  # Skip normalization/lineage processing
-            logging.info(f"⚡ PERFORMANCE: Set _skip_processing_pipeline flag to prevent processing all {len(selected_tags_from_request)} tags")
             needs_file_load = False
         else:
             # No tags provided - need to load file
