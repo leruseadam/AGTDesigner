@@ -7388,10 +7388,13 @@ def generate_labels():
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
             excel_processor._last_loaded_file = file_path  # Mark as loaded
+            excel_processor._skip_processing_pipeline = True  # Skip normalization/lineage processing
+            logging.info(f"⚡ PERFORMANCE: Set _skip_processing_pipeline flag to prevent processing all {len(selected_tags_from_request)} tags")
             needs_file_load = False
         else:
             # No tags provided - need to load file
             logging.info("📂 No tags in request - will load file")
+            excel_processor._skip_processing_pipeline = False  # Normal processing
             needs_file_load = True
         
         # PERFORMANCE FIX: Check if processor already has the file loaded before reloading
@@ -7451,8 +7454,12 @@ def generate_labels():
         has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
         has_database = False
         
+        # PERFORMANCE FIX: Skip default file loading if we already have tags from request
+        # Tags are already loaded and normalized - no need to load entire file
+        skip_default_file_load = getattr(excel_processor, '_skip_processing_pipeline', False)
+        
         # If no Excel data, try to load the default inventory file
-        if not has_excel_data:
+        if not has_excel_data and not skip_default_file_load:
             try:
                 # Try to load a store-specific default file if available
                 store_name = get_current_store_name()

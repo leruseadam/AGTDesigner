@@ -2070,6 +2070,13 @@ class ExcelProcessor:
             self.df.reset_index(drop=True, inplace=True)
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
             
+            # PERFORMANCE OPTIMIZATION: Skip processing pipeline if tags already processed
+            # When generating labels with pre-selected tags, data is already normalized
+            if getattr(self, '_skip_processing_pipeline', False):
+                self.logger.info(f"⚡ PERFORMANCE: Skipping processing pipeline - data already normalized ({len(self.df)} tags)")
+                self._on_dataset_updated(file_path, file_mtime)
+                return True
+            
             # 2) Trim product names
             if "Product Name*" in self.df.columns:
                 self.df["Product Name*"] = self.df["Product Name*"].str.lstrip()
