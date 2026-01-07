@@ -7737,8 +7737,11 @@ def generate_labels():
                 store_name = get_current_store_name() or 'AGT_Bothell'
                 product_db = get_product_database(store_name)
                 if product_db:
-                                    # PERFORMANCE: Skip DOH check logging to improve speed
-                                    pass
+                    # PERFORMANCE: Skip DOH check logging to improve speed
+                    # Check if database is empty
+                    try:
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
                         cursor.execute("SELECT COUNT(*) FROM products")
                         db_count = cursor.fetchone()[0]
                         logging.info(f"Database has {db_count} products")
@@ -10978,26 +10981,15 @@ def get_available_tags():
             if has_excel_data and len(all_tags) > 0:
                 logging.info(f"⚡ Excel data exists ({len(all_tags)} tags) - SKIPPING database merge to prevent wrong data")
             else:
-                logging.info(f"📦 No Excel data - checking if database fallback is appropriate")
-                
-                # CRITICAL: Don't load database tags if Excel file exists in session
-                session_file_path = session.get('file_path', '')
-                has_excel_file = session_file_path and os.path.exists(session_file_path)
-                
-                if has_excel_file:
-                    logging.warning("⚠️ DATABASE FALLBACK BLOCKED: Excel file exists in session, not loading all database tags")
-                    logging.warning(f"   Excel file: {session_file_path}")
-                    # Return empty - frontend should wait for Excel processing to complete
-                    return jsonify({
-                        'tags': [],
-                        'total_count': 0,
-                        'source': 'excel-processing',
-                        'message': 'Excel file is being processed. Tags will load momentarily.'
-                    }), 202
-                
-                # Only proceed with database fallback if truly no Excel file
-                logging.info("✅ No Excel file found - proceeding with database fallback")
-                try:
+                logging.info(f"📦 No Excel data - database fallback disabled")
+                # DATABASE FALLBACK DISABLED: Return empty instead of loading entire database
+                logging.warning("⚠️ DATABASE FALLBACK DISABLED: Only showing tags from Excel files")
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'no-excel-no-fallback',
+                    'message': 'No Excel file uploaded. Please upload an Excel file to see products.'
+                }), 200
                     store_name = get_current_store_name()
                     product_db = get_product_database(store_name)
                     logging.info(f"Got product database: {product_db}")
@@ -11745,74 +11737,14 @@ def get_available_tags():
                 'message': 'Served cached tags while recovering from an error.'
             })
         
-        # EMERGENCY FALLBACK: Try database directly (ONLY if no Excel file exists)
-        try:
-            # CRITICAL: Don't load database tags if Excel file exists
-            session_file_path = session.get('file_path', '')
-            has_excel_file = session_file_path and os.path.exists(session_file_path)
-            
-            if has_excel_file:
-                logging.warning("⚠️ EMERGENCY FALLBACK BLOCKED: Excel file exists, not loading database tags")
-                return jsonify({'error': 'Failed to load tags from Excel file', 'tags': [], 'total_count': 0}), 500
-            
-            store_name = get_current_store_name()
-            product_db = get_product_database(store_name)
-            if product_db:
-                logging.info("🔄 EMERGENCY: Attempting direct database query after error (NO EXCEL FILE)...")
-                database_tags = product_db.get_all_products()
-                if database_tags and len(database_tags) > 0:
-                    all_tags = []
-                    for db_tag in database_tags[:5000]:  # Limit for emergency
-                        try:
-                            processed_db_tag = process_database_product_for_api(db_tag)
-                            all_tags.append(processed_db_tag)
-                        except:
-                            all_tags.append(db_tag)
-                    logging.info(f"✅ EMERGENCY FALLBACK: Returning {len(all_tags)} tags from database")
-                    resp = jsonify({
-                        'tags': all_tags,
-                        'total_count': len(all_tags),
-                        'source': 'error-fallback',
-                        'warning': f'Primary method failed, using database fallback: {str(e)}'
-                    })
-                    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-                    resp.headers['Pragma'] = 'no-cache'
-                    return resp
-        except Exception as fallback_error:
-            logging.error(f"❌ Emergency fallback also failed: {fallback_error}")
-        
-        # Try to return a basic fallback response to prevent total failure
-        try:
-            excel_processor = get_excel_processor()
-            if excel_processor and excel_processor.df is not None and not excel_processor.df.empty:
-                basic_tags = excel_processor.get_available_tags()
-                # Ensure lineage fields exist so UI falls back gracefully
-                try:
-                    for tag in basic_tags:
-                        lin = str(tag.get('Lineage', tag.get('lineage', ''))).strip().upper()
-                        if lin:
-                            tag['currentLineage'] = tag.get('currentLineage') or lin
-                            tag['canonical_lineage'] = tag.get('canonical_lineage') or lin
-                except Exception:
-                    pass
-                logging.info(f"🔄 Fallback: returning {len(basic_tags)} tags from Excel only")
-                return jsonify({
-                    'tags': basic_tags,
-                    'total_count': len(basic_tags),
-                    'source': 'fallback'
-                })
-        except Exception as fallback_error:
-            logging.error(f"❌ Fallback also failed: {fallback_error}")
-        
-        # Last resort: Return empty tags array instead of 500 error
-        logging.warning(f"⚠️  Returning empty tags array due to errors. Original error: {str(e)}")
+        # EMERGENCY FALLBACK DISABLED: Never load database tags
+        logging.warning("⚠️ EMERGENCY FALLBACK DISABLED: Not loading database tags")
         return jsonify({
             'tags': [],
             'total_count': 0,
-            'source': 'error',
-            'error': str(e),
-            'message': 'Failed to load tags. Please try again or upload an Excel file.'
-        }), 200  # Return 200 with empty array instead of 500
+            'source': 'no-fallback',
+            'error': 'Failed to load Excel tags. Please re-upload your Excel file.'
+        }), 500
 
 @app.route('/api/selected-tags', methods=['GET'])
 def get_selected_tags():
@@ -13238,37 +13170,16 @@ def get_web_available_tags():
             except Exception as e:
                 logging.warning(f"Excel processor error: {e}")
         
-        # If we have tags from Excel, use those and skip heavy database queries
+        # DATABASE FALLBACK DISABLED: Only show tags from Excel files
+        # If no Excel data, return empty instead of loading entire database
         if not all_tags:
-            # CRITICAL: Check if Excel file exists before falling back to database
-            session_file_path = session.get('file_path', '')
-            has_excel_file = session_file_path and os.path.exists(session_file_path)
-            
-            if has_excel_file:
-                logging.warning("⚠️ WEB TAGS DATABASE FALLBACK BLOCKED: Excel file exists, not loading database tags")
-                # Return empty tags - frontend should use regular /api/tags endpoint
-                return jsonify({'tags': [], 'total_count': 0, 'source': 'excel-file-exists', 'message': 'Excel file exists, use /api/tags endpoint'})
-            
-            # Fallback: attempt to build tags from product database when Excel is unavailable
-            try:
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name) if store_name else None
-                if product_db:
-                    logging.info(f"WEB TAGS: Building tags from database fallback for store: {store_name} (NO EXCEL FILE)")
-                    db_products = product_db.get_all_products()
-                    db_tags = []
-                    for product in db_products:
-                        try:
-                            processed = process_database_product_for_api(product)
-                            db_tags.append(processed)
-                        except Exception as tag_error:
-                            logging.debug(f"WEB TAGS: Skipping product due to processing error: {tag_error}")
-                    all_tags.extend(db_tags)
-                    logging.info(f"WEB TAGS: Database fallback returned {len(db_tags)} tags")
-                else:
-                    logging.warning("WEB TAGS: No product database available for fallback")
-            except Exception as db_error:
-                logging.error(f"WEB TAGS: Database fallback failed: {db_error}")
+            logging.info("WEB TAGS: No Excel data - returning empty (database fallback disabled)")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'no-excel-file',
+                'message': 'No Excel file uploaded. Please upload an Excel file to see products.'
+            })
         
         if all_tags:
             # WEB OPTIMIZATION: Cache the results for web clients
