@@ -1422,6 +1422,9 @@ class TemplateProcessor:
                 required_labels = len(chunk)  # Dynamic templates use actual chunk size
             
             for i, record in enumerate(chunk):
+                # PERFORMANCE: Time each label context build
+                label_start = time.time()
+                
                 # Set current record for brand centering logic
                 self.current_record = record
                 # Set current product type for brand marker processing
@@ -1433,6 +1436,11 @@ class TemplateProcessor:
                     # Pass all caches to avoid N+1 queries (including DOH cache for 5-10 minute speedup)
                     label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
                                                                product_lineage_cache, strain_info_cache, joint_ratio_cache, product_doh_cache)
+                
+                label_time = time.time() - label_start
+                if label_time > 0.1:  # Log if > 100ms
+                    self.logger.warning(f"⏱️ SLOW LABEL: {record.get('ProductName', 'Unknown')} took {label_time:.2f}s to build context")
+                    
                 context[f'Label{i+1}'] = label_context
                 # Debug logging to check field values and order (only for first label to reduce overhead)
                 if i == 0:
@@ -1461,7 +1469,11 @@ class TemplateProcessor:
             self.logger.debug(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
             
             try:
+                render_start = time.time()
                 doc.render(context)
+                render_time = time.time() - render_start
+                self.logger.info(f"⏱️ RENDER TIME: {render_time:.2f}s for {len(chunk)} labels")
+                
                 self.logger.debug("DocxTemplate render completed successfully")
                 
                 # CRITICAL FIX: Remove unmerged placeholders immediately after render
@@ -6562,9 +6574,9 @@ class TemplateProcessor:
                             )
                             
                             if is_brand_name:
-                                # Force center alignment for brand names
-                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                # Centered brand name content
+                                # Force left alignment for brand names (lineage should not be centered)
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                # Left-aligned brand name content
                                 
         except Exception as e:
             self.logger.error(f"Error ensuring brand centering for nonclassic types: {e}")
