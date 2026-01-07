@@ -4995,8 +4995,8 @@ class TemplateProcessor:
                         paragraph.paragraph_format.space_before = Pt(2)
                         paragraph.paragraph_format.space_after = Pt(1)
                     else:
-                        # Non-classic product types should have LEFT alignment for lineage
-                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        # Non-classic product types should have CENTER alignment for ProductBrand (which goes in Lineage field)
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         # Ensure consistent spacing above lineage section for equal margins
                         paragraph.paragraph_format.space_before = Pt(2)
                         paragraph.paragraph_format.space_after = Pt(1)
@@ -5370,9 +5370,9 @@ class TemplateProcessor:
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             self.logger.debug(f"Left-justified lineage for classic product type: '{content}' (product_type: {product_type})")
                         else:
-                            # For non-classic types, left-align the ProductBrand content in Lineage field
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            self.logger.debug(f"Left-aligned lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
+                            # For non-classic types, center the ProductBrand content in Lineage field
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            self.logger.debug(f"Centered lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
                         
                         # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage (fallback)
                         if product_type and 'vape' in product_type.lower():
@@ -6574,9 +6574,9 @@ class TemplateProcessor:
                             )
                             
                             if is_brand_name:
-                                # Force left alignment for brand names (lineage should not be centered)
-                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                                # Left-aligned brand name content
+                                # Force center alignment for brand names (ProductBrand should be centered for nonclassic types)
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                # Centered brand name content
                                 
         except Exception as e:
             self.logger.error(f"Error ensuring brand centering for nonclassic types: {e}")
