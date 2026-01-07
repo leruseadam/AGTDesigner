@@ -1448,8 +1448,20 @@ const TagManager = {
             }
         }
 
-        // PATCH: Always use cache, even after recent lineage updates, but keep lineage update logic elsewhere intact.
-        // (No-op: do not skip cache after recent lineage update)
+        // CRITICAL FIX: Always skip cache in database-only mode to ensure correct lineage from database
+        // Also skip if there was a recent lineage update
+        const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
+        const skipCacheDueToLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
+        
+        // In database-only mode (no Excel file), always fetch from backend to get fresh database lineage
+        if (shouldLoadFromDatabase || skipCacheDueToLineageUpdate) {
+            if (shouldLoadFromDatabase) {
+                console.log('🔄 Skipping cache - database-only mode (will fetch fresh from backend for correct lineage)');
+            } else {
+                console.log('🔄 Skipping cache - recent lineage update detected (will fetch fresh from backend)');
+            }
+            return false; // Force fetch from backend to get fresh database lineage
+        }
 
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
