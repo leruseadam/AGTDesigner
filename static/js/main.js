@@ -1102,7 +1102,10 @@ const TagManager = {
             
             const normalizedFile = removeTimestamp(String(file).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-'));
             
-            const normalizedKey = `agt_available_tags_${normalizedStore}_${normalizedFile}`;
+            // CRITICAL FIX: Add platform identifier to prevent Chrome sync conflicts
+            const platform = isWindows ? 'win' : 'mac';
+            
+            const normalizedKey = `agt_available_tags_${platform}_${normalizedStore}_${normalizedFile}`;
             return normalizedKey;
         } catch (error) {
             console.warn('Failed to build normalized cache key:', error);
