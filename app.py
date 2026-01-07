@@ -13299,6 +13299,69 @@ def get_filter_options():
         if not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
             logging.warning(f"CRITICAL: Excel processor DataFrame is empty (df is None: {excel_processor.df is None}, df.empty: {excel_processor.df.empty if excel_processor.df is not None else 'N/A'})")
             
+            # PERFORMANCE FIX: Try to use cached tags first to avoid slow file reload
+            session_file_path = session.get('file_path', '')
+            if session_file_path:
+                import hashlib
+                file_cache_key = f"tags_file_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
+                cached_tags = cache.get(file_cache_key)
+                if cached_tags and len(cached_tags) > 0:
+                    logging.info(f"⚡ PERFORMANCE: Using cached tags ({len(cached_tags)} tags) to generate filter options instead of reloading file")
+                    # Extract filter options from cached tags
+                    vendors = set()
+                    brands = set()
+                    product_types = set()
+                    lineages = set()
+                    weights = set()
+                    strains = set()
+                    doh_values = set()
+                    
+                    for tag in cached_tags:
+                        vendor = tag.get('Vendor') or tag.get('Vendor/Supplier*') or tag.get('ProductVendor')
+                        if vendor and str(vendor).strip() and str(vendor).strip().lower() not in ['nan', 'none', '']:
+                            vendors.add(str(vendor).strip())
+                        
+                        brand = tag.get('Product Brand') or tag.get('ProductBrand')
+                        if brand and str(brand).strip() and str(brand).strip().lower() not in ['nan', 'none', '']:
+                            brands.add(str(brand).strip())
+                        
+                        product_type = tag.get('Product Type*') or tag.get('Product Type')
+                        if product_type and str(product_type).strip() and str(product_type).strip().lower() not in ['nan', 'none', '']:
+                            product_types.add(str(product_type).strip())
+                        
+                        lineage = tag.get('Lineage') or tag.get('currentLineage') or tag.get('canonical_lineage')
+                        if lineage and str(lineage).strip() and str(lineage).strip().lower() not in ['nan', 'none', '']:
+                            lineages.add(str(lineage).strip())
+                        
+                        weight = tag.get('Weight*') or tag.get('Weight')
+                        if weight and str(weight).strip() and str(weight).strip().lower() not in ['nan', 'none', '']:
+                            weights.add(str(weight).strip())
+                        
+                        strain = tag.get('Product Strain') or tag.get('ProductStrain')
+                        if strain and str(strain).strip() and str(strain).strip().lower() not in ['nan', 'none', '']:
+                            strains.add(str(strain).strip())
+                        
+                        doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
+                        if doh and str(doh).strip() and str(doh).strip().lower() not in ['nan', 'none', '']:
+                            doh_values.add(str(doh).strip())
+                    
+                    options = {
+                        'vendor': sorted(list(vendors)),
+                        'brand': sorted(list(brands)),
+                        'productType': sorted(list(product_types)),
+                        'lineage': sorted(list(lineages)),
+                        'weight': sorted(list(weights)),
+                        'strain': sorted(list(strains)),
+                        'doh': sorted(list(doh_values)),
+                        'highCbd': []  # Will be calculated separately if needed
+                    }
+                    
+                    # Cache the options
+                    cache.set(cache_key, options, timeout=300)
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"✅ Generated filter options from cached tags ({elapsed:.1f}ms): {len(options['vendor'])} vendors, {len(options['brand'])} brands")
+                    return jsonify(options)
+            
             from src.core.data.excel_processor import get_default_upload_file
             selected_store = get_current_store_name() if has_store_selection() else None
             default_file = get_default_upload_file(selected_store)

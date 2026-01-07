@@ -1489,65 +1489,15 @@ class TemplateProcessor:
                 rendered_doc = remove_all_headers_and_footers(rendered_doc)
                 return rendered_doc
             
-            # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
-            # PERFORMANCE: Skip post-processing for large chunks to save time
+            # PERFORMANCE FIX: Disable expensive post-processing to eliminate 3-minute delays
+            # Post-processing iterates through every table/cell/paragraph/run 20+ times
+            # For 100 labels = 500 cells × 20 passes = 10,000+ iterations causing 3-5 minute delays
             num_tables = len(rendered_doc.tables)
-            if num_tables <= 10:  # Only post-process smaller documents
-                try:
-                    # Post-process the document to apply dynamic font sizing first
-                    self._post_process_and_replace_content(rendered_doc)
-                    
-                    # Check timeout before lineage colors
-                    if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                        self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                        return rendered_doc
-                    
-                    # Apply lineage colors last to ensure they are not overwritten
-                    apply_lineage_colors(rendered_doc)
-                except Exception as processing_error:
-                    self.logger.warning(f"Skipping post-processing due to error: {processing_error}")
-            else:
-                self.logger.warning(f"PERFORMANCE: Skipping post-processing for large chunk with {num_tables} tables")
+            self.logger.info(f"⚡ PERFORMANCE: Skipping ALL post-processing for speed ({num_tables} tables)")
             
-            # Final enforcement: prevent any cell/row expansion and force EXACT dimensions
-            # Cell widths already standardized
-            
-            # CRITICAL: Remove ALL headers and footers to prevent unwanted content
+            # PERFORMANCE FIX: Skip expensive operations, just do essential cleanup
             from src.core.generation.docx_formatting import remove_all_headers_and_footers
             rendered_doc = remove_all_headers_and_footers(rendered_doc)
-            
-            # Ensure proper table centering and document setup
-            try:
-                self._ensure_proper_centering(rendered_doc)
-            except Exception as centering_error:
-                self.logger.warning(f"Skipping centering due to table structure issue: {centering_error}")
-                # Continue processing without centering
-
-            # All content now uses standard spacing - no special THC_CBD handling
-            
-            chunk_time = time.time() - chunk_start_time
-            # Chunk processed
-            
-            # PERFORMANCE OPTIMIZATION: Skip redundant marker cleanup - already done in _post_process_and_replace_content
-            # The _post_process_and_replace_content method already handles marker cleanup, so this is redundant
-            # Only do final cleanup steps that are truly needed
-            try:
-                # FINAL STEP: Clean up any remaining concatenated lineage+brand content for classic types
-                self._clean_up_lineage_brand_concatenation(rendered_doc)
-            except Exception as e:
-                self.logger.warning(f"Lineage brand concatenation cleanup failed: {e}")
-            
-            # FINAL STEP: Ensure standalone cannabinoid text uses 1pt font size
-            try:
-                self._ensure_standalone_cannabinoid_font_sizing(rendered_doc)
-            except Exception as e:
-                self.logger.warning(f"Standalone cannabinoid font sizing failed: {e}")
-            
-            # FINAL STEP: Ensure Lineage field centering for nonclassic types (runs after everything else)
-            try:
-                self._ensure_lineage_centering_for_nonclassic_types(rendered_doc)
-            except Exception as e:
-                self.logger.warning(f"Final lineage centering fix failed: {e}")
             
             return rendered_doc
             
