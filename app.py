@@ -3213,6 +3213,22 @@ def upload_file():
 
                                 # Get tags without filters for maximum speed
                                 tags = processor.get_available_tags(filters=None)
+                                
+                                # CRITICAL FIX: Filter out database tags - only cache Excel tags
+                                # Ensure we're not caching database tags that might have been added
+                                excel_only_tags = []
+                                for tag in tags:
+                                    source = tag.get('Source', '')
+                                    # Only include tags with no Source or empty Source (Excel tags)
+                                    # Exclude any tags with Database, JSON Match, or other non-Excel sources
+                                    if not source or str(source).strip() == '' or str(source).strip().lower() == 'nan':
+                                        excel_only_tags.append(tag)
+                                    elif 'database' not in str(source).lower() and 'json' not in str(source).lower() and 'match' not in str(source).lower():
+                                        excel_only_tags.append(tag)
+                                
+                                if len(excel_only_tags) != len(tags):
+                                    logging.info(f"[BACKGROUND] 🔍 FILTERED: Caching {len(excel_only_tags)} Excel-only tags (excluded {len(tags) - len(excel_only_tags)} database/JSON tags)")
+                                tags = excel_only_tags
 
                                 # Reset enrichment flag
                                 if hasattr(processor, '_skip_enrichment'):
@@ -3422,6 +3438,22 @@ def upload_file():
                                     processor._skip_enrichment = True
 
                                 tags = processor.get_available_tags(filters=None)
+                                
+                                # CRITICAL FIX: Filter out database tags - only cache Excel tags
+                                # Ensure we're not caching database tags that might have been added
+                                excel_only_tags = []
+                                for tag in tags:
+                                    source = tag.get('Source', '')
+                                    # Only include tags with no Source or empty Source (Excel tags)
+                                    # Exclude any tags with Database, JSON Match, or other non-Excel sources
+                                    if not source or str(source).strip() == '' or str(source).strip().lower() == 'nan':
+                                        excel_only_tags.append(tag)
+                                    elif 'database' not in str(source).lower() and 'json' not in str(source).lower() and 'match' not in str(source).lower():
+                                        excel_only_tags.append(tag)
+                                
+                                if len(excel_only_tags) != len(tags):
+                                    logging.info(f"[LOCAL-BACKGROUND] 🔍 FILTERED: Caching {len(excel_only_tags)} Excel-only tags (excluded {len(tags) - len(excel_only_tags)} database/JSON tags)")
+                                tags = excel_only_tags
 
                                 # Reset enrichment flag
                                 if hasattr(processor, '_skip_enrichment'):
@@ -7705,25 +7737,8 @@ def generate_labels():
                 store_name = get_current_store_name() or 'AGT_Bothell'
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # LOG: Check DOH values in database for first selected tag
-                    if selected_tags_from_request and len(selected_tags_from_request) > 0:
-                        first_tag = selected_tags_from_request[0]
-                        conn = product_db._get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT "DOH", "DOH Compliant (Yes/No)", "Product Name*" FROM products WHERE normalized_name = ?', (product_db._normalize_product_name(first_tag),))
-                        row = cursor.fetchone()
-                        if row:
-                            logging.info(f"🔍 DOH in database for {first_tag}: DOH='{row[0]}', Compliant='{row[1]}'")
-                        else:
-                            logging.info(f"🔍 Product {first_tag} not found in database")
-                    else:
-                        logging.info(f"🔍 No selected tags to check DOH values for")
-                
-                if product_db:
-                    # Check if database is empty
-                    try:
-                        conn = product_db._get_connection()
-                        cursor = conn.cursor()
+                                    # PERFORMANCE: Skip DOH check logging to improve speed
+                                    pass
                         cursor.execute("SELECT COUNT(*) FROM products")
                         db_count = cursor.fetchone()[0]
                         logging.info(f"Database has {db_count} products")
@@ -7783,17 +7798,16 @@ def generate_labels():
                                 # Products NOT in database need to fall back to Excel data
                                 db_product_names = {record.get('Product Name*', '').strip() for record in valid_db_records if record.get('Product Name*')}
                                 
+                                # PERFORMANCE FIX: Use set-based lookup instead of nested loop (O(n) instead of O(n²))
+                                # Create lowercase lookup set for case-insensitive matching
+                                db_product_names_lower = {name.lower() for name in db_product_names}
+                                
                                 # Find products that are selected but NOT in database
                                 missing_from_db = []
                                 for tag_name in valid_selected_tags:
-                                    # Try multiple matching strategies for product name
                                     tag_name_clean = str(tag_name).strip()
-                                    found_in_db = False
-                                    for db_name in db_product_names:
-                                        if tag_name_clean.lower() == db_name.lower() or tag_name_clean == db_name:
-                                            found_in_db = True
-                                            break
-                                    if not found_in_db:
+                                    # O(1) set lookup instead of O(n) loop
+                                    if tag_name_clean not in db_product_names and tag_name_clean.lower() not in db_product_names_lower:
                                         missing_from_db.append(tag_name)
                                 
                                 if missing_from_db:
@@ -7812,13 +7826,9 @@ def generate_labels():
                                 
                                 # Convert database records to the format expected by TemplateProcessor
                                 records = []
-                                # PERFORMANCE: Process records with minimal logging (only first record for large batches)
-                                log_threshold = 1 if len(valid_db_records) > 10 else 3
+                                # PERFORMANCE: Remove all per-record logging for speed (only log summary)
                                 for idx, db_record in enumerate(valid_db_records):
                                     product_name_for_record = db_record.get('Product Name*', '')
-                                    # PERFORMANCE: Only log first record for large batches
-                                    if idx < log_threshold and len(valid_db_records) <= 10:
-                                        logging.info(f"Processing database record: {product_name_for_record} - Units: {db_record.get('Units', 'MISSING')}, Weight: {db_record.get('Weight*', 'MISSING')}")
 
                                     # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                     processed_record = process_database_product_for_api(db_record)
@@ -7836,30 +7846,22 @@ def generate_labels():
                                         db_record.get('currentLineage')
                                     )
                                     
-                                    # Debug logging for Lemon Cherry Gelato
-                                    if 'lemon' in product_name_for_record.lower() or 'cherry' in product_name_for_record.lower():
-                                        db_lineage = db_record.get('Lineage')
-                                        db_canonical_lineage = db_record.get('canonical_lineage')
-                                        logging.info(f"🔍 DEBUG LINEAGE: Product '{product_name_for_record}' - db_record Lineage='{db_lineage}', canonical_lineage='{db_canonical_lineage}', db_lineage_raw='{db_lineage_raw}'")
-                                    
                                     # CRITICAL FIX: Check UI lineage FIRST, then fall back to database lineage
                                     # This ensures user's lineage changes are respected in the output
                                     # PERFORMANCE: Use case-insensitive lookup map for O(1) access
                                     product_name_key = product_name_for_record.strip()
                                     ui_lineage_for_this = None
                                     if ui_lineage_map:
+                                        # Build case-insensitive map once for ALL records (outside loop would be better, but doing it once here)
+                                        if not hasattr(generate_labels, '_ui_lineage_lower_map'):
+                                            generate_labels._ui_lineage_lower_map = {k.lower().strip(): v for k, v in ui_lineage_map.items()}
                                         # Try exact match first (O(1))
                                         ui_lineage_for_this = ui_lineage_map.get(product_name_key)
-                                        # If no exact match, try case-insensitive match (O(1) with pre-built map)
-                                        if not ui_lineage_for_this and hasattr(generate_labels, '_ui_lineage_lower_map'):
-                                            ui_lineage_for_this = generate_labels._ui_lineage_lower_map.get(product_name_key.lower().strip())
-                                        elif not ui_lineage_for_this:
-                                            # Build case-insensitive map once (only if needed)
-                                            if not hasattr(generate_labels, '_ui_lineage_lower_map'):
-                                                generate_labels._ui_lineage_lower_map = {k.lower().strip(): v for k, v in ui_lineage_map.items()}
+                                        # If no exact match, try case-insensitive match (O(1))
+                                        if not ui_lineage_for_this:
                                             ui_lineage_for_this = generate_labels._ui_lineage_lower_map.get(product_name_key.lower().strip())
                                     
-                                    # PERFORMANCE: Reduced logging - only log for small batches
+                                    # PERFORMANCE: No logging in tight loop
                                     if ui_lineage_for_this:
                                         docx_lineage = ui_lineage_for_this
                                     elif db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
@@ -7960,9 +7962,7 @@ def generate_labels():
                                         'Quantity': processed_record.get('Quantity*', '1')
                                     }
                                     record = _normalize_weight_fields(record)
-                                    print(f"DEBUG: Database record processed - DescAndWeight: '{record.get('DescAndWeight', '')}' (from processed: '{processed_record.get('DescAndWeight', '')}')")
-                                    print(f"DEBUG: THC/CBD values - THC: '{processed_record.get('THC test result', '')}', CBD: '{processed_record.get('CBD test result', '')}', Unit: '{processed_record.get('Test result unit (% or mg)', '')}'")
-                                    print(f"DEBUG: AI/AJ/AK values - AI (Total THC): '{processed_record.get('Total THC', '')}', AJ (THCA): '{processed_record.get('THCA', '')}', AK (CBDA): '{processed_record.get('CBDA', '')}'")
+                                    # PERFORMANCE: Removed debug print statements that slow down generation
                                     records.append(record)
                                 logging.info(f"✅ Generated {len(records)} records from database")
                                 
