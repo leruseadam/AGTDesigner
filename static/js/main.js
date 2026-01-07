@@ -1061,8 +1061,12 @@ const TagManager = {
             const normalizedStore = String(store).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
             const normalizedFile = String(file).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
             
-            const cacheKey = `agt_available_tags_${normalizedStore}_${normalizedFile}`;
-            verboseLog('🔑 Cache key generated:', cacheKey, '{ store:', normalizedStore, 'file:', normalizedFile, '}');
+            // CRITICAL FIX: Add platform identifier to prevent Chrome sync conflicts
+            // Chrome sync shares localStorage between Mac and Windows, causing stale cache issues
+            const platform = isWindows ? 'win' : 'mac';
+            
+            const cacheKey = `agt_available_tags_${platform}_${normalizedStore}_${normalizedFile}`;
+            verboseLog('🔑 Cache key generated:', cacheKey, '{ platform:', platform, 'store:', normalizedStore, 'file:', normalizedFile, '}');
             return cacheKey;
         } catch (error) {
             console.warn('Failed to build available-tags cache key:', error);
@@ -1247,11 +1251,22 @@ const TagManager = {
             if (!payload || !Array.isArray(payload.tags) || payload.tags.length === 0) {
                 return null;
             }
+            
+            // CRITICAL FIX: Validate platform matches - Chrome sync can share cache between Mac/Windows
+            // If platform doesn't match, cache is from different platform and should be invalidated
+            const currentPlatform = isWindows ? 'win' : 'mac';
+            if (payload.platform && payload.platform !== currentPlatform) {
+                console.warn(`⚠️ Cache from different platform (${payload.platform} vs ${currentPlatform}) - invalidating stale cache`);
+                // Clear this stale cache entry
+                storage.removeItem(cacheKey);
+                return null;
+            }
+            
             const age = Date.now() - payload.timestamp;
             if (payload.timestamp && age > this.CACHE_TTL_MS) {
                 return null;
             }
-            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded${payload._optimized ? ' (optimized cache)' : ''}`);
+            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded${payload._optimized ? ' (optimized cache)' : ''} (platform: ${payload.platform || 'unknown'})`);
 
             return payload.tags;
         } catch (error) {
@@ -1311,10 +1326,14 @@ const TagManager = {
                 };
             });
 
+            // CRITICAL FIX: Store platform identifier to prevent Chrome sync conflicts
+            const currentPlatform = isWindows ? 'win' : 'mac';
+            
             const payload = {
                 timestamp: Date.now(),
                 tags: optimizedTags,
-                _optimized: true // Flag to indicate this is optimized cache
+                _optimized: true, // Flag to indicate this is optimized cache
+                platform: currentPlatform // Store platform to detect cross-platform cache conflicts
             };
 
             const payloadStr = JSON.stringify(payload);
