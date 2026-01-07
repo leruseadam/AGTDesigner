@@ -7145,7 +7145,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
         # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
         # Also handle case where normalized_product_strain is NULL - fall back to name-based join
             cursor.execute(f'''
-                SELECT 
+                SELECT
                     p."Product Name*" AS product_name,
                     p.normalized_name AS normalized_name,
                     COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
