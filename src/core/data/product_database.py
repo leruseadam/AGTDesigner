@@ -1689,6 +1689,7 @@ class ProductDatabase:
                                 try:
                                     self._update_existing_product(cursor, product_id, product_data)
                                     conn.commit()
+                                    self._invalidate_all_products_cache()  # Invalidate cache after updating product
                                     logger.info(f"Successfully updated product '{existing_name}' after UNIQUE constraint violation")
                                     return product_id
                                 except Exception as update_error:
@@ -2340,6 +2341,11 @@ class ProductDatabase:
             # Calculate excluded counts
             excluded_count = len(df) - len(filtered_df)
             blank_entries_skipped = len(df) - len(filtered_df) - excluded_count
+            
+            # Invalidate cache if products were stored or updated
+            if stored_count > 0 or updated_count > 0:
+                self._invalidate_all_products_cache()
+                logger.debug(f"Invalidated all_products cache after storing {stored_count} new and updating {updated_count} products")
             
             result = {
                 'stored': stored_count,
