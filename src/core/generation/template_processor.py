@@ -4253,6 +4253,22 @@ class TemplateProcessor:
                     # Replace the full product strain marker pattern with just the content
                     cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
                 
+                # CRITICAL FIX: Handle PRICE markers specially to preserve content
+                # Extract price content before removing markers to prevent "PRICE_END" -> "RICE_END"
+                price_match = re.search(r'PRICE_START(.+?)PRICE_END', cleaned, re.IGNORECASE)
+                if price_match:
+                    price_content = price_match.group(1)
+                    # Replace the full price marker pattern with just the content
+                    cleaned = re.sub(r'PRICE_START(.+?)PRICE_END', price_content, cleaned, flags=re.IGNORECASE)
+                
+                # CRITICAL FIX: Handle DESC markers specially to preserve content
+                # Extract description content before removing markers
+                desc_match = re.search(r'DESC_START(.+?)DESC_END', cleaned, re.IGNORECASE)
+                if desc_match:
+                    desc_content = desc_match.group(1)
+                    # Replace the full desc marker pattern with just the content
+                    cleaned = re.sub(r'DESC_START(.+?)DESC_END', desc_content, cleaned, flags=re.IGNORECASE)
+                
                 # Remove other marker patterns
                 for pattern in marker_patterns:
                     cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
