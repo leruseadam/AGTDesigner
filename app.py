@@ -9428,6 +9428,20 @@ def process_database_product_for_api(db_product):
     return processed_product
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
+
+    def clean_markers_from_tags(tags):
+        """Remove all START/END markers from tag fields before returning to frontend"""
+        import re
+        # Build comprehensive regex pattern from markers.py to catch ALL marker types
+        marker_pattern = r'(PRODUCTNAME_START|PRODUCTNAME_END|PRODUCTBRAND_START|PRODUCTBRAND_END|PRODUCTBRAND_CENTER_START|PRODUCTBRAND_CENTER_END|PRODUCTSTRAIN_START|PRODUCTSTRAIN_END|PRODUCTTYPE_START|PRODUCTTYPE_END|PRODUCTVENDOR_START|PRODUCTVENDOR_END|LINEAGE_START|LINEAGE_END|WEIGHTUNITS_START|WEIGHTUNITS_END|PRICE_START|PRICE_END|DOH_START|DOH_END|DESC_START|DESC_END|THC_CBD_START|THC_CBD_END|RATIO_START|RATIO_END|JOINT_RATIO_START|JOINT_RATIO_END|THC_START|THC_END|CBD_START|CBD_END|INCL_START|INCL_END)'
+        for tag in tags:
+            for key, value in list(tag.items()):
+                if isinstance(value, str):
+                    # Remove all START/END markers
+                    value = re.sub(marker_pattern, '', value)
+                    tag[key] = value.strip()
+        return tags
+
     store_name = None
     cache_store_name = 'global'
     try:
@@ -9445,6 +9459,8 @@ def get_available_tags():
                 logging.warning(f"Memory high but returning cached tags: {len(cached_tags)} tags")
                 # EXCEL-ONLY MODE: Skip database alignment - use cached tags as-is
                 safe_cached_tags = make_json_safe(cached_tags)
+                # CRITICAL: Clean markers before returning to frontend
+                safe_cached_tags = clean_markers_from_tags(safe_cached_tags)
                 return jsonify({
                     'tags': safe_cached_tags,
                     'total_count': len(safe_cached_tags),
@@ -9479,6 +9495,8 @@ def get_available_tags():
                 if cached_tags:
                     # EXCEL-ONLY MODE: Skip database alignment - use cached tags as-is
                     safe_cached_tags = make_json_safe(cached_tags)
+                    # CRITICAL: Clean markers before returning to frontend
+                    safe_cached_tags = clean_markers_from_tags(safe_cached_tags)
                     return jsonify({
                         'tags': safe_cached_tags,
                         'total_count': len(safe_cached_tags),
@@ -9637,6 +9655,8 @@ def get_available_tags():
         if cached_tags and fast_load:
             logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
             safe_cached_tags = make_json_safe(cached_tags)
+            # CRITICAL: Clean markers before returning to frontend
+            safe_cached_tags = clean_markers_from_tags(safe_cached_tags)
             elapsed = (time.time() - start_time) * 1000
             return jsonify({
                 'tags': safe_cached_tags,
@@ -9915,8 +9935,10 @@ def get_available_tags():
                             tag['lineage'] = excel_lineage_clean.lower()
 
                 safe_simple_tags = make_json_safe(simple_tags)
+                # CRITICAL: Clean markers before returning to frontend
+                safe_simple_tags = clean_markers_from_tags(safe_simple_tags)
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags")
+                logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} Excel-only tags (markers cleaned)")
 
                 # CRITICAL PERFORMANCE FIX: ALWAYS cache the processed tags to avoid reloading Excel (10+ seconds) on every request
                 # This is the main fix for the 5-minute tag loading timeout in production
@@ -10040,6 +10062,8 @@ def get_available_tags():
                 # Only align if most tags are missing lineage
                 aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=True)
             safe_cached_tags = make_json_safe(aligned_cached_tags)
+            # CRITICAL: Clean markers before returning to frontend
+            safe_cached_tags = clean_markers_from_tags(safe_cached_tags)
             return jsonify({
                 'tags': safe_cached_tags,
                 'total_count': len(safe_cached_tags),
@@ -10234,6 +10258,8 @@ def get_available_tags():
                         logging.info(f"⚡ FAST-LOAD: Skipped database enrichment - using Excel lineage only")
 
                     safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
+                    # CRITICAL: Clean markers before returning to frontend
+                    safe_all_tags = clean_markers_from_tags(safe_all_tags) if safe_all_tags else []
 
                     # Cache for this upload to speed up subsequent requests (key includes file + timestamp)
                     if safe_all_tags and not nocache:
@@ -10309,6 +10335,8 @@ def get_available_tags():
                 # This ensures UI shows current database lineage, not stale cached lineage
                 aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name)
                 safe_all_tags = make_json_safe(aligned_cached_tags)
+                # CRITICAL: Clean markers before returning to frontend
+                safe_all_tags = clean_markers_from_tags(safe_all_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(
                     f"⚡ SUPER-FAST: Returning {len(safe_all_tags)} cached tags for fast_load request "
@@ -10340,6 +10368,8 @@ def get_available_tags():
                 logging.info(f"⚡ PERFORMANCE: Skipping lineage alignment for fast loading (fast_load={fast_load}) - returning cached tags INSTANTLY")
                 # PERFORMANCE FIX: Return cached tags immediately without any database queries
                 safe_all_tags = make_json_safe(cached_tags)
+                # CRITICAL: Clean markers before returning to frontend
+                safe_all_tags = clean_markers_from_tags(safe_all_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"⚡ INSTANT: Returning {len(safe_all_tags)} cached tags ({elapsed:.1f}ms)")
                 return jsonify({
@@ -10694,6 +10724,8 @@ def get_available_tags():
                 # This dramatically speeds up tag loading (from 30-60s to <1s)
                 if not lineage_alignment_needed:
                     safe_all_tags = make_json_safe(cached_tags)
+                    # CRITICAL: Clean markers before returning to frontend
+                    safe_all_tags = clean_markers_from_tags(safe_all_tags)
                     # Cache the results for faster subsequent requests
                     if safe_all_tags and not nocache:
                         cache.set(cache_key, safe_all_tags, timeout=300)  # Cache for 5 minutes
@@ -11187,38 +11219,75 @@ def get_available_tags():
                 added_db_count = 0
                 skipped_db_count = 0
                 updated_excel_count = 0
+        
+        # CRITICAL FIX: ALWAYS enrich Excel tags with database lineage (even in EXCEL-ONLY MODE)
+        # Database sovereign_lineage must take priority over Excel Lineage
+        # This code runs OUTSIDE the if False block so it always executes
+        if all_tags and len(all_tags) > 0:
+            logging.info(f"🔄 ENRICHING {len(all_tags)} tags with database lineage (sovereign_lineage priority)...")
+            updated_excel_count = 0
             
-                # CRITICAL FIX: Query database for ALL products to build complete lineage lookup
-                # This ensures Excel tags get database lineage even if they're not in the limited database_tags list
-                db_lineage_lookup = {}
-                try:
-                    store_name = get_current_store_name()
-                    product_db = get_product_database(store_name)
-                    if product_db:
-                        logging.info("🔍 Building complete database lineage lookup for Excel tag updates...")
-                        conn = product_db._get_connection()
-                        cur = conn.cursor()
-                    
-                        # Query ALL products for lineage (not just the limited 2000)
-                        # CRITICAL: Query both Product Name* and normalized_name to match products correctly
+            # CRITICAL FIX: Query database for ALL products to build complete lineage lookup
+            # This ensures Excel tags get database lineage even if they're not in the limited database_tags list
+            db_lineage_lookup = {}
+            try:
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                if product_db:
+                    logging.info("🔍 Building complete database lineage lookup for Excel tag updates...")
+                    conn = product_db._get_connection()
+                    cur = conn.cursor()
+                
+                    # Query ALL products for lineage (not just the limited 2000)
+                    # CRITICAL: Query both Product Name* and normalized_name to match products correctly
+                    try:
+                        # Try with strain join first - get both product name and normalized name for matching
+                        lineage_query = '''
+                            SELECT 
+                                p."Product Name*" AS product_name,
+                                p.normalized_name AS normalized_name,
+                                COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                            FROM products p
+                            LEFT JOIN strains s ON p.strain_id = s.id
+                            WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL 
+                              AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
+                        '''
+                        cur.execute(lineage_query)
+                        rows = cur.fetchall()
+                        for row in rows:
+                            product_name = row[0]
+                            normalized_name = row[1] if len(row) > 1 else None
+                            lineage = row[2] if len(row) > 2 else row[1]  # Handle case where normalized_name is missing
+                            if product_name and lineage:
+                                lineage_clean = str(lineage).strip().upper()
+                                lineage_data = {
+                                    'currentLineage': lineage_clean,
+                                    'canonical_lineage': lineage_clean,
+                                    'Lineage': lineage_clean
+                                }
+                                # Store by both product name and normalized name for better matching
+                                db_lineage_lookup[product_name] = lineage_data
+                                if normalized_name:
+                                    db_lineage_lookup[normalized_name] = lineage_data
+                        logging.info(f"✅ Built lineage lookup with {len(set([k for k in db_lineage_lookup.keys() if not k or not isinstance(k, str) or not k.startswith('normalized:')]))} products from database (with normalized names)")
+                    except Exception as query_err:
+                        # Fallback: query without strain join but STILL prioritize sovereign_lineage
+                        logging.warning(f"Lineage query with strain join failed, using fallback: {query_err}")
                         try:
-                            # Try with strain join first - get both product name and normalized name for matching
-                            lineage_query = '''
-                                SELECT 
-                                    p."Product Name*" AS product_name,
-                                    p.normalized_name AS normalized_name,
-                                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
-                                FROM products p
-                                LEFT JOIN strains s ON p.strain_id = s.id
-                                WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL 
-                                  AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
+                            # CRITICAL FIX: Fallback must also prioritize sovereign_lineage
+                            fallback_query = '''
+                                SELECT "Product Name*", normalized_name, 
+                                       COALESCE(sovereign_lineage, "Lineage") AS lineage
+                                FROM products 
+                                WHERE (sovereign_lineage IS NOT NULL AND sovereign_lineage != '')
+                                   OR ("Lineage" IS NOT NULL AND "Lineage" != '')
                             '''
-                            cur.execute(lineage_query)
+                            cur.execute(fallback_query)
                             rows = cur.fetchall()
                             for row in rows:
                                 product_name = row[0]
                                 normalized_name = row[1] if len(row) > 1 else None
-                                lineage = row[2] if len(row) > 2 else row[1]  # Handle case where normalized_name is missing
+                                lineage = row[2] if len(row) > 2 else (row[1] if len(row) > 1 else None)
                                 if product_name and lineage:
                                     lineage_clean = str(lineage).strip().upper()
                                     lineage_data = {
@@ -11230,52 +11299,18 @@ def get_available_tags():
                                     db_lineage_lookup[product_name] = lineage_data
                                     if normalized_name:
                                         db_lineage_lookup[normalized_name] = lineage_data
-                            logging.info(f"✅ Built lineage lookup with {len(set([k for k in db_lineage_lookup.keys() if not k or not isinstance(k, str) or not k.startswith('normalized:')]))} products from database (with normalized names)")
-                        except Exception as query_err:
-                            # Fallback: query without strain join
-                            logging.warning(f"Lineage query with strain join failed, using fallback: {query_err}")
-                            try:
-                                fallback_query = '''
-                                    SELECT "Product Name*", normalized_name, "Lineage" 
-                                    FROM products 
-                                    WHERE "Lineage" IS NOT NULL AND "Lineage" != ''
-                                '''
-                                cur.execute(fallback_query)
-                                rows = cur.fetchall()
-                                for row in rows:
-                                    product_name = row[0]
-                                    normalized_name = row[1] if len(row) > 1 else None
-                                    lineage = row[2] if len(row) > 2 else (row[1] if len(row) > 1 else None)
-                                    if product_name and lineage:
-                                        lineage_clean = str(lineage).strip().upper()
-                                        lineage_data = {
-                                            'currentLineage': lineage_clean,
-                                            'canonical_lineage': lineage_clean,
-                                            'Lineage': lineage_clean
-                                        }
-                                        # Store by both product name and normalized name for better matching
-                                        db_lineage_lookup[product_name] = lineage_data
-                                        if normalized_name:
-                                            db_lineage_lookup[normalized_name] = lineage_data
-                                logging.info(f"✅ Built lineage lookup (fallback) with {len(set([k for k in db_lineage_lookup.keys() if not k or not isinstance(k, str) or not k.startswith('normalized:')]))} products from database")
-                            except Exception as fallback_err:
-                                logging.error(f"Failed to build lineage lookup: {fallback_err}")
-                except Exception as lookup_err:
-                    logging.warning(f"Could not build database lineage lookup: {lookup_err}")
-                    # Fallback: use database_tags for lookup
-                    for db_tag in database_tags:
-                        product_name = db_tag.get('Product Name*', '')
-                        if product_name:
-                            db_lineage = db_tag.get('currentLineage') or db_tag.get('canonical_lineage') or db_tag.get('Lineage')
-                            if db_lineage:
-                                db_lineage_lookup[product_name] = {
-                                    'currentLineage': db_tag.get('currentLineage'),
-                                    'canonical_lineage': db_tag.get('canonical_lineage'),
-                                    'Lineage': str(db_lineage).strip().upper()
-                                }
+                            logging.info(f"✅ Built lineage lookup (fallback with sovereign_lineage) with {len(set([k for k in db_lineage_lookup.keys() if not k or not isinstance(k, str) or not k.startswith('normalized:')]))} products from database")
+                        except Exception as fallback_err:
+                            logging.error(f"Failed to build lineage lookup: {fallback_err}")
+            except Exception as lookup_err:
+                logging.warning(f"Could not build database lineage lookup: {lookup_err}")
+                db_lineage_lookup = {}
         
             # CRITICAL FIX: Update ALL Excel tags with database lineage if database product exists
             # Use fuzzy matching to find products even if names don't match exactly
+            # This runs even in EXCEL-ONLY MODE to ensure database sovereign_lineage is used
+            logging.info(f"🔄 STARTING DATABASE LINEAGE ENRICHMENT: Processing {len(all_tags)} tags, lookup has {len(db_lineage_lookup)} entries")
+            updated_excel_count = 0
             for excel_tag in all_tags:
                 product_name = excel_tag.get('Product Name*', '')
                 if not product_name:
@@ -11307,16 +11342,27 @@ def get_available_tags():
                                 logging.debug(f"✅ Found case-insensitive match: '{product_name}' → '{db_name}'")
                                 break
             
-                # CRITICAL: Use get_product_lineage() for EXACT same lineage as output generation
+                # CRITICAL: ALWAYS use database lineage - database is source of truth, especially sovereign_lineage
+                # Use get_product_lineage() for EXACT same lineage as output generation
                 # This ensures UI lineages match output - uses COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
                 db_lineage_from_method = None
+                # Ensure product_db is available (might not be in scope from earlier try block)
+                if 'product_db' not in locals() or product_db is None:
+                    try:
+                        store_name = get_current_store_name()
+                        product_db = get_product_database(store_name)
+                    except Exception:
+                        product_db = None
                 if product_db:
                     try:
                         # Use exact same method as output generation (template_processor.py line 1515)
+                        # This method prioritizes p.sovereign_lineage (user manual changes)
                         db_lineage_from_method = product_db.get_product_lineage(product_name)
                     except Exception as method_err:
                         logging.debug(f"Could not get lineage via get_product_lineage for '{product_name}': {method_err}")
             
+                # CRITICAL FIX: Always use database lineage if found, even if Excel has a value
+                # Database sovereign_lineage takes priority over Excel Lineage
                 if db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
                     # Use get_product_lineage() result (same as output generation)
                     db_lineage_clean = str(db_lineage_from_method).strip().upper()
@@ -11332,14 +11378,17 @@ def get_available_tags():
                 
                     # CRITICAL: Always update ALL lineage fields from database using get_product_lineage()
                     # This ensures frontend gets exact same values as output generation
+                    # Database sovereign_lineage ALWAYS overwrites Excel Lineage
                     excel_tag['currentLineage'] = db_lineage_clean
                     excel_tag['canonical_lineage'] = db_lineage_clean
-                    excel_tag['Lineage'] = db_lineage_clean
+                    excel_tag['Lineage'] = db_lineage_clean  # Overwrite Excel Lineage with database value
                     excel_tag['lineage'] = db_lineage_clean.lower()
                 
                     updated_excel_count += 1
                     if old_lineage != db_lineage_clean:
-                        logging.debug(f"✅ UI LINEAGE UPDATE (get_product_lineage): '{product_name}' - '{old_lineage}' → '{db_lineage_clean}'")
+                        logging.info(f"✅ DATABASE LINEAGE (sovereign_lineage priority): '{product_name}' - Excel: '{old_lineage}' → DB: '{db_lineage_clean}'")
+                    else:
+                        logging.debug(f"✅ Lineage confirmed from database: '{product_name}' = '{db_lineage_clean}'")
                     continue  # Skip fallback lookup since we got lineage from get_product_lineage()
                 elif db_lineage_data:
                     # Fallback: Update Excel tag with database lineage from lookup (database is source of truth)
@@ -11356,16 +11405,21 @@ def get_available_tags():
                 
                     # CRITICAL: Always update ALL lineage fields from database, even if they appear to match
                     # This ensures frontend gets fresh database values
+                    # Database lineage ALWAYS overwrites Excel Lineage
                     excel_tag['currentLineage'] = db_lineage_clean
                     excel_tag['canonical_lineage'] = db_lineage_clean
-                    excel_tag['Lineage'] = db_lineage_clean
+                    excel_tag['Lineage'] = db_lineage_clean  # Overwrite Excel Lineage with database value
                     excel_tag['lineage'] = db_lineage_clean.lower()
                 
                     updated_excel_count += 1
                     if old_lineage != db_lineage_clean:
-                        logging.info(f"🔄 LINEAGE UPDATE: '{product_name}' - Excel: '{old_lineage}' → DB: '{db_lineage_clean}'")
+                        logging.info(f"✅ DATABASE LINEAGE (from lookup): '{product_name}' - Excel: '{old_lineage}' → DB: '{db_lineage_clean}'")
                     else:
-                        logging.debug(f"✅ Lineage confirmed: '{product_name}' = '{db_lineage_clean}'")
+                        logging.debug(f"✅ Lineage confirmed from database lookup: '{product_name}' = '{db_lineage_clean}'")
+                else:
+                    # CRITICAL: No database lineage found - log warning but keep Excel Lineage as fallback
+                    # This should be rare - most products should be in database
+                    logging.debug(f"⚠️ No database lineage found for '{product_name}' - keeping Excel Lineage as fallback")
         
             if updated_excel_count > 0:
                 logging.info(f"✅ Updated {updated_excel_count} Excel tags with database lineage from complete lookup")
@@ -11451,29 +11505,41 @@ def get_available_tags():
                     if not tag_name:
                         continue
                 
-                    # Check if tag has database lineage fields
-                    has_db_fields = tag.get('currentLineage') or tag.get('canonical_lineage')
-                
-                    if not has_db_fields:
-                        # CRITICAL: Tag is missing database lineage - query database directly
-                        try:
-                            direct_db_lineage = product_db.get_product_lineage(tag_name)
-                            if direct_db_lineage:
-                                db_lineage_clean = str(direct_db_lineage).strip().upper()
-                                # Set ALL lineage fields to database value
-                                tag['currentLineage'] = db_lineage_clean
-                                tag['canonical_lineage'] = db_lineage_clean
-                                tag['Lineage'] = db_lineage_clean  # Overwrite Excel Lineage
-                                tag['lineage'] = db_lineage_clean.lower()
+                    # CRITICAL: Always query database for lineage - database sovereign_lineage is source of truth
+                    # Even if tag has currentLineage/canonical_lineage, re-query to ensure we have latest sovereign_lineage
+                    try:
+                        direct_db_lineage = product_db.get_product_lineage(tag_name)
+                        if direct_db_lineage:
+                            db_lineage_clean = str(direct_db_lineage).strip().upper()
+                            # Get current lineage to compare
+                            current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '')).strip().upper()
+                            
+                            # CRITICAL: Always overwrite with database value - database sovereign_lineage takes priority
+                            # Set ALL lineage fields to database value (overwrites Excel Lineage)
+                            tag['currentLineage'] = db_lineage_clean
+                            tag['canonical_lineage'] = db_lineage_clean
+                            tag['Lineage'] = db_lineage_clean  # Overwrite Excel Lineage with database sovereign_lineage
+                            tag['lineage'] = db_lineage_clean.lower()
+                            
+                            if current_lineage != db_lineage_clean:
                                 final_lineage_check_count += 1
-                                logging.info(f"✅ FINAL CHECK: Set database lineage for '{tag_name}': '{db_lineage_clean}'")
-                        except Exception as final_check_err:
-                            logging.debug(f"Final lineage check failed for '{tag_name}': {final_check_err}")
+                                logging.info(f"✅ FINAL CHECK: Database lineage overwrote Excel - '{tag_name}': '{current_lineage}' → '{db_lineage_clean}'")
+                            else:
+                                logging.debug(f"✅ FINAL CHECK: Database lineage confirmed for '{tag_name}': '{db_lineage_clean}'")
+                        else:
+                            # No database lineage found - log warning
+                            logging.debug(f"⚠️ FINAL CHECK: No database lineage found for '{tag_name}' - keeping existing value")
+                    except Exception as final_check_err:
+                        logging.debug(f"Final lineage check failed for '{tag_name}': {final_check_err}")
             
                 if final_lineage_check_count > 0:
                     logging.info(f"✅ FINAL CHECK: Set database lineage on {final_lineage_check_count} tags that were missing it")
     
         safe_all_tags = make_json_safe(all_tags)
+        # CRITICAL: Clean all markers from tags before returning to frontend
+        # Generation needs markers, but frontend should not see them
+        safe_all_tags = clean_markers_from_tags(safe_all_tags)
+        logging.info(f"🧹 Cleaned markers from {len(safe_all_tags)} tags before returning to frontend")
         # CRITICAL: NO CACHING - always return fresh data to prevent stale data issues
         logging.info(f"🚫 CACHE DISABLED: Not caching tags to prevent stale data")
         try:
@@ -12011,16 +12077,17 @@ def update_lineage():
         except Exception as e:
             logging.error(f"Error updating product lineage: {e}")
         
-        # Step 2: CRITICAL - Update products.sovereign_lineage for ALL matching products
+        # Step 2: CRITICAL - Update products.sovereign_lineage AND Lineage for ALL matching products
         # This ensures lineage changes persist for ALL products, whether or not they have strains
+        # Update BOTH fields for consistency (sovereign_lineage has priority, but Lineage is also updated)
         cursor.execute("""
             UPDATE products
-            SET sovereign_lineage = ?
+            SET sovereign_lineage = ?, "Lineage" = ?
             WHERE \"Product Name*\" = ? OR ProductName = ?
-        """, (new_lineage, tag_name, tag_name))
+        """, (new_lineage, new_lineage, tag_name, tag_name))
         products_sovereign_updated = cursor.rowcount
         if products_sovereign_updated > 0:
-            logging.info(f"✅ Updated sovereign_lineage for {products_sovereign_updated} product(s)")
+            logging.info(f"✅ Updated sovereign_lineage and Lineage for {products_sovereign_updated} product(s)")
 
         # Step 3: CRITICAL - Also update strain lineage if product has a strain
         # This ensures the lineage persists because strain lineage is the source of truth
@@ -12141,6 +12208,75 @@ def update_lineage():
             logging.info(f"✅ WAL checkpoint completed for lineage update")
         except Exception as checkpoint_error:
             logging.warning(f"⚠️ WAL checkpoint failed (non-critical): {checkpoint_error}")
+
+        # CRITICAL FIX: Clear lineage cache for updated products to ensure fresh reads
+        # Without this, get_product_lineage() will return stale cached values
+        try:
+            from src.core.data.product_database import _lineage_cache, _lineage_cache_timestamps, _lineage_cache_lock
+            with _lineage_cache_lock:
+                # Clear cache for the main product
+                cache_key = tag_name.strip().lower()
+                if cache_key in _lineage_cache:
+                    del _lineage_cache[cache_key]
+                    del _lineage_cache_timestamps[cache_key]
+                    logging.info(f"✅ Cleared lineage cache for '{tag_name}' after update")
+                
+                # Clear cache for all products that were updated (Step 2: sovereign_lineage updates)
+                cursor.execute("""
+                    SELECT DISTINCT "Product Name*", ProductName
+                    FROM products
+                    WHERE ("Product Name*" = ? OR ProductName = ?)
+                """, (tag_name, tag_name))
+                for row in cursor.fetchall():
+                    for product_name_col in row:
+                        if product_name_col:
+                            product_cache_key = str(product_name_col).strip().lower()
+                            if product_cache_key in _lineage_cache:
+                                del _lineage_cache[product_cache_key]
+                                del _lineage_cache_timestamps[product_cache_key]
+                
+                # Also clear cache for all products with the same strain (if we updated strains)
+                # This includes products updated in Step 4 (similar products)
+                if strains_updated > 0:
+                    for strain_row in strain_rows:
+                        if len(strain_row) == 2:
+                            strain_id, strain_name = strain_row
+                        else:
+                            strain_id = strain_row[0]
+                            strain_name = 'Unknown'
+                        
+                        # Get all product names with this strain to clear their cache
+                        cursor.execute("""
+                            SELECT DISTINCT "Product Name*", ProductName
+                            FROM products
+                            WHERE strain_id = ?
+                        """, (strain_id,))
+                        for row in cursor.fetchall():
+                            for product_name_col in row:
+                                if product_name_col:
+                                    product_cache_key = str(product_name_col).strip().lower()
+                                    if product_cache_key in _lineage_cache:
+                                        del _lineage_cache[product_cache_key]
+                                        del _lineage_cache_timestamps[product_cache_key]
+                        
+                        # Also clear cache for products with matching strain name (Step 4 name-matched products)
+                        cursor.execute("""
+                            SELECT DISTINCT "Product Name*", ProductName
+                            FROM products
+                            WHERE LOWER(TRIM("Product Strain")) = LOWER(TRIM(?))
+                            AND "Product Type*" IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
+                        """, (strain_name,))
+                        for row in cursor.fetchall():
+                            for product_name_col in row:
+                                if product_name_col:
+                                    product_cache_key = str(product_name_col).strip().lower()
+                                    if product_cache_key in _lineage_cache:
+                                        del _lineage_cache[product_cache_key]
+                                        del _lineage_cache_timestamps[product_cache_key]
+                        
+                        logging.info(f"✅ Cleared lineage cache for all products with strain '{strain_name}' (id: {strain_id})")
+        except Exception as cache_clear_err:
+            logging.warning(f"⚠️ Could not clear lineage cache (non-critical): {cache_clear_err}")
 
         total_updated = products_updated + strains_updated
 
