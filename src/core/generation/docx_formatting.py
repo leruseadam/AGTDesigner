@@ -469,7 +469,7 @@ def set_cell_background(cell, color_hex):
         shd.set(qn('w:themeFill'), '0')
         tcPr.append(shd)
         for paragraph in cell.paragraphs:
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
             for run in paragraph.runs:
                 run.font.color.rgb = RGBColor(255, 255, 255)
                 run.font.bold = True
