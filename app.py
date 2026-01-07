@@ -8565,15 +8565,17 @@ def generate_labels():
                 # Build lineage lookup with strain join (same as get_product_lineage uses)
                 lineage_lookup = {}
                 try:
+                    # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                     cur.execute('''
                         SELECT 
                             p."Product Name*",
                             p.normalized_name,
-                            COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                            COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
                         FROM products p
-                        LEFT JOIN strains s ON p.strain_id = s.id
-                        WHERE COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") IS NOT NULL
-                          AND COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") != ''
+                        LEFT JOIN strains s1 ON p.strain_id = s1.id
+                        LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                        WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") IS NOT NULL
+                          AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") != ''
                     ''')
                     for row in cur.fetchall():
                         pname, norm_name, lineage = row[0], row[1], row[2]

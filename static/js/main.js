@@ -5275,8 +5275,37 @@ const TagManager = {
     },
     
     _renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags) {
-        const sortedVendors = Array.from(organizedTags.entries())
+        let sortedVendors = Array.from(organizedTags.entries())
             .sort(([a], [b]) => (a || '').localeCompare(b || ''));
+        
+        // CRITICAL FIX: Filter out "Unknown Vendor" during initial loading to prevent annoying flash
+        // This happens when tags are being organized before vendor extraction completes
+        const isInitialLoading = (this._fetchingAvailableTags || this._checkingExistingData) && 
+                                 (!this.state.tags || this.state.tags.length === 0);
+        const hasOnlyUnknownVendor = sortedVendors.length === 1 && 
+                                     sortedVendors[0][0] === 'Unknown Vendor';
+        
+        if (isInitialLoading && hasOnlyUnknownVendor) {
+            // Don't render "Unknown Vendor" during initial load - wait for vendor extraction to complete
+            verboseLog('⏭️ Skipping "Unknown Vendor" render during initial load - waiting for vendor extraction');
+            // Show loading indicator instead
+            availableTagsContainer.innerHTML = `
+                <div style="
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: 200px;
+                    padding: 2rem;
+                ">
+                    <div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem; margin-bottom: 1rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p style="color: rgba(255, 255, 255, 0.7);">Loading products...</p>
+                </div>
+            `;
+            return;
+        }
 
         // CRITICAL FIX: Render vendors in chunks to prevent UI freeze for large datasets
         const VENDOR_BATCH_SIZE = 5; // Process 5 vendors at a time

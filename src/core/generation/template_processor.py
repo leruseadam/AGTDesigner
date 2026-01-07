@@ -1217,8 +1217,11 @@ class TemplateProcessor:
             
             if not documents: 
                 return None
-            if len(documents) == 1: 
-                return documents[0]
+            if len(documents) == 1:
+                # CRITICAL FIX: Remove all markers from single document before returning
+                single_doc = documents[0]
+                self._final_marker_cleanup(single_doc)
+                return single_doc
             
             # Combine documents
             self.logger.debug(f"Combining {len(documents)} documents")
@@ -1234,6 +1237,9 @@ class TemplateProcessor:
             final_doc = Document(final_doc_buffer)
             from src.core.generation.docx_formatting import remove_all_headers_and_footers
             final_doc = remove_all_headers_and_footers(final_doc)
+            
+            # CRITICAL FIX: Remove all markers from final document before returning
+            self._final_marker_cleanup(final_doc)
             
             total_time = time.time() - self.start_time
             self.logger.info(f"Template processing completed in {total_time:.2f}s for {len(records)} records")

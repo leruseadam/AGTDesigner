@@ -5016,11 +5016,13 @@ class ProductDatabase:
             # Try exact match first (fastest) - also get strain for sativa hybrid check
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
+            # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
+                LEFT JOIN strains s1 ON p.strain_id = s1.id
+                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
                 WHERE p."Product Name*" = ? OR p."ProductName" = ?
                 ORDER BY p.id DESC
                 LIMIT 1
@@ -5058,11 +5060,13 @@ class ProductDatabase:
             # Fallback: Case-insensitive and whitespace-insensitive match
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
+            # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
+                LEFT JOIN strains s1 ON p.strain_id = s1.id
+                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
                 WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
                    OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
                 ORDER BY p.id DESC
