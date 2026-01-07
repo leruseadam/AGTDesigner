@@ -10091,10 +10091,17 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // PERFORMANCE: Use fast_load=1 by default for fast tag loading
+            // CRITICAL FIX: Check if we're in database-only mode - if so, don't use fast_load
+            // fast_load might skip database lineage alignment, which we need for correct lineage
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            const isDatabaseMode = (!file || file === 'nofile' || file === '' || file === 'database');
+            const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
+            const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
+            
+            // PERFORMANCE: Use fast_load=1 by default for fast tag loading (but not in database mode)
             // Background refresh will enrich with database lineage later if needed
             // This dramatically speeds up initial tag loading
-            const fastLoadParam = '&fast_load=1';
+            const fastLoadParam = (isDatabaseMode || hasRecentLineageUpdate) ? '' : '&fast_load=1';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
@@ -10123,12 +10130,12 @@ const TagManager = {
                         console.warn('⚠️ Tag loading timeout after 60 seconds - will try cache or show error');
                     }, 60000); // 60 seconds - needed for large datasets
 
-                    // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
-                    // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
-                    const forceDbLineage = this._forceDatabaseLineage || false;
+                    // CRITICAL FIX: Always use prefer_db in database-only mode to ensure correct lineage from database
+                    // Also use prefer_db after recent lineage updates
+                    const forceDbLineage = this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate;
                     const useCache = retryCount === 0 && !forceDbLineage && !forceReload; // Don't use cache after upload or force reload
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Only use prefer_db when forcing database lineage (after upload), otherwise let fast_load optimize
+                    // Always use prefer_db in database mode or after recent lineage updates to ensure correct lineage
                     const preferDbParam = forceDbLineage ? '&prefer_db=1' : '';
                     
                     const fetchUrl = `/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
