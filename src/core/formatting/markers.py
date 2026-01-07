@@ -40,18 +40,33 @@ MARKER_MAP = {
 }
 
 def wrap_with_marker(text, marker):
-    """DISABLED: No longer wrap text with markers - return text as-is to prevent markers in output."""
+    """Wrap text with start and end markers for template formatting."""
     if not text:
         return ""
-    # Return text without wrapping to eliminate marker problem
-    return str(text)
+    safe_text = str(text).replace('&', '&amp;')
+    return f"{marker}_START{safe_text}{marker}_END"
 
 def unwrap_marker(value, marker):
-    """OPTIMIZED: Since markers are disabled, just return value as-is."""
-    # No markers exist anymore, so no unwrapping needed
+    """Remove markers from a value if present."""
+    if not isinstance(value, str):
+        return value
+    start_marker = f"{marker}_START"
+    end_marker = f"{marker}_END"
+    if start_marker in value and end_marker in value:
+        start_idx = value.find(start_marker) + len(start_marker)
+        end_idx = value.find(end_marker)
+        unwrapped = value[start_idx:end_idx]
+        # Only strip for non-JointRatio and non-THC/CBD markers to preserve line breaks
+        if marker not in ['JOINT_RATIO', 'THC_CBD', 'RATIO']:
+            unwrapped = unwrapped.strip()
+        # Restore ampersands
+        return unwrapped.replace('&amp;', '&')
     return value
 
 def is_already_wrapped(value, marker):
-    """OPTIMIZED: Since markers are disabled, always return False."""
-    # No markers exist anymore, so nothing is wrapped
-    return False
+    """Check if a value is already wrapped with markers."""
+    if not isinstance(value, str):
+        return False
+    start_marker = f"{marker}_START"
+    end_marker = f"{marker}_END"
+    return start_marker in value and end_marker in value
