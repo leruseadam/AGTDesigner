@@ -364,13 +364,6 @@ def db_connection(db_path, timeout=30.0, check_same_thread=False):
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
 
-# CRITICAL: Prevent logging recursion errors on PythonAnywhere
-if IS_PYTHONANYWHERE:
-    # Set all loggers to CRITICAL to prevent excessive logging that causes recursion
-    logging.getLogger().setLevel(logging.CRITICAL)
-    for name in list(logging.root.manager.loggerDict.keys()):
-        logging.getLogger(name).setLevel(logging.CRITICAL)
-
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Honour environment override so PythonAnywhere can skip the heavy Excel scan
 # Default remains False for full-featured local runs unless explicitly disabled
