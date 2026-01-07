@@ -4211,19 +4211,21 @@ class TemplateProcessor:
                 
                 # CRITICAL FIX: Handle PRICE markers specially to preserve content
                 # Extract price content BEFORE removing markers to prevent "PRICE_END" -> "RICE_END"
-                price_match = re.search(r'PRICE_START(.+?)PRICE_END', cleaned, re.IGNORECASE)
+                # Use non-greedy matching with whitespace tolerance
+                price_match = re.search(r'PRICE_START\s*(.+?)\s*PRICE_END', cleaned, re.IGNORECASE | re.DOTALL)
                 if price_match:
-                    price_content = price_match.group(1)
+                    price_content = price_match.group(1).strip()
                     # Replace the full price marker pattern with just the content
-                    cleaned = re.sub(r'PRICE_START(.+?)PRICE_END', price_content, cleaned, flags=re.IGNORECASE)
+                    cleaned = re.sub(r'PRICE_START\s*.+?\s*PRICE_END', re.escape(price_content), cleaned, flags=re.IGNORECASE | re.DOTALL)
                 
                 # CRITICAL FIX: Handle DESC markers specially to preserve content
                 # Extract description content BEFORE removing markers
-                desc_match = re.search(r'DESC_START(.+?)DESC_END', cleaned, re.IGNORECASE)
+                # Use non-greedy matching with whitespace tolerance
+                desc_match = re.search(r'DESC_START\s*(.+?)\s*DESC_END', cleaned, re.IGNORECASE | re.DOTALL)
                 if desc_match:
-                    desc_content = desc_match.group(1)
+                    desc_content = desc_match.group(1).strip()
                     # Replace the full desc marker pattern with just the content
-                    cleaned = re.sub(r'DESC_START(.+?)DESC_END', desc_content, cleaned, flags=re.IGNORECASE)
+                    cleaned = re.sub(r'DESC_START\s*.+?\s*DESC_END', re.escape(desc_content), cleaned, flags=re.IGNORECASE | re.DOTALL)
                 
                 # CRITICAL FIX: Handle lineage markers specially to preserve content
                 # Extract lineage content before removing markers
@@ -4433,17 +4435,18 @@ class TemplateProcessor:
                 original_text = "".join(run.text for run in paragraph.runs)
                 modified_text = original_text
                 
-                # CRITICAL FIX: Extract PRICE and DESC content BEFORE removing markers
-                # This ensures content isn't lost when removing markers
-                price_match = re.search(r'PRICE_START(.+?)PRICE_END', modified_text, re.IGNORECASE)
-                if price_match:
-                    price_content = price_match.group(1)
-                    modified_text = re.sub(r'PRICE_START(.+?)PRICE_END', price_content, modified_text, flags=re.IGNORECASE)
-                
-                desc_match = re.search(r'DESC_START(.+?)DESC_END', modified_text, re.IGNORECASE)
-                if desc_match:
-                    desc_content = desc_match.group(1)
-                    modified_text = re.sub(r'DESC_START(.+?)DESC_END', desc_content, modified_text, flags=re.IGNORECASE)
+                            # CRITICAL FIX: Extract PRICE and DESC content BEFORE removing markers
+                            # This ensures content isn't lost when removing markers
+                            # Use non-greedy matching with whitespace tolerance and DOTALL flag
+                            price_match = re.search(r'PRICE_START\s*(.+?)\s*PRICE_END', modified_text, re.IGNORECASE | re.DOTALL)
+                            if price_match:
+                                price_content = price_match.group(1).strip()
+                                modified_text = re.sub(r'PRICE_START\s*.+?\s*PRICE_END', re.escape(price_content), modified_text, flags=re.IGNORECASE | re.DOTALL)
+                            
+                            desc_match = re.search(r'DESC_START\s*(.+?)\s*DESC_END', modified_text, re.IGNORECASE | re.DOTALL)
+                            if desc_match:
+                                desc_content = desc_match.group(1).strip()
+                                modified_text = re.sub(r'DESC_START\s*.+?\s*DESC_END', re.escape(desc_content), modified_text, flags=re.IGNORECASE | re.DOTALL)
                 
                 # Remove all marker patterns (after extraction)
                 for marker in markers:
@@ -4474,15 +4477,16 @@ class TemplateProcessor:
                             
                             # CRITICAL FIX: Extract PRICE and DESC content BEFORE removing markers
                             # This ensures content isn't lost when removing markers
-                            price_match = re.search(r'PRICE_START(.+?)PRICE_END', modified_text, re.IGNORECASE)
+                            # Use non-greedy matching with whitespace tolerance and DOTALL flag
+                            price_match = re.search(r'PRICE_START\s*(.+?)\s*PRICE_END', modified_text, re.IGNORECASE | re.DOTALL)
                             if price_match:
-                                price_content = price_match.group(1)
-                                modified_text = re.sub(r'PRICE_START(.+?)PRICE_END', price_content, modified_text, flags=re.IGNORECASE)
+                                price_content = price_match.group(1).strip()
+                                modified_text = re.sub(r'PRICE_START\s*.+?\s*PRICE_END', re.escape(price_content), modified_text, flags=re.IGNORECASE | re.DOTALL)
                             
-                            desc_match = re.search(r'DESC_START(.+?)DESC_END', modified_text, re.IGNORECASE)
+                            desc_match = re.search(r'DESC_START\s*(.+?)\s*DESC_END', modified_text, re.IGNORECASE | re.DOTALL)
                             if desc_match:
-                                desc_content = desc_match.group(1)
-                                modified_text = re.sub(r'DESC_START(.+?)DESC_END', desc_content, modified_text, flags=re.IGNORECASE)
+                                desc_content = desc_match.group(1).strip()
+                                modified_text = re.sub(r'DESC_START\s*.+?\s*DESC_END', re.escape(desc_content), modified_text, flags=re.IGNORECASE | re.DOTALL)
                             
                             # Remove all marker patterns (after extraction)
                             for marker in markers:
