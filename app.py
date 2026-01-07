@@ -3973,10 +3973,10 @@ def upload_instant():
         logging.info("=== INSTANT UPLOAD START ===")
 
         # Validate store selection
-        if not has_store_selection():
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
             return jsonify({'error': 'Please select a store before uploading files'}), 400
-
-        selected_store = get_current_store_name()
 
         # Validate file
         if 'file' not in request.files:
