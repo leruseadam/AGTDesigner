@@ -906,19 +906,42 @@ def process_chunk(args):
                     # This ensures lineage updates from /api/update-lineage are used in generation
                     batch_lineage_query = f'''
                         SELECT p."Product Name*", 
-                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
+                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                               p.strain_id,
+                               p.sovereign_lineage,
+                               s.sovereign_lineage as strain_sovereign,
+                               s.canonical_lineage as strain_canonical,
+                               p."Lineage" as product_lineage
                         FROM products p
                         LEFT JOIN strains s ON p.strain_id = s.id
                         WHERE p."Product Name*" IN ({placeholders})
                         ORDER BY p.id DESC
                     '''
                     cur.execute(batch_lineage_query, product_names)
+                    results_count = 0
                     for row_result in cur.fetchall():
-                        pname, lineage = row_result
+                        results_count += 1
+                        pname = row_result[0]
+                        lineage = row_result[1]
+                        strain_id = row_result[2]
+                        p_sovereign = row_result[3]
+                        s_sovereign = row_result[4]
+                        s_canonical = row_result[5]
+                        p_lineage = row_result[6]
+                        
+                        logger.info(f"🔍 DB LINEAGE QUERY: '{pname}' -> Final: '{lineage}' | strain_id: {strain_id} | p.sovereign: '{p_sovereign}' | s.sovereign: '{s_sovereign}' | s.canonical: '{s_canonical}' | p.Lineage: '{p_lineage}'")
+                        
                         if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
                             product_lineage_cache[pname] = str(lineage).strip().upper()
+                            logger.info(f"✅ CACHED DB LINEAGE: '{pname}' -> '{product_lineage_cache[pname]}'")
+                        else:
+                            logger.warning(f"⚠️ NO DB LINEAGE: '{pname}' - lineage value was empty or invalid: '{lineage}'")
+                    
+                    logger.info(f"📊 BATCH LINEAGE QUERY: Processed {results_count} products, cached {len(product_lineage_cache)} lineages")
                 except Exception as batch_err:
-                    logger.warning(f"Batch product lineage query failed: {batch_err}")
+                    logger.error(f"❌ Batch product lineage query failed: {batch_err}")
+                    import traceback
+                    logger.error(traceback.format_exc())
             
             # Batch query for strain info
             if strain_names:

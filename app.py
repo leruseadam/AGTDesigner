@@ -7921,20 +7921,16 @@ def generate_labels():
                                     # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                     processed_record = process_database_product_for_api(db_record)
 
-                                    # CRITICAL FIX: ALWAYS use database lineage as source of truth for tag generation
-                                    # UI lineage may contain sativa hybrid overrides that shouldn't affect tag output
-                                    # Database lineage is the ONLY source of truth - ignore UI lineage completely
-                                    # IMPORTANT: Read ONLY from db_record (raw database value), NOT from processed_record
-                                    # which may have been modified by process_database_product_for_api()
-                                    db_lineage_raw = (
-                                        db_record.get('Lineage') or 
-                                        db_record.get('canonical_lineage') or
-                                        db_record.get('sovereign_lineage') or
-                                        db_record.get('lineage') or 
-                                        db_record.get('currentLineage')
-                                    )
+                                    # CRITICAL FIX: Use get_product_lineage() which properly joins with strains table
+                                    # This ensures strains.sovereign_lineage is found (priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p.Lineage)
+                                    # get_products_by_names() doesn't join strains, so it can't see strains.sovereign_lineage
+                                    db_lineage_from_method = None
+                                    try:
+                                        db_lineage_from_method = product_db.get_product_lineage(product_name_for_record)
+                                    except Exception as lineage_err:
+                                        logging.debug(f"get_product_lineage failed for '{product_name_for_record}': {lineage_err}")
                                     
-                                    # CRITICAL FIX: Check UI lineage FIRST, then fall back to database lineage
+                                    # CRITICAL FIX: Check UI lineage FIRST, then fall back to database lineage from get_product_lineage()
                                     # This ensures user's lineage changes are respected in the output
                                     # PERFORMANCE: Use case-insensitive lookup map for O(1) access
                                     product_name_key = product_name_for_record.strip()
@@ -7952,8 +7948,8 @@ def generate_labels():
                                     # PERFORMANCE: No logging in tight loop
                                     if ui_lineage_for_this:
                                         docx_lineage = ui_lineage_for_this
-                                    elif db_lineage_raw and str(db_lineage_raw).strip() not in ['', 'None', 'nan']:
-                                        docx_lineage = str(db_lineage_raw).strip().upper()
+                                    elif db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
+                                        docx_lineage = str(db_lineage_from_method).strip().upper()
                                     else:
                                         # No database lineage found - use defaults based on product type
                                         product_type = processed_record.get('Product Type*', '').lower()
