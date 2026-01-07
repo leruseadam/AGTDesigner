@@ -4080,13 +4080,12 @@ def upload_file_simple():
         logging.info("=== SIMPLE UPLOAD REQUEST START ===")
         start_time = time.time()
         
-        # CRITICAL: Require store selection before upload
-        if not has_store_selection():
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
             logging.error("Upload attempted without store selection")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
-        
-        # Get current store selection
-        selected_store = get_current_store_name()
         
         if 'file' not in request.files:
             logging.error("No file uploaded")
@@ -5224,13 +5223,12 @@ def upload_lightning():
         logging.info("=== LIGHTNING UPLOAD START ===")
         start_time = time.time()
         
-        # CRITICAL: Require store selection before upload
-        if not has_store_selection():
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
             logging.error("Upload attempted without store selection")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
-        
-        # Get current store selection
-        selected_store = get_current_store_name()
         
         # Validate file upload
         if 'file' not in request.files:
@@ -20398,13 +20396,12 @@ def upload_file_optimized():
         if not check_rate_limit(client_ip):
             return jsonify({'error': 'Rate limit exceeded. Please wait before uploading another file.'}), 429
         
-        # CRITICAL: Require store selection before upload
-        if not has_store_selection():
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
             logging.error("Upload attempted without store selection")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
-        
-        # Get current store selection
-        selected_store = get_current_store_name()
         
         logging.info("=== ULTRA-FAST UPLOAD REQUEST START ===")
         start_time = time.time()
@@ -20566,13 +20563,12 @@ def upload_file_fast():
         start_time = time.time()
         logging.info("=== UPLOAD-FAST REQUEST START ===")
         
-        # CRITICAL: Require store selection before upload
-        if not has_store_selection():
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
             logging.error("Upload attempted without store selection")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
-        
-        # Get current store selection
-        selected_store = get_current_store_name()
         
         # Check if file is present
         if 'file' not in request.files:
