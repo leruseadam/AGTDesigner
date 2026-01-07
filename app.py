@@ -1303,17 +1303,9 @@ def get_excel_processor():
         except Exception:
             pass
 
-    # PERFORMANCE FIX: Check if caller wants to skip file loading (for tag-based generation)
-    skip_file_load = False
-    if has_request_context():
-        skip_file_load = session.get('_skip_file_load_for_generation', False)
-    
-    if skip_file_load:
-        logging.info("⚡ PERFORMANCE: Skipping file load in get_excel_processor (bypass flag set)")
-        return processor
-
     # Try to load session file if present
     try:
+        from flask import has_request_context, session
         if has_request_context():
             session_file = session.get('file_path')
             if session_file and os.path.exists(session_file):
@@ -7413,33 +7405,48 @@ def generate_labels():
             logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
         logging.debug(f"Selected tags from request: {selected_tags_from_request}")
         
-        # CRITICAL PERFORMANCE FIX: Set bypass flag BEFORE get_excel_processor to skip file loading
+        # CRITICAL PERFORMANCE FIX: Set flag BEFORE getting excel_processor
+        # This prevents get_excel_processor() from loading the file unnecessarily
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
-            logging.info(f"⚡ PERFORMANCE: {len(selected_tags_from_request)} tags in request - setting bypass flag")
-            # DON'T SET BYPASS FLAG - we need the file data for filtering
-            # The processor will check if file is already loaded and skip reload
+            logging.info(f"⚡ PERFORMANCE: {len(selected_tags_from_request)} tags in request - will skip file processing")
+            session['_skip_file_load_for_generation'] = True
         else:
             session['_skip_file_load_for_generation'] = False
         
         # TRACE: Check store before getting excel_processor
         logging.debug(f"🔍 TRACE: Store before get_excel_processor = {get_current_store_name()}")
         
-        # Get processor instance (will skip file loading if bypass flag set)
+        # Enable product DB integration for proper tag matching
         excel_processor = get_excel_processor()
-        excel_processor.enable_product_db_integration(True)
-        
-        # Clear bypass flag after get_excel_processor
-        if '_skip_file_load_for_generation' in session:
-            del session['_skip_file_load_for_generation']
         
         # TRACE: Check store after getting excel_processor
         logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
+        excel_processor.enable_product_db_integration(True)
+        
+        # Clear the skip flag now that get_excel_processor() has been called
+        if '_skip_file_load_for_generation' in session:
+            del session['_skip_file_load_for_generation']
+
+        # CRITICAL FIX: JSON tags work exactly like Excel tags - no special preservation needed
+        # They're already in the DataFrame and will be handled the same way as Excel tags
+        
         # TRACE: Check store before file loading
         logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
         
-        # Determine if file loading is needed
-        needs_file_load = True
+        # PERFORMANCE FIX: If selected_tags are provided, use them for generation
+        # Full DataFrame was already loaded (with processing skipped), now filter to selected tags
+        if selected_tags_from_request and len(selected_tags_from_request) > 0:
+            logging.info(f"⚡ PERFORMANCE: Using {len(selected_tags_from_request)} selected tags for generation (full data already loaded with processing skipped)")
+            # Replace DataFrame with just the selected tags for generation
+            import pandas as pd
+            excel_processor.df = pd.DataFrame(selected_tags_from_request)
+            needs_file_load = False
+        else:
+            # No tags provided - need to load file
+            logging.info("📂 No tags in request - will load file")
+            excel_processor._skip_processing_pipeline = False  # Normal processing
+            needs_file_load = True
         
         # PERFORMANCE FIX: Check if processor already has the file loaded before reloading
         # This prevents the 24-second file read delay when the file is already loaded
