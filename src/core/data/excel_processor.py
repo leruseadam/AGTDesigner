@@ -2127,15 +2127,34 @@ class ExcelProcessor:
                 rename_mapping["Weight Unit* (grams/gm or ounces/oz)"] = "Units"
             if "Price* (Tier Name for Bulk)" in self.df.columns and "Price" not in self.df.columns:
                 rename_mapping["Price* (Tier Name for Bulk)"] = "Price"
-            if "Vendor/Supplier*" in self.df.columns and "Vendor" not in self.df.columns:
-                rename_mapping["Vendor/Supplier*"] = "Vendor"
-                self.logger.info(f"Renaming column 'Vendor/Supplier*' to 'Vendor' during regular processing")
-            elif "Vendor/Supplier*" in self.df.columns:
-                self.logger.info(f"Column 'Vendor/Supplier*' found but 'Vendor' already exists - keeping both columns")
+            
+            # ENHANCED VENDOR COLUMN DETECTION: Look for many possible vendor column names
+            vendor_search_terms = ['vendor', 'supplier', 'brand', 'manufacturer', 'producer']
+            vendor_col_found = None
+            
+            # First check if we already have the target columns
+            if "Vendor/Supplier*" in self.df.columns:
+                vendor_col_found = "Vendor/Supplier*"
+                if "Vendor" not in self.df.columns:
+                    rename_mapping["Vendor/Supplier*"] = "Vendor"
+                    self.logger.info(f"Renaming column 'Vendor/Supplier*' to 'Vendor' during regular processing")
             elif "Vendor" in self.df.columns:
+                vendor_col_found = "Vendor"
                 self.logger.info(f"Column 'Vendor' found - no renaming needed")
             else:
-                self.logger.warning(f"No vendor column found in DataFrame. Available columns: {[col for col in self.df.columns if 'vendor' in col.lower() or 'supplier' in col.lower()]}")
+                # Search for any column containing vendor-related terms
+                for col in self.df.columns:
+                    col_lower = col.lower()
+                    if any(term in col_lower for term in vendor_search_terms):
+                        vendor_col_found = col
+                        self.logger.info(f"✅ Found vendor-related column: '{col}' - mapping to 'Vendor' and 'Vendor/Supplier*'")
+                        rename_mapping[col] = "Vendor"
+                        break
+                
+                if not vendor_col_found:
+                    self.logger.warning(f"⚠️ NO VENDOR COLUMN FOUND! Available columns: {self.df.columns.tolist()}")
+                    self.logger.warning(f"   Searched for columns containing: {vendor_search_terms}")
+            
             if "DOH Compliant (Yes/No)" in self.df.columns and "DOH" not in self.df.columns:
                 rename_mapping["DOH Compliant (Yes/No)"] = "DOH"
             if "Concentrate Type" in self.df.columns and "Ratio" not in self.df.columns:
@@ -2150,6 +2169,11 @@ class ExcelProcessor:
             
             if rename_mapping:
                 self.df.rename(columns=rename_mapping, inplace=True)
+            
+            # CRITICAL FIX: After renaming, create Vendor/Supplier* column if only Vendor exists
+            if "Vendor" in self.df.columns and "Vendor/Supplier*" not in self.df.columns:
+                self.df["Vendor/Supplier*"] = self.df["Vendor"]
+                self.logger.info(f"Created 'Vendor/Supplier*' column from 'Vendor' column")
 
             # Handle duplicate columns after renaming
             self.df = handle_duplicate_columns(self.df)
