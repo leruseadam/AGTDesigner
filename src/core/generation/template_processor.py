@@ -4162,7 +4162,7 @@ class TemplateProcessor:
         Final marker cleanup to ensure ALL markers are stripped from the final output.
         This method runs after all other processing to catch any remaining markers.
         """
-        self.logger.info("🧹 STARTING MARKER CLEANUP - Processing document...")
+        self.logger.warning("🧹🧹🧹 STARTING MARKER CLEANUP - Processing document...")
         markers_found = []
         try:
             # Enhanced patterns to catch all marker variations
@@ -4322,6 +4322,11 @@ class TemplateProcessor:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
+                            # DIAGNOSTIC: Log each run's text individually
+                            for idx, run in enumerate(paragraph.runs):
+                                if '_START' in run.text or '_END' in run.text or 'DESC_' in run.text or 'PRICE_' in run.text:
+                                    self.logger.warning(f"🔍 MARKER IN RUN {idx}: '{run.text}'")
+                            
                             # Get full paragraph text
                             original_para_text = paragraph.text
                             
