@@ -9552,7 +9552,18 @@ def get_available_tags():
                     pass
 
         # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
+        # CRITICAL: Always check cache first, even during fast_load, to avoid reloading Excel file
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
+        if cached_tags and fast_load:
+            logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
+            safe_cached_tags = make_json_safe(cached_tags)
+            elapsed = (time.time() - start_time) * 1000
+            return jsonify({
+                'tags': safe_cached_tags,
+                'total_count': len(safe_cached_tags),
+                'source': 'cache-fast-load',
+                'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
+            })
 
         # CRITICAL: Tags ONLY come from Excel files - never from database alone
         # If no Excel file, return empty tags with message to upload Excel file
