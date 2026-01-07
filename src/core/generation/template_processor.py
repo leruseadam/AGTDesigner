@@ -3643,7 +3643,10 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Ensure DOH images have proper vertical margins to prevent cutoff
             self._ensure_doh_logo_vertical_margins(doc)
-            
+
+            # CRITICAL FIX: Apply lineage colors BEFORE marker cleanup (colors need markers to identify content)
+            apply_lineage_colors(doc)
+
             # CRITICAL FIX: Final marker cleanup to ensure ALL markers are stripped
             self._final_marker_cleanup(doc)
             
