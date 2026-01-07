@@ -11,6 +11,9 @@ from functools import lru_cache
 import threading
 import os
 
+# Detect PythonAnywhere environment
+IS_PYTHONANYWHERE = 'PYTHONANYWHERE_DOMAIN' in os.environ or 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
+
 def get_database_path(store_name):
     """Get the correct database path for ProductDatabase instances.
     
@@ -38,6 +41,10 @@ def get_database_path(store_name):
     return os.path.join(uploads_dir, db_filename)
 
 logger = logging.getLogger(__name__)
+
+# PYTHONANYWHERE FIX: Reduce logging to prevent performance issues
+if IS_PYTHONANYWHERE:
+    logger.setLevel(logging.ERROR)  # Only show errors on PythonAnywhere
 
 # Performance optimization: disable debug logging in production
 DEBUG_ENABLED = False
@@ -410,26 +417,37 @@ class ProductDatabase:
                     )
 
                     # Apply performance optimizations with error handling
-                    # WAL mode can fail on some filesystems, so make it optional
-                    try:
-                        conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
-                    except sqlite3.OperationalError as e:
-                        logging.warning(f"WAL mode not supported, using default journal mode: {e}")
+                    # PYTHONANYWHERE FIX: Use simpler database settings on PythonAnywhere
+                    if IS_PYTHONANYWHERE:
+                        # PythonAnywhere has limited filesystem performance
+                        # Use DELETE journal mode instead of WAL for better compatibility
+                        conn.execute("PRAGMA journal_mode=DELETE")
+                        conn.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
+                        conn.execute("PRAGMA synchronous=NORMAL")
+                        conn.execute("PRAGMA cache_size=-10000")  # 10MB cache (smaller for shared hosting)
+                        conn.execute("PRAGMA temp_store=MEMORY")
+                        logging.info("⚡ PYTHONANYWHERE: Using simplified database settings for better performance")
+                    else:
+                        # Local/full environment: use aggressive optimizations
+                        try:
+                            conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
+                        except sqlite3.OperationalError as e:
+                            logging.warning(f"WAL mode not supported, using default journal mode: {e}")
 
-                    conn.execute("PRAGMA busy_timeout=60000")  # 60 second busy timeout
-                    conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/speed
-                    conn.execute("PRAGMA cache_size=-20000")  # 20MB cache
-                    conn.execute("PRAGMA temp_store=MEMORY")  # Temp tables in memory
+                        conn.execute("PRAGMA busy_timeout=60000")  # 60 second busy timeout
+                        conn.execute("PRAGMA synchronous=NORMAL")  # Balance safety/speed
+                        conn.execute("PRAGMA cache_size=-20000")  # 20MB cache
+                        conn.execute("PRAGMA temp_store=MEMORY")  # Temp tables in memory
 
-                    try:
-                        conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
-                    except sqlite3.OperationalError as e:
-                        logging.warning(f"Memory-mapped I/O not supported: {e}")
+                        try:
+                            conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
+                        except sqlite3.OperationalError as e:
+                            logging.warning(f"Memory-mapped I/O not supported: {e}")
 
-                    try:
-                        conn.execute("PRAGMA page_size=4096")  # Optimal page size
-                    except sqlite3.OperationalError as e:
-                        logging.warning(f"Could not set page size: {e}")
+                        try:
+                            conn.execute("PRAGMA page_size=4096")  # Optimal page size
+                        except sqlite3.OperationalError as e:
+                            logging.warning(f"Could not set page size: {e}")
 
                     # Verify connection works before returning
                     cursor = conn.cursor()
