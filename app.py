@@ -11246,6 +11246,10 @@ def get_available_tags():
         # EXCEL-ONLY MODE: NEVER merge database tags - use ONLY Excel tags
         logging.info(f"⚡ EXCEL-ONLY MODE: Using {len(all_tags)} Excel tags - skipping ALL database merging")
         
+        # CRITICAL: Skip ALL database tag merging - use ONLY Excel tags
+        database_tags = []  # Force empty to prevent any merging
+        use_database_only = False  # Never use database tags
+        
         if False:  # Disabled - never merge database tags
             # 3. Combine and deduplicate products
             # CRITICAL: When Excel data exists, SKIP ALL merging - use ONLY Excel data
@@ -11312,37 +11316,41 @@ def get_available_tags():
             process_time = time.time() - process_start
             logging.info(f"PREFER_DB: Added {len(all_tags)} products from database in {process_time:.2f}s (database_tags had {len(database_tags)} items)")
         else:
-            # Normal mode: Use Excel processor products as primary (they have processed fields)
-            # Add database products that aren't already in Excel processor
-            # CRITICAL FIX: all_tags may already contain Excel tags (from earlier processing)
-            # Get product names from current all_tags for deduplication
-            existing_product_names = {tag.get('Product Name*', '') for tag in all_tags if tag.get('Product Name*')}
-        
-            # If we have excel_tags variable, use it for count, otherwise use all_tags
-            if 'excel_tags' in locals() and excel_tags:
-                excel_count = len(excel_tags)
-            else:
-                excel_count = len(all_tags)
-        
-            logging.info(f"Existing product names set has {len(existing_product_names)} unique names")
-            logging.info(f"Current all_tags has {len(all_tags)} items before adding database products")
-        
-            # Add database products that aren't duplicates
-            # CRITICAL FIX: Also update Excel tags with database lineage when database product exists
-            added_db_count = 0
-            skipped_db_count = 0
-            updated_excel_count = 0
-        
-            # CRITICAL FIX: Query database for ALL products to build complete lineage lookup
-            # This ensures Excel tags get database lineage even if they're not in the limited database_tags list
-            db_lineage_lookup = {}
-            try:
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    logging.info("🔍 Building complete database lineage lookup for Excel tag updates...")
-                    conn = product_db._get_connection()
-                    cur = conn.cursor()
+            # EXCEL-ONLY MODE: Skip ALL database merging - use ONLY Excel tags
+            logging.info(f"⚡ EXCEL-ONLY MODE: Skipping database merging - using {len(all_tags)} Excel tags only")
+            
+            if False:  # Disabled - never merge database tags
+                # Normal mode: Use Excel processor products as primary (they have processed fields)
+                # Add database products that aren't already in Excel processor
+                # CRITICAL FIX: all_tags may already contain Excel tags (from earlier processing)
+                # Get product names from current all_tags for deduplication
+                existing_product_names = {tag.get('Product Name*', '') for tag in all_tags if tag.get('Product Name*')}
+            
+                # If we have excel_tags variable, use it for count, otherwise use all_tags
+                if 'excel_tags' in locals() and excel_tags:
+                    excel_count = len(excel_tags)
+                else:
+                    excel_count = len(all_tags)
+            
+                logging.info(f"Existing product names set has {len(existing_product_names)} unique names")
+                logging.info(f"Current all_tags has {len(all_tags)} items before adding database products")
+            
+                # Add database products that aren't duplicates
+                # CRITICAL FIX: Also update Excel tags with database lineage when database product exists
+                added_db_count = 0
+                skipped_db_count = 0
+                updated_excel_count = 0
+            
+                # CRITICAL FIX: Query database for ALL products to build complete lineage lookup
+                # This ensures Excel tags get database lineage even if they're not in the limited database_tags list
+                db_lineage_lookup = {}
+                try:
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        logging.info("🔍 Building complete database lineage lookup for Excel tag updates...")
+                        conn = product_db._get_connection()
+                        cur = conn.cursor()
                 
                     # Query ALL products for lineage (not just the limited 2000)
                     # CRITICAL: Query both Product Name* and normalized_name to match products correctly
