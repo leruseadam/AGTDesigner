@@ -8620,7 +8620,8 @@ def generate_labels():
                     if product_names:
                         placeholders = ','.join(['?'] * len(product_names))
                         # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
-                        # PERFORMANCE: Query only products in current batch
+                        # PERFORMANCE: Query only products in current batch (already limited)
+                        # PERFORMANCE: LOWER(TRIM()) join is necessary but we limit to current batch only
                         cur.execute(f'''
                             SELECT 
                                 p."Product Name*",
@@ -8630,8 +8631,6 @@ def generate_labels():
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
                             WHERE p."Product Name*" IN ({placeholders})
-                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") IS NOT NULL
-                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") != ''
                         ''', product_names)
                         for row in cur.fetchall():
                             pname, norm_name, lineage = row[0], row[1], row[2]
@@ -10456,27 +10455,12 @@ def get_available_tags():
                     pass
                 return resp
 
-            # PERFORMANCE OPTIMIZATION: Skip lineage alignment when fast_load is enabled and no recent updates
-            # This dramatically speeds up tag loading (from 30-60s to <1s)
-            # Only align lineage when:
-            # 1. fast_load is False (explicitly requested full alignment)
-            # 2. Recent lineage updates detected (force_full_refresh)
-            # 3. prefer_db is True (explicitly requested database priority)
-            lineage_alignment_needed = not fast_load or force_full_refresh or prefer_db
-
-            if lineage_alignment_needed:
-                logging.info(f"🔄 Lineage alignment enabled: fast_load={fast_load}, force_full_refresh={force_full_refresh}, prefer_db={prefer_db}")
-            else:
-                logging.info(f"⚡ PERFORMANCE: Skipping lineage alignment for fast loading (fast_load={fast_load}) - returning cached tags INSTANTLY")
-                # PERFORMANCE FIX: Return cached tags immediately without any database queries
-                safe_all_tags = make_json_safe(cached_tags)
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"⚡ INSTANT: Returning {len(safe_all_tags)} cached tags ({elapsed:.1f}ms)")
-                return jsonify({
-                    'tags': safe_all_tags,
-                    'total_count': len(safe_all_tags),
-                    'source': 'cache-instant'
-                })
+            # CRITICAL FIX: Always align lineage from database, even from cache
+            # This ensures UI shows database sovereign_lineage, not Excel lineage
+            # Use fast batch query to keep it performant
+            lineage_alignment_needed = True  # Always align to ensure DB lineage is shown
+            
+            logging.info(f"🔄 Lineage alignment enabled: fast_load={fast_load}, force_full_refresh={force_full_refresh}, prefer_db={prefer_db}")
             
             # PERFORMANCE OPTIMIZATION: Only update DataFrame lineage when lineage alignment is needed
             # Skip this expensive operation when fast_load is enabled
