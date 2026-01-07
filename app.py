@@ -7912,6 +7912,32 @@ def generate_labels():
                                         if product_name and ui_lineage:
                                             ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
                                 
+                                # PERFORMANCE FIX: Batch query all lineages at once instead of N+1 queries
+                                # This replaces individual get_product_lineage() calls which were causing 5-minute delays
+                                db_lineage_map = {}
+                                try:
+                                    conn = product_db._get_connection()
+                                    cur = conn.cursor()
+                                    product_names_for_batch = [r.get('Product Name*', '') for r in valid_db_records if r.get('Product Name*')]
+                                    if product_names_for_batch:
+                                        placeholders = ','.join(['?'] * len(product_names_for_batch))
+                                        # Batch query with both strain joins (same logic as get_product_lineage)
+                                        cur.execute(f'''
+                                            SELECT p."Product Name*",
+                                                   COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage
+                                            FROM products p
+                                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                                            WHERE p."Product Name*" IN ({placeholders})
+                                        ''', product_names_for_batch)
+                                        for row in cur.fetchall():
+                                            pname, lineage = row[0], row[1]
+                                            if pname and lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                                                db_lineage_map[pname] = str(lineage).strip().upper()
+                                        logging.info(f"✅ BATCH LINEAGE: Loaded {len(db_lineage_map)} lineages for {len(product_names_for_batch)} products")
+                                except Exception as batch_err:
+                                    logging.warning(f"Batch lineage query failed: {batch_err}")
+                                
                                 # Convert database records to the format expected by TemplateProcessor
                                 records = []
                                 # PERFORMANCE: Remove all per-record logging for speed (only log summary)
@@ -7921,14 +7947,8 @@ def generate_labels():
                                     # CRITICAL FIX: Use process_database_product_for_api to ensure consistent DescAndWeight creation
                                     processed_record = process_database_product_for_api(db_record)
 
-                                    # CRITICAL FIX: Use get_product_lineage() which properly joins with strains table
-                                    # This ensures strains.sovereign_lineage is found (priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p.Lineage)
-                                    # get_products_by_names() doesn't join strains, so it can't see strains.sovereign_lineage
-                                    db_lineage_from_method = None
-                                    try:
-                                        db_lineage_from_method = product_db.get_product_lineage(product_name_for_record)
-                                    except Exception as lineage_err:
-                                        logging.debug(f"get_product_lineage failed for '{product_name_for_record}': {lineage_err}")
+                                    # PERFORMANCE FIX: Use batched lineage lookup instead of individual get_product_lineage() call
+                                    db_lineage_from_method = db_lineage_map.get(product_name_for_record)
                                     
                                     # CRITICAL FIX: Check UI lineage FIRST, then fall back to database lineage from get_product_lineage()
                                     # This ensures user's lineage changes are respected in the output
@@ -8554,6 +8574,7 @@ def generate_labels():
         
         # CRITICAL FIX: Force database lineage on ALL records before generation
         # This ensures sovereign_lineage from strains table is used, not Excel Lineage
+        # PERFORMANCE FIX: Only query products in current batch, not all products in database
         try:
             store_name = get_current_store_name()
             product_db = get_product_database(store_name)
@@ -8565,27 +8586,35 @@ def generate_labels():
                 # Build lineage lookup with strain join (same as get_product_lineage uses)
                 lineage_lookup = {}
                 try:
-                    # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
-                    cur.execute('''
-                        SELECT 
-                            p."Product Name*",
-                            p.normalized_name,
-                            COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
-                        FROM products p
-                        LEFT JOIN strains s1 ON p.strain_id = s1.id
-                        LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
-                        WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") IS NOT NULL
-                          AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") != ''
-                    ''')
-                    for row in cur.fetchall():
-                        pname, norm_name, lineage = row[0], row[1], row[2]
-                        if pname and lineage:
-                            lineage_upper = str(lineage).strip().upper()
-                            lineage_lookup[pname] = lineage_upper
-                            lineage_lookup[pname.lower().strip()] = lineage_upper
-                            if norm_name:
-                                lineage_lookup[norm_name] = lineage_upper
-                    logging.info(f"✅ Built lineage lookup with {len(lineage_lookup)} entries")
+                    # PERFORMANCE: Only query products in current batch, not all products
+                    product_names = [r.get('ProductName') or r.get('Product Name*') or '' for r in records]
+                    product_names = [p for p in product_names if p]  # Remove empty
+                    
+                    if product_names:
+                        placeholders = ','.join(['?'] * len(product_names))
+                        # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+                        # PERFORMANCE: Query only products in current batch
+                        cur.execute(f'''
+                            SELECT 
+                                p."Product Name*",
+                                p.normalized_name,
+                                COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
+                            FROM products p
+                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                            WHERE p."Product Name*" IN ({placeholders})
+                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") IS NOT NULL
+                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") != ''
+                        ''', product_names)
+                        for row in cur.fetchall():
+                            pname, norm_name, lineage = row[0], row[1], row[2]
+                            if pname and lineage:
+                                lineage_upper = str(lineage).strip().upper()
+                                lineage_lookup[pname] = lineage_upper
+                                lineage_lookup[pname.lower().strip()] = lineage_upper
+                                if norm_name:
+                                    lineage_lookup[norm_name] = lineage_upper
+                        logging.info(f"✅ Built lineage lookup with {len(lineage_lookup)} entries for {len(product_names)} products")
                 except Exception as q_err:
                     logging.warning(f"Lineage lookup query failed: {q_err}")
                 
