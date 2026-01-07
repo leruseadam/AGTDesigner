@@ -3575,13 +3575,12 @@ def upload_file_streaming():
         max_processing_time = MAX_TOTAL_PROCESSING_TIME if 'MAX_TOTAL_PROCESSING_TIME' in globals() else 300
         max_processing_time = MAX_TOTAL_PROCESSING_TIME if 'MAX_TOTAL_PROCESSING_TIME' in globals() else 300
         
-        # CRITICAL: Require store selection before upload
-        if not has_store_selection():
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
             logging.error("Upload attempted without store selection")
             return jsonify({'error': 'Please select a store before uploading files'}), 400
-        
-        # Get current store selection
-        selected_store = get_current_store_name()
         
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
