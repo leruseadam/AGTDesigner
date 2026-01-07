@@ -1292,12 +1292,26 @@ const TagManager = {
             }
 
             // CRITICAL FIX: Clear old cache entries FIRST to make space
+            // Also clear cache from different platform (Chrome sync can share cache between Mac/Windows)
             const cacheKey = this.getAvailableTagsCacheKey();
+            const currentPlatform = isWindows ? 'win' : 'mac';
             const keysToRemove = [];
             for (let i = 0; i < storage.length; i++) {
                 const key = storage.key(i);
-                if (key && key.includes('agt_available_tags') && key !== cacheKey) {
-                    keysToRemove.push(key);
+                if (key && key.includes('agt_available_tags')) {
+                    // Remove if it's not the current cache key
+                    if (key !== cacheKey) {
+                        keysToRemove.push(key);
+                    }
+                    // Also check for cross-platform cache conflicts
+                    // If key doesn't include platform identifier, it's old format - remove it
+                    if (!key.includes(`_${currentPlatform}_`) && !key.includes(`_win_`) && !key.includes(`_mac_`)) {
+                        // Old format cache without platform - remove it
+                        if (!keysToRemove.includes(key)) {
+                            keysToRemove.push(key);
+                            console.log(`🗑️ Removing old-format cache (no platform): ${key}`);
+                        }
+                    }
                 }
             }
             if (keysToRemove.length > 0) {
