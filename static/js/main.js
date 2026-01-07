@@ -1378,7 +1378,24 @@ const TagManager = {
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
         const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
         
+        // CRITICAL FIX: Check for recent lineage updates - skip cache if lineage was recently updated
+        // This ensures UI shows fresh database lineage, not stale cached Excel lineage
+        const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
+        const skipCacheDueToLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
+        
+        // CRITICAL FIX: In database-only mode, always fetch from backend to ensure correct lineage
+        // Don't use cache in database-only mode - it might have stale Excel lineage
+        if (shouldLoadFromDatabase || skipCacheDueToLineageUpdate) {
+            if (shouldLoadFromDatabase) {
+                console.log('🔄 Skipping cache - database-only mode (will fetch fresh from backend for correct lineage)');
+            } else {
+                console.log('🔄 Skipping cache - recent lineage update detected (will fetch fresh from backend)');
+            }
+            return false; // Force fetch from backend to get fresh database lineage
+        }
+        
         // If no Excel file but we have database, try to load from cache first, then fetch from database
+        // NOTE: This path is only reached if shouldLoadFromDatabase is false (has Excel file) AND no recent lineage update
         if (shouldLoadFromDatabase) {
             console.log('📊 No Excel file, checking cache for database tags...');
             // Still try to load from cache (might have database tags cached)
@@ -1448,21 +1465,7 @@ const TagManager = {
             }
         }
 
-        // CRITICAL FIX: Always skip cache in database-only mode to ensure correct lineage from database
-        // Also skip if there was a recent lineage update
-        const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
-        const skipCacheDueToLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
-        
-        // In database-only mode (no Excel file), always fetch from backend to get fresh database lineage
-        if (shouldLoadFromDatabase || skipCacheDueToLineageUpdate) {
-            if (shouldLoadFromDatabase) {
-                console.log('🔄 Skipping cache - database-only mode (will fetch fresh from backend for correct lineage)');
-            } else {
-                console.log('🔄 Skipping cache - recent lineage update detected (will fetch fresh from backend)');
-            }
-            return false; // Force fetch from backend to get fresh database lineage
-        }
-
+        // This path is only for Excel mode (has Excel file) and no recent lineage updates
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
             verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
