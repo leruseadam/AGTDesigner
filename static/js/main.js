@@ -3594,21 +3594,62 @@ const TagManager = {
                 }
             }
 
-            // CRITICAL FIX: Never extract vendor from product name - "by Vendor" in product names is actually the brand
-            // Vendor should always be in the tag data from Excel - if missing, it's a data quality issue
-            // Never use brand as vendor - this causes brands to appear in vendor list
+            // CRITICAL FIX: Extract vendor from product name if missing from Excel data
+            // This handles cases where Excel file doesn't have vendor columns or cache is stale
             if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
-                // Vendor should always be present in Excel data - if missing, log it but use fallback
-                // Only log first 10 missing vendors to avoid console spam
-                if (!this._missingVendorLogCount) this._missingVendorLogCount = 0;
-                if (this._missingVendorLogCount < 10) {
-                    console.warn(`⚠️ Missing vendor for product '${tag['Product Name*'] || tag.ProductName || 'Unknown'}'. Vendor should always be in Excel data.`);
-                    this._missingVendorLogCount++;
-                } else if (this._missingVendorLogCount === 10) {
-                    console.warn(`⚠️ ... (suppressing further missing vendor warnings)`);
-                    this._missingVendorLogCount++;
+                const productName = tag['Product Name*'] || tag.ProductName || tag.displayName || '';
+                
+                // AUTOMATIC FIX: Try to extract vendor from product name pattern "Product by Vendor"
+                if (productName) {
+                    // Pattern: "Product Name by Vendor Name" or "Product Name by Vendor Name - Weight"
+                    const vendorPatterns = [
+                        /\s+by\s+([^-]+?)(?:\s*-\s*\d|$)/i,           // "Product by Vendor - 1g"
+                        /\s+by\s+([^-]+?)(?:\s*\(|$)/i,               // "Product by Vendor (description)"
+                        /\s+by\s+([A-Z][^-]+?)(?:\s|$)/i,             // "Product by VendorName"
+                        /\s+by\s+([A-Za-z\s&]+?)(?:\s*-\s*\d|$)/i,   // "Product by Vendor & Co - 1g"
+                    ];
+                    
+                    for (const pattern of vendorPatterns) {
+                        const match = productName.match(pattern);
+                        if (match && match[1]) {
+                            const extractedVendor = match[1].trim();
+                            // Filter out common false positives
+                            const falsePositives = ['the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for'];
+                            if (extractedVendor && 
+                                extractedVendor.length > 1 && 
+                                !falsePositives.includes(extractedVendor.toLowerCase())) {
+                                vendor = extractedVendor;
+                                // Also update the tag object so it persists
+                                tag.vendor = vendor;
+                                tag.Vendor = vendor;
+                                tag['Vendor/Supplier*'] = vendor;
+                                if (!this._vendorExtractionCount) this._vendorExtractionCount = 0;
+                                this._vendorExtractionCount++;
+                                break;
+                            }
+                        }
+                    }
                 }
-                vendor = 'Unknown Vendor';
+                
+                // If still no vendor after extraction attempt, use fallback
+                if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
+                    // Only log first 10 missing vendors to avoid console spam
+                    if (!this._missingVendorLogCount) this._missingVendorLogCount = 0;
+                    if (this._missingVendorLogCount < 10) {
+                        console.warn(`⚠️ Missing vendor for product '${productName}'. Attempted extraction from name but failed.`);
+                        this._missingVendorLogCount++;
+                    } else if (this._missingVendorLogCount === 10) {
+                        console.warn(`⚠️ ... (suppressing further missing vendor warnings)`);
+                        this._missingVendorLogCount++;
+                    }
+                    vendor = 'Unknown Vendor';
+                } else {
+                    // Log successful extraction (first 5 only)
+                    if (!this._vendorExtractionLogged) {
+                        console.log(`✅ Auto-extracted vendor from product names (${this._vendorExtractionCount || 0} vendors extracted so far)`);
+                        this._vendorExtractionLogged = true;
+                    }
+                }
             } else {
                 vendor = vendor.trim();
                 // CRITICAL FIX: Don't normalize vendor to empty string - preserve original value
@@ -3742,7 +3783,46 @@ const TagManager = {
         const unknownVendorCount = vendorCounts.get('Unknown Vendor') || 0;
         if (unknownVendorCount > uniqueTags.length * 0.5) {
             console.warn(`⚠️ WARNING: ${unknownVendorCount} out of ${uniqueTags.length} products (${Math.round(unknownVendorCount/uniqueTags.length*100)}%) have no vendor data!`);
-            console.warn('⚠️ This suggests the Excel file is missing vendor information for most products.');
+            console.warn('⚠️ This suggests the Excel file is missing vendor information or cache is stale.');
+            
+            // AUTOMATIC FIX: Try to extract vendor from product names for all tags
+            console.log('🔄 Attempting to auto-extract vendor from product names...');
+            let extractedCount = 0;
+            for (const tag of uniqueTags) {
+                if (!tag.vendor || tag.vendor === 'Unknown Vendor') {
+                    const productName = tag['Product Name*'] || tag.ProductName || tag.displayName || '';
+                    if (productName) {
+                        const vendorPatterns = [
+                            /\s+by\s+([^-]+?)(?:\s*-\s*\d|$)/i,
+                            /\s+by\s+([^-]+?)(?:\s*\(|$)/i,
+                            /\s+by\s+([A-Z][^-]+?)(?:\s|$)/i,
+                        ];
+                        
+                        for (const pattern of vendorPatterns) {
+                            const match = productName.match(pattern);
+                            if (match && match[1]) {
+                                const extractedVendor = match[1].trim();
+                                if (extractedVendor && extractedVendor.length > 1) {
+                                    tag.vendor = extractedVendor;
+                                    tag.Vendor = extractedVendor;
+                                    tag['Vendor/Supplier*'] = extractedVendor;
+                                    extractedCount++;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (extractedCount > 0) {
+                console.log(`✅ Auto-extracted vendor for ${extractedCount} products from product names`);
+                console.log('🔄 Re-organizing tags with extracted vendor information...');
+                // Re-organize with the updated vendor information
+                return this.organizeBrandCategories(uniqueTags);
+            } else {
+                console.warn('⚠️ Could not extract vendor from product names. Please re-upload Excel file or check that vendor columns exist.');
+            }
         }
 
         return vendorGroups;
