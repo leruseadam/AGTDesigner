@@ -4508,70 +4508,204 @@ class TemplateProcessor:
 
     def _ultimate_marker_cleanup(self, doc):
         """
-        Ultimate cleanup: Reconstruct full text to handle markers split across runs.
-        Word splits text into multiple runs, so we need to work with full paragraph text.
+        Ultimate cleanup: Remove all marker strings from document.
+        Uses simple string replacement for reliability.
         """
         try:
-            literal_markers = [
-                'DESC_START', 'DESC_END',
-                'PRICE_START', 'PRICE_END', 'PRICE_STARTS', 'RICE_END',
-                'STARTS+UP', 'STARTS UP', '+UP',
-                'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
-                'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
-                'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END',
-                'LINEAGE_START', 'LINEAGE_END',
-                'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END',
-                'THC_CBD_START', 'THC_CBD_END',
-                'RATIO_START', 'RATIO_END',
-                'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
+            from src.core.formatting.markers import FIELD_MARKERS
+            import re
+            
+            # Build comprehensive marker list from FIELD_MARKERS
+            literal_markers = []
+            for field_name, (start_marker, end_marker) in FIELD_MARKERS.items():
+                literal_markers.append(start_marker)
+                literal_markers.append(end_marker)
+            
+            # Remove duplicates while preserving order
+            literal_markers = list(dict.fromkeys(literal_markers))
+            
+            # Also add common variations that can occur when markers are split across runs
+            # e.g., PRICE_START + S becomes PRICE_STARTS, PRICE_END where P is split becomes RICE_END
+            additional_markers = [
+                'PRICE_STARTS', 'RICE_END',  # Common split variations
             ]
+            literal_markers.extend(additional_markers)
+            literal_markers = list(dict.fromkeys(literal_markers))
             
             replacements_made = 0
             
+            def clean_text(text):
+                """Clean text by removing all marker strings (case-insensitive)."""
+                if not text:
+                    return text
+                
+                cleaned = text
+                # Simple string replacement for each marker (case-insensitive)
+                for marker in literal_markers:
+                    # Replace marker (case-insensitive)
+                    pattern = re.compile(re.escape(marker), re.IGNORECASE)
+                    cleaned = pattern.sub('', cleaned)
+                
+                # Also catch any remaining _START or _END patterns
+                cleaned = re.sub(r'\b\w+_(START|END)\b', '', cleaned, flags=re.IGNORECASE)
+                
+                return cleaned
+            
             # Process all paragraphs - work with FULL TEXT to handle split runs
             for paragraph in doc.paragraphs:
-                if not paragraph.runs:
+                try:
+                    if not paragraph.runs:
+                        continue
+                    full_text = paragraph.text
+                    if not full_text:
+                        continue
+                    
+                    # Check if any markers exist by trying to clean
+                    cleaned_text = clean_text(full_text)
+                    if cleaned_text == full_text:
+                        continue
+                    
+                    # Text will be cleaned, replace all runs
+                    replacements_made += 1
+                    if paragraph.runs:
+                        paragraph.runs[0].text = cleaned_text
+                        for run in paragraph.runs[1:]:
+                            run.text = ''
+                except Exception as para_error:
+                    self.logger.warning(f"Error cleaning paragraph: {para_error}")
                     continue
-                full_text = paragraph.text
-                if not full_text:
-                    continue
-                cleaned_text = full_text
-                for marker in literal_markers:
-                    if marker in cleaned_text:
-                        cleaned_text = cleaned_text.replace(marker, '')
-                        replacements_made += 1
-                if cleaned_text != full_text:
-                    # Replace all runs with cleaned text in first run
-                    paragraph.runs[0].text = cleaned_text
-                    for run in paragraph.runs[1:]:
-                        run.text = ''
             
             # Process all tables - work with FULL TEXT to handle split runs
             for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            if not paragraph.runs:
-                                continue
-                            full_text = paragraph.text
-                            if not full_text:
-                                continue
-                            cleaned_text = full_text
-                            for marker in literal_markers:
-                                if marker in cleaned_text:
-                                    cleaned_text = cleaned_text.replace(marker, '')
-                                    replacements_made += 1
-                            if cleaned_text != full_text:
-                                # Replace all runs with cleaned text in first run
-                                paragraph.runs[0].text = cleaned_text
+                try:
+                    for row in table.rows:
+                        try:
+                            for cell in row.cells:
+                                try:
+                                    for paragraph in cell.paragraphs:
+                                        try:
+                                            if not paragraph.runs:
+                                                continue
+                                            full_text = paragraph.text
+                                            if not full_text:
+                                                continue
+                                            
+                                            # Check if any markers exist by trying to clean
+                                            cleaned_text = clean_text(full_text)
+                                            if cleaned_text == full_text:
+                                                continue
+                                            
+                                            # Text will be cleaned, replace all runs
+                                            replacements_made += 1
+                                            if paragraph.runs:
+                                                paragraph.runs[0].text = cleaned_text
+                                                for run in paragraph.runs[1:]:
+                                                    run.text = ''
+                                        except Exception as para_error:
+                                            self.logger.warning(f"Error cleaning paragraph in cell: {para_error}")
+                                            continue
+                                except Exception as cell_error:
+                                    self.logger.warning(f"Error cleaning cell: {cell_error}")
+                                    continue
+                        except Exception as row_error:
+                            self.logger.warning(f"Error cleaning row: {row_error}")
+                            continue
+                except Exception as table_error:
+                    self.logger.warning(f"Error cleaning table: {table_error}")
+                    continue
+            
+            # CRITICAL FIX: Run cleanup multiple times to catch markers that appear after text reconstruction
+            # Sometimes markers get split across runs and only appear after we merge text
+            max_iterations = 5  # Increased iterations to handle complex splits
+            iteration = 0
+            while iteration < max_iterations:
+                iteration += 1
+                found_markers = False
+                
+                # Quick pass to check if any markers remain
+                for paragraph in doc.paragraphs:
+                    if paragraph.text and clean_text(paragraph.text) != paragraph.text:
+                        found_markers = True
+                        break
+                    if not found_markers:
+                        for table in doc.tables:
+                            for row in table.rows:
+                                for cell in row.cells:
+                                    if cell.text and clean_text(cell.text) != cell.text:
+                                        found_markers = True
+                                        break
+                                if found_markers:
+                                    break
+                            if found_markers:
+                                break
+                
+                if not found_markers:
+                    break  # No markers found, we're done
+                
+                # Run cleanup again on paragraphs
+                for paragraph in doc.paragraphs:
+                    try:
+                        if paragraph.runs and paragraph.text:
+                            cleaned = clean_text(paragraph.text)
+                            if cleaned != paragraph.text:
+                                paragraph.runs[0].text = cleaned
                                 for run in paragraph.runs[1:]:
                                     run.text = ''
+                    except:
+                        continue
+                
+                # Run cleanup again on tables
+                for table in doc.tables:
+                    try:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for paragraph in cell.paragraphs:
+                                    try:
+                                        if paragraph.runs and paragraph.text:
+                                            cleaned = clean_text(paragraph.text)
+                                            if cleaned != paragraph.text:
+                                                paragraph.runs[0].text = cleaned
+                                                for run in paragraph.runs[1:]:
+                                                    run.text = ''
+                                    except:
+                                        continue
+                    except:
+                        continue
             
             if replacements_made > 0:
-                self.logger.warning(f"⚡ ULTIMATE CLEANUP: Removed {replacements_made} marker instances")
+                self.logger.warning(f"⚡ ULTIMATE CLEANUP: Removed {replacements_made} marker instances in {iteration} iteration(s)")
+            else:
+                # DEBUG: Check if markers actually exist but weren't found
+                sample_texts = []
+                for table in doc.tables[:1]:  # Check first table only
+                    for row in table.rows[:2]:  # Check first 2 rows
+                        for cell in row.cells[:2]:  # Check first 2 cells
+                            if cell.text:
+                                sample_texts.append(cell.text[:100])  # First 100 chars
+                                if len(sample_texts) >= 3:
+                                    break
+                        if len(sample_texts) >= 3:
+                            break
+                    if len(sample_texts) >= 3:
+                        break
+                
+                # Check if any markers are in sample texts
+                markers_found = []
+                for text in sample_texts:
+                    for marker in literal_markers[:5]:  # Check first 5 markers
+                        if marker.upper() in text.upper():
+                            markers_found.append(marker)
+                            break
+                
+                if markers_found:
+                    self.logger.error(f"❌ ULTIMATE CLEANUP ERROR: Found markers {markers_found} in text but cleanup didn't remove them! Sample: {sample_texts[0][:50] if sample_texts else 'N/A'}")
+                else:
+                    self.logger.debug("⚡ ULTIMATE CLEANUP: No markers found")
             
         except Exception as e:
             self.logger.error(f"❌ ULTIMATE CLEANUP ERROR: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
 
     def _final_lineage_cleanup(self, doc):
         """
