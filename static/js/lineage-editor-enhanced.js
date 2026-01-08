@@ -513,6 +513,25 @@ class EnhancedStrainLineageEditor {
             // Save lineage
             const result = await this.saveLineage(newLineage);
             
+            // CRITICAL FIX: Set lastLineageUpdateTime to trigger UI refresh
+            const updateTime = Date.now().toString();
+            if (window.sessionStorage) {
+                sessionStorage.setItem('lastLineageUpdateTime', updateTime);
+            }
+            if (window.localStorage) {
+                localStorage.setItem('lastLineageUpdateTime', updateTime);
+            }
+            console.log('✅ Set lastLineageUpdateTime to trigger UI refresh with fresh database lineage');
+            
+            // CRITICAL FIX: Refresh tags to show updated lineage from database
+            if (window.TagManager && typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+                console.log('🔄 Refreshing tags to show updated lineage...');
+                // Refresh tags in background (non-blocking)
+                window.TagManager.fetchAndUpdateAvailableTags(true).catch(err => {
+                    console.warn('Failed to refresh tags after lineage update:', err);
+                });
+            }
+            
             // Add to history
             this.addToHistory(newLineage, result.products_updated);
             
