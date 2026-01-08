@@ -2646,7 +2646,7 @@ class TemplateProcessor:
                 # Center brand should always be ALL CAPS
                 brand_center_text = str(product_brand).upper()
                 if self.template_type == 'vertical':
-                    # Mirror double-template handling: treat brand content as lineage with hint markers for color logic
+                    # For vertical template: preserve actual lineage, use brand for ProductBrand
                     final_brand_text = str(brand_center_text).strip().upper()
 
                     product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
