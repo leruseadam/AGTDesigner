@@ -1256,6 +1256,10 @@ class TemplateProcessor:
                 self._final_marker_cleanup(single_doc)
                 self._nuclear_marker_cleanup(single_doc)
                 self._ultimate_marker_cleanup(single_doc)  # CRITICAL: Also run ultimate cleanup!
+
+                # NUCLEAR OPTION: Brute force replace ALL marker text in ALL paragraphs
+                self._brute_force_marker_removal(single_doc)
+
                 self.logger.warning("✅ FINAL CLEANUP: All cleanups complete")
                 return single_doc
             
@@ -1279,6 +1283,10 @@ class TemplateProcessor:
             self._final_marker_cleanup(final_doc)
             self._nuclear_marker_cleanup(final_doc)
             self._ultimate_marker_cleanup(final_doc)  # CRITICAL: Also run ultimate cleanup!
+
+            # NUCLEAR OPTION: Brute force replace ALL marker text
+            self._brute_force_marker_removal(final_doc)
+
             self.logger.warning("✅ FINAL CLEANUP: All cleanups complete")
 
             total_time = time.time() - self.start_time
@@ -1690,6 +1698,9 @@ class TemplateProcessor:
         joint_ratio_cache = joint_ratio_cache or {}
         product_doh_cache = product_doh_cache or {}  # PERFORMANCE FIX: Add DOH cache
         """Ultra-optimized label context building for maximum performance."""
+        # CRITICAL: Import marker functions at TOP to avoid UnboundLocalError
+        from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_already_wrapped
+
         # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
             product_brand_cache = {}
@@ -3080,8 +3091,15 @@ class TemplateProcessor:
         # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight
         if label_context.get('DescAndWeight'):
             from src.core.generation.text_processing import make_nonbreaking_hyphens
+            # Note: unwrap_marker and wrap_with_marker already imported at top of function
+
             original_desc_weight = label_context['DescAndWeight']
-            label_context['DescAndWeight'] = make_nonbreaking_hyphens(label_context['DescAndWeight'])
+
+            # CRITICAL: Unwrap markers BEFORE formatting, then rewrap after
+            unwrapped = unwrap_marker(original_desc_weight, 'DESC')
+            formatted = make_nonbreaking_hyphens(unwrapped)
+            label_context['DescAndWeight'] = wrap_with_marker(formatted, 'DESC')
+
             self.logger.info(f"🔧 NON-BREAKING FORMATTING: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
 
 
@@ -4770,21 +4788,112 @@ class TemplateProcessor:
                     if len(sample_texts) >= 3:
                         break
                 
-                # Check if any markers are in sample texts
+                # Check if ANY markers are in sample texts
                 markers_found = []
                 for text in sample_texts:
-                    for marker in literal_markers[:5]:  # Check first 5 markers
+                    # Check ALL markers, not just first 5!
+                    for marker in literal_markers:
                         if marker.upper() in text.upper():
                             markers_found.append(marker)
-                            break
-                
+                    # Also check for common marker patterns
+                    if 'START' in text.upper() or 'END' in text.upper():
+                        if any(x in text.upper() for x in ['PRICE', 'DESC', 'LINEAGE', 'PRODUCTBRAND']):
+                            markers_found.append('PATTERN_MATCH')
+
                 if markers_found:
-                    self.logger.error(f"❌ ULTIMATE CLEANUP ERROR: Found markers {markers_found} in text but cleanup didn't remove them! Sample: {sample_texts[0][:50] if sample_texts else 'N/A'}")
+                    self.logger.error(f"❌ ULTIMATE CLEANUP ERROR: Found markers {set(markers_found)} in text but cleanup didn't remove them!")
+                    self.logger.error(f"Sample texts: {sample_texts}")
                 else:
                     self.logger.debug("⚡ ULTIMATE CLEANUP: No markers found")
             
         except Exception as e:
             self.logger.error(f"❌ ULTIMATE CLEANUP ERROR: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+
+    def _brute_force_marker_removal(self, doc):
+        """
+        NUCLEAR OPTION: Brute force marker removal.
+        Simply replaces ALL known marker strings with their content or empty string.
+        """
+        try:
+            import re
+
+            # All possible markers
+            markers_to_remove = [
+                'PRICE_START', 'PRICE_END', 'RICE_END',
+                'DESC_START', 'DESC_END', 'tgDESC_END', 'SgDESC_END',
+                'LINEAGE_START', 'LINEAGE_END',
+                'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
+                'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
+                'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END',
+                'PRODUCTNAME_START', 'PRODUCTNAME_END',
+                'PRODUCTTYPE_START', 'PRODUCTTYPE_END',
+                'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END',
+                'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
+                'THC_CBD_START', 'THC_CBD_END',
+                'RATIO_START', 'RATIO_END',
+                'JOINT_RATIO_START', 'JOINT_RATIO_END',
+                'DOH_START', 'DOH_END',
+                'THC_START', 'THC_END',
+                'CBD_START', 'CBD_END',
+            ]
+
+            cleaned_count = 0
+
+            # Process ALL tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            original = para.text
+                            if not original:
+                                continue
+
+                            cleaned = original
+                            # Remove each marker
+                            for marker in markers_to_remove:
+                                cleaned = cleaned.replace(marker, '')
+
+                            # Clean up whitespace
+                            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+                            if cleaned != original:
+                                # Replace text in first run, clear others
+                                if para.runs:
+                                    para.runs[0].text = cleaned
+                                    for run in para.runs[1:]:
+                                        run.text = ''
+                                    cleaned_count += 1
+                                    self.logger.warning(f"🔥 BRUTE FORCE: '{original[:80]}' → '{cleaned[:80]}'")
+
+            # Process paragraphs outside tables
+            for para in doc.paragraphs:
+                original = para.text
+                if not original:
+                    continue
+
+                cleaned = original
+                for marker in markers_to_remove:
+                    cleaned = cleaned.replace(marker, '')
+
+                cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+                if cleaned != original:
+                    if para.runs:
+                        para.runs[0].text = cleaned
+                        for run in para.runs[1:]:
+                            run.text = ''
+                        cleaned_count += 1
+                        self.logger.warning(f"🔥 BRUTE FORCE: '{original[:80]}' → '{cleaned[:80]}'")
+
+            if cleaned_count > 0:
+                self.logger.warning(f"🔥 BRUTE FORCE CLEANUP: Removed markers from {cleaned_count} paragraphs")
+            else:
+                self.logger.debug("🔥 BRUTE FORCE: No markers found to remove")
+
+        except Exception as e:
+            self.logger.error(f"❌ BRUTE FORCE ERROR: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
 

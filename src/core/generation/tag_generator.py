@@ -1350,15 +1350,29 @@ def process_chunk(args):
     tpl.render(context)
     if DEBUG_ENABLED:
         logger.debug("Template rendered successfully")
-    
-    # Save to buffer
+
+    # Save rendered template to buffer first
     buffer = BytesIO()
     tpl.save(buffer)
     buffer.seek(0)
     if DEBUG_ENABLED:
         logger.debug("Template saved to buffer")
-    
-    return buffer.getvalue()
+
+    # CRITICAL FIX: Load the saved document and clean up markers
+    from docx import Document
+    doc = Document(buffer)
+    _final_marker_cleanup(doc)
+    if DEBUG_ENABLED:
+        logger.debug("Marker cleanup completed")
+
+    # Save the cleaned document to final buffer
+    final_buffer = BytesIO()
+    doc.save(final_buffer)
+    final_buffer.seek(0)
+    if DEBUG_ENABLED:
+        logger.debug("Cleaned document saved to final buffer")
+
+    return final_buffer.getvalue()
 
 def combine_documents(docs):
     """Combine multiple documents into one using a safer method."""
@@ -1648,104 +1662,177 @@ def _final_marker_cleanup(doc):
     """
     Final marker cleanup to ensure ALL markers are stripped from the final output.
     This method runs after all other processing to catch any remaining markers.
+    Handles markers that may be split across multiple text runs.
     """
     try:
-        # Enhanced patterns to catch all marker variations
+        # ALL marker types including corrupted/partial variations
+        # Based on screenshot: PRICE_START, RICE_END, DESC_START, tgDESC_END, etc.
         marker_patterns = [
-            r'\b\w+_(START|END)\b',           # Standard markers like PRODUCTBRAND_START
-            r'\b\w+_START\b',                 # START markers specifically
-            r'\b\w+_END\b',                   # END markers specifically
-            r'PRODUCTBRAND_START\s*',         # PRODUCTBRAND_START with optional spaces
-            r'\s*PRODUCTBRAND_END\b',         # PRODUCTBRAND_END with optional spaces
-            r'PRODUCTBRAND_CENTER_START\s*',  # PRODUCTBRAND_CENTER_START with optional spaces
-            r'\s*PRODUCTBRAND_CENTER_END\b',  # PRODUCTBRAND_CENTER_END with optional spaces
-            r'PRODUCTSTRAIN_START\s*',        # PRODUCTSTRAIN_START with optional spaces
-            r'\s*PRODUCTSTRAIN_END\b',        # PRODUCTSTRAIN_END with optional spaces
-            r'LINEAGE_START\s*',              # LINEAGE_START with optional spaces
-            r'\s*LINEAGE_END\b',              # LINEAGE_END with optional spaces
-            r'PRODUCTVENDOR_START\s*',        # PRODUCTVENDOR_START with optional spaces
-            r'\s*PRODUCTVENDOR_END\b',        # PRODUCTVENDOR_END with optional spaces
-            r'THC_CBD_START\s*',              # THC_CBD_START with optional spaces
-            r'\s*THC_CBD_END\b',              # THC_CBD_END with optional spaces
-            r'RATIO_START\s*',                # RATIO_START with optional spaces
-            r'\s*RATIO_END\b',                # RATIO_END with optional spaces
-            r'WEIGHTUNITS_START\s*',          # WEIGHTUNITS_START with optional spaces
-            r'\s*WEIGHTUNITS_END\b',          # WEIGHTUNITS_END with optional spaces
-            r'PRICE_START\s*',                # PRICE_START with optional spaces
-            r'\s*PRICE_END\b',                # PRICE_END with optional spaces
-            r'DESC_START\s*',                 # DESC_START with optional spaces
-            r'\s*DESC_END\b',                 # DESC_END with optional spaces
-            r'\bPRODUCTBRAND\b',              # Standalone PRODUCTBRAND
-            r'\bPRODUCTSTRAIN\b',             # Standalone PRODUCTSTRAIN
-            r'\bPRODUCTVENDOR\b',             # Standalone PRODUCTVENDOR
-            r'\bTHC_CBD\b',                   # Standalone THC_CBD
-            r'\bWEIGHTUNITS\b',               # Standalone WEIGHTUNITS
-            r'\bPRICE\b',                     # Standalone PRICE
-            r'\bDESC\b',                      # Standalone DESC
+            # Full markers with START/END
+            r'PRODUCTNAME_START',
+            r'PRODUCTNAME_END',
+            r'PRODUCTBRAND_START',
+            r'PRODUCTBRAND_END',
+            r'PRODUCTBRAND_CENTER_START',
+            r'PRODUCTBRAND_CENTER_END',
+            r'PRODUCTSTRAIN_START',
+            r'PRODUCTSTRAIN_END',
+            r'PRODUCTTYPE_START',
+            r'PRODUCTTYPE_END',
+            r'PRODUCTVENDOR_START',
+            r'PRODUCTVENDOR_END',
+            r'LINEAGE_START',
+            r'LINEAGE_END',
+            r'WEIGHTUNITS_START',
+            r'WEIGHTUNITS_END',
+            r'PRICE_START',
+            r'PRICE_END',
+            r'DESC_START',
+            r'DESC_END',
+            r'THC_CBD_START',
+            r'THC_CBD_END',
+            r'RATIO_START',
+            r'RATIO_END',
+            r'JOINT_RATIO_START',
+            r'JOINT_RATIO_END',
+            r'THC_START',
+            r'THC_END',
+            r'CBD_START',
+            r'CBD_END',
+            r'DOH_START',
+            r'DOH_END',
+            # Partial/corrupted markers (like RICE_END instead of PRICE_END)
+            r'RICE_START',
+            r'RICE_END',
+            # Prefixed markers (like tgDESC_END)
+            r'tgDESC_START',
+            r'tgDESC_END',
+            r'tgPRICE_START',
+            r'tgPRICE_END',
         ]
-        
+
         def clean_text(text):
-            """Clean text by removing all marker patterns while preserving content."""
+            """Clean text by removing all marker patterns while preserving content between markers."""
+            if not text:
+                return text
+
             cleaned = text
-            
-            # Extract content from markers before removing them
-            lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE)
+
+            # PRIORITY 1: Extract and preserve content between paired markers
+            # LINEAGE: Keep the lineage value
+            lineage_match = re.search(r'LINEAGE_START\s*(.+?)\s*LINEAGE_END', cleaned, re.IGNORECASE | re.DOTALL)
             if lineage_match:
-                lineage_content = lineage_match.group(1)
-                cleaned = re.sub(r'LINEAGE_START(.+?)LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE)
-            
-            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE)
+                lineage_content = lineage_match.group(1).strip()
+                cleaned = re.sub(r'LINEAGE_START\s*.+?\s*LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+            # PRODUCTBRAND/PRODUCTBRAND_CENTER: Keep the brand name
+            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START\s*(.+?)\s*PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE | re.DOTALL)
             if brand_match:
-                brand_content = brand_match.group(1)
-                cleaned = re.sub(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_content, cleaned, flags=re.IGNORECASE)
-            
-            strain_match = re.search(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', cleaned, re.IGNORECASE)
+                brand_content = brand_match.group(1).strip()
+                cleaned = re.sub(r'PRODUCTBRAND(?:_CENTER)?_START\s*.+?\s*PRODUCTBRAND(?:_CENTER)?_END', brand_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+            # PRODUCTSTRAIN: Keep the strain name
+            strain_match = re.search(r'PRODUCTSTRAIN_START\s*(.+?)\s*PRODUCTSTRAIN_END', cleaned, re.IGNORECASE | re.DOTALL)
             if strain_match:
-                strain_content = strain_match.group(1)
-                cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
-            
-            # Remove other marker patterns
-            for pattern in marker_patterns:
-                cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-            
-            # Clean up any double spaces, leading/trailing spaces
-            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                strain_content = strain_match.group(1).strip()
+                cleaned = re.sub(r'PRODUCTSTRAIN_START\s*.+?\s*PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+            # PRICE: Keep the price value
+            price_match = re.search(r'PRICE_START\s*(.+?)\s*(?:PRICE_END|RICE_END)', cleaned, re.IGNORECASE | re.DOTALL)
+            if price_match:
+                price_content = price_match.group(1).strip()
+                cleaned = re.sub(r'PRICE_START\s*.+?\s*(?:PRICE_END|RICE_END)', price_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+            # DESC: Keep the description
+            desc_match = re.search(r'DESC_START\s*(.+?)\s*(?:DESC_END|tgDESC_END)', cleaned, re.IGNORECASE | re.DOTALL)
+            if desc_match:
+                desc_content = desc_match.group(1).strip()
+                cleaned = re.sub(r'DESC_START\s*.+?\s*(?:DESC_END|tgDESC_END)', desc_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+            # THC_CBD/RATIO: Keep the content
+            thc_cbd_match = re.search(r'THC_CBD_START\s*(.+?)\s*THC_CBD_END', cleaned, re.IGNORECASE | re.DOTALL)
+            if thc_cbd_match:
+                thc_cbd_content = thc_cbd_match.group(1).strip()
+                cleaned = re.sub(r'THC_CBD_START\s*.+?\s*THC_CBD_END', thc_cbd_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+            ratio_match = re.search(r'RATIO_START\s*(.+?)\s*RATIO_END', cleaned, re.IGNORECASE | re.DOTALL)
+            if ratio_match:
+                ratio_content = ratio_match.group(1).strip()
+                cleaned = re.sub(r'RATIO_START\s*.+?\s*RATIO_END', ratio_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+            # WEIGHTUNITS: Keep the weight
+            weight_match = re.search(r'WEIGHTUNITS_START\s*(.+?)\s*WEIGHTUNITS_END', cleaned, re.IGNORECASE | re.DOTALL)
+            if weight_match:
+                weight_content = weight_match.group(1).strip()
+                cleaned = re.sub(r'WEIGHTUNITS_START\s*.+?\s*WEIGHTUNITS_END', weight_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
+
+            # PRIORITY 2: Remove any remaining standalone markers
+            for marker in marker_patterns:
+                # Remove the marker with optional whitespace
+                cleaned = re.sub(r'\s*' + marker + r'\s*', ' ', cleaned, flags=re.IGNORECASE)
+
+            # PRIORITY 3: Remove any residual marker-like patterns
+            # This catches things like "bis" from "PRODUCTBRAND_END" split across runs
+            cleaned = re.sub(r'\b(?:bis|tg)\b', '', cleaned, flags=re.IGNORECASE)
+
+            # Clean up excessive whitespace
+            cleaned = re.sub(r'\s+', ' ', cleaned)
+            cleaned = cleaned.strip()
+
             return cleaned
-        
-        # Clean markers in all tables
+
+        # Clean markers in all tables (where the labels are)
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
-                        original_para_text = paragraph.text
-                        cleaned_para_text = clean_text(original_para_text)
+                        # Get the full text from all runs
+                        original_text = paragraph.text
+                        if not original_text:
+                            continue
 
-                        if cleaned_para_text != original_para_text:
-                            # Clear all runs and set cleaned text in first run
-                            for run in paragraph.runs:
-                                run.text = ''
+                        # Clean the text
+                        cleaned_text = clean_text(original_text)
+
+                        # If text changed, update the paragraph
+                        if cleaned_text != original_text:
+                            # Preserve formatting by keeping first run and clearing others
                             if paragraph.runs:
-                                paragraph.runs[0].text = cleaned_para_text
-                            elif cleaned_para_text:
-                                paragraph.add_run(cleaned_para_text)
+                                # Store formatting from first run
+                                first_run = paragraph.runs[0]
+                                font = first_run.font
+
+                                # Clear all runs
+                                for run in paragraph.runs[1:]:
+                                    run.text = ''
+
+                                # Set cleaned text in first run
+                                first_run.text = cleaned_text
+                            elif cleaned_text:
+                                # No runs exist, create one
+                                paragraph.add_run(cleaned_text)
 
         # Clean markers in paragraphs outside tables
         for paragraph in doc.paragraphs:
-            original_para_text = paragraph.text
-            cleaned_para_text = clean_text(original_para_text)
+            original_text = paragraph.text
+            if not original_text:
+                continue
 
-            if cleaned_para_text != original_para_text:
-                for run in paragraph.runs:
-                    run.text = ''
+            cleaned_text = clean_text(original_text)
+
+            if cleaned_text != original_text:
                 if paragraph.runs:
-                    paragraph.runs[0].text = cleaned_para_text
-                elif cleaned_para_text:
-                    paragraph.add_run(cleaned_para_text)
-        
-        logger.info("Final marker cleanup completed")
-        
+                    first_run = paragraph.runs[0]
+                    for run in paragraph.runs[1:]:
+                        run.text = ''
+                    first_run.text = cleaned_text
+                elif cleaned_text:
+                    paragraph.add_run(cleaned_text)
+
+        logger.info("✅ Final marker cleanup completed successfully")
+
     except Exception as e:
-        logger.warning(f"Error in final marker cleanup: {e}")
+        logger.warning(f"⚠️ Error in final marker cleanup: {e}")
 
 def debug_markers(text):
     """Debug helper to identify marker issues."""
