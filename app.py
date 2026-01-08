@@ -6152,6 +6152,8 @@ def set_store():
         _excel_processor = None
 
         # OPTIMIZATION: File loading deferred to page reload for instant response
+        # Don't call get_product_database here - it's slow and can cause timeout
+        # Database will be loaded on first use after page reload
         logging.debug(f"Store set to {store_value} - cleared session, globals & caches")
         
         return jsonify({
