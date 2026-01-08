@@ -14282,6 +14282,18 @@ const TagManager = {
 
     // Action splash screen for clear/undo operations
     showActionSplash(message) {
+        // CRITICAL FIX: Don't show loading splash if store selection modal is visible
+        const storeModal = document.getElementById('storeSelectionModal');
+        const isStoreModalVisible = storeModal && (storeModal.classList.contains('show') || storeModal.style.display !== 'none');
+        
+        // Also check if store is not confirmed
+        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
+        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        
+        if (isStoreModalVisible || !storeConfirmed) {
+            verboseLog('Store modal visible or not confirmed - skipping action splash:', message);
+            return;
+        }
         // Create splash if it doesn't exist
         let splash = document.getElementById('actionSplash');
         if (!splash) {
