@@ -3827,8 +3827,13 @@ const TagManager = {
         
         // Show loading splash IMMEDIATELY for tag population (no delay, no conditions)
         const tagsToShow = filteredTags || originalTags;
-        // Show splash immediately when tags are being loaded, unless user is actively searching
-        if (!this.state.isSearching) {
+        // CRITICAL FIX: Only show loading if store is confirmed
+        // Don't show loading splash before store selection modal
+        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
+        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        
+        // Show splash immediately when tags are being loaded, unless user is actively searching OR store not confirmed
+        if (!this.state.isSearching && storeConfirmed) {
             this.showActionSplash('Loading tags...');
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen
@@ -3843,6 +3848,9 @@ const TagManager = {
                     </div>
                 `;
             }
+        } else if (!storeConfirmed) {
+            // Store not confirmed - don't show loading, let store modal show
+            verboseLog('Store not confirmed - skipping loading splash (store modal should show)');
         }
         
         // PERFORMANCE: Use setTimeout(0) instead of requestAnimationFrame for faster initial render
