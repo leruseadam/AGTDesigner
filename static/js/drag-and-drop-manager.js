@@ -1039,12 +1039,36 @@ class DragAndDropManager {
             if (elementData.backup) {
                 const restoredElement = elementData.backup.cloneNode(true);
                 if (targetParent) {
-                    if (targetElement) {
-                        targetParent.insertBefore(restoredElement, targetElement);
+                    if (targetElement && targetParent.contains(targetElement)) {
+                        // targetElement is a child of targetParent - safe to insert before
+                        try {
+                            targetParent.insertBefore(restoredElement, targetElement);
+                        } catch (e) {
+                            console.error('❌ Error inserting before target element:', e);
+                            // Fallback: append to parent
+                            targetParent.appendChild(restoredElement);
+                        }
+                    } else if (targetElement) {
+                        // targetElement exists but is not a child of targetParent
+                        // Find the correct parent of targetElement
+                        const correctParent = targetElement.parentNode;
+                        if (correctParent) {
+                            try {
+                                correctParent.insertBefore(restoredElement, targetElement);
+                            } catch (e) {
+                                console.error('❌ Error inserting before target element in correct parent:', e);
+                                correctParent.appendChild(restoredElement);
+                            }
+                        } else {
+                            // Fallback: append to targetParent
+                            targetParent.appendChild(restoredElement);
+                        }
                     } else {
+                        // No target element - append to parent
                         targetParent.appendChild(restoredElement);
                     }
                 } else {
+                    // No target parent - append to container
                     container.appendChild(restoredElement);
                 }
                 console.log('✅ Restored element from backup');
@@ -1058,12 +1082,31 @@ class DragAndDropManager {
         // Insert the dragged element at the correct position
         if (targetElement && targetParent) {
             // Insert before the target element
-            try {
-                targetParent.insertBefore(draggedElement, targetElement);
-            } catch (e) {
-                console.error('❌ Error inserting before target element:', e);
-                // Fallback: append to parent
-                targetParent.appendChild(draggedElement);
+            // CRITICAL FIX: Verify targetElement is actually a child of targetParent
+            if (targetParent.contains(targetElement)) {
+                // Safe to insert before
+                try {
+                    targetParent.insertBefore(draggedElement, targetElement);
+                } catch (e) {
+                    console.error('❌ Error inserting before target element:', e);
+                    // Fallback: append to parent
+                    targetParent.appendChild(draggedElement);
+                }
+            } else {
+                // targetElement is not a child of targetParent - find correct parent
+                const correctParent = targetElement.parentNode;
+                if (correctParent) {
+                    try {
+                        correctParent.insertBefore(draggedElement, targetElement);
+                    } catch (e) {
+                        console.error('❌ Error inserting before target element in correct parent:', e);
+                        // Fallback: append to correct parent
+                        correctParent.appendChild(draggedElement);
+                    }
+                } else {
+                    // Fallback: append to targetParent
+                    targetParent.appendChild(draggedElement);
+                }
             }
         } else if (targetParent) {
             // Append to the target parent
