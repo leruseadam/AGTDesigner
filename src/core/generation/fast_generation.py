@@ -26,7 +26,9 @@ except ImportError:
     HAS_CACHETOOLS = False
 
 # CRITICAL FIX: Clear cache on module load to remove documents with markers
-logger.warning("🧹 CLEARING GENERATION CACHE - Removing old cached documents with markers")
+# Cache version: increment this when cleanup logic changes to invalidate old cache
+CACHE_VERSION = "v2.1"  # Updated when marker cleanup changes
+logger.warning(f"🧹 CLEARING GENERATION CACHE (version {CACHE_VERSION}) - Removing old cached documents with markers")
 _generation_cache.clear()
 
 _template_buffer_cache = {}  # Persistent cache for template buffers
@@ -107,6 +109,33 @@ class FastGenerationEngine:
             
             # CRITICAL: Clean markers from cached document too
             logger.warning("🧹🧹🧹 ABOUT TO CALL CLEANUP ON CACHED DOC")
+            
+            # DEBUG: Check for markers before cleanup
+            sample_texts = []
+            marker_count = 0
+            for table in cached_doc.tables[:1]:  # Check first table
+                for row in table.rows[:2]:  # Check first 2 rows
+                    for cell in row.cells[:2]:  # Check first 2 cells
+                        if cell.text:
+                            text = cell.text[:200]  # First 200 chars
+                            sample_texts.append(text)
+                            # Count markers
+                            if 'DESC_START' in text or 'DESC_END' in text:
+                                marker_count += text.count('DESC_START') + text.count('DESC_END')
+                            if 'PRICE_START' in text or 'PRICE_END' in text:
+                                marker_count += text.count('PRICE_START') + text.count('PRICE_END')
+                            if len(sample_texts) >= 3:
+                                break
+                    if len(sample_texts) >= 3:
+                        break
+                if len(sample_texts) >= 3:
+                    break
+            
+            if marker_count > 0:
+                logger.error(f"❌ FOUND {marker_count} MARKERS IN CACHED DOC BEFORE CLEANUP! Sample: {sample_texts[0][:100] if sample_texts else 'N/A'}")
+            else:
+                logger.debug(f"✅ No markers found in cached doc before cleanup (checked {len(sample_texts)} sample texts)")
+            
             try:
                 self.template_processor._final_marker_cleanup(cached_doc)
                 logger.warning("🧹 FIRST CLEANUP DONE")
@@ -114,6 +143,23 @@ class FastGenerationEngine:
                 logger.warning("🧹 NUCLEAR CLEANUP DONE")
                 self.template_processor._ultimate_marker_cleanup(cached_doc)
                 logger.warning("🧹 ULTIMATE CLEANUP DONE")
+                
+                # DEBUG: Check for markers after cleanup
+                marker_count_after = 0
+                for table in cached_doc.tables[:1]:
+                    for row in table.rows[:2]:
+                        for cell in row.cells[:2]:
+                            if cell.text:
+                                text = cell.text
+                                if 'DESC_START' in text or 'DESC_END' in text:
+                                    marker_count_after += text.count('DESC_START') + text.count('DESC_END')
+                                if 'PRICE_START' in text or 'PRICE_END' in text:
+                                    marker_count_after += text.count('PRICE_START') + text.count('PRICE_END')
+                
+                if marker_count_after > 0:
+                    logger.error(f"❌❌❌ CLEANUP FAILED: {marker_count_after} markers still present after cleanup!")
+                else:
+                    logger.debug(f"✅ Cleanup successful: all markers removed")
             except Exception as e:
                 logger.error(f"❌❌❌ CLEANUP FAILED: {e}")
                 import traceback
