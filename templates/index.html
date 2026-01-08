@@ -87,6 +87,25 @@
             <p style="color: rgba(255, 255, 255, 0.8); font-size: 1rem; margin: 0;">Please wait while we load your store data</p>
           </div>
         `;
+        
+        // CRITICAL FIX: Add timeout to force hide modal if it hangs
+        const modalTimeout = setTimeout(() => {
+          console.warn('⚠️ Store selection taking too long (15 seconds), forcing modal close and reload...');
+          // Store is probably set, just reload
+          if (sessionStorage.getItem('selected_store') === storeValue) {
+            console.log('✅ Store already in sessionStorage, reloading...');
+            window.location.reload();
+          } else {
+            // Restore modal and show error
+            if (modalBody && modalBody.dataset.originalContent) {
+              modalBody.innerHTML = modalBody.dataset.originalContent;
+            }
+            alert('Store selection timed out. Please try again or refresh the page.');
+          }
+        }, 15000); // 15 second timeout
+        
+        // Store timeout ID so we can clear it on success
+        modalBody.dataset.modalTimeout = modalTimeout;
       }
 
       // Get reference to main content
@@ -126,6 +145,12 @@
         return response.json();
       })
       .then(data => {
+        // Clear modal timeout on success
+        if (modalBody && modalBody.dataset.modalTimeout) {
+          clearTimeout(parseInt(modalBody.dataset.modalTimeout));
+          delete modalBody.dataset.modalTimeout;
+        }
+        
         console.log('✅ JSON parsed successfully');
         console.log('Response data:', data);
         console.log('data.success =', data.success);
@@ -211,6 +236,12 @@
       })
       .catch(error => {
         clearTimeout(fetchTimeout);
+        // Clear modal timeout on error
+        if (modalBody && modalBody.dataset.modalTimeout) {
+          clearTimeout(parseInt(modalBody.dataset.modalTimeout));
+          delete modalBody.dataset.modalTimeout;
+        }
+        
         console.error('❌ Fetch error:', error);
         console.error('Error stack:', error.stack);
         
@@ -815,18 +846,51 @@
             console.log('✅ Content shown, modal hidden');
             
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
+            // Add timeout to prevent hanging
+            const callbackTimeout = setTimeout(() => {
+              console.warn('⚠️ onStoreConfirmed taking too long, forcing TagManager init...');
+              if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
+                try {
+                  window.TagManager.init();
+                } catch (e) {
+                  console.error('❌ Error forcing TagManager init:', e);
+                }
+              }
+            }, 5000); // 5 second timeout
+            
             if (typeof onStoreConfirmed === 'function') {
               console.log('🔄 Store confirmed, calling initialization callback...');
               window._tagManagerInitStarted = true; // Mark that initialization has started
               setTimeout(() => {
                 try {
+                  clearTimeout(callbackTimeout);
                   onStoreConfirmed();
                 } catch (initError) {
+                  clearTimeout(callbackTimeout);
                   console.error('❌ Error in onStoreConfirmed callback:', initError);
+                  // Still try to init TagManager even if callback fails
+                  if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
+                    try {
+                      window.TagManager.init();
+                    } catch (e) {
+                      console.error('❌ Error initializing TagManager after callback error:', e);
+                    }
+                  }
                 }
               }, 100);
             } else {
+              clearTimeout(callbackTimeout);
               console.warn('⚠️ No onStoreConfirmed callback provided - TagManager may not initialize');
+              // Still try to init TagManager
+              if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
+                setTimeout(() => {
+                  try {
+                    window.TagManager.init();
+                  } catch (e) {
+                    console.error('❌ Error initializing TagManager:', e);
+                  }
+                }, 200);
+              }
             }
 
             // CRITICAL FIX: Also trigger TagManager initialization directly if callback didn't work
