@@ -619,8 +619,9 @@ class ProductDatabase:
                         "CBGV" TEXT,
                         "CBNV" TEXT,
                         "CBGVA" TEXT,
+                        "sovereign_lineage" TEXT,  -- Manual lineage override for products without strains
                         FOREIGN KEY (strain_id) REFERENCES strains (id),
-                        UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
+                        UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand", "Weight*")
                     )
                 ''')
                 
@@ -1091,8 +1092,9 @@ class ProductDatabase:
                     "Quantity Received*" TEXT,  -- Alternative to "Quantity*"
                     "qty" TEXT,  -- Alternative to "Quantity*"
                     "Source" TEXT,  -- Source of product data (Excel Import, JSON Match, etc.)
+                    "sovereign_lineage" TEXT,  -- Manual lineage override for products without strains
                     FOREIGN KEY (strain_id) REFERENCES strains (id),
-                    UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
+                    UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand", "Weight*")
                 )
             ''')
             
@@ -1216,15 +1218,22 @@ class ProductDatabase:
             return None
 
     def update_all_canonical_lineages_to_mode(self):
-        """Update all strains' canonical_lineage to the mode lineage from the products table."""
+        """Update all strains' canonical_lineage to the mode lineage from the products table.
+        CRITICAL: Skips strains with sovereign_lineage (manual edits) to preserve user changes."""
         self.init_database()
         conn = self._get_connection()
         cursor = conn.cursor()
-        # Get all strains
-        cursor.execute('SELECT id, strain_name, canonical_lineage FROM strains')
+        # Get all strains WITHOUT sovereign lineage (don't overwrite manual edits)
+        cursor.execute('SELECT id, strain_name, canonical_lineage, sovereign_lineage FROM strains')
         strains = cursor.fetchall()
         updated = 0
-        for strain_id, strain_name, canonical_lineage in strains:
+        skipped = 0
+        for strain_id, strain_name, canonical_lineage, sovereign_lineage in strains:
+            # CRITICAL: Skip strains with sovereign lineage (manual edits)
+            if sovereign_lineage:
+                skipped += 1
+                logger.debug(f"Skipping '{strain_name}' - has sovereign lineage '{sovereign_lineage}'")
+                continue
             mode_lineage = self.get_mode_lineage(strain_id)
             if mode_lineage and mode_lineage != canonical_lineage:
                 cursor.execute('''
@@ -1233,7 +1242,7 @@ class ProductDatabase:
                 logger.info(f"Updated canonical_lineage for '{strain_name}' to '{mode_lineage}' (was '{canonical_lineage}')")
                 updated += 1
         conn.commit()
-        logger.info(f"Canonical lineage update complete. {updated} strains updated.")
+        logger.info(f"Canonical lineage update complete. {updated} strains updated, {skipped} skipped (sovereign lineage protected).")
 
     @timed_operation("add_or_update_strain")
     @retry_on_lock(max_retries=3, delay=0.5)
@@ -1366,9 +1375,9 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                # Rate-limit noisy blank-name logs: log first occurrence and then sparsely (every 1000)
-                if self._rejected_blank_names == 1 or self._rejected_blank_names % 1000 == 1:
-                    logger.info(
+                # Log only the first occurrence, then every 100th to avoid spam
+                if self._rejected_blank_names == 1 or self._rejected_blank_names % 100 == 1:
+                    logger.debug(
                         f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})"
                     )
                 return None
@@ -1376,17 +1385,16 @@ class ProductDatabase:
             # Check for invalid values
             if str(product_name).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_invalid_names += 1
-                # Rate-limit invalid-name logs
-                if self._rejected_invalid_names == 1 or self._rejected_invalid_names % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
+                if self._rejected_invalid_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
                 return None
             
             # RELAXED VALIDATION: Allow single character names for vertical template compatibility
             # Check for minimum length (at least 1 character instead of 2)
             if len(str(product_name).strip()) < 1:
                 self._rejected_short_names += 1
-                if self._rejected_short_names == 1 or self._rejected_short_names % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
+                if self._rejected_short_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
             # Additional validation for essential fields
@@ -1395,22 +1403,30 @@ class ProductDatabase:
             
             if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_missing_vendor += 1
-                if self._rejected_missing_vendor == 1 or self._rejected_missing_vendor % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
+                if self._rejected_missing_vendor % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
                 return None
             
             if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_missing_type += 1
-                if self._rejected_missing_type == 1 or self._rejected_missing_type % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
+                if self._rejected_missing_type % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
                 return None
             
             normalized_name = self._normalize_product_name(product_name)
             current_date = datetime.now().isoformat()
             
             # Get or create strain
-            strain_name = product_data.get('Product Strain', '')
+            strain_name = product_data.get('Product Strain', '').strip() if product_data.get('Product Strain') else ''
             strain_id = None
+
+            # CRITICAL FIX: If no Product Strain, extract strain from product name (classic types only)
+            # This ensures products without "Product Strain" field still get linked to strains
+            # so their lineage edits can be saved to the strains table
+            if not strain_name:
+                product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
+                strain_name = self._extract_strain_from_product_name(product_name, product_type)
+
             if strain_name:
                 # Normalize lineage before storing
                 normalized_lineage = self._normalize_lineage(product_data.get('Lineage'))
@@ -3351,11 +3367,75 @@ class ProductDatabase:
         """Normalize product name for consistent matching."""
         if not isinstance(product_name, str):
             return ""
-        
+
         # Use the existing normalization function
         from .excel_processor import normalize_name
         return normalize_name(product_name)
-    
+
+    def _extract_strain_from_product_name(self, product_name: str, product_type: str = None) -> str:
+        """Extract strain name from product name for classic product types.
+
+        Only extracts for classic types: flower, pre-roll, concentrate, etc.
+        Returns empty string for non-classic types (edibles, tinctures, topicals).
+        """
+        if not product_name or not isinstance(product_name, str):
+            return ''
+
+        # Define classic types (same as Excel processor)
+        classic_types = [
+            "flower", "pre-roll", "infused pre-roll", "concentrate",
+            "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+        ]
+
+        # Only extract for classic types
+        if product_type and product_type.lower() not in classic_types:
+            return ''
+
+        # Extract strain name from product name
+        # Common patterns:
+        # "Pocket Aces Badder by Super Mega Bussin' - 1g" -> "Pocket Aces"
+        # "Blue Dream Flower by Vendor - 3.5g" -> "Blue Dream"
+        # "OG Kush Pre-Roll - 1g x 5 Pack" -> "OG Kush"
+
+        import re
+
+        # Remove common suffixes and brand info
+        # Pattern: "StrainName ProductType by Brand - Weight"
+        name = product_name.strip()
+
+        # Remove " by [Brand]" part
+        name = re.sub(r'\s+by\s+.+$', '', name, flags=re.IGNORECASE)
+
+        # Remove weight info like " - 1g", " - 3.5g", etc.
+        name = re.sub(r'\s*-\s*[\d.]+\s*g.*$', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\s*-\s*\d+\s*x\s*[\d.]+.*$', '', name, flags=re.IGNORECASE)
+
+        # Remove product type keywords
+        product_type_keywords = [
+            'badder', 'wax', 'crumble', 'sugar', 'sauce', 'diamonds', 'shatter',
+            'live resin', 'live rosin', 'cured resin', 'hash rosin',
+            'honey', 'butter', 'rocks', 'oil', 'distillate',
+            'flower', 'pre-roll', 'preroll', 'infused', 'vape', 'cartridge'
+        ]
+
+        for keyword in product_type_keywords:
+            # Remove keyword and anything after it (case-insensitive)
+            pattern = r'\s+' + re.escape(keyword) + r'.*$'
+            name = re.sub(pattern, '', name, flags=re.IGNORECASE)
+
+        # Clean up and return
+        strain_name = name.strip()
+
+        # Validate: must be at least 2 characters and not a common non-strain word
+        if len(strain_name) < 2:
+            return ''
+
+        non_strain_words = ['the', 'and', 'or', 'with', 'pack', 'box']
+        if strain_name.lower() in non_strain_words:
+            return ''
+
+        return strain_name
+
     def _decode_json_abbreviations(self, json_name: str) -> str:
         """Decode JSON abbreviations to full product names."""
         decoded = json_name.lower().strip()
@@ -3812,28 +3892,40 @@ class ProductDatabase:
             
             # Update the product with new data
             # CRITICAL FIX: Check for sovereign_lineage FIRST - it takes absolute priority
-            # Only check strain_id if the column exists in the database
+            # Check BOTH products.sovereign_lineage AND strains.sovereign_lineage
             strain_id = None
             sovereign_lineage = None
-            
-            if self._products_has_column('strain_id'):
+
+            # STEP 1: Check if product itself has sovereign_lineage (highest priority)
+            if self._products_has_column('sovereign_lineage'):
+                try:
+                    cursor.execute('SELECT sovereign_lineage FROM products WHERE id = ?', (product_id,))
+                    product_sovereign_result = cursor.fetchone()
+                    if product_sovereign_result and product_sovereign_result[0]:
+                        sovereign_lineage = str(product_sovereign_result[0]).strip()
+                        logger.info(f"🔒 PRODUCT SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
+                except Exception as product_error:
+                    logger.warning(f"Could not check products.sovereign_lineage for product {product_id}: {product_error}")
+
+            # STEP 2: If no product sovereign lineage, check strain sovereign lineage
+            if not sovereign_lineage and self._products_has_column('strain_id'):
                 try:
                     cursor.execute('SELECT strain_id FROM products WHERE id = ?', (product_id,))
                     strain_id_result = cursor.fetchone()
                     strain_id = strain_id_result[0] if strain_id_result else None
-                    
+
                     if strain_id:
                         # Check if this strain has a manually-set sovereign_lineage
                         cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
                         sovereign_result = cursor.fetchone()
                         if sovereign_result and sovereign_result[0]:
                             sovereign_lineage = str(sovereign_result[0]).strip()
-                            logger.info(f"🔒 SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
+                            logger.info(f"🔒 STRAIN SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
                 except Exception as strain_error:
                     logger.warning(f"Could not check strain_id for product {product_id}: {strain_error}")
                     strain_id = None
-            
-            # If sovereign lineage exists, USE IT and ignore Excel lineage
+
+            # If sovereign lineage exists (from either product OR strain), USE IT and ignore Excel lineage
             if sovereign_lineage:
                 final_lineage = sovereign_lineage
                 logger.info(f"✅ LINEAGE PRIORITY: Using sovereign lineage '{final_lineage}' for product ID {product_id} (ignoring Excel)")
@@ -4523,27 +4615,28 @@ class ProductDatabase:
     
     @timed_operation("get_strain_lineage_map")
     def get_strain_lineage_map(self) -> Dict[str, str]:
-        """Get a mapping of normalized strain names to their canonical lineages."""
+        """Get a mapping of normalized strain names to their lineages, prioritizing sovereign (manual) lineages."""
         try:
             self.init_database()  # Ensure DB is initialized
-            
+
             cache_key = self._get_cache_key("strain_lineage_map")
-            
+
             # Check cache first
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
                 return cached_result
-            
+
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('SELECT normalized_name, canonical_lineage FROM strains WHERE canonical_lineage IS NOT NULL')
-            
+            # CRITICAL FIX: Prioritize sovereign_lineage (manual edits) over canonical_lineage (Excel data)
+            cursor.execute('SELECT normalized_name, COALESCE(sovereign_lineage, canonical_lineage) FROM strains WHERE COALESCE(sovereign_lineage, canonical_lineage) IS NOT NULL')
+
             lineage_map = {row[0]: row[1] for row in cursor.fetchall() if row[0] and row[1]}
-            
+
             # Cache the result for 10 minutes
             self._set_cache(cache_key, lineage_map, ttl=600)
             return lineage_map
-            
+
         except Exception as e:
             logger.error(f"Error getting strain lineage map: {e}")
             return {}
@@ -4611,6 +4704,16 @@ class ProductDatabase:
                 logger.warning(f"No product found in database to update: '{product_name}' (vendor={vendor}, brand={brand})")
             else:
                 logger.info(f"Successfully updated {rows_updated} row(s) for product '{product_name}'")
+
+                # CRITICAL FIX: Clear lineage cache for this product to force fresh lookup
+                # Without this, get_product_lineage() will return the old cached value
+                with _lineage_cache_lock:
+                    cache_key = product_name.strip().lower()
+                    if cache_key in _lineage_cache:
+                        del _lineage_cache[cache_key]
+                        del _lineage_cache_timestamps[cache_key]
+                        logger.info(f"✅ Cleared lineage cache for '{product_name}' after update")
+
             return rows_updated > 0
         except Exception as e:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
@@ -4655,10 +4758,15 @@ class ProductDatabase:
                 return None
             
             # Try exact match first (fastest) - also get strain for sativa hybrid check
+            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE "Product Name*" = ? OR "ProductName" = ?
-                ORDER BY id DESC
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" = ? OR p."ProductName" = ?
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -4692,11 +4800,16 @@ class ProductDatabase:
                 return lineage
             
             # Fallback: Case-insensitive and whitespace-insensitive match
+            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
-                   OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
-                ORDER BY id DESC
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
+                   OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -4721,10 +4834,15 @@ class ProductDatabase:
                 return lineage
             
             # Last resort: Partial match (in case product name has extra characters)
+            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT "Lineage", "Product Strain" FROM products 
-                WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
-                ORDER BY id DESC
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                       p."Product Strain"
+                FROM products p
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" LIKE ? OR p."ProductName" LIKE ?
+                ORDER BY p.id DESC
                 LIMIT 1
             ''', (f'%{product_name_norm}%', f'%{product_name_norm}%'))
             
@@ -4779,11 +4897,13 @@ class ProductDatabase:
                     logger.debug(f"Found vendor-specific lineage for {strain_name} + {brand}: {result[0]}")
                     return result[0]
                 
-                # Check products table for vendor/brand combination without relying on missing strain_id
-                # Match by normalized Product Strain text to the requested strain
+                # Check products table for vendor/brand combination
+                # CRITICAL FIX: Join with strains and prioritize sovereign_lineage
                 normalized_strain = self._normalize_strain_name(strain_name)
                 cursor.execute('''
-                    SELECT p."Lineage" FROM products p
+                    SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
+                    FROM products p
+                    LEFT JOIN strains s ON p.strain_id = s.id
                     WHERE LOWER(TRIM(COALESCE(p."Product Strain", ''))) = ?
                       AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
                     ORDER BY p.id DESC
@@ -4795,11 +4915,14 @@ class ProductDatabase:
                     logger.debug(f"Found product-specific lineage for {strain_name} + {vendor} + {brand}: {result[0]}")
                     return result[0]
             
-            # Fallback to canonical lineage from strains table
+            # Fallback to strain lineage from strains table (prioritizes sovereign_lineage)
             strain_info = self.get_strain_info(strain_name)
-            if strain_info and strain_info.get('canonical_lineage'):
-                logger.debug(f"Using canonical lineage for {strain_name}: {strain_info['canonical_lineage']}")
-                return strain_info['canonical_lineage']
+            if strain_info:
+                # CRITICAL FIX: Use display_lineage which prioritizes sovereign_lineage over canonical
+                lineage = strain_info.get('display_lineage') or strain_info.get('canonical_lineage')
+                if lineage:
+                    logger.debug(f"Using strain lineage for {strain_name}: {lineage}")
+                    return lineage
             
             return None
             
@@ -5466,17 +5589,10 @@ class ProductDatabase:
             # If we didn't find all products, try fuzzy matching
             logger.info(f"Found {len(exact_matches)} exact matches, trying fuzzy matching for remaining products")
             
-            # Get all products for fuzzy matching (exclude deactivated and samples)
+            # Get all products for fuzzy matching
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT * FROM products
-                WHERE "Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND "Product Type*" NOT LIKE '%Sample%'
-                    AND "Product Type*" != 'Samples - Educational'
-                    AND "Product Type*" != 'Sample - Vendor'
-                ORDER BY "Product Name*"
-            ''')
+            cursor.execute('SELECT * FROM products ORDER BY "Product Name*"')
             all_rows = cursor.fetchall()
             columns = [description[0] for description in cursor.description]
             all_products = [dict(zip(columns, row)) for row in all_rows]
@@ -6808,16 +6924,12 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" = ?
-                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND p."Product Type*" NOT LIKE '%Sample%'
-                    AND p."Product Type*" != 'Samples - Educational'
-                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.last_seen_date DESC
             ''', (product_name,))
             
@@ -6844,16 +6956,12 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE (p."Product Strain" LIKE ? OR s.strain_name LIKE ?)
-                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND p."Product Type*" NOT LIKE '%Sample%'
-                    AND p."Product Type*" != 'Samples - Educational'
-                    AND p."Product Type*" != 'Sample - Vendor'
+                WHERE p."Product Strain" LIKE ? OR s.strain_name LIKE ?
                 ORDER BY p.last_seen_date DESC
             ''', (f'%{strain_name}%', f'%{strain_name}%'))
             
@@ -6880,16 +6988,12 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Type*" = ? AND (p."Product Strain" = ? OR s.strain_name = ?)
-                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND p."Product Type*" NOT LIKE '%Sample%'
-                    AND p."Product Type*" != 'Samples - Educational'
-                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.last_seen_date DESC
             ''', (product_type, strain_name, strain_name))
             
@@ -6947,10 +7051,6 @@ class ProductDatabase:
             query = f'''
                 SELECT p.id, {", ".join(select_columns)}
                 FROM products p
-                WHERE p."Product Type*" NOT LIKE '%DEACTIVATED%'
-                    AND p."Product Type*" NOT LIKE '%Sample%'
-                    AND p."Product Type*" != 'Samples - Educational'
-                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.id
             '''
             

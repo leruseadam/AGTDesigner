@@ -126,15 +126,18 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     if pack_match:
         weight = pack_match.group(1)
         count = pack_match.group(2)
-        # Normalize weight display (remove leading zeros in decimals)
-        weight_display = weight.lstrip('0').lstrip('.') if '.' in weight else weight
-        if weight_display.startswith('.'):
-            weight_display = '0' + weight_display
+        # Normalize weight display (handle .5g -> 0.5g, but keep 0.5g as 0.5g)
+        if weight.startswith('.'):
+            # ".5" -> "0.5"
+            weight_display = '0' + weight
+        else:
+            # "0.5" stays "0.5", "1" stays "1"
+            weight_display = weight
         # Include the word "Pre-Roll" in the display name so grouped
         # pack labels clearly indicate they are prerolls.
         return {
             'group_id': f'{weight}g-{count}pack',
-            'display_name': f'Assorted Pre-Roll \u2011\u00A0{weight_display}g x {count} Packs',
+            'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
             'category': f'{weight_display}g x {count} Packs'
         }
     
@@ -143,7 +146,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         # Ensure the specific 1g x 5 pack group also includes "Pre-Roll"
         return {
             'group_id': '5packs',
-            'display_name': 'Assorted Pre-Roll \u2011\u00A01g x 5 Packs',
+            'display_name': 'Assorted Pre-Roll - 1g x 5 Packs',
             'category': '1g x 5 Packs'
         }
     
@@ -154,8 +157,8 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             weight = weight_match.group(1)
             return {
                 'group_id': f'infused-preroll-{weight}g',
-                'display_name': f'Infused Pre-Roll \u2011\u00A0{weight}g',
-                'category': f'Infused Pre-Roll \u2011\u00A0{weight}g'
+                'display_name': f'Infused Pre-Roll - {weight}g',
+                'category': f'Infused Pre-Roll - {weight}g'
             }
         else:
             return {
@@ -171,8 +174,8 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             weight = weight_match.group(1)
             return {
                 'group_id': f'preroll-{weight}g',
-                'display_name': f'Pre-Roll \u2011\u00A0{weight}g',
-                'category': f'Pre-Roll \u2011\u00A0{weight}g'
+                'display_name': f'Pre-Roll - {weight}g',
+                'category': f'Pre-Roll - {weight}g'
             }
     
     # Default: use truncated description pattern
@@ -429,12 +432,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # CRITICAL FIX: Also store with session-independent key so QR codes work across sessions
         # Use group_key (with vendor) to ensure vendor-specific QR codes work correctly
         cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
-        # Also store with original group_id for backward compatibility (may overwrite, but that's OK for QR codes)
-        cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
+        # CRITICAL FIX: DO NOT store with group_id alone - this causes incorrect products to show
+        # when multiple vendors have the same product category (e.g., two vendors both have "1g x 5 Pack")
+        # The vendor-specific cache key above is sufficient, and the route will use vendor filtering
+
         # Also store group info for display purposes
         cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
         cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
-        cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
         
         # CRITICAL FIX: Store in database for persistence across site refreshes
         try:

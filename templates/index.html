@@ -19,12 +19,10 @@
   <!-- Stylesheets -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust }}">
-  <!-- Windows Performance Optimizations CSS -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/pc-performance.css') }}?v={{ cache_bust }}">
   
-  <!-- PC Performance Optimization - Load if on Windows -->
+  <!-- PC Performance Optimization - Load ONLY if on Windows -->
   <script>
-    // Detect Windows platform and load PC performance CSS
+    // Detect Windows platform and load PC performance CSS conditionally
     if (navigator.platform.toLowerCase().includes('win') || 
         navigator.userAgent.toLowerCase().includes('windows')) {
       const link = document.createElement('link');
@@ -32,6 +30,8 @@
       link.href = "{{ url_for('static', filename='css/pc-performance.css') }}?v={{ cache_bust }}";
       document.head.appendChild(link);
       console.log('PC performance optimization loaded for Windows');
+    } else {
+      console.log('Mac detected - using full styling (no PC performance optimizations)');
     }
   </script>
   
@@ -1275,18 +1275,9 @@
 
                 // Enhanced Lineage Editor Functions
             window.createEnhancedLineageEditor = function(browserData, vendorStats) {
-              const allStrains = browserData.strains || [];
+              const strains = browserData.strains || [];
               const vendors = browserData.vendors || [];
               const vendorStrains = browserData.vendor_strains || [];
-              // Default: show all strains, but allow filtering by vendor
-              let strains = allStrains;
-              // If a vendor is selected, filter strains to only those for that vendor
-              const selectedVendor = window._enhancedLineageSelectedVendor || '';
-              if (selectedVendor && vendorStrains.length > 0) {
-                // Get strain names for this vendor
-                const strainNames = vendorStrains.filter(vs => vs.vendor === selectedVendor).map(vs => vs.strain_name);
-                strains = allStrains.filter(s => strainNames.includes(s.strain_name));
-              }
               
               return `
                 <div class="enhanced-lineage-editor">
@@ -1304,10 +1295,10 @@
                           </div>
                           <div class="mb-3">
                             <label class="form-label">Filter by Vendor</label>
-                            <select class="form-select" id="vendorFilter" onchange="window._enhancedLineageVendorChanged(this.value)">
-                                <option value="">All Vendors</option>
-                                ${vendors.map(v => `<option value="${v.vendor}"${window._enhancedLineageSelectedVendor === v.vendor ? ' selected' : ''}>${v.vendor} (${v.total_products} products)</option>`).join('')}
-                              </select>
+                            <select class="form-select" id="vendorFilter">
+                              <option value="">All Vendors</option>
+                              ${vendors.map(v => `<option value="${v.vendor}">${v.vendor} (${v.total_products} products)</option>`).join('')}
+                            </select>
                           </div>
                           <div class="mb-3">
                             <label class="form-label">Filter by Lineage</label>
@@ -1469,26 +1460,20 @@
             
             // Use the consolidated function from window scope
             
-            window._enhancedLineageSelectedVendor = '';
-            window._enhancedLineageVendorChanged = function(vendor) {
-              window._enhancedLineageSelectedVendor = vendor;
-              // Re-render the modal with the new vendor filter
-              if (window._lastEnhancedLineageBrowserData && window._lastEnhancedLineageVendorStats) {
-                showDatabaseModal('Enhanced Lineage Editor', window.createEnhancedLineageEditor(window._lastEnhancedLineageBrowserData, window._lastEnhancedLineageVendorStats));
-                window.initializeEnhancedLineageEditor();
-              }
-            };
             window.initializeEnhancedLineageEditor = function() {
               // Store current data globally for functions to access
               window.currentStrainData = [];
               window.selectedStrains = new Set();
+              
               // Set up event listeners and initialize functionality
               updateSelectionCount();
+              
               // Enable bulk update button when lineage is selected
               document.getElementById('bulkLineageSelect').addEventListener('change', function() {
                 const selectedLineage = this.value;
                 const selectedCount = window.selectedStrains.size;
                 const bulkBtn = document.getElementById('bulkUpdateBtn');
+                
                 if (selectedLineage && selectedCount > 0) {
                   bulkBtn.disabled = false;
                   bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update ${selectedCount} strain${selectedCount > 1 ? 's' : ''} to ${selectedLineage}`;
@@ -1497,6 +1482,7 @@
                   bulkBtn.innerHTML = `<i class="fas fa-edit"></i> Update Selected (<span id="selectedCount">0</span>)`;
                 }
               });
+
               // Trigger search when pressing Enter in the search box
               const strainInput = document.getElementById('strainSearchInput');
               if (strainInput) {
@@ -1507,7 +1493,15 @@
                   }
                 });
               }
-              // Trigger search when changing lineage filter
+
+              // Trigger search when changing vendor/lineage filters
+              const vendorSelect = document.getElementById('vendorFilter');
+              if (vendorSelect) {
+                vendorSelect.addEventListener('change', function() {
+                  if (window.searchStrains) window.searchStrains();
+                });
+              }
+
               const lineageSelect = document.getElementById('lineageFilter');
               if (lineageSelect) {
                 lineageSelect.addEventListener('change', function() {
@@ -3191,6 +3185,15 @@
       font-weight: 400;
     }
 
+    /* Tag List Font Size */
+    .tag-item {
+      font-size: 1.1rem !important;
+    }
+
+    .tag-item * {
+      font-size: inherit;
+    }
+
     /* Enhanced Product Database Manager Styles */
           .stats-card {
         background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.9));
@@ -4766,7 +4769,11 @@
     }
     
     .filter-select {
-      background: rgba(255, 255, 255, 0.2) !important;
+      background-color: rgba(255, 255, 255, 0.2) !important;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='%23ffffff' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
+      background-repeat: no-repeat !important;
+      background-position: right 12px center !important;
+      background-size: 20px 20px !important;
       border: 3px solid rgba(255, 100, 100, 0.8) !important; /* BRIGHT BORDER TO CONFIRM CSS LOADED */
       color: #fff !important;
       font-size: 14px !important; /* Reduced from 16px for more compact look */
@@ -4787,10 +4794,6 @@
       -webkit-appearance: none !important;
       -moz-appearance: none !important;
       appearance: none !important;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='%23ffffff' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
-      background-repeat: no-repeat !important;
-      background-position: right 12px center !important;
-      background-size: 20px 20px !important;
     }
     
     /* Override any Bootstrap or other framework constraints */
@@ -4802,42 +4805,90 @@
     #lineageFilter,
     #weightFilter,
     #dohFilter,
-    #highCbdFilter {
-      min-width: 280px !important; /* Increased from 140px for more space */
-      width: 100% !important; /* Fill parent container */
-      max-width: none !important; /* Allow expansion to fit content */
+    #highCbdFilter,
+    #templateSelect {
+      background-color: rgba(44, 34, 58, 0.85) !important;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
+      background-repeat: no-repeat !important;
+      background-position: right 16px center !important;
+      background-size: 18px 18px !important;
+      min-width: 280px !important;
+      width: 100% !important;
+      max-width: none !important;
       min-height: 60px !important;
-      border: 3px solid rgba(0, 212, 170, 0.8) !important;
-      font-size: 14px !important; /* Reduced from 16px for more compact look */
-      padding: 1rem 40px 1rem 1.25rem !important; /* Added right padding for arrow */
-      line-height: 1.4 !important; /* Reduced from 1.5 */
+      border: 3px solid #00d4aa !important;
+      border-radius: 14px !important;
+      font-size: 18px !important;
+      font-weight: 700 !important;
+      color: #fff !important;
+      text-align: left !important;
+      padding: 1rem 48px 1rem 1.25rem !important;
+      line-height: 1.5 !important;
       box-sizing: border-box !important;
-      overflow: visible !important; /* Prevent text truncation */
-      text-overflow: clip !important; /* Don't use ellipsis */
-      white-space: nowrap !important; /* Keep text on one line */
-      /* Ensure dropdown arrow appears */
+      overflow: visible !important;
+      text-overflow: clip !important;
+      white-space: nowrap !important;
       -webkit-appearance: none !important;
       -moz-appearance: none !important;
       appearance: none !important;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='%23ffffff' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
-      background-repeat: no-repeat !important;
-      background-position: right 12px center !important;
-      background-size: 20px 20px !important;
     }
     
     .filter-select:hover {
-      background: rgba(255, 255, 255, 0.25) !important;
+      background-color: rgba(255, 255, 255, 0.25) !important;
       border-color: rgba(160, 132, 232, 0.7) !important;
       transform: translateY(-1px);
       box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
     }
-    
-    .filter-select:focus {
-      background: rgba(255, 255, 255, 0.25) !important;
+
+
+    /* Only apply focus/active color change to filters, NOT #templateSelect */
+    .filter-select:focus,
+    .filter-select:active,
+    #vendorFilter:focus,
+    #vendorFilter:active,
+    #brandFilter:focus,
+    #brandFilter:active,
+    #productTypeFilter:focus,
+    #productTypeFilter:active,
+    #lineageFilter:focus,
+    #lineageFilter:active,
+    #weightFilter:focus,
+    #weightFilter:active,
+    #dohFilter:focus,
+    #dohFilter:active,
+    #highCbdFilter:focus,
+    #highCbdFilter:active {
+      background-color: rgba(44, 34, 58, 0.95) !important;
       border-color: rgba(160, 132, 232, 0.8) !important;
       box-shadow: 0 0 0 3px rgba(160, 132, 232, 0.3), 0 6px 16px rgba(0, 0, 0, 0.4) !important;
+      outline: none !important;
     }
-    
+
+    #templateSelect:focus,
+    #templateSelect:active {
+      background-color: rgba(44, 34, 58, 0.85) !important;
+      border-color: #00d4aa !important;
+      box-shadow: none !important;
+      outline: none !important;
+    }
+
+    #vendorFilter:hover,
+    #brandFilter:hover,
+    #productTypeFilter:hover,
+    #lineageFilter:hover,
+    #weightFilter:hover,
+    #dohFilter:hover,
+    #highCbdFilter:hover {
+      background-color: rgba(255, 255, 255, 0.25) !important;
+      border-color: rgba(160, 132, 232, 0.7) !important;
+    }
+
+    /* Template select keeps same color on hover - no change */
+    #templateSelect:hover {
+      background-color: rgba(44, 34, 58, 0.85) !important;
+      border-color: #00d4aa !important;
+    }
+
     .filter-select option {
       background: #2d223a !important;
       color: #fff !important;
@@ -4870,7 +4921,12 @@
       display: flex;
       justify-content: center;
       align-items: center;
+      opacity: 1;
+      visibility: visible;
       transition: opacity 0.5s ease-out;
+      /* Prevent any size changes during loading */
+      min-width: 100%;
+      min-height: 100%;
     }
     
     /* CRITICAL FIX: Add lava background behind app loading splash */
@@ -4901,12 +4957,19 @@
       overflow: hidden;
       background: rgba(22, 33, 62, 0.95);
       border: 1px solid rgba(0, 212, 170, 0.2);
-      box-shadow: 
+      box-shadow:
         0 20px 40px rgba(0, 0, 0, 0.3),
         0 0 0 1px rgba(0, 212, 170, 0.1);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      transform: translateX(0);
+      transform: translateX(0) scale(1);
+      /* Prevent container from resizing */
+      min-width: 600px;
+      min-height: 400px;
+      max-width: 600px;
+      max-height: 400px;
+      flex-shrink: 0;
+      flex-grow: 0;
     }
 
     .app-loading-content {
@@ -5557,7 +5620,7 @@
                   <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0; min-height: 80px; justify-content: center;">
                     <!-- File Path Display (Above buttons) -->
                     <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
                         {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
                       </span>
                     </div>
@@ -5636,11 +5699,9 @@
                       </select>
                     </div>
                     <div class="filter-group">
-                      <label for="highCbdFilter" class="filter-label">HIGH CBD/THC</label>
-                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD/THC products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
+                      <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
+                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
                         <option value="All">All</option>
-                        <option value="High CBD">High CBD</option>
-                        <option value="High THC">High THC</option>
                       </select>
                     </div>
                   </div>
@@ -5696,8 +5757,8 @@
             <div class="control-panel" style="width: 100%;">
               <!-- Template Section -->
               <div class="control-section mb-2">
-                <label class="filter-label">Template</label>
-                <select id="templateSelect" class="form-select form-select-modern" aria-label="Template">
+                <label for="templateSelect" class="filter-label">TEMPLATE</label>
+                <select id="templateSelect" class="form-select filter-select" aria-label="Template">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
@@ -7391,7 +7452,47 @@
     // Mark as loaded immediately after script tag (synchronous scripts execute immediately)
     window.mainJsLoaded = true;
     console.log('✅ main.js script tag executed');
-    
+
+    // CRITICAL: Hydrate tags from cache IMMEDIATELY for instant page load
+    // This must happen right after main.js loads, before any other initialization
+    if (window.TagManager && typeof window.TagManager.hydrateAvailableTagsFromCache === 'function') {
+      try {
+        console.log('⚡ Attempting to hydrate tags from cache...');
+
+        // Debug: Check what's available in localStorage and sessionStorage
+        const cacheKey = window.TagManager.getAvailableTagsCacheKey ? window.TagManager.getAvailableTagsCacheKey() : 'unknown';
+        console.log('📦 Expected cache key:', cacheKey);
+
+        const localStorageKeys = [];
+        const sessionStorageKeys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.includes('agt_available_tags')) {
+            localStorageKeys.push(key);
+          }
+        }
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (key && key.includes('agt_available_tags')) {
+            sessionStorageKeys.push(key);
+          }
+        }
+        console.log('📦 LocalStorage tag cache keys:', localStorageKeys);
+        console.log('📦 SessionStorage tag cache keys:', sessionStorageKeys);
+
+        const hydrated = window.TagManager.hydrateAvailableTagsFromCache();
+        if (hydrated) {
+          console.log('✅ INSTANT: Tags hydrated from cache immediately after main.js load');
+        } else {
+          console.warn('⚠️ Cache hydration returned false - no cache available or cache check failed');
+        }
+      } catch (err) {
+        console.error('❌ Cache hydration failed:', err);
+      }
+    } else {
+      console.error('❌ TagManager or hydrateAvailableTagsFromCache not available');
+    }
+
     // Check TagManager immediately after script loads (synchronous execution)
     (function checkTagManager() {
       if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
@@ -8444,32 +8545,7 @@
         </form>
       `;
 
-      if (isNew) {
-        // Show in a dedicated Add Product modal
-        let modal = document.getElementById('addProductModal');
-        if (!modal) {
-          modal = document.createElement('div');
-          modal.id = 'addProductModal';
-          modal.className = 'modal fade';
-          modal.tabIndex = -1;
-          modal.innerHTML = `
-            <div class="modal-dialog modal-lg">
-              <div class="modal-content">
-                <div class="modal-header">
-                  <h5 class="modal-title">Add Product</h5>
-                  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body"></div>
-              </div>
-            </div>`;
-          document.body.appendChild(modal);
-        }
-        modal.querySelector('.modal-body').innerHTML = content;
-        const bsModal = new bootstrap.Modal(modal);
-        bsModal.show();
-      } else {
-        showDatabaseModal(`Edit Product #${productId}`, content);
-      }
+      showDatabaseModal(isNew ? 'Add Product' : `Edit Product #${productId}`, content);
     }
 
     function editProduct(productId) {
@@ -9435,7 +9511,7 @@
                         <strong>${match.best_match['Product Name*'] || match.best_match['ProductName'] || 'Enhanced Match'}</strong>
                         <div class="mt-2">
                           <small class="text-muted">
-                            <strong>Price:</strong> $${match.best_match['Price'] || '0.00'}<br>
+                            <strong>Price:</strong> $${match.best_match['Price'] || '25.00'}<br>
                             <strong>Brand:</strong> ${match.best_match['Product Brand'] || 'CERES'}<br>
                             <strong>Type:</strong> ${match.best_match['Product Type*'] || 'Edible (Solid)'}<br>
                             <strong>Weight:</strong> ${match.best_match['Weight*'] || '1'}${match.best_match['Units'] || 'g'}<br>

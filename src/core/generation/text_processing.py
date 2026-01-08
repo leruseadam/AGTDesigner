@@ -215,16 +215,19 @@ def fix_description_spacing(desc: str) -> str:
 
 def make_nonbreaking_hyphens(text):
     """
-    Convert regular hyphens to non-breaking hyphens in text.
-    This prevents line breaks at hyphenated words.
+    Format hyphens with proper spacing: normal space + normal hyphen + non-breaking space.
+    This allows line breaks before the hyphen but prevents breaks after it.
+    Example: "Pre-Roll - 1g" becomes "Pre-Roll -<nbsp>1g"
     """
     if not text or not isinstance(text, str):
         return text
-    
-    # Replace regular hyphens with non-breaking hyphens
-    # Use Unicode non-breaking hyphen (U+2011)
-    text = text.replace('-', '\u2011')
-    
+
+    import re
+
+    # Replace " - " (space-hyphen-space) with " -<nbsp>" (space-hyphen-non-breaking-space)
+    # This allows breaks before the hyphen but prevents breaks after
+    text = re.sub(r'\s+-\s+', ' -\u00A0', text)
+
     return text
 
 def replace_placeholder_with_markers(doc, placeholder, marker_value):

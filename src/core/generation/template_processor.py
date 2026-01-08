@@ -1351,7 +1351,10 @@ class TemplateProcessor:
                 buffer.seek(0)
                 rendered_doc = Document(buffer)
                 self._remove_unmerged_placeholders(rendered_doc, len(chunk))
-                
+
+                # CRITICAL: Hide ProductVendor for non-classic types
+                self._hide_productvendor_for_nonclassic_types(rendered_doc, chunk)
+
             except Exception as render_error:
                 self.logger.error(f"DocxTemplate render failed: {render_error}")
                 self.logger.error(f"Context keys: {list(context.keys())}")
@@ -1668,14 +1671,47 @@ class TemplateProcessor:
             product_name = record.get('ProductName', record.get('Product Name*', ''))
             excel_lineage = label_context.get('Lineage', '') or record.get('Lineage', '')
             
-            # CRITICAL: Always check database FIRST - database lineage always takes priority
-            if product_name:
+            # CRITICAL: Use record lineage first (already enriched with database value, no sativa hybrid override)
+            # Only query database if record lineage is missing
+            db_lineage = None
+            # Priority: sovereign_lineage > Lineage > canonical_lineage > lineage
+            record_lineage = record.get('sovereign_lineage') or record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
+            if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
+                db_lineage = str(record_lineage).strip()
+                if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
+                    self.logger.info(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
+            elif product_name:
+                # Record lineage missing - query database directly (avoid get_product_lineage which applies override)
                 from app import get_product_database, get_current_store_name
                 store_name = get_current_store_name()
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # FIRST: Check product-level lineage (preserves user changes)
-                    db_lineage = product_db.get_product_lineage(product_name)
+                    # Query database directly to avoid sativa hybrid override in get_product_lineage()
+                    try:
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
+                        cursor.execute('''
+                            SELECT sovereign_lineage, "Lineage", "canonical_lineage"
+                            FROM products
+                            WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                            ORDER BY id DESC
+                            LIMIT 1
+                        ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
+                        result = cursor.fetchone()
+                        # Priority: sovereign_lineage > Lineage > canonical_lineage
+                        if result and result[0]:
+                            db_lineage = str(result[0]).strip()
+                            self.logger.info(f"🔒 DOCX: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
+                        elif result and result[1]:
+                            db_lineage = str(result[1]).strip()
+                        elif result and result[2]:
+                            db_lineage = str(result[2]).strip()
+                    except Exception as db_err:
+                        self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
+                        # Fallback to get_product_lineage if direct query fails
+                        db_lineage = product_db.get_product_lineage(product_name)
                     
                     # If no product-level lineage, check strain-level lineage
                     if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
@@ -1972,13 +2008,16 @@ class TemplateProcessor:
                             if clean_weight.startswith('\u2011'):
                                 # Replace non-breaking hyphen with regular hyphen
                                 clean_weight = clean_weight.replace('\u2011', '-', 1).replace('\u00A0', ' ')
+                            # CRITICAL FIX: Remove trailing hyphen from primary_text to prevent double hyphen
+                            # (e.g., "Pre-Roll-" + "- 0.5g" = "Pre-Roll-- 0.5g")
+                            primary_text_clean = primary_text.rstrip('-').rstrip()
                             if clean_weight.startswith('-'):
                                 # Weight already has hyphen, just append it with space
-                                desc_and_weight = f"{primary_text} {clean_weight}"
+                                desc_and_weight = f"{primary_text_clean} {clean_weight}"
                             else:
                                 # Add hyphen and space before weight
-                                desc_and_weight = f"{primary_text} - {clean_weight}"
-                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' with weight '{clean_weight}' -> '{desc_and_weight}'")
+                                desc_and_weight = f"{primary_text_clean} - {clean_weight}"
+                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text_clean}' with weight '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             # No weight available, use description only
                             desc_and_weight = primary_text
@@ -2017,11 +2056,8 @@ class TemplateProcessor:
                                     self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         
                         # Keep weight on the same line as description with non-breaking space
-                        # For preroll template, use non-breaking hyphen to keep hyphen and weight together
-                        if self.template_type == 'preroll':
-                            desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
-                        else:
-                            desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                        # Use consistent space-hyphen-space pattern for all templates
+                        desc_and_weight = f"{desc} - {clean_weight}"
                         self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
                     else:
                         # Fallback to constructing from Weight* + Units
@@ -2037,11 +2073,8 @@ class TemplateProcessor:
                         
                         if weight_value and units_value:
                             clean_weight = f"{weight_value}{units_value}"
-                            # For preroll template, use non-breaking hyphen to keep hyphen and weight together
-                            if self.template_type == 'preroll':
-                                desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
-                            else:
-                                desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                            # Use consistent space-hyphen-space pattern for all templates
+                            desc_and_weight = f"{desc} - {clean_weight}"
                             self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             desc_and_weight = desc
@@ -2083,7 +2116,8 @@ class TemplateProcessor:
             image_path = process_doh_image(doh_upper, product_type)
             if image_path:
                 # Fast width selection - reduced by 1mm for all template types
-                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13}
+                # Preroll template uses half size (5.5mm) for DOH logo
+                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13, 'preroll': 5.5}
                 image_width = Mm(width_map.get(self.template_type, 11))
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
@@ -2199,11 +2233,43 @@ class TemplateProcessor:
                     store_name = get_current_store_name()
                     product_db = get_product_database(store_name)
                     
-                    # Try to get product-level lineage first (more specific, includes manual updates)
+                    # CRITICAL: Use record lineage first (already enriched, avoids sativa hybrid override)
+                    # Only query database if record lineage is missing
                     product_name = record.get('Product Name*', record.get('ProductName', ''))
                     db_lineage = None
-                    if product_name:
-                        db_lineage = product_db.get_product_lineage(product_name)
+                    # Priority: sovereign_lineage > Lineage > canonical_lineage > lineage
+                    record_lineage = record.get('sovereign_lineage') or record.get('Lineage') or record.get('canonical_lineage') or record.get('lineage')
+                    if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                        # Use record lineage (already set correctly by enrichment)
+                        db_lineage = str(record_lineage).strip()
+                        if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
+                            self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
+                    elif product_name:
+                        # Query database directly to avoid sativa hybrid override
+                        try:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
+                            cursor.execute('''
+                                SELECT sovereign_lineage, "Lineage", "canonical_lineage"
+                                FROM products
+                                WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
+                                ORDER BY id DESC
+                                LIMIT 1
+                            ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
+                            result = cursor.fetchone()
+                            # Priority: sovereign_lineage > Lineage > canonical_lineage
+                            if result and result[0]:
+                                db_lineage = str(result[0]).strip()
+                                self.logger.info(f"🔒 PREROLL: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
+                            elif result and result[1]:
+                                db_lineage = str(result[1]).strip()
+                            elif result and result[2]:
+                                db_lineage = str(result[2]).strip()
+                        except Exception as db_err:
+                            self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
+                            # Fallback to get_product_lineage if direct query fails
+                            db_lineage = product_db.get_product_lineage(product_name)
                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
                         lineage_val = str(db_lineage).strip().upper()
                         self.logger.info(f"✅ Using database product lineage fallback: '{lineage_val}' for '{product_name}'")
@@ -2813,22 +2879,22 @@ class TemplateProcessor:
                 from src.core.generation.text_processing import make_nonbreaking_hyphens
                 original_description = label_context['Description']
                 label_context['Description'] = make_nonbreaking_hyphens(label_context['Description'])
-                self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG (PREROLL): Description '{original_description}' -> '{label_context['Description']}'")
+                self.logger.info(f"🔧 NON-BREAKING FORMATTING (PREROLL): Description '{original_description}' -> '{label_context['Description']}'")
 
         # CRITICAL FIX: Apply non-breaking hyphens to ProductName to prevent "Pre-Roll" splitting
         if label_context.get('ProductName'):
             from src.core.generation.text_processing import make_nonbreaking_hyphens
             original_product_name = label_context['ProductName']
             label_context['ProductName'] = make_nonbreaking_hyphens(label_context['ProductName'])
-            self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG: ProductName '{original_product_name}' -> '{label_context['ProductName']}'")
-        
-        # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight to prevent "Pre-Roll" splitting
+            self.logger.info(f"🔧 NON-BREAKING FORMATTING: ProductName '{original_product_name}' -> '{label_context['ProductName']}'")
+
+        # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight
         if label_context.get('DescAndWeight'):
             from src.core.generation.text_processing import make_nonbreaking_hyphens
             original_desc_weight = label_context['DescAndWeight']
             label_context['DescAndWeight'] = make_nonbreaking_hyphens(label_context['DescAndWeight'])
-            self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
-        
+            self.logger.info(f"🔧 NON-BREAKING FORMATTING: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
+
 
         # Fast line break processing
         product_type = (label_context.get('ProductType', '').lower() or 
@@ -2936,10 +3002,24 @@ class TemplateProcessor:
                 except Exception:
                     base_url = ''
 
-                # If host_url is unavailable (very unusual), allow an override via env
+                # If host_url is unavailable, try multiple fallbacks
                 if not base_url:
+                    # First try environment variable
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
-                
+
+                # If still no base_url, try Flask config
+                if not base_url:
+                    try:
+                        from flask import current_app
+                        base_url = current_app.config.get('QR_BASE_URL', '').strip()
+                    except Exception:
+                        pass
+
+                # Last resort: use production URL as default
+                if not base_url:
+                    base_url = 'https://www.agtpricetags.com'
+                    self.logger.warning(f"No QR_BASE_URL configured, using default: {base_url}")
+
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
                 # This allows the route to filter products by vendor
@@ -2947,33 +3027,15 @@ class TemplateProcessor:
                     # URL encode vendor to handle special characters
                     from urllib.parse import quote
                     vendor_encoded = quote(vendor_clean)
-                    if base_url:
-                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
-                    else:
-                        # Use relative URL if no base_url available
-                        qr_url = f"/preroll-items/{group_id}?vendor={vendor_encoded}"
+                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
                 else:
                     # Fallback to group_id only if no vendor (backward compatibility)
-                    if base_url:
-                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
-                    else:
-                        # Use relative URL if no base_url available
-                        qr_url = f"/preroll-items/{group_id}"
-                
+                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
+
                 # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
-                # If we detect a local host, just drop the scheme/host and use a relative path; most
-                # modern scanners will still treat this as a URL when opened from a browser context.
-                if base_url and ('localhost' in qr_url.lower() or '127.0.0.1' in qr_url):
-                    from urllib.parse import urlparse
-                    parsed = urlparse(qr_url)
-                    qr_url = parsed.path or qr_url
-                    if parsed.query:
-                        qr_url = f"{qr_url}?{parsed.query}"
-                    self.logger.warning(f"QR URL used a localhost base, converted to relative path: {qr_url}")
-                
-                # Log if using relative URL (no base_url)
-                if not base_url:
-                    self.logger.info(f"PREROLL QR: No base URL available; using relative URL: {qr_url}")
+                # If we detect a local host, raise an error (never allow local URLs for QR/menu)
+                if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
+                    raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
@@ -5643,6 +5705,85 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error removing unmerged placeholders: {e}")
 
+    def _hide_productvendor_for_nonclassic_types(self, doc, chunk):
+        """
+        Hide ProductVendor content for non-classic product types.
+        For classic types (flower, pre-roll, concentrate, etc.), ProductVendor is shown.
+        For non-classic types (edibles, tinctures, gummies, etc.), ProductVendor is hidden by removing the paragraph containing it.
+        """
+        try:
+            from src.core.generation.unified_font_sizing import CLASSIC_TYPES
+
+            # Build a map of label number to product type
+            label_product_types = {}
+            for i, record in enumerate(chunk):
+                product_type = (record.get('ProductType', '').lower() or
+                               record.get('Product Type*', '').lower())
+                label_num = i + 1
+                label_product_types[label_num] = product_type
+                if product_type not in CLASSIC_TYPES:
+                    self.logger.info(f"🔒 HIDE PRODUCTVENDOR: Label{label_num} is non-classic type '{product_type}' - will hide ProductVendor")
+
+            # Process each table in the document
+            for table in doc.tables:
+                cell_count = 0
+                for row in table.rows:
+                    for cell in row.cells:
+                        cell_count += 1
+
+                        # Determine which label this cell represents
+                        if cell_count > len(chunk):
+                            continue  # Skip empty cells
+
+                        product_type = label_product_types.get(cell_count, '')
+                        is_classic = product_type in CLASSIC_TYPES
+
+                        # For non-classic types, remove ProductVendor content
+                        if not is_classic and product_type:
+                            paragraphs_removed = self._remove_productvendor_from_cell(cell, cell_count)
+                            if paragraphs_removed > 0:
+                                self.logger.info(f"✅ HIDDEN: Removed {paragraphs_removed} ProductVendor paragraph(s) from Label{cell_count} ({product_type})")
+
+        except Exception as e:
+            self.logger.warning(f"Error hiding ProductVendor for non-classic types: {e}")
+
+    def _remove_productvendor_from_cell(self, cell, label_num):
+        """
+        Remove paragraphs containing ProductVendor from a cell for non-classic types.
+        Returns the number of paragraphs removed.
+        """
+        try:
+            paragraphs_removed = 0
+
+            # Look for paragraphs that contain the Lineage text followed by empty content
+            # (which would be where ProductVendor was supposed to go)
+            # In the vertical template, Lineage and ProductVendor are typically on the same line
+
+            for paragraph in list(cell.paragraphs):  # Create a copy to iterate safely
+                paragraph_text = paragraph.text
+
+                # Check if this paragraph previously had ProductVendor (now empty)
+                # Look for patterns like "Lineage     " where there's trailing whitespace
+                # or a paragraph that's completely empty after Lineage
+
+                # For vertical templates specifically, check if paragraph has Lineage and extra spacing
+                if 'LINEAGE_END' in paragraph_text or 'PRODUCTVENDOR' in paragraph_text:
+                    # This paragraph has marker remnants - check if we should clean it
+                    # Since ProductVendor was already set to empty, we just need to clean up spacing
+
+                    # Remove runs that are empty or contain only ProductVendor markers
+                    for run in list(paragraph.runs):
+                        if run.text and ('PRODUCTVENDOR' in run.text or
+                                        (run.text.strip() == '' and 'LINEAGE_END' not in run.text)):
+                            # Remove this run
+                            run.text = ''
+
+            return paragraphs_removed
+
+        except Exception as e:
+            self.logger.warning(f"Error removing ProductVendor from cell {label_num}: {e}")
+            return 0
+
     def _ensure_table_grids_exist(self, doc):
         """Ensure all tables have proper tblGrid elements."""
         try:
@@ -6875,8 +7016,8 @@ class TemplateProcessor:
                 return
             
             # Original single-line processing
-            # Set paragraph to right alignment for proper vendor right-alignment
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            # Set paragraph to left alignment so lineage stays on left and vendor goes to right via tab stop
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
             
             # Add lineage with larger font size (left-aligned)
             if lineage_content and lineage_content.strip():
@@ -7119,7 +7260,7 @@ class TemplateProcessor:
                 # Extract vendor content
                 vendor_start_idx = full_text.find(vendor_start) + len(vendor_start)
                 vendor_end_idx = full_text.find(vendor_end)
-                vendor_content = full_text[vendor_start_idx:vendor_end_idx]
+                vendor_content = full_text[vendor_start_idx:vendor_end_idx].strip()
                 
                 # CRITICAL FIX: For classic types, don't combine lineage and vendor
                 # The lineage should only contain actual lineage content (SATIVA, INDICA, HYBRID)

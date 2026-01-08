@@ -33,8 +33,6 @@
     const vh = window.innerHeight;
     const dpr = window.devicePixelRatio || 1;
     
-    console.log('Viewport:', vw, 'x', vh, 'DPR:', dpr);
-    
     // Set CSS dimensions to fill viewport
     canvas.style.position = 'fixed';
     canvas.style.top = '0px';
@@ -60,9 +58,6 @@
     
     // Update WebGL viewport to match canvas resolution
     gl.viewport(0, 0, displayWidth, displayHeight);
-    
-    console.log('Canvas CSS:', vw, 'x', vh);
-    console.log('Canvas internal:', displayWidth, 'x', displayHeight);
   }
   window.addEventListener('resize', resize);
   resize();

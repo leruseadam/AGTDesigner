@@ -5614,7 +5614,7 @@ class ExcelProcessor:
             
             # Remove excluded product types (minimal check)
             if 'Product Type*' in df.columns:
-                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
+                excluded_types = ["Samples - Educational", "Sample - Vendor"]
                 df = df[~df['Product Type*'].isin(excluded_types)]
                 df.reset_index(drop=True, inplace=True)
             
@@ -6003,7 +6003,7 @@ class ExcelProcessor:
             'rso/co2 tankers': '$40.00'
         }
         
-        return price_ranges.get(product_type, '$0.00')
+        return price_ranges.get(product_type, '$25.00')
     
     def _infer_weight_from_name(self, product_name, product_type):
         """Infer weight and units from product name and type."""
@@ -7845,7 +7845,7 @@ class ExcelProcessor:
             
             # Remove excluded product types (minimal check)
             if 'Product Type*' in df.columns:
-                excluded_types = ["Samples - Educational", "Sample - Vendor", "x-DEACTIVATED 1", "x-DEACTIVATED 2"]
+                excluded_types = ["Samples - Educational", "Sample - Vendor"]
                 df = df[~df['Product Type*'].isin(excluded_types)]
                 df.reset_index(drop=True, inplace=True)
             

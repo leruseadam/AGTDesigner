@@ -9,25 +9,16 @@
     
     console.log('⚡ Fast page load optimization v2.1.0 enabled');
     
-    // CRITICAL: Clear cache if no file uploaded
-    // Prevents showing stale cached data from previous sessions
-    // NOTE: Only clear sessionStorage, keep localStorage for faster reloads
+    // NOTE: Preserve cached tag lists even when no Excel file is present.
+    // Previous behavior cleared sessionStorage when no file was uploaded which
+    // caused the tag lists to disappear for users relying on cached data.
+    // Keep localStorage/sessionStorage intact so cached tags remain available.
     const fileInfoText = document.getElementById('fileInfoText');
     const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded');
     if (!hasUploadedFile) {
-        console.log('🗑️ No uploaded file detected - clearing stale sessionStorage cache (keeping localStorage)');
-        // Clear all tag-related cache entries from sessionStorage only
-        if (window.sessionStorage) {
-            const keysToRemove = [];
-            for (let i = 0; i < sessionStorage.length; i++) {
-                const key = sessionStorage.key(i);
-                if (key && key.includes('agt_available_tags')) {
-                    keysToRemove.push(key);
-                }
-            }
-            keysToRemove.forEach(key => sessionStorage.removeItem(key));
-            console.log(`✅ Cleared ${keysToRemove.length} stale sessionStorage cache entries`);
-        }
+        console.log('ℹ️ No uploaded file detected - preserving cached tag lists for instant access');
+        // Intentionally do not clear sessionStorage/localStorage here.
+        // If a manual cache clear is required, use the explicit UI control instead.
     }
     
     // Store original checkForExistingData function
@@ -68,82 +59,6 @@
             }
             return;
         }
-
-        // IMMEDIATE FILTER POPULATION: If tags are already hydrated in TagManager state,
-        // build and apply filters synchronously to ensure dropdowns appear instantly.
-        try {
-            if (window.TagManager && TagManager.state && Array.isArray(TagManager.state.tags) && TagManager.state.tags.length > 0) {
-                console.log('⚡ FastPageLoad: Immediately building filters from TagManager.state.tags');
-                try {
-                    // Build options from tags and apply them synchronously
-                    const built = TagManager._extractFiltersFromTags(TagManager.state.tags);
-                    // Directly update filters (preserve existing values)
-                        TagManager.updateFilters(built, true);
-                    console.log('✅ FastPageLoad: Filters applied synchronously from in-memory tags');
-                    // Hide splash if present
-                    if (TagManager.hideActionSplash) TagManager.hideActionSplash();
-                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                        AppLoadingSplash.stopAutoAdvance();
-                        AppLoadingSplash.complete();
-                    }
-                } catch (innerErr) {
-                    console.warn('FastPageLoad: synchronous filter build failed:', innerErr);
-                }
-            }
-        } catch (e) {
-            console.warn('FastPageLoad: immediate filter population check failed:', e);
-        }
-            
-            // If originalFilterOptions exist, prefer them (they may include server-side defaults)
-            try {
-                if (TagManager.state && TagManager.state.originalFilterOptions) {
-                    console.log('⚡ FastPageLoad: Applying originalFilterOptions synchronously');
-                    TagManager.updateFilters(TagManager.state.originalFilterOptions, true);
-                }
-            } catch (err) {
-                console.warn('FastPageLoad: applying originalFilterOptions failed:', err);
-            }
-
-            // DOM sanity check: if vendorFilter still only contains 'All', create missing selects and reapply filters
-            try {
-                const vendorEl = document.getElementById('vendorFilter');
-                const needsCreate = !vendorEl || (vendorEl.options && vendorEl.options.length <= 1);
-                if (needsCreate) {
-                    console.warn('FastPageLoad: vendorFilter appears empty or missing - creating filter selects and reapplying options');
-                    const filterRow = document.querySelector('.filter-row') || document.body;
-                    const ensureSelect = (id, labelText) => {
-                        if (!document.getElementById(id)) {
-                            const wrapper = document.createElement('div');
-                            wrapper.className = 'filter-group';
-                            const label = document.createElement('label');
-                            label.htmlFor = id;
-                            label.className = 'filter-label';
-                            label.textContent = labelText;
-                            const select = document.createElement('select');
-                            select.id = id;
-                            select.className = 'form-select filter-select';
-                            const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'All'; select.appendChild(opt);
-                            wrapper.appendChild(label);
-                            wrapper.appendChild(select);
-                            filterRow.appendChild(wrapper);
-                        }
-                    };
-                    ensureSelect('vendorFilter', 'VENDOR');
-                    ensureSelect('brandFilter', 'BRAND');
-                    ensureSelect('productTypeFilter', 'PRODUCT TYPE');
-                    ensureSelect('lineageFilter', 'LINEAGE');
-                    ensureSelect('weightFilter', 'WEIGHT');
-                    ensureSelect('dohFilter', 'DOH COMPLIANCE');
-                    ensureSelect('highCbdFilter', 'HIGH CBD/THC');
-
-                    // Rebuild from either originalFilterOptions or from tags
-                    const optionsToApply = (TagManager.state && TagManager.state.originalFilterOptions) ? TagManager.state.originalFilterOptions : TagManager._extractFiltersFromTags(TagManager.state.tags);
-                    TagManager.updateFilters(optionsToApply, true);
-                    console.log('✅ FastPageLoad: Created missing selects and reapplied filter options');
-                }
-            } catch (domErr) {
-                console.warn('FastPageLoad: DOM fallback failed:', domErr);
-            }
         
         // Store original function
         originalCheckForExistingData = TagManager.checkForExistingData;
@@ -151,7 +66,22 @@
         // Replace with optimized version
         TagManager.checkForExistingData = async function() {
             console.log('⚡ Optimized checkForExistingData called');
-            
+
+            // CRITICAL FIX: If tags are already hydrated from cache (e.g., by inline script),
+            // skip loading entirely and return immediately
+            const alreadyHydrated = this.state && this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
+            const tagsAlreadyRendered = document.getElementById('availableTags')?.querySelectorAll('.tag-item').length > 0;
+
+            if (alreadyHydrated || tagsAlreadyRendered) {
+                console.log(`✅ Tags already ${alreadyHydrated ? 'hydrated from cache' : 'rendered in DOM'} (${alreadyHydrated ? this.state.tags.length : 'rendered'} tags), skipping load`);
+                // Still load selected tags and filters in background
+                Promise.allSettled([
+                    this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
+                    this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
+                ]).catch(err => console.warn('Background load error:', err));
+                return;
+            }
+
             // CRITICAL FIX: Check for uploaded file FIRST before trying to load tags
             let hasFile = false;
             try {
@@ -176,15 +106,76 @@
                 console.log('Error checking for current file:', error);
             }
             
-            // If no file exists, show upload prompt and exit early
+            // If no file exists, prefer cached tags (if available) before showing upload prompt
             const availableTagsContainer = document.getElementById('availableTags');
             if (!hasFile && availableTagsContainer) {
-                console.log('📤 No file uploaded - showing upload prompt');
-                // Hide any loading splash
+                console.log('📤 No file uploaded - checking cache before showing upload prompt');
+                const cachedTags = this.loadAvailableTagsFromCache ? this.loadAvailableTagsFromCache() : null;
+                if (cachedTags && Array.isArray(cachedTags) && cachedTags.length > 0) {
+                    console.log(`⚡ INSTANT CACHE HIT (no file): ${cachedTags.length} tags available`);
+                    const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
+                    this.state.tags = [...cachedTags];
+                    this.state.originalTags = [...cachedTags];
+                    this.state.hydratedFromCache = true;
+
+                    requestAnimationFrame(() => {
+                        console.log('🎨 Rendering cached tags (no file)...');
+                        if (this._updateAvailableTags) {
+                            this._updateAvailableTags(cachedTags, null);
+                        }
+
+                        if (savedSelectedTags.length > 0) {
+                            this.state.persistentSelectedTags = [...savedSelectedTags];
+                            this.state.selectedTags = new Set(savedSelectedTags);
+                            requestAnimationFrame(() => {
+                                savedSelectedTags.forEach(tagName => {
+                                    const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
+                                    checkboxes.forEach(cb => { if (!cb.checked) cb.checked = true; });
+                                });
+                                if (this.getSelectedTagObjects && this.updateSelectedTags) {
+                                    const selectedTagObjects = this.getSelectedTagObjects();
+                                    if (selectedTagObjects.length > 0) {
+                                        this.updateSelectedTags(selectedTagObjects);
+                                    }
+                                }
+                            });
+                        }
+
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }
+                    });
+
+                    // Background: fetch selected tags and filters
+                    Promise.allSettled([
+                        this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
+                        this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
+                    ]).then(() => {
+                        console.log('✅ Background: Selected tags and filters loaded (no file cached)');
+                        if (savedSelectedTags.length > 0 && this.state.persistentSelectedTags.length === 0) {
+                            this.state.persistentSelectedTags = [...savedSelectedTags];
+                            this.state.selectedTags = new Set(savedSelectedTags);
+                            if (this.getSelectedTagObjects && this.updateSelectedTags) {
+                                const selectedTagObjects = this.getSelectedTagObjects();
+                                if (selectedTagObjects.length > 0) {
+                                    this.updateSelectedTags(selectedTagObjects);
+                                }
+                            }
+                        }
+                    }).catch(err => { console.warn('⚠️ Background load error (non-critical):', err); });
+
+                    return; // Exit early - rendered cached tags
+                }
+
+                // No cache available - show upload prompt
+                console.log('📤 No cache found - showing upload prompt');
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                // Show upload prompt instead of loading tags
                 availableTagsContainer.innerHTML = `
                     <div class="text-center py-5">
                         <div class="upload-prompt">
@@ -197,7 +188,6 @@
                         </div>
                     </div>
                 `;
-                // Complete splash screen
                 if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();

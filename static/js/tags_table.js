@@ -285,9 +285,19 @@ class TagsTable {
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
   // CRITICAL: Use database lineage directly - canonical_lineage/currentLineage is source of truth
-  // Always display the exact database value for lineage, with no conversion or override
+  // Respect database values - don't convert unless absolutely necessary
   const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
+  
+  // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
+  
+  // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+  // This ensures UI displays correct lineage even if database/Excel has wrong value
+  const productType = tag['Product Type*'] || tag.Type || '';
+  const isClassicType = productType && getUniqueLineages(productType).length === 6;
+  if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+    lineage = 'HYBRID';
+  }
   
   // Only set default if lineage is completely missing
   if (!lineage) {
@@ -933,11 +943,9 @@ class TagsTable {
         }
       }
     };
-
-    // CRITICAL FIX: Reduce restore interval from 50ms to 500ms to prevent visual glitches
-    // Restoring every 50ms (20 times per second!) was causing disturbing flashing/glitching
-    // 500ms (2 times per second) is sufficient and much less visually disruptive
-    restoreInterval = setInterval(restoreSelectedTags, 500);
+    
+    // Start VERY aggressive restore - every 50ms
+    restoreInterval = setInterval(restoreSelectedTags, 50);
     
     try {
       

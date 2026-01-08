@@ -1311,13 +1311,6 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                 tcW.set(qn('w:w'), '2880')  # Fixed width in twips (2.0 inches = 2880 twips)
                                 tcW.set(qn('w:type'), 'dxa')  # Fixed width type
                             
-                            # Disable cell auto-sizing
-                            tcFitText = tcPr.find(qn('w:tcFitText'))
-                            if tcFitText is None:
-                                tcFitText = OxmlElement('w:tcFitText')
-                                tcPr.append(tcFitText)
-                            tcFitText.set(qn('w:val'), '0')  # Disable fit text
-                            
                             # Set cell height to exact value
                             # ONLY set height if template_type was not provided (template-specific heights set above)
                             if not template_type:
@@ -1338,16 +1331,31 @@ def enforce_fixed_cell_dimensions(table, template_type=None):
                                 # CRITICAL: Set paragraph alignment to prevent expansion
                                 paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                 
-                                # CRITICAL: Enable text wrapping and prevent overflow
+                                # CRITICAL: Enable text wrapping but keep words together (never split mid-word)
                                 pPr = paragraph._element.get_or_add_pPr()
-                                
-                                # Add text wrapping control
-                                wrap = pPr.find(qn('w:wordWrap'))
-                                if wrap is None:
-                                    wrap = OxmlElement('w:wordWrap')
-                                    pPr.append(wrap)
-                                wrap.set(qn('w:val'), '1')  # Enable word wrapping
-                                
+
+                                # CRITICAL FIX: Disable character-level wrapping - only allow word-level wrapping
+                                # This prevents mid-word splits like "Blueberry - 7" -> "Blueberry - 7|g"
+                                wordWrap = pPr.find(qn('w:wordWrap'))
+                                if wordWrap is None:
+                                    wordWrap = OxmlElement('w:wordWrap')
+                                    pPr.append(wordWrap)
+                                wordWrap.set(qn('w:val'), '1')  # Enable wrapping at word boundaries only
+
+                                # CRITICAL FIX: Suppress automatic hyphenation to prevent "3.5g" from breaking
+                                suppressAutoHyphens = pPr.find(qn('w:suppressAutoHyphens'))
+                                if suppressAutoHyphens is None:
+                                    suppressAutoHyphens = OxmlElement('w:suppressAutoHyphens')
+                                    pPr.append(suppressAutoHyphens)
+
+                                # CRITICAL FIX: Prevent text from overflowing or breaking mid-word
+                                # Use autoSpaceDE (disable auto-spacing) to prevent unexpected breaks
+                                autoSpaceDE = pPr.find(qn('w:autoSpaceDE'))
+                                if autoSpaceDE is None:
+                                    autoSpaceDE = OxmlElement('w:autoSpaceDE')
+                                    pPr.append(autoSpaceDE)
+                                autoSpaceDE.set(qn('w:val'), '0')  # Disable auto-spacing that can cause mid-word breaks
+
                                 # Add overflow control
                                 overflow = pPr.find(qn('w:overflowPunct'))
                                 if overflow is None:

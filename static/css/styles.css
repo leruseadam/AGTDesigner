@@ -11,10 +11,10 @@
   --bg-secondary: rgba(60, 45, 75, 0.9);
   --accent-color: rgba(160, 132, 232, 1);
 
-  /* Normal responsive sizing */
-  --base-font-size: 1rem;
-  --small-font-size: 0.875rem;
-  --large-font-size: 1.25rem;
+  /* Normal responsive sizing - increased by 2px (0.125rem) */
+  --base-font-size: 1.125rem;
+  --small-font-size: 1rem;
+  --large-font-size: 1.375rem;
 
   /* Button sizing */
   --btn-height: 44px;
@@ -27,15 +27,15 @@
   --spacing-lg: 1.5rem;
   --spacing-xl: 2rem;
   
-  --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
+  --tag-list-height: max(var(--tag-list-min-height), calc(110vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
   --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-  --center-panel-height: 78rem;     /* Height of center control panel */
+  --center-panel-height: 85rem;     /* Height of center control panel */
   --tag-list-scroll-padding: 1rem;
 }
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin: 0.5rem 0 1rem 0 !important;
+  margin: 2.5rem 0 3rem 0 !important;
   padding: 0 !important;
   display: flex !important;
   justify-content: center !important;
@@ -43,34 +43,9 @@
   width: 100% !important;
 }
 
-/* Add Product Modal Theming */
-#addProductModal .modal-content {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  border: 2px solid var(--accent-color);
-  border-radius: 10px;
-  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-}
-#addProductModal .modal-header {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--accent-color);
-}
-#addProductModal .modal-title {
-  color: var(--accent-color);
-  font-weight: 600;
-}
-#addProductModal .modal-body {
-  background: transparent;
-  color: var(--text-primary);
-}
-#addProductModal .btn-close {
-  filter: invert(1) grayscale(1) brightness(2);
-}
-
 @media (min-width: 992px) {
   .help-button-container {
-    margin: 0.5rem 0 1rem 0 !important;
+    margin: 2.5rem 0 3rem 0 !important;
     padding: 0 !important;
   }
 }
@@ -111,7 +86,7 @@ html {
 
 
 body {
-  font-size: 1rem; /* Standard base font size */
+  font-size: 1.125rem; /* Increased base font size (+2px from 16px to 18px) */
   line-height: 1.5;
   width: 100%;
   min-height: 100vh;
@@ -181,12 +156,12 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 }
 
 /* ========================================================================
-   LARGE MONITOR SETTINGS - DO NOT CHANGE FONT-SIZE VALUES
+   LARGE MONITOR SETTINGS - DISABLED FOR CONSISTENCY
    ========================================================================
-   These values MUST match the base html font-size above (16px).
-   Changing these causes zoom issues on large monitors.
+   Disabled to ensure consistent appearance across all desktop displays.
+   All desktops now use the base CSS rules defined above.
    ======================================================================== */
-@media (min-width: 1921px) {
+@media (min-width: 999999px) {
   html {
     font-size: 16px !important; /* LOCKED - must match base html font-size */
   }
@@ -224,21 +199,19 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   #availableTags .tag-name,
   #availableTags .tag-text,
   #availableTags .tag-info,
-  #selectedTags,
-  #selectedTags *,
-  #selectedTags .tag-item,
   #selectedTags .tag-entry,
   #selectedTags .tag-name,
   #selectedTags .tag-text,
   #selectedTags .tag-info,
-  .tag-list-container,
-  .tag-list-container *,
   .tag-list-container .tag-item,
   .tag-list-container .tag-entry,
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 32px !important; /* Larger vendor/product text */
+    font-size: 1.625rem !important; /* Increased by 2px (1.5rem = 24px, 1.625rem = 26px) */
+    font-weight: 700 !important;
+    color: #fff !important;
+    text-shadow: 0 2px 8px rgba(44,34,58,0.7), 0 1px 0 #222;
   }
   
   /* Reduce padding and margins */
@@ -263,7 +236,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   }
 }
 
-@media (min-width: 2560px) {
+@media (min-width: 999999px) {
   html {
     font-size: 12px !important;
   }
@@ -299,11 +272,11 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 36px !important; /* Larger vendor/product text */
+    font-size: 38px !important; /* Increased by 2px for better readability */
   }
 }
 
-@media (min-width: 3840px) {
+@media (min-width: 999999px) {
   html {
     font-size: 10px !important;
   }
@@ -339,7 +312,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   .tag-list-container .tag-name,
   .tag-list-container .tag-text,
   .tag-list-container .tag-info {
-    font-size: 40px !important; /* Larger vendor/product text */
+    font-size: 42px !important; /* Increased by 2px for better readability */
   }
 }
   
@@ -359,7 +332,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 
 /* Normal scaling for key UI elements */
 .tag-item, .tag-entry {
-  font-size: 16px !important; /* Reduced for better fit */
+  font-size: 18px !important; /* Increased by 2px for better readability */
   min-height: 2.5rem !important;
 }
 
@@ -374,7 +347,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 #selectedTags .tag-name,
 #selectedTags .tag-row,
 #selectedTags .tag-item * {
-  font-size: 16px !important;
+  font-size: 18px !important;
   line-height: 1.5 !important;
 }
 
@@ -743,13 +716,13 @@ canvas#lava-lamp-canvas {
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
 }
 
@@ -757,7 +730,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
@@ -768,7 +741,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
@@ -813,10 +786,10 @@ body.modal-open #mainContent.store-selection-disabled,
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 72vh);
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(85rem, var(--tag-list-height));
   }
   @supports (height: 100dvh) {
-    :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(78rem, var(--tag-list-height)); }
+    :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(85rem, var(--tag-list-height)); }
   }
   .control-panel,
   .center-panel,
@@ -834,7 +807,8 @@ body.modal-open #mainContent.store-selection-disabled,
 .placeholder-text {
   color: rgba(255, 255, 255, 0.5) !important;
   font-style: italic !important;
-  opacity: 0.7 !important;
+  opacity: 0.9 !important;
+  font-size: 1.3rem !important;
 }
 
 .control-panel {
@@ -883,7 +857,7 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .control-panel > .control-section + .control-section {
-  margin-top: 0 !important;
+  margin-top: 3rem !important;
 }
  
 .control-section {
@@ -934,12 +908,12 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: 0.5rem 0 1rem 0 !important;
+  margin: 1.5rem 0 2.5rem 0 !important;
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
   align-items: center !important;
-  padding: 0 !important;
+  padding: .5rem !important;
   z-index: 1 !important;
 }
 
@@ -980,7 +954,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: 57rem;     /* Height of center control panel */
+    --center-panel-height: 67rem;     /* Height of center control panel */
     --tag-list-scroll-padding: 1rem;
 
     /* Dynamic filter border sizing */
@@ -2102,7 +2076,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #2d223a !important;
     border-radius: 4px !important;
     padding: 6px 12px !important;
-    font-size: 1.05rem !important;
+    font-size: 1.3rem !important;
     font-weight: 500 !important;
     transition: all 0.3s ease !important;
     box-shadow: 
@@ -2112,7 +2086,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-shadow: none !important;
     letter-spacing: 0.05px !important;
     position: relative !important;
-    height: 36px !important;
+    height: 40px !important;
     min-height: 36px !important;
     line-height: 1.2 !important;
     box-sizing: border-box !important;
@@ -2281,12 +2255,12 @@ body.modal-open #mainContent.store-selection-disabled,
     box-sizing: border-box !important;
   }
   
-  /* Ensure all text in inventory list uses readable size */
+  /* Ensure all text in inventory list uses readable size - matches selectedTags */
   #availableTags .tag-item,
   #availableTags .tag-entry,
   #availableTags .tag-name,
   #availableTags .tag-text {
-    font-size: 14px !important;
+    font-size: 18px !important;
   }
   
   /* Fix selected tags container height */
@@ -2690,6 +2664,8 @@ body.modal-open #mainContent.store-selection-disabled,
     flex: 0 0 auto !important;
     width: auto !important;
     min-width: 260px !important;
+    margin-top: 3rem !important;
+    margin-bottom: 0.5rem !important;
   }
   
   /* Ensure tag list containers are responsive - ZOOM RESPONSIVE */
@@ -2882,7 +2858,7 @@ body.modal-open #mainContent.store-selection-disabled,
     max-width: 100%;
     /* Allow content to be visible - CRITICAL for dropdowns */
     overflow: visible !important;
-    margin-bottom: 0.5rem !important; /* Reduced from 0.75rem for compactness */
+    margin-bottom: 0.2rem !important; /* Compact spacing */
     padding-right: 8px !important; /* Extra padding to prevent dropdown cutoff */
   }
   
@@ -2986,29 +2962,6 @@ body.modal-open #mainContent.store-selection-disabled,
     align-items: center !important;
   }
   
-  /* Legacy: Professional center column buttons - Replaced by .btn-control class */
-  /* Keep minimal fallback styles for backwards compatibility */
-  .control-panel .btn-glass:not(.btn-control) {
-    padding: 0.6rem 1rem !important;
-    font-size: 0.85rem !important;
-    font-weight: 500 !important;
-    min-height: 40px !important;
-  }
-  
-  .control-panel .btn-glass:not(.btn-control):hover {
-    transform: translateY(-1px) !important;
-  }
-  
-  .control-panel .btn-glass .icon-btn {
-    gap: 8px !important;
-    display: inline-flex !important;
-    align-items: center !important;
-  }
-  
-  .control-panel .btn-glass svg {
-    width: 16px !important;
-    height: 16px !important;
-  }
 
   /* Center column specific spacing reductions */
   .help-button-container {
@@ -3016,7 +2969,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.5rem 0 1rem 0 !important;
+    margin: 2.5rem 0 3rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -3057,7 +3010,7 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     margin-left: auto !important;
     margin-right: auto !important;
-    font-size: 1.1rem !important; /* Increased for better readability */
+    font-size: 1.5rem !important; /* Large for visibility */
     padding-left: 24px !important; /* Equal padding accounting for arrow */
     padding-right: 24px !important; /* Equal padding accounting for arrow */
   }
@@ -3193,8 +3146,8 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Filter labels in center column */
   .control-panel .filter-label {
     margin-bottom: 0.6rem !important;
-    font-size: 0.85rem !important;
-    font-weight: 600 !important;
+    font-size: 1.2rem !important;
+    font-weight: 700 !important;
     letter-spacing: 0.5px !important;
     text-transform: uppercase !important;
     color: rgba(160, 132, 232, 0.9) !important;
@@ -3239,22 +3192,16 @@ body.modal-open #mainContent.store-selection-disabled,
   /* High specificity to ensure colors override base styles */
   
   /* Match JSON - Blue/Cyan (Data Import) - VIBRANT */
-  .control-panel .btn-control.btn-color-blue,
-  .control-panel .btn-glass.btn-control.btn-color-blue,
-  .control-panel .d-grid .btn-control.btn-color-blue,
   .btn-control.btn-color-blue,
   .btn-control[data-bs-target="#jsonMatchModal"] {
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5)) !important;
     border-color: rgba(59, 130, 246, 0.8) !important;
     color: #dbeafe !important;
-    box-shadow: 
+    box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(59, 130, 246, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-blue:hover,
-  .control-panel .btn-glass.btn-control.btn-color-blue:hover,
-  .control-panel .d-grid .btn-control.btn-color-blue:hover,
   .btn-control.btn-color-blue:hover,
   .btn-control[data-bs-target="#jsonMatchModal"]:hover {
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.6)) !important;
@@ -3264,24 +3211,18 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Undo - Orange/Amber (Action Reversal) - VIBRANT */
-  .control-panel .btn-control.btn-color-orange,
-  .control-panel .btn-glass.btn-control.btn-color-orange,
-  .control-panel .d-grid .btn-control.btn-color-orange,
   .btn-control.btn-color-orange,
   #undo-move-btn.btn-control {
     background: linear-gradient(135deg, rgba(251, 146, 60, 0.4), rgba(249, 115, 22, 0.5)) !important;
     border-color: rgba(251, 146, 60, 0.8) !important;
     color: #fed7aa !important;
-    box-shadow: 
+    box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(251, 146, 60, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-    padding: 0.5rem 0.4rem !important; /* Ensure consistent padding */
-    min-height: 42px !important; /* Ensure consistent height */
+    padding: 0.5rem 0.4rem !important;
+    min-height: 42px !important;
   }
-  .control-panel .btn-control.btn-color-orange:hover,
-  .control-panel .btn-glass.btn-control.btn-color-orange:hover,
-  .control-panel .d-grid .btn-control.btn-color-orange:hover,
   .btn-control.btn-color-orange:hover,
   #undo-move-btn.btn-control:hover {
     background: linear-gradient(135deg, rgba(251, 146, 60, 0.5), rgba(249, 115, 22, 0.6)) !important;
@@ -3291,28 +3232,22 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Clear & Reset - Red (Destructive Action) - VIBRANT */
-  .control-panel .btn-control.btn-color-red,
-  .control-panel .btn-glass.btn-control.btn-color-red,
-  .control-panel .d-grid .btn-control.btn-color-red,
   .btn-control.btn-color-red,
   #clear-filters-btn.btn-control {
     background: linear-gradient(135deg, rgba(239, 68, 68, 0.4), rgba(220, 38, 38, 0.5)) !important;
     border-color: rgba(239, 68, 68, 0.8) !important;
     color: #fee2e2 !important;
-    box-shadow: 
+    box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(239, 68, 68, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-    padding: 0.5rem 0.4rem !important; /* Ensure consistent padding with Undo/Redo */
-    min-height: 42px !important; /* Ensure consistent height with Undo/Redo */
-    height: auto !important; /* Allow natural height */
-    display: flex !important; /* Ensure flex display */
-    align-items: center !important; /* Center content vertically */
-    justify-content: center !important; /* Center content horizontally */
+    padding: 0.5rem 0.4rem !important;
+    min-height: 42px !important;
+    height: auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
   }
-  .control-panel .btn-control.btn-color-red:hover,
-  .control-panel .btn-glass.btn-control.btn-color-red:hover,
-  .control-panel .d-grid .btn-control.btn-color-red:hover,
   .btn-control.btn-color-red:hover,
   #clear-filters-btn.btn-control:hover {
     background: linear-gradient(135deg, rgba(239, 68, 68, 0.5), rgba(220, 38, 38, 0.6)) !important;
@@ -3321,24 +3256,8 @@ body.modal-open #mainContent.store-selection-disabled,
     box-shadow: 0 4px 20px rgba(239, 68, 68, 0.6), 0 0 20px rgba(239, 68, 68, 0.5) !important;
   }
   
-  /* CRITICAL FIX: Ensure Clear button has same height as Undo/Redo - placed after all other rules */
-  .controls-buttons-container > #clear-filters-btn.btn-control.btn-color-red,
-  .controls-buttons-container > #clear-filters-btn.btn-glass.btn-control.btn-color-red,
-  #clear-filters-btn.btn-control.btn-color-red.btn-glass {
-    padding: 0.5rem 0.4rem !important; /* Match undo/redo padding exactly */
-    min-height: 42px !important; /* Match undo/redo height exactly */
-    height: auto !important; /* Allow natural height */
-    line-height: 1.5 !important; /* Ensure proper line height */
-    display: flex !important; /* Ensure flex display */
-    align-items: center !important; /* Center content vertically */
-    justify-content: center !important; /* Center content horizontally */
-    box-sizing: border-box !important; /* Include padding in height calculation */
-  }
-  
   /* Export Data - Green/Teal (Export/Download) - VIBRANT */
-  .control-panel .btn-control.btn-color-green,
-  .control-panel .btn-glass.btn-control.btn-color-green,
-  .control-panel .d-grid .btn-control.btn-color-green,
+  .btn-glass.btn-control.btn-color-green,
   .btn-control.btn-color-green,
   .btn-control[onclick*="downloadExcel"] {
     background: linear-gradient(135deg, rgba(20, 184, 166, 0.4), rgba(15, 118, 110, 0.5)) !important;
@@ -3349,9 +3268,7 @@ body.modal-open #mainContent.store-selection-disabled,
       0 0 12px rgba(20, 184, 166, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-green:hover,
-  .control-panel .btn-glass.btn-control.btn-color-green:hover,
-  .control-panel .d-grid .btn-control.btn-color-green:hover,
+  .btn-glass.btn-control.btn-color-green:hover,
   .btn-control.btn-color-green:hover,
   .btn-control[onclick*="downloadExcel"]:hover {
     background: linear-gradient(135deg, rgba(20, 184, 166, 0.5), rgba(15, 118, 110, 0.6)) !important;
@@ -3361,24 +3278,22 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Data & Analytics - Indigo/Blue (Analytics/View) - VIBRANT */
-  .control-panel .btn-control.btn-color-indigo,
-  .control-panel .btn-glass.btn-control.btn-color-indigo,
-  .control-panel .d-grid .btn-control.btn-color-indigo,
+  .btn-glass.btn-control.btn-color-indigo,
   .btn-control.btn-color-indigo,
-  .btn-control[onclick*="showProductDatabaseManager"] {
+  .btn-control[onclick*="showProductDatabaseManager"],
+  #redo-move-btn.btn-control {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(79, 70, 229, 0.5)) !important;
     border-color: rgba(99, 102, 241, 0.8) !important;
     color: #e0e7ff !important;
-    box-shadow: 
+    box-shadow:
       0 2px 8px rgba(0, 0, 0, 0.15),
       0 0 12px rgba(99, 102, 241, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-indigo:hover,
-  .control-panel .btn-glass.btn-control.btn-color-indigo:hover,
-  .control-panel .d-grid .btn-control.btn-color-indigo:hover,
+  .btn-glass.btn-control.btn-color-indigo:hover,
   .btn-control.btn-color-indigo:hover,
-  .btn-control[onclick*="showProductDatabaseManager"]:hover {
+  .btn-control[onclick*="showProductDatabaseManager"]:hover,
+  #redo-move-btn.btn-control:hover {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(79, 70, 229, 0.6)) !important;
     border-color: rgba(99, 102, 241, 1) !important;
     color: #ffffff !important;
@@ -3386,9 +3301,7 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Edit DB - Yellow/Amber (Edit Action) - VIBRANT */
-  .control-panel .btn-control.btn-color-yellow,
-  .control-panel .btn-glass.btn-control.btn-color-yellow,
-  .control-panel .d-grid .btn-control.btn-color-yellow,
+  .btn-glass.btn-control.btn-color-yellow,
   .btn-control.btn-color-yellow,
   .btn-control[onclick*="showDatabaseEditor"] {
     background: linear-gradient(135deg, rgba(234, 179, 8, 0.4), rgba(217, 119, 6, 0.5)) !important;
@@ -3399,9 +3312,7 @@ body.modal-open #mainContent.store-selection-disabled,
       0 0 12px rgba(234, 179, 8, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-yellow:hover,
-  .control-panel .btn-glass.btn-control.btn-color-yellow:hover,
-  .control-panel .d-grid .btn-control.btn-color-yellow:hover,
+  .btn-glass.btn-control.btn-color-yellow:hover,
   .btn-control.btn-color-yellow:hover,
   .btn-control[onclick*="showDatabaseEditor"]:hover {
     background: linear-gradient(135deg, rgba(234, 179, 8, 0.5), rgba(217, 119, 6, 0.6)) !important;
@@ -3411,9 +3322,7 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Lineage Editor - Purple (Management Tool - matches theme) - VIBRANT */
-  .control-panel .btn-control.btn-color-purple,
-  .control-panel .btn-glass.btn-control.btn-color-purple,
-  .control-panel .d-grid .btn-control.btn-color-purple,
+  .btn-glass.btn-control.btn-color-purple,
   .btn-control.btn-color-purple,
   .btn-control[onclick*="openLineageEditor"] {
     background: linear-gradient(135deg, rgba(139, 92, 246, 0.4), rgba(124, 58, 237, 0.5)) !important;
@@ -3424,9 +3333,7 @@ body.modal-open #mainContent.store-selection-disabled,
       0 0 12px rgba(139, 92, 246, 0.4),
       inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
   }
-  .control-panel .btn-control.btn-color-purple:hover,
-  .control-panel .btn-glass.btn-control.btn-color-purple:hover,
-  .control-panel .d-grid .btn-control.btn-color-purple:hover,
+  .btn-glass.btn-control.btn-color-purple:hover,
   .btn-control.btn-color-purple:hover,
   .btn-control[onclick*="openLineageEditor"]:hover {
     background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(124, 58, 237, 0.6)) !important;
@@ -3543,9 +3450,6 @@ body.modal-open #mainContent.store-selection-disabled,
   .control-panel > *:not(:last-child) {
     margin-bottom: 0 !important;
   }
-  
-  /* Legacy button styles - replaced by .btn-control */
-  /* .control-panel .btn-sm styles are deprecated - use .btn-control instead */
   
   /* Tag items with dropdowns */
   .tag-row {
@@ -3748,7 +3652,7 @@ body.modal-open #mainContent.store-selection-disabled,
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 0.9rem !important;
+      font-size: 1rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -3857,8 +3761,6 @@ body.modal-open #mainContent.store-selection-disabled,
     border-color: rgba(160, 132, 232, 0.5) !important;
     background: rgba(255, 255, 255, 0.22) !important;
   }
-  
-  /* Legacy lineage dropdown option styling removed - now using lineage-specific colors with white text */
   
   /* DOH Dropdown Styling - wider for readability */
   .doh-dropdown,
@@ -4109,56 +4011,6 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: bold !important;
   }
 
-  /* CRITICAL FIX: Ensure CBD lineage colors override all other styles */
-  .tag-item[data-lineage="CBD"],
-  .tag-item[data-lineage="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3) !important;
-    font-weight: bold !important;
-  }
-
-  /* ULTRA-CRITICAL: Force lineage colors with maximum specificity - override everything */
-  div.tag-item[data-lineage="SATIVA"].tag-item {
-    background: rgba(237, 65, 35, 0.6) !important;
-    border-color: rgba(237, 65, 35, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="INDICA"].tag-item {
-    background: rgba(153, 0, 255, 0.6) !important;
-    border-color: rgba(153, 0, 255, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="HYBRID"].tag-item {
-    background: rgba(0, 153, 0, 0.6) !important;
-    border-color: rgba(0, 153, 0, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="HYBRID/SATIVA"].tag-item {
-    background: rgba(237, 65, 35, 0.6) !important;
-    border-color: rgba(237, 65, 35, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="HYBRID/INDICA"].tag-item {
-    background: rgba(153, 0, 255, 0.6) !important;
-    border-color: rgba(153, 0, 255, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="CBD"].tag-item,
-  div.tag-item[data-lineage="CBD_BLEND"].tag-item {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="MIXED"].tag-item {
-    background: rgba(0, 33, 245, 0.6) !important;
-    border-color: rgba(0, 33, 245, 0.3) !important;
-  }
-
-  div.tag-item[data-lineage="PARA"].tag-item,
-  div.tag-item[data-lineage="PARAPHERNALIA"].tag-item {
-    background: rgba(200, 50, 120, 0.8) !important;
-    border-color: rgba(200, 50, 120, 0.5) !important;
-  }
 
   /* JSON matched tag styling - subtle indicator without overriding lineage colors */
   .json-matched-tag {
@@ -4247,62 +4099,39 @@ body.modal-open #mainContent.store-selection-disabled,
       0 2px 4px rgba(200, 50, 120, 0.4) !important;
   }
   
-  /* Tag row styles (for table view) - matching tag-item styles */
-  .tag-row[data-lineage="SATIVA"] {
-    background: rgba(237, 65, 35, 0.6) !important;
-    border-color: rgba(237, 65, 35, 0.3);
-  }
-  
-  .tag-row[data-lineage="INDICA"] {
-    background: rgba(153, 0, 255, 0.6) !important;
-    border-color: rgba(153, 0, 255, 0.3);
-  }
-  
-  .tag-row[data-lineage="HYBRID"] {
-    background: rgba(0, 153, 0, 0.6) !important;
-    border-color: rgba(0, 153, 0, 0.3);
-  }
-  
+  /* Tag row styles (for table view) - consolidated with tag-item styles above */
+  .tag-row[data-lineage="SATIVA"],
   .tag-row[data-lineage="HYBRID/SATIVA"] {
     background: rgba(237, 65, 35, 0.6) !important;
     border-color: rgba(237, 65, 35, 0.3);
   }
-  
+
+  .tag-row[data-lineage="INDICA"],
   .tag-row[data-lineage="HYBRID/INDICA"] {
     background: rgba(153, 0, 255, 0.6) !important;
     border-color: rgba(153, 0, 255, 0.3);
   }
-  
-  .tag-row[data-lineage="CBD"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
-  }
-  
-  .tag-row[data-lineage="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3);
-  }
-  
-  .tag-row[data-lineage="MIXED"] {
-    background: rgba(0, 33, 245, 0.6) !important;
-    border-color: rgba(0, 33, 245, 0.3);
-  }
-  
-  .tag-row[data-lineage="PARA"] {
-    background: rgba(200, 50, 120, 0.8) !important;
-    border-color: rgba(200, 50, 120, 0.5) !important;
-  }
-  
-  .tag-row[data-lineage="PARAPHERNALIA"] {
-    background: rgba(200, 50, 120, 0.8) !important;
-    border-color: rgba(200, 50, 120, 0.5) !important;
+
+  .tag-row[data-lineage="HYBRID"] {
+    background: rgba(0, 153, 0, 0.6) !important;
+    border-color: rgba(0, 153, 0, 0.3);
   }
 
-  /* CRITICAL FIX: Ensure CBD lineage colors override all other styles for tag-row */
   .tag-row[data-lineage="CBD"],
   .tag-row[data-lineage="CBD_BLEND"] {
     background: rgba(241, 194, 50, 0.6) !important;
     border-color: rgba(241, 194, 50, 0.3) !important;
+  }
+
+  .tag-row[data-lineage="MIXED"] {
+    background: rgba(0, 33, 245, 0.6) !important;
+    border-color: rgba(0, 33, 245, 0.3);
+  }
+
+  .tag-row[data-lineage="PARA"],
+  .tag-row[data-lineage="PARAPHERNALIA"] {
+    background: rgba(200, 50, 120, 0.8) !important;
+    border-color: rgba(200, 50, 120, 0.5) !important;
   }
   
   /* Brand headers */
@@ -4511,7 +4340,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Filter section */
 .filter-label {
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   font-weight: 700;
   color: var(--text-secondary);
   margin-bottom: 0.4rem;
@@ -4865,7 +4694,7 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--primary-color);
     font-weight: 600;
     margin-bottom: 0.75rem;
-    font-size: 1.2rem !important;
+    font-size: 1.5rem !important;
     margin-left: 0 !important;
     padding-left: 0 !important;
     position: relative;
@@ -6136,7 +5965,7 @@ body.modal-open #mainContent.store-selection-disabled,
       background: none !important;
       padding: 0 0.5rem 0 0 !important;
       margin-bottom: 0 !important;
-      font-size: 0.85rem !important;
+      font-size: 1.1rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.06em !important;
       color: #e0d7ff !important;
@@ -6152,7 +5981,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .tag-row {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.25rem;
       padding-left: 0.5rem !important;
   }
 
@@ -6184,14 +6013,15 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.2rem !important;
+    font-size: 1.5rem !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 0.78rem !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
@@ -6353,15 +6183,6 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Force tag names to wrap and not truncate */
-  /* EMERGENCY FIX: Force CBD colors with maximum specificity */
-  .tag-item[data-lineage="CBD"],
-  .tag-item[data-lineage="CBD_BLEND"],
-  .tag-row[data-lineage="CBD"],
-  .tag-row[data-lineage="CBD_BLEND"] {
-    background: rgba(241, 194, 50, 0.6) !important;
-    border-color: rgba(241, 194, 50, 0.3) !important;
-    font-weight: bold !important;
-  }
 
   .tag-item .tag-name,
   .tag-row .tag-name,
@@ -6584,9 +6405,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Vendor (top-level) */
   .vendor-section > .vendor-header {
-    font-size: 1.3em !important;
+    font-size: 1.3em !important; /* Slightly smaller than subcategory */
     font-weight: 700;
-    margin-bottom: 0.4em;
+    margin-bottom: 0.05em;
     letter-spacing: 0.04em;
     color: #e0d6f6;
   }
@@ -6597,25 +6418,25 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.d-flex,
   .vendor-section > .vendor-header.mb-2,
   .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.4em !important;
+    font-size: 1.1em !important; /* Slightly smaller than subcategory */
     font-weight: 700 !important;
   }
-  
+
   /* Reduce vendor header font size in selected tags list */
   #selectedTags .vendor-section > .vendor-header,
   #selectedTags .vendor-section > .vendor-header h5,
   #selectedTags .vendor-section > .vendor-header.d-flex,
   #selectedTags .vendor-section > .vendor-header.mb-2,
   #selectedTags .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.1em !important;
+    font-size: 1.1em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
   }
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.05em;
+    font-size: 1.4em; /* Larger for better visibility */
     font-weight: 600;
-    margin-bottom: 0.3em;
+    margin-bottom: 0.05em;
     margin-left: 1.2em;
     letter-spacing: 0.03em;
     color: #cbb6f6;
@@ -6623,9 +6444,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1em;
+    font-size: 1.25em; /* Increased by 0.125em (~2px) */
     font-weight: 500;
-    margin-bottom: 0.2em;
+    margin-bottom: 0.05em;
     margin-left: 2.2em;
     letter-spacing: 0.02em;
     color: #b3a1d8;
@@ -6635,9 +6456,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 0.98em;
+    font-size: 1.5em;
     font-weight: 500;
-    margin-bottom: 0.2em;
+    margin-bottom: 0.1em;
     margin-left: 3.2em;
     letter-spacing: 0.01em;
     color: #a99cc7;
@@ -6645,8 +6466,8 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Add vertical spacing between all group headers */
   .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
-    margin-top: 0.5em;
-    margin-bottom: 0.5em;
+    margin-top: 0.05em;
+    margin-bottom: 0.05em;
   }
 
   /* Add spacing between checkboxes and text */
@@ -6657,7 +6478,10 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-right: 0.5em;
   }
 
-  select, .form-select, .form-select-modern {
+  /* CRITICAL: Exclude templateSelect from generic select rules */
+  select:not(#templateSelect):not(#templateSelectModal), 
+  .form-select:not(#templateSelect):not(#templateSelectModal), 
+  .form-select-modern:not(#templateSelect):not(#templateSelectModal) {
     /* Cross-platform consistency - remove platform-specific styling */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
@@ -6693,49 +6517,73 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #e0d6f6 !important;
   }
 
-  /* Custom dropdown arrow for glassy background */
-  select, .form-select, .form-select-modern {
+  /* Custom dropdown arrow for glassy background - exclude templateSelect */
+  select:not(#templateSelect):not(#templateSelectModal), 
+  .form-select:not(#templateSelect):not(#templateSelectModal), 
+  .form-select-modern:not(#templateSelect):not(#templateSelectModal) {
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
     background-repeat: no-repeat;
     background-position: right 14px center;
     background-size: 18px 18px;
   }
 
-  /* Specific style for the Template selection boxes (main + modal) */
+  /* Specific style for the Template selection boxes (main + modal) - Mac native style matching PC */
   #templateSelect,
   #templateSelectModal {
-    /* Cross-platform consistency - remove platform-specific styling */
+    /* Remove native styling */
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
-    
-    /* Standardized styling for consistent appearance */
+
+    /* Layout and sizing - MATCH FILTER DROPDOWNS */
     display: block !important;
     box-sizing: border-box !important;
-    width: 140px !important; /* Fixed width to match min/max */
-    min-width: 140px !important; /* Reduced width for more compact appearance */
-    max-width: 140px !important; /* Limit max width to match min-width */
+    width: 100% !important;
+    min-width: 180px !important;
+    max-width: 100% !important;
     min-height: 60px !important;
     height: 60px !important;
-    margin: 0.5rem auto 0.75rem auto !important; /* Center with auto margins */
+    margin: 0.5rem auto 0.75rem auto !important;
+
+    /* Text alignment - perfectly centered */
     text-align: center !important;
     text-align-last: center !important;
-    direction: ltr !important; /* Ensure left-to-right for proper centering */
-    padding: 12px 45px 12px 45px !important; /* Symmetric padding to center text - arrow space accounted for on right */
-    font-size: 1.2em !important; /* Increased for better readability */
-    font-weight: 700 !important;
-    color: #e0d6f6 !important;
-    background: rgba(34, 34, 51, 0.85) !important;
-    border: 2.5px solid #a084e8 !important;
-    border-radius: 12px !important;
-    box-shadow: 0 6px 28px 0 rgba(160, 132, 232, 0.18) !important;
+    direction: ltr !important;
+
+    /* Padding - MATCH FILTER DROPDOWNS */
+    padding: 1rem 40px 1rem 1.25rem !important;
+
+    /* Font styling - MATCH FILTER DROPDOWNS */
+    font-size: 16px !important;
+    font-weight: 500 !important;
+    color: #f7f8ff !important;
+    line-height: 1.5 !important;
+    letter-spacing: 0.3px !important;
+
+    /* Background - Dark theme to match other dropdowns */
+    background-color: rgba(34, 34, 51, 0.55) !important;
+    background: rgba(34, 34, 51, 0.55) !important;
+
+    /* Border and Shadow - MATCH FILTER DROPDOWNS (Teal glow) */
+    border: 3px solid #00d4aa !important;
+    box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
+    border-radius: 6px !important;
+
+    /* Backdrop filter */
     backdrop-filter: blur(10px) !important;
     -webkit-backdrop-filter: blur(10px) !important;
-    transition: border 0.2s, box-shadow 0.2s;
-    overflow: visible !important;
-    white-space: nowrap !important; /* Prevent text wrapping */
+
+    /* Prevent text wrapping */
+    white-space: nowrap !important;
     text-overflow: ellipsis !important;
-    
+    overflow: visible !important;
+
+    /* Dropdown arrow - MATCH FILTER STYLE (teal) */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%2300d4aa" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 12px center !important;
+    background-size: 16px 16px !important;
+
     /* CRITICAL: Force centering - override any conflicting rules */
     margin-left: auto !important;
     margin-right: auto !important;
@@ -6744,39 +6592,108 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     right: auto !important;
     transform: none !important;
-    
-    /* Ensure consistent arrow across platforms - positioned to not interfere with centering */
-    background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
-    background-repeat: no-repeat !important;
-    background-position: right 14px center !important;
-    background-size: 18px 18px !important;
+
+    /* CRITICAL: Mac Safari needs explicit color override */
+    -webkit-text-fill-color: #f7f8ff !important;
+    color: #f7f8ff !important;
   }
   
-  /* OVERRIDE form-select-modern class for template select */
+  /* OVERRIDE form-select-modern class for template select - Dark theme */
   #templateSelect.form-select-modern,
   #templateSelectModal.form-select-modern {
-    margin: 0.5rem auto 0.75rem auto !important;
-    text-align: center !important;
-    text-align-last: center !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    font-size: 1.1rem !important; /* Increased for better readability */
-    padding-left: 24px !important; /* Equal padding accounting for arrow */
-    padding-right: 24px !important; /* Equal padding accounting for arrow */
-  /* Keep padding symmetric so text sits truly centered */
-  padding-left: 32px !important;
-  padding-right: 32px !important;
+    /* CRITICAL: Ensure Mac browsers respect all styling */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    background-color: rgba(34, 34, 51, 0.55) !important;
+    /* Teal arrow to match filter dropdowns */
+    background-image: url('data:image/svg+xml;utf8,<svg fill="%2300d4aa" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') !important;
+    background-repeat: no-repeat !important;
+    background-position: right 12px center !important;
+    background-size: 16px 16px !important;
+    /* Teal border and glow to match filter dropdowns */
+    border: 3px solid #00d4aa !important;
+    box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
+    color: #f7f8ff !important;
+    -webkit-text-fill-color: #f7f8ff !important;
   }
   
-  /* CRITICAL: Force text centering by adjusting padding to account for arrow */
+  /* Mac Safari/Chrome specific override - ensure custom styling is applied */
+  @supports (-webkit-appearance: none) {
+    #templateSelect,
+    #templateSelectModal {
+      -webkit-appearance: none !important;
+      appearance: none !important;
+      background-color: rgba(34, 34, 51, 0.55) !important;
+      /* Match filter dropdown teal glow */
+      border: 3px solid #00d4aa !important;
+      box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
+      color: #f7f8ff !important;
+      -webkit-text-fill-color: #f7f8ff !important;
+    }
+  }
+  
+  /* Template dropdown options - Dark theme */
   #templateSelect option,
   #templateSelectModal option {
+    color: #f7f8ff !important;
+    background-color: rgba(34, 34, 51, 0.95) !important;
+    background: rgba(34, 34, 51, 0.95) !important;
+    -webkit-background-color: rgba(34, 34, 51, 0.95) !important;
+    font-size: 1.05em !important;
+    font-weight: 400 !important;
     text-align: center !important;
     text-align-last: center !important;
     direction: ltr !important;
     display: block !important;
-    font-size: 0.9em !important; /* Increased for better readability */
-    padding: 6px 16px !important; /* Equal left/right padding for centering */
+    padding: 8px 16px !important;
+    line-height: 1.5 !important;
+    -webkit-text-fill-color: #f7f8ff !important;
+  }
+  
+  /* Selected/checked option styling - Dark theme */
+  #templateSelect option:checked,
+  #templateSelectModal option:checked,
+  #templateSelect option[selected],
+  #templateSelectModal option[selected] {
+    background-color: rgba(160, 132, 232, 0.3) !important;
+    background: rgba(160, 132, 232, 0.3) !important;
+    -webkit-background-color: rgba(160, 132, 232, 0.3) !important;
+    color: #f7f8ff !important;
+    -webkit-text-fill-color: #f7f8ff !important;
+    font-weight: 500 !important;
+  }
+  
+  /* Hover state for options */
+  #templateSelect option:hover,
+  #templateSelectModal option:hover {
+    background-color: rgba(160, 132, 232, 0.2) !important;
+    background: rgba(160, 132, 232, 0.2) !important;
+    -webkit-background-color: rgba(160, 132, 232, 0.2) !important;
+    color: #f7f8ff !important;
+    -webkit-text-fill-color: #f7f8ff !important;
+  }
+  
+  /* Focused option styling */
+  #templateSelect option:focus,
+  #templateSelectModal option:focus {
+    background-color: rgba(160, 132, 232, 0.25) !important;
+    background: rgba(160, 132, 232, 0.25) !important;
+    -webkit-background-color: rgba(160, 132, 232, 0.25) !important;
+    color: #f7f8ff !important;
+    -webkit-text-fill-color: #f7f8ff !important;
+    outline: none !important;
+  }
+  
+  /* Mac Safari specific option styling */
+  @supports (-webkit-appearance: none) {
+    #templateSelect option,
+    #templateSelectModal option {
+      -webkit-appearance: none !important;
+      background-color: rgba(34, 34, 51, 0.95) !important;
+      color: #e0d6f6 !important;
+      -webkit-text-fill-color: #e0d6f6 !important;
+    }
   }
   
   /* CRITICAL: Ensure selected text in dropdown is centered - override all other rules */
@@ -6788,7 +6705,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Adjust padding to visually center text - symmetric padding with arrow accounted for */
     padding-left: 24px !important; /* Equal padding accounting for arrow */
     padding-right: 24px !important; /* Equal padding accounting for arrow */
-    font-size: 1.1rem !important; /* Increased for better readability */
+    font-size: 1.5rem !important; /* Large for visibility */
     direction: ltr !important;
     /* Ensure text appears centered visually */
     text-indent: 0 !important;
@@ -6847,161 +6764,9 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-right: auto !important;
   }
   
-  /* FORCE template select to be centered within control-section */
-  .control-section #templateSelect,
-  .control-section #templateSelectModal {
-    margin-left: auto !important;
-    margin-right: auto !important;
-    display: block !important;
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-  
-  /* Fix template dropdown on large monitors (Windows PC) */
-  @media (min-width: 1921px) {
-    #templateSelect,
-    #templateSelectModal {
-      font-size: 0.75em !important; /* Smaller font on large monitors */
-      margin: 0.5rem auto 0.75rem auto !important; /* Ensure centered */
-      margin-left: auto !important;
-      margin-right: auto !important;
-      display: block !important;
-      padding-left: 24px !important; /* Equal padding accounting for arrow */
-      padding-right: 24px !important; /* Equal padding accounting for arrow */
-      width: 100% !important;
-    }
-    
-    /* Force control-section to center on large monitors */
-    .control-section {
-      display: flex !important;
-      flex-direction: column !important;
-      align-items: center !important;
-      justify-content: center !important;
-    }
-  }
-  
-  /* PC-specific: Reduce template select font size on Windows/PC screens */
-  /* Target larger screens (typically PC monitors) - Mac screens are usually smaller */
-  @media screen and (min-width: 1400px) {
-    #templateSelect,
-    #templateSelectModal {
-      font-size: 0.75em !important; /* Smaller font size for PC */
-    }
-  }
-  
-  /* PC-specific: Ensure template dropdown is centered in control-section */
-  @media (min-width: 992px) {
-    /* CRITICAL: Override control-panel's stretch alignment to center content on PC */
-    .control-panel {
-      align-items: center !important;
-      display: flex !important;
-      flex-direction: column !important;
-      justify-content: flex-start !important;
-    }
-    
-    /* Center the control-section itself - ensure it centers its children */
-    .control-section {
-      align-items: center !important;
-      display: flex !important;
-      flex-direction: column !important;
-      width: 100% !important;
-      text-align: center !important;
-      justify-content: center !important;
-    }
-    
-    /* FORCE template dropdown to be centered - override everything */
-    .control-section #templateSelect,
-    .control-section #templateSelectModal,
-    .control-panel .control-section #templateSelect,
-    .control-panel .control-section #templateSelectModal {
-      display: block !important;
-      width: 70% !important;
-      max-width: 70% !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
-      text-align: center !important;
-      text-align-last: center !important;
-      transform: none !important;
-    }
-    
-    /* Ensure the center column container properly centers its children */
-    [data-container-type="center"] {
-      align-items: center !important;
-      text-align: center !important;
-    }
-    
-    /* Force center alignment for template select in center container */
-    [data-container-type="center"] #templateSelect,
-    [data-container-type="center"] #templateSelectModal {
-      margin-left: auto !important;
-      margin-right: auto !important;
-      text-align: center !important;
-      text-align-last: center !important;
-    }
-    
-    /* Ensure Template label is centered */
-    .control-section .filter-label,
-    .control-section label:first-child {
-      text-align: center !important;
-      width: 100% !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
-    }
-  }
-  
-  /* Override inline styles on template select */
-  #templateSelect[style*="width"],
-  #templateSelect[style*="max-width"] {
-    width: 100% !important;
-    max-width: 100% !important;
-    min-width: 180px !important;
-  }
-  
-  /* Override inline width constraints on center column to allow full width */
-  [data-container-type="center"][style*="max-width"],
-  [data-container-type="center"][style*="width"] {
-    max-width: none !important;
-    width: auto !important;
-  }
-  
-  /* Ensure control panel doesn't constrain width */
-  .control-panel[style*="max-width"] {
-    max-width: 100% !important;
-    width: 100% !important;
-  }
-
-  #templateSelect option,
-  #templateSelectModal option {
-    color: #e0d6f6 !important;
-    background: rgba(34, 34, 51, 0.95) !important;
-    font-size: 0.75em !important; /* Smaller font to fit in dropdown */
-    font-weight: 500;
-    text-align: center !important;
-    text-align-last: center !important;
-    direction: ltr !important;
-    display: block !important;
-    padding: 6px 16px !important; /* Equal left/right padding for centering */
-    margin: 0 auto !important;
-  }
-
-  #templateSelect:focus,
-  #templateSelectModal:focus {
-    border-color: #cbb6f6 !important;
-    box-shadow: 0 0 0 2px #a084e8 !important;
-  }
-
-  /* Mobile: let the select fill the column */
-  @media (max-width: 576px) {
-    #templateSelect,
-    #templateSelectModal {
-      width: 100% !important;
-      max-width: 100% !important;
-      min-width: 0 !important;
-    }
-  }
 
   .container-label, .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
-    line-height: 1.7 !important;
+    line-height: 1.3 !important;
   }
 
   #generateBtn {
@@ -7093,7 +6858,7 @@ body.modal-open #mainContent.store-selection-disabled,
     transform: translateY(-1px) scale(1.03);
   }
   .file-info-modern {
-    font-size: 0.82rem !important;
+    font-size: 1rem !important;
     gap: 2px !important;
     margin-left: 6px !important;
     min-width: 200px !important;
@@ -7109,6 +6874,7 @@ body.modal-open #mainContent.store-selection-disabled,
     flex-shrink: 0 !important;
   }
   
+  /*File upload path; console: font-weight: 700 !important;*/
   .file-info-text {
     overflow: hidden !important;
     text-overflow: ellipsis !important;
@@ -7116,6 +6882,7 @@ body.modal-open #mainContent.store-selection-disabled,
     flex: 1 !important;
     min-width: 0 !important;
   }
+
   .upload-btn-modern svg {
     width: 15px !important;
     height: 15px !important;
@@ -7592,6 +7359,7 @@ body.modal-open #mainContent.store-selection-disabled,
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     font-size: 1.4rem;
+    margin-bottom: 0.25rem !important;
     margin: 0;
     cursor: pointer;
     transition: box-shadow 0.3s, transform 0.2s;
@@ -7732,11 +7500,11 @@ body.modal-open #mainContent.store-selection-disabled,
     -webkit-backdrop-filter: blur(20px) !important;
     border: var(--filter-border-width) solid rgba(160, 132, 232, 0.2) !important; /* Match glass-card border */
     border-radius: 16px !important; /* Reduced from 24px for compactness */
-    box-shadow: 
-      0 12px 40px rgba(0,0,0,0.15), 
+    box-shadow:
+      0 12px 40px rgba(0,0,0,0.15),
       0 4px 16px rgba(160,132,232,0.1),
       0 2px 8px rgba(160,132,232,0.08) !important; /* Match glass-card shadows */
-    margin: 0 0 0.75rem 0; /* Reduced bottom margin */
+    margin: 0 0 0.25rem 0; /* Reduced bottom margin from 0.75rem to 0.25rem */
     padding: 0.75rem 0.75rem 1rem 0.75rem !important; /* Increased bottom padding to prevent cutoff */
     transition: all 0.3s cubic-bezier(0.4,0,0.2,1) !important; /* Match glass-card transition */
     position: relative;
@@ -7966,7 +7734,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.5rem 0 1rem 0 !important;
+    margin: 2.5rem 0 3rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -8272,7 +8040,7 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Make sidebar filter bar and filters slightly smaller */
   .sticky-filter-bar .form-label,
   .sticky-filter-bar .filter-label {
-    font-size: 0.92em !important;
+    font-size: 1.2em !important;
     padding: 0 0 0.15rem 0 !important; /* Increased bottom padding to prevent cutoff */
     line-height: 1.5 !important; /* Ensure proper line-height */
     overflow: visible !important; /* Prevent text cutoff */
@@ -8315,7 +8083,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .modern-upload-bar,
   .upload-btn-modern,
   .file-info-modern {
-    font-size: 0.75rem !important;
+    font-size: 1rem !important;
   }
 
   /* Slightly increase filter dropdown height for better fit */
@@ -8581,6 +8349,8 @@ body.modal-open #mainContent.store-selection-disabled,
   min-height: auto !important;
   max-height: none !important;
   overflow: visible !important;
+  margin-top: 3rem !important;
+  margin-bottom: 0.5rem !important;
   }
   
   [data-container-type="available"],
@@ -8613,7 +8383,7 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .control-panel > * + * {
-    margin-top: 0.9rem !important;
+    margin-top: 0.8rem !important;
   }
   
   [data-container-type="available"] #availableTags,
@@ -8701,6 +8471,8 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Make center column wider to accommodate buttons */
   [data-container-type="center"] {
     min-width: 140px !important;
+    margin-top: 3rem !important;
+    margin-bottom: 0.5rem !important;
   }
 
   /* Ultra-wide monitors (32"+ / ultrawide displays) */
@@ -8739,7 +8511,7 @@ body.modal-open #mainContent.store-selection-disabled,
     
     .control-panel {
       max-height: none !important;
-      min-height: 600px !important;
+      min-height: 650px !important;
     }
     
     .col-lg-3, .col-lg-4, .col-lg-5 {
@@ -8976,7 +8748,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .filter-label,
   h5.filter-label,
   .card-header .filter-label {
-    font-size: 0.9rem !important;
+    font-size: 1.3rem !important;
     font-weight: 700 !important;
     color: rgba(255, 255, 255, 0.85) !important;
     margin-bottom: 0.3rem !important;
@@ -9597,34 +9369,6 @@ body.modal-open #mainContent.store-selection-disabled,
     -webkit-backdrop-filter: blur(10px) !important;
   }
 
-  /* Ensure modal backdrop is stable and not affected by background animation */
-  #strainLineageEditorModal + .modal-backdrop {
-    display: none !important; /* Hide backdrop entirely */
-    pointer-events: none !important; /* Disable click blocking */
-  }
-
-  /* Prevent body background animation from affecting modal */
-  body.modal-open #strainLineageEditorModal {
-    z-index: 10001 !important;
-  }
-
-  body.modal-open #strainLineageEditorModal + .modal-backdrop {
-    display: none !important; /* Hide backdrop entirely */
-    pointer-events: none !important; /* Disable click blocking */
-  }
-
-  /* Force modal to stay visible even during background transitions */
-  #strainLineageEditorModal.show {
-    display: block !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    z-index: 10001 !important;
-  }
-
-  #strainLineageEditorModal.show + .modal-backdrop {
-    display: none !important; /* Hide backdrop entirely */
-    pointer-events: none !important; /* Disable click blocking */
-  }
 
   /* Prevent any background animations from affecting modal content */
   #strainLineageEditorModal * {
@@ -10035,7 +9779,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.collapsible-header,
   .vendor-section > .vendor-header.align-items-center,
   .vendor-section > .vendor-header * {
-    font-size: 1.25em !important;
+    font-size: 1.3em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
     line-height: 1.2 !important;
   }
@@ -10044,21 +9788,21 @@ body.modal-open #mainContent.store-selection-disabled,
   #availableTags .vendor-section > .vendor-header > .vendor-title,
   #availableTags .vendor-section > .vendor-header span.vendor-title,
   #availableTags .vendor-section .vendor-header .vendor-title.flex-grow-1 {
-    font-size: 2em !important;
+    font-size: 1.125em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
     line-height: 1.3 !important;
   }
 
   /* Increase vendor title text size in tag lists */
   .vendor-header .vendor-title {
-    font-size: 1.4em !important;
+    font-size: 1.3 !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
   }
-  
+
   /* Reduce vendor font size in selected tags list */
   #selectedTags .vendor-section > .vendor-header .vendor-title,
   #selectedTags .vendor-header .vendor-title {
-    font-size: 1.1em !important;
+    font-size: 1.2em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
   }
 
@@ -10122,11 +9866,11 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .font-size-large {
-    font-size: clamp(14px, 1.3rem, 24px) !important;
+    font-size: clamp(14px, 1.2rem, 24px) !important;
   }
   
   .font-size-xlarge {
-    font-size: clamp(16px, 1.45rem, 26px) !important;
+    font-size: clamp(16px, 1.3rem, 26px) !important;
   }
   
   /* Responsive font sizing based on container width */
@@ -10140,34 +9884,34 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Container-specific font sizing - using normalized viewport units */
   .tag-item .text-container {
-    font-size: clamp(9px, 0.8rem, 16px) !important;
+    font-size: clamp(9px, 1rem, 16px) !important;
     max-width: calc(100% - 40px) !important;
     padding-right: 8px !important;
   }
   
   .vendor-header .text-container {
     font-size: clamp(14px, 1.2rem, 20px) !important;
-    font-weight: 600 !important;
+    font-weight: 800 !important;
   }
   
   .brand-header .text-container {
-    font-size: clamp(11px, 1rem, 19px) !important;
-    font-weight: 500 !important;
+    font-size: clamp(11px, 1.1rem, 22px) !important;
+    font-weight: 800 !important;
   }
   
   .product-type-header .text-container {
-    font-size: clamp(10px, 1.05rem, 18px) !important;
-    font-weight: 500 !important;
+    font-size: clamp(10px, 1.05rem, 20px) !important;
+    font-weight: 800 !important;
   }
   
   .subcategory-header .text-container {
-    font-size: clamp(10px, 1.05rem, 18px) !important;
-    font-weight: 500 !important;
+    font-size: clamp(14px, 1.5rem, 26px) !important;
+    font-weight: 800 !important;
   }
   
   .weight-header .text-container {
-    font-size: clamp(10px, 1.05rem, 18px) !important;
-    font-weight: 500 !important;
+    font-size: clamp(12px, 1.25rem, 20px) !important;
+    font-weight: 600 !important;
   }
   
   /* Template-specific font sizing */
@@ -10390,7 +10134,7 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1px solid rgba(160, 132, 232, 0.25) !important;
     color: white !important;
     font-weight: 600 !important;
-    font-size: 0.85rem !important;
+    font-size: 1.1rem !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
     letter-spacing: 0.02em !important;
     transition: background 0.2s ease, color 0.2s ease !important;
@@ -10417,7 +10161,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .product-type-header .collapse-icon,
   .subcategory-header .collapse-icon,
   .weight-header .collapse-icon {
-    font-size: 0.85rem !important;
+    font-size: 1.1rem !important;
     padding: 0 4px !important;
     min-width: 18px !important;
     min-height: 18px !important;
@@ -11087,9 +10831,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
 /* Slightly lower the center column so it visually centers between the tag lists */
 [data-container-type="center"] {
-  margin-top: 10px !important;
+  margin-top: 3rem !important;
+  margin-bottom: 0.5rem !important;
   position: relative !important;
-  top: 5px !important;
 }
 
 /* Scale-to-fit support - REMOVED transform-origin from html/body to fix canvas positioning */

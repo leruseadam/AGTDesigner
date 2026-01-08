@@ -1167,9 +1167,9 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                # Rate-limit noisy blank-name logs: log first occurrence and then sparsely (every 1000)
-                if self._rejected_blank_names == 1 or self._rejected_blank_names % 1000 == 1:
-                    logger.info(
+                # Log only the first occurrence, then every 100th to avoid spam
+                if self._rejected_blank_names == 1 or self._rejected_blank_names % 100 == 1:
+                    logger.debug(
                         f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})"
                     )
                 return None
@@ -1177,17 +1177,16 @@ class ProductDatabase:
             # Check for invalid values
             if str(product_name).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_invalid_names += 1
-                # Rate-limit invalid-name logs
-                if self._rejected_invalid_names == 1 or self._rejected_invalid_names % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
+                if self._rejected_invalid_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
                 return None
             
             # RELAXED VALIDATION: Allow single character names for vertical template compatibility
             # Check for minimum length (at least 1 character instead of 2)
             if len(str(product_name).strip()) < 1:
                 self._rejected_short_names += 1
-                if self._rejected_short_names == 1 or self._rejected_short_names % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
+                if self._rejected_short_names % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
             # Additional validation for essential fields
@@ -1196,14 +1195,14 @@ class ProductDatabase:
             
             if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_missing_vendor += 1
-                if self._rejected_missing_vendor == 1 or self._rejected_missing_vendor % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
+                if self._rejected_missing_vendor % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
                 return None
             
             if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_missing_type += 1
-                if self._rejected_missing_type == 1 or self._rejected_missing_type % 1000 == 1:
-                    logger.info(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
+                if self._rejected_missing_type % 10 == 1:
+                    logger.debug(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
                 return None
             
             normalized_name = self._normalize_product_name(product_name)
