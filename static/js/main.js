@@ -10139,7 +10139,8 @@ const TagManager = {
             let response;
             let responseData;
             const maxRetries = 3; // Allow retries for errors
-            const maxProcessingRetries = 30; // Allow 30 retries for 202 (file processing) - enough for 60+ seconds of loading
+            // PERFORMANCE: Reduced from 30 to 15 retries - if file takes longer than 30 seconds, use cache
+            const maxProcessingRetries = 15; // Allow 15 retries for 202 (file processing) - 30 seconds max wait
             let retryCount = 0;
             let processingRetryCount = 0;
             let lastError;
@@ -10154,12 +10155,12 @@ const TagManager = {
                 try {
                     console.log(`🔄 Retry attempt ${retryCount + 1} (processing retries: ${processingRetryCount})`);
                     const controller = new AbortController();
-                    // PERFORMANCE: Increased timeout to 60 seconds for large datasets
-                    // Large files (5000+ tags) can take 30-45 seconds to process on first load
+                    // PERFORMANCE: Reduced timeout to 30 seconds - if it takes longer, use cache
+                    // Most files should load in 10-15 seconds, large files can use cache fallback
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn('⚠️ Tag loading timeout after 60 seconds - will try cache or show error');
-                    }, 60000); // 60 seconds - needed for large datasets
+                        console.warn('⚠️ Tag loading timeout after 30 seconds - will try cache or show error');
+                    }, 30000); // 30 seconds - faster timeout, use cache for slow loads
 
                     // CRITICAL FIX: Always use prefer_db in database-only mode to ensure correct lineage from database
                     // Also use prefer_db after recent lineage updates
@@ -10194,6 +10195,17 @@ const TagManager = {
                     // Handle 202 Accepted (file still processing) - allow more retries for this
                     if (response.status === 202) {
                         processingRetryCount++;
+                        
+                        // PERFORMANCE: After 5 retries (10 seconds), try to show cached data immediately
+                        if (processingRetryCount === 5) {
+                            verboseLog('⏳ File processing taking a while, showing cached data while waiting...');
+                            const cachedTags = this.hydrateAvailableTagsFromCache();
+                            if (cachedTags) {
+                                verboseLog('✅ Showing cached tags immediately while file processes in background');
+                                // Continue waiting for fresh data, but user sees cached data now
+                            }
+                        }
+                        
                         if (processingRetryCount >= maxProcessingRetries) {
                             // Too many processing retries - try to use cache or show helpful error
                             verboseLog('⏳ File processing taking too long, trying cache fallback...');
@@ -16499,10 +16511,20 @@ const TagManager = {
                 console.error('❌ Error populating lineage dropdown:', error);
             }
 
-            // CRITICAL FIX: Always fetch fresh data from server, skip cache
-            // Cache can contain stale/old tags that don't match current Excel file
-            console.log('📊 Fetching fresh tags from server (cache skipped to ensure current Excel data)...');
+            // PERFORMANCE: Show cached data immediately, then refresh in background
+            // This provides instant UI while ensuring fresh data
+            console.log('📊 Loading tags (showing cache immediately, refreshing in background)...');
             try {
+                // Try to show cached data first for instant display
+                const cachedTags = this.hydrateAvailableTagsFromCache();
+                if (cachedTags && cachedTags.length > 0) {
+                    console.log(`⚡ Showing ${cachedTags.length} cached tags immediately`);
+                    this.state.tags = [...cachedTags];
+                    this.state.originalTags = [...cachedTags];
+                    this._updateAvailableTags(cachedTags, null);
+                }
+                
+                // Then fetch fresh data in background
                 const loaded = await this.fetchAndUpdateAvailableTags();
                 if (loaded) {
                     console.log('✅ Tags loaded from database in init()');
@@ -16513,7 +16535,8 @@ const TagManager = {
             } catch (error) {
                 console.error('❌ Error loading tags in init():', error);
                 // Don't throw - allow app to continue even if tags fail to load
-                return false;
+                // If we have cached data, that's better than nothing
+                return this.state.tags && this.state.tags.length > 0;
             }
         } catch (error) {
             console.error('❌ CRITICAL: Error in TagManager.init():', error);
