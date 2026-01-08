@@ -2719,8 +2719,17 @@ class TemplateProcessor:
 
                     self.logger.info(f"🔍 VERTICAL BRAND DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
 
+                    # CRITICAL FIX: For vertical templates, preserve the actual Lineage value from database/Excel
+                    # Check if Lineage was already set for classic types (from database lookup earlier)
+                    existing_lineage = label_context.get('Lineage', '')
+                    
+                    # Unwrap lineage if it has markers
+                    if existing_lineage and is_already_wrapped(existing_lineage, 'LINEAGE'):
+                        existing_lineage = unwrap_marker(existing_lineage, 'LINEAGE')
+                    
+                    # Get lineage for color logic (used in ProductBrand)
                     lineage_for_color_source = (
-                        label_context.get('Lineage') or
+                        existing_lineage or
                         record.get('Lineage') or
                         ''
                     )
@@ -2736,13 +2745,14 @@ class TemplateProcessor:
                     # CRITICAL FIX: For vertical templates, preserve the actual Lineage value
                     # Don't overwrite Lineage with hint token - Lineage should show actual lineage from database/Excel
                     # Only use hint token in ProductBrand for color logic
-                    # If Lineage was already set (from database lookup), preserve it
-                    if 'Lineage' not in label_context or not label_context.get('Lineage'):
-                        # Only set Lineage to hint if it wasn't already set
-                        # But actually, for non-classic types, we should preserve any existing lineage
-                        # or use the lineage_for_color as the actual lineage value
+                    # Preserve existing Lineage if it was set (for classic types from database lookup)
+                    if existing_lineage and existing_lineage.strip():
+                        # Keep the existing lineage value (from database lookup for classic types)
+                        # This preserves values like "HYBRID/SATIVA", "HYBRID/INDICA", etc.
+                        label_context['Lineage'] = existing_lineage.strip()
+                    else:
+                        # For non-classic types without lineage, use the lineage_for_color as the actual lineage
                         label_context['Lineage'] = lineage_for_color
-                    # Otherwise, keep the existing Lineage value (from database lookup earlier)
 
                     # Populate ProductBrand with hint + brand markers for display (single source of truth)
                     label_context['ProductBrand'] = (
