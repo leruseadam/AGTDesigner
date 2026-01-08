@@ -3477,13 +3477,34 @@ const TagManager = {
             // DEBUG: Log first few tags to see what fields are available
             if (!this._vendorDebugLogged && (!vendor || vendor.trim() === '')) {
                 const sampleTag = tags && tags.length > 0 ? tags[0] : tag;
+                const allVendorKeys = Object.keys(sampleTag).filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier'));
                 console.log('🔍 DEBUG: Sample tag fields for vendor extraction:', {
                     hasVendor: !!sampleTag.vendor,
                     hasVendorCapital: !!sampleTag.Vendor,
                     hasVendorSupplier: !!sampleTag['Vendor/Supplier*'],
-                    allKeys: Object.keys(sampleTag).filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier')),
+                    allVendorKeys: allVendorKeys,
+                    vendorValues: allVendorKeys.reduce((acc, key) => {
+                        acc[key] = sampleTag[key];
+                        return acc;
+                    }, {}),
+                    allKeys: Object.keys(sampleTag).slice(0, 20), // First 20 keys
                     sampleTag: sampleTag
                 });
+                
+                // CRITICAL: If no vendor found and we have product name, try to extract from name
+                if (!vendor && sampleTag['Product Name*']) {
+                    const productName = sampleTag['Product Name*'];
+                    // Try to extract vendor from "Product by Vendor" pattern
+                    const vendorMatch = productName.match(/\s+by\s+([^-]+?)(?:\s*-\s*\d|$)/i);
+                    if (vendorMatch && vendorMatch[1]) {
+                        const extractedVendor = vendorMatch[1].trim();
+                        if (extractedVendor && extractedVendor.length > 1) {
+                            console.log(`💡 Extracted vendor '${extractedVendor}' from product name '${productName}'`);
+                            vendor = extractedVendor;
+                        }
+                    }
+                }
+                
                 this._vendorDebugLogged = true;
             }
             // Normalize empty strings and 'Unknown' to ensure consistent handling
