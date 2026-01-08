@@ -2740,11 +2740,8 @@ class TemplateProcessor:
                     if not lineage_for_color:
                         lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
 
-                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
-
                     # CRITICAL FIX: For vertical templates, preserve the actual Lineage value
-                    # Don't overwrite Lineage with hint token - Lineage should show actual lineage from database/Excel
-                    # Only use hint token in ProductBrand for color logic
+                    # Don't use lineage hint tokens - Lineage should show actual lineage from database/Excel
                     # Preserve existing Lineage if it was set (for classic types from database lookup)
                     if existing_lineage and existing_lineage.strip():
                         # Keep the existing lineage value (from database lookup for classic types)
@@ -2754,13 +2751,13 @@ class TemplateProcessor:
                         # For non-classic types without lineage, use the lineage_for_color as the actual lineage
                         label_context['Lineage'] = lineage_for_color
 
-                    # Populate ProductBrand with hint + brand markers for display (single source of truth)
+                    # Populate ProductBrand with brand markers for display (no lineage hint tokens)
                     label_context['ProductBrand'] = (
-                        f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                        f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     )
                     label_context['ProductBrand_Center'] = ""
 
-                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set ProductBrand to '{final_brand_text}' with lineage hint '{lineage_for_color}', preserved Lineage: '{label_context.get('Lineage', 'NOT SET')}'")
+                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set ProductBrand to '{final_brand_text}', preserved Lineage: '{label_context.get('Lineage', 'NOT SET')}'")
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
@@ -2872,24 +2869,36 @@ class TemplateProcessor:
                     # CRITICAL FIX: Add debugging to see final brand text
                     self.logger.info(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
 
-                    # Use PRODUCTBRAND_CENTER markers for the Lineage band, no LINEAGE_HINT
-                    clean_brand_text = str(final_brand_text).strip().upper()
-                    clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', clean_brand_text)
-                    clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*', '', clean_brand_text)
-                    clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
-                    clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
-                    clean_brand_text = clean_brand_text.strip()
-
-                    if clean_brand_text:
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
+                    # CRITICAL FIX: For double template, preserve actual Lineage value if it exists
+                    # Check if Lineage was already set (from database lookup for classic types)
+                    existing_lineage = label_context.get('Lineage', '')
+                    if existing_lineage and existing_lineage.strip():
+                        # Unwrap if it has markers
+                        if is_already_wrapped(existing_lineage, 'LINEAGE'):
+                            existing_lineage = unwrap_marker(existing_lineage, 'LINEAGE')
+                        # Keep the existing lineage value (from database lookup for classic types)
+                        # This preserves values like "HYBRID/SATIVA", "HYBRID/INDICA", etc.
+                        label_context['Lineage'] = existing_lineage.strip()
                     else:
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                        # For non-classic types, use cleaned brand text in the Lineage band
+                        # Use PRODUCTBRAND_CENTER markers for the Lineage band, no LINEAGE_HINT
+                        clean_brand_text = str(final_brand_text).strip().upper()
+                        clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', clean_brand_text)
+                        clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*', '', clean_brand_text)
+                        clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
+                        clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
+                        clean_brand_text = clean_brand_text.strip()
+
+                        if clean_brand_text:
+                            label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
+                        else:
+                            label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
 
                     # For double template we don't need separate ProductBrand fields (avoid duplication)
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
 
-                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{clean_brand_text or final_brand_text}' for double template (no LINEAGE_HINT)")
+                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{label_context.get('Lineage', 'NOT SET')}' for double template (preserved existing lineage if available)")
                 else:
                     # For other templates (horizontal, etc.), use marker-based formatting
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption
@@ -5237,9 +5246,7 @@ class TemplateProcessor:
             self.logger.debug(f"🎯 BRAND MARKER DETECTED: '{text_stripped}' classified as brand (marker-based)")
             return 'brand'
 
-        if '__LINEAGE_HINT_' in text:
-            self.logger.debug(f"🎯 LINEAGE HINT DETECTED: '{text_stripped}' classified as lineage (marker-based)")
-            return 'lineage'
+        # Removed lineage hint detection - no longer using lineage hint tokens
 
         # Check for prices (contain $ symbol)
         if '$' in text:
