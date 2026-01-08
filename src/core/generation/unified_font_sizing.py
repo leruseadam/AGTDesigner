@@ -45,8 +45,8 @@ def _load_font_sizing_config():
                 'double': {
                     'description': [(10, 28), (20, 26), (30, 24), (35, 22), (40, 20), (45, 18), (50, 16), (70, 14), (80, 12), (float('inf'), 10)],
                     'brand': [(5, 12), (15, 10), (20, 8), (30, 7.5), (40, 7), (float('inf'), 6.5)],
-                    'price': [(5, 40), (10, 38), (20, 36), (80, 20), (float('inf'), 18)],  # Match horizontal template logic
-                    'lineage': [(10, 20), (60, 18), (80, 10), (float('inf'), 10)],  # Match horizontal template logic
+                    'price': [(10, 26), (15, 21), (float('inf'), 14)],
+                    'lineage': [(10, 16), (20, 15), (30, 14), (40, 13), (float('inf'), 12)],  # Increased from 9-14pt to 12-16pt
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
                     'thc_cbd': [(20, 7),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
@@ -59,8 +59,8 @@ def _load_font_sizing_config():
                 'vertical': {
                     'description': [(10, 36), (20, 34), (30, 30), (40, 28), (45, 26), (50, 24), (60, 23), (70, 22), (80, 20), (float('inf'), 18)],
                     'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
-                    'price': [(5, 40), (10, 38), (20, 36), (80, 20), (float('inf'), 18)],  # Match horizontal template logic
-                    'lineage': [(10, 20), (60, 18), (80, 10), (float('inf'), 10)],  # Match horizontal template logic
+                    'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
+                    'lineage': [(10, 20), (20, 19), (30, 18), (50, 17), (float('inf'), 16)],  # Increased from 14-18pt to 16-20pt
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
@@ -176,8 +176,39 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             )
             return Pt(final_size)
     
-    # Price rules now use horizontal template logic for all templates (removed digit-based overrides)
-    # This ensures consistency across all templates - horizontal, vertical, and double
+    # Special rule: Double template prices based on number of digits
+    if field_type.lower() == 'price' and orientation.lower() == 'double':
+        # Remove $ and any non-digit characters, then count digits
+        clean_text = ''.join(char for char in str(text) if char.isdigit())
+        num_digits = len(clean_text)
+        
+        if num_digits <= 2:  # Two digit prices (e.g., $12, $30, $55)
+            final_size = 28 * scale_factor
+            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 26pt font")
+            return Pt(final_size)
+        elif num_digits == 3:  # Three digit prices (e.g., $100, $128, $250)
+            final_size = 20 * scale_factor
+            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 20pt font")
+            return Pt(final_size)
+        else:  # Four or more digits (e.g., $1000+)
+            final_size = 16 * scale_factor
+            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 16pt font")
+            return Pt(final_size)
+    
+    # Special rule: Vertical template prices based on number of digits
+    if field_type.lower() == 'price' and orientation.lower() == 'vertical':
+        # Remove $ and any non-digit characters, then count digits
+        clean_text = ''.join(char for char in str(text) if char.isdigit())
+        num_digits = len(clean_text)
+        
+        if num_digits <= 2:  # $1 or $11 - use 36pt font
+            final_size = 36 * scale_factor
+            logger.debug(f"Vertical template price rule: '{text}' has {num_digits} digits, using 36pt font")
+            return Pt(final_size)
+        else:  # $111 or more - use 30pt font
+            final_size = 30 * scale_factor
+            logger.debug(f"Vertical template price rule: '{text}' has {num_digits} digits, using 30pt font")
+            return Pt(final_size)
     
     if not text:
         # For empty text, use the appropriate field configuration instead of default

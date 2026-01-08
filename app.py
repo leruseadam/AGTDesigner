@@ -7124,31 +7124,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
     """
     Ensure tags shown in the UI use the latest lineage from the database.
     Returns a shallow-copied list so cached tag objects are not mutated.
-    
+
     Args:
         tags: List of tag dictionaries
         store_name: Store name for database lookup
         skip_if_aligned: If True, skip alignment if tags already have canonical_lineage/currentLineage AND sovereign_lineage
     """
-    if not tags or not isinstance(tags, list):
-        return tags
-    
-    # CRITICAL: Force alignment if there was a recent lineage update (within last 5 minutes)
-    # This ensures UI shows fresh sovereign_lineage after updates, even if cached tags exist
-    lineage_update_timestamp = session.get('lineage_update_timestamp', 0)
-    has_recent_lineage_update = lineage_update_timestamp and (time.time() - lineage_update_timestamp) < 300
-    if has_recent_lineage_update:
-        logging.info(f"🔄 Forcing lineage alignment due to recent lineage update (timestamp: {lineage_update_timestamp})")
-        skip_if_aligned = False  # Force alignment to get fresh sovereign_lineage from database
-    
-    # PERFORMANCE: Skip alignment if tags already have canonical_lineage/currentLineage
-    # This prevents expensive database queries when tags already have lineage data
-    if skip_if_aligned and not force_overwrite:
-        tags_with_lineage = sum(1 for t in tags if isinstance(t, dict) and
-                                (t.get('canonical_lineage') or t.get('currentLineage')))
-        if tags_with_lineage >= len(tags) * 0.9:  # 90%+ already have lineage
-            logging.debug(f"⚡ Skipping lineage alignment - {tags_with_lineage}/{len(tags)} tags already have lineage")
-            return tags
+    # EMERGENCY: Disable alignment entirely to fix PythonAnywhere timeout
+    # This function is causing 30+ second hangs on PythonAnywhere
+    logging.debug(f"⚡ Alignment disabled - returning tags as-is ({len(tags) if tags else 0} tags)")
+    return tags
     
     try:
         product_db = get_product_database(store_name)
