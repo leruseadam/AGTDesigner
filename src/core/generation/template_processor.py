@@ -4248,7 +4248,11 @@ class TemplateProcessor:
                 """Clean text by removing all marker patterns while preserving lineage content - OPTIMIZED."""
                 original_text = text
                 cleaned = text
-                
+
+                # PERFORMANCE: Quick check - if no markers present, skip expensive cleanup
+                if '_START' not in text.upper() and '_END' not in text.upper():
+                    return text
+
                 # PERFORMANCE: Use pre-compiled regex patterns for faster matching
                 # Extract content for special markers FIRST before removing them
                 
@@ -4428,6 +4432,10 @@ class TemplateProcessor:
             def clean_text_fast(text):
                 """Fast marker cleanup using pre-compiled patterns."""
                 modified_text = text
+
+                # PERFORMANCE: Quick check - if no markers present, skip expensive cleanup
+                if '_START' not in text.upper() and '_END' not in text.upper():
+                    return text
 
                 # Extract PRICE and DESC content BEFORE removing markers
                 price_match = _MARKER_PATTERNS['price_content'].search(modified_text)
