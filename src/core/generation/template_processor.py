@@ -3351,15 +3351,22 @@ class TemplateProcessor:
                 
                 # Always derive the QR base from the current request host so we don't
                 # bake any specific domain into the code or printed labels.
+                # CRITICAL FIX: Never use localhost for QR URLs - always use production domain
                 from flask import request
                 import os
 
+                base_url = ''
+                
+                # Try to get base_url from request, but NEVER use localhost
                 try:
-                    base_url = (request.host_url or '').rstrip('/')
+                    request_url = (request.host_url or '').rstrip('/')
+                    # CRITICAL: Skip localhost URLs - they should never be used in QR codes
+                    if request_url and 'localhost' not in request_url.lower() and '127.0.0.1' not in request_url:
+                        base_url = request_url
                 except Exception:
-                    base_url = ''
+                    pass
 
-                # If host_url is unavailable, try multiple fallbacks
+                # If host_url is unavailable or was localhost, try multiple fallbacks
                 if not base_url:
                     # First try environment variable
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
